@@ -10,6 +10,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -94,33 +95,15 @@ class PaymentRepositoryTest {
         assertThatThrownBy(() -> payments.saveAndFlush(attempt("one")))
             .isInstanceOf(DataIntegrityViolationException.class).hasMessageContaining("uk_payments_payable_idempotency");
     }
-    int approve(Long id) {
-        return new TransactionTemplate(transactionManager).execute(status -> payments.transitionStatus(
-            id, List.of(PaymentStatus.PROCESSING), PaymentStatus.APPROVED, NOW.plusSeconds(1)));
-    }
-    @Test void inv11_duplicateConditionalApprovalUpdatesZeroRows() {
+    @Test void inv11_duplicateLockedApprovalIsAppliedOnce() {
         Payment p = attempt("one");
         p.startProcessing("pg-key", NOW);
         payments.saveAndFlush(p);
-        assertThat(approve(p.getId())).isEqualTo(1);
-        assertThat(approve(p.getId())).isZero();
+        assertThat(approveUnderLock(p.getId())).isTrue();
+        assertThat(approveUnderLock(p.getId())).isFalse();
         Payment loaded = payments.findById(p.getId()).orElseThrow();
         assertThat(loaded.getStatus()).isEqualTo(PaymentStatus.APPROVED);
         assertThat(loaded.getUpdatedAt()).isEqualTo(NOW.plusSeconds(1));
-    }
-    @Test void inv11_concurrentApprovalHasExactlyOneWinner() throws Exception {
-        Payment p = attempt("one");
-        p.startProcessing("pg-key", NOW);
-        payments.saveAndFlush(p);
-        CountDownLatch start = new CountDownLatch(1);
-        try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
-            Callable<Integer> task = () -> { start.await(); return approve(p.getId()); };
-            Future<Integer> first = pool.submit(task);
-            Future<Integer> second = pool.submit(task);
-            start.countDown();
-            assertThat(List.of(first.get(20, TimeUnit.SECONDS), second.get(20, TimeUnit.SECONDS)))
-                .containsExactlyInAnyOrder(1, 0);
-        }
     }
     @Test void oneActiveFullRefundPerPaymentAndFailedRefundAllowsRetry() {
         Long id = payments.saveAndFlush(attempt("one")).getId();
@@ -139,5 +122,50 @@ class PaymentRepositoryTest {
         refunds.saveAndFlush(first);
         assertThatThrownBy(() -> refunds.saveAndFlush(PaymentRefund.request(id, 1000L, "refund-one", "reason", NOW)))
             .isInstanceOf(DataIntegrityViolationException.class).hasMessageContaining("uk_payment_refunds_idempotency_key");
+    }
+
+    /** Locked load + entity method: the second transaction waits, then sees APPROVED and does nothing. */
+    boolean approveUnderLock(Long id) {
+        return new TransactionTemplate(transactionManager).execute(status -> {
+            Payment locked = payments.findByIdForUpdate(id).orElseThrow();
+            if (locked.getStatus() != PaymentStatus.PROCESSING) return false;
+            locked.approve(NOW.plusSeconds(1), NOW.plusSeconds(1));
+            return true;
+        });
+    }
+    @Test void inv11_concurrentLockedApprovalHasExactlyOneWinner() throws Exception {
+        Payment p = attempt("one");
+        p.startProcessing("pg-key", NOW);
+        payments.saveAndFlush(p);
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+            Callable<Boolean> task = () -> { start.await(); return approveUnderLock(p.getId()); };
+            Future<Boolean> first = pool.submit(task);
+            Future<Boolean> second = pool.submit(task);
+            start.countDown();
+            assertThat(List.of(first.get(20, TimeUnit.SECONDS), second.get(20, TimeUnit.SECONDS)))
+                .containsExactlyInAnyOrder(true, false);
+        }
+        Payment loaded = payments.findById(p.getId()).orElseThrow();
+        assertThat(loaded.getStatus()).isEqualTo(PaymentStatus.APPROVED);
+        assertThat(loaded.getApprovedAt()).isEqualTo(NOW.plusSeconds(1));
+    }
+    @Test void dbRejectsProcessingWithoutPaymentKey() {
+        Long id = payments.saveAndFlush(attempt("one")).getId();
+        assertThatThrownBy(() -> jdbc.update("UPDATE payments SET status = 'PROCESSING' WHERE id = ?", id))
+            .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_payments_payment_key_after_ready");
+    }
+    @Test void dbRejectsApprovedWithoutApprovedAt() {
+        Payment p = attempt("one");
+        p.startProcessing("pg-key", NOW);
+        Long id = payments.saveAndFlush(p).getId();
+        assertThatThrownBy(() -> jdbc.update("UPDATE payments SET status = 'APPROVED' WHERE id = ?", id))
+            .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_payments_approved_at");
+    }
+    @Test void dbRejectsCompletedRefundWithoutTransactionKey() {
+        Long paymentId = payments.saveAndFlush(attempt("one")).getId();
+        Long refundId = refunds.saveAndFlush(PaymentRefund.request(paymentId, 1000L, "refund-one", "reason", NOW)).getId();
+        assertThatThrownBy(() -> jdbc.update("UPDATE payment_refunds SET status = 'COMPLETED' WHERE id = ?", refundId))
+            .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_payment_refunds_completed");
     }
 }

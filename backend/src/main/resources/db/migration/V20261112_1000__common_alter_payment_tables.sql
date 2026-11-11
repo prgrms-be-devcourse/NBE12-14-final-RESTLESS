@@ -19,6 +19,12 @@ ALTER TABLE payments
     ADD CONSTRAINT ck_payments_payable_type CHECK (payable_type IN ('DROP', 'TICKET', 'FAN_MEETING')),
     ADD CONSTRAINT ck_payments_status CHECK
         (status IN ('READY', 'PROCESSING', 'APPROVED', 'FAILED', 'UNKNOWN', 'CANCEL_PENDING', 'CANCELLED', 'CANCEL_UNKNOWN')),
+    -- Approval starts with the PG paymentKey. Only READY, or READY closed as FAILED, may lack it.
+    ADD CONSTRAINT ck_payments_payment_key_after_ready CHECK
+        (status IN ('READY', 'FAILED') OR payment_key IS NOT NULL),
+    -- Every approved or cancellation-path payment records when the PG approved it.
+    ADD CONSTRAINT ck_payments_approved_at CHECK
+        (status NOT IN ('APPROVED', 'CANCEL_PENDING', 'CANCELLED', 'CANCEL_UNKNOWN') OR approved_at IS NOT NULL),
     ADD CONSTRAINT uk_payments_pg_order_id UNIQUE (pg_order_id),
     ADD CONSTRAINT uk_payments_payable_idempotency UNIQUE (payable_type, payable_id, idempotency_key),
     ADD CONSTRAINT uk_payments_active_payable_key UNIQUE (active_payable_key),
@@ -36,4 +42,7 @@ ALTER TABLE payment_refunds
         (CASE WHEN status <> 'FAILED' THEN payment_id END) STORED,
     ADD CONSTRAINT uk_payment_refunds_idempotency_key UNIQUE (idempotency_key),
     ADD CONSTRAINT uk_payment_refunds_active_payment_id UNIQUE (active_payment_id),
-    ADD CONSTRAINT ck_payment_refunds_status CHECK (status IN ('REQUESTED', 'COMPLETED', 'UNKNOWN', 'FAILED'));
+    ADD CONSTRAINT ck_payment_refunds_status CHECK (status IN ('REQUESTED', 'COMPLETED', 'UNKNOWN', 'FAILED')),
+    -- A completed refund must carry the PG cancel transaction key and completion time.
+    ADD CONSTRAINT ck_payment_refunds_completed CHECK
+        (status <> 'COMPLETED' OR (completed_at IS NOT NULL AND cancel_transaction_key IS NOT NULL));

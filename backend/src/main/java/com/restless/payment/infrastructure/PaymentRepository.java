@@ -2,14 +2,12 @@ package com.restless.payment.infrastructure;
 
 import com.restless.payment.domain.PayableType;
 import com.restless.payment.domain.Payment;
-import com.restless.payment.domain.PaymentStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.time.Instant;
-import java.util.Collection;
 import java.util.Optional;
 
 public interface PaymentRepository extends JpaRepository<Payment, Long> {
@@ -18,12 +16,16 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
         PayableType payableType, Long payableId, String idempotencyKey);
 
     /**
-     * Caller supplies a transaction and validated source/target states.
-     * A zero result means another worker already resolved this attempt.
-     * Bulk updates clear the persistence context; callers must reload before further entity changes.
+     * Locks the payment row (SELECT ... FOR UPDATE) for the rest of the caller's transaction.
+     * Use this before calling entity transition methods: plain loads let two concurrent
+     * transactions both see PROCESSING and both approve. Lock the payment row before any
+     * domain rows (ADR-0003).
      */
-    @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("update Payment p set p.status = :to, p.updatedAt = :now where p.id = :id and p.status in :from")
-    int transitionStatus(@Param("id") Long id, @Param("from") Collection<PaymentStatus> from,
-                         @Param("to") PaymentStatus to, @Param("now") Instant now);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Payment p where p.id = :id")
+    Optional<Payment> findByIdForUpdate(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Payment p where p.pgOrderId = :pgOrderId")
+    Optional<Payment> findByPgOrderIdForUpdate(@Param("pgOrderId") String pgOrderId);
 }
