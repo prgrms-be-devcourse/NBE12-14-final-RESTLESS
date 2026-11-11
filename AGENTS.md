@@ -6,7 +6,7 @@
 This repository implements an artist fandom event commerce platform.
 
 Core domains:
-- Coupon: limited first-come-first-served issuance
+- Fan meeting: entry applications, winner draw, winner payment
 - Ticketing: seat holds and reservations
 - Drop: waiting room, inventory reservation, purchase
 - Auction: concurrent bidding and closing
@@ -64,7 +64,8 @@ After implementation:
 
 ## 4. Critical Invariants
 
-- Coupon issuance must not exceed its configured quota.
+- Fan meeting confirmed plus payment-pending selections must not exceed capacity.
+- A fan meeting payment approved within its deadline must confirm participation.
 - A concert seat must not have multiple active owners.
 - Drop inventory must never be oversold.
 - Duplicate purchase requests must not create duplicate orders.

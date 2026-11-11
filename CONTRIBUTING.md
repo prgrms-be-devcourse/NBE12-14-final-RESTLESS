@@ -11,7 +11,7 @@
 | `docs/<요약>` | 문서 |
 | `chore/<요약>` | 빌드, 설정 |
 
-도메인: `drop`, `ticketing`, `coupon`, `auction`, `common`, `infra`, `fe`
+도메인: `drop`, `ticketing`, `fanmeeting`, `auction`, `common`, `infra`, `fe`
 
 ## PR
 
