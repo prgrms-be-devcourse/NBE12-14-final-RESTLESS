@@ -62,6 +62,18 @@ Spring Boot → Toss Payments HTTPS API
 - RDS를 인터넷에 공개하지 않는다.
 - 재고, 결제, 인증 API는 캐시 대상이 아니다.
 
+### 실행 환경 구분
+
+| 구분 | Spring 프로필 | compose 프로필 | DB |
+|---|---|---|---|
+| 로컬 개발 | `dev` (기본값) | `dev`: `mysql` 서비스 | 로컬 Docker MySQL |
+| 배포 | `prod` | `prod`: `app` 서비스 | RDS MySQL |
+
+- `prod` 설정 값은 환경변수로만 주입하고 기본값을 두지 않는다. 값이 빠지면 기동이 실패한다.
+- 앱 컨테이너는 `127.0.0.1:8080`으로만 열고, 외부 요청은 Nginx가 받는다.
+- 필수 값 검사는 compose(`${VAR:?}`)가 아니라 `application-prod.yml`이 맡는다. compose는 꺼진 프로필의 서비스까지 변수를 검사하므로, compose에 필수 표기를 쓰면 `dev` 실행도 실패한다.
+- 백엔드 `Dockerfile`은 아직 없다. `prod` compose 프로필은 이미지를 만든 뒤에 쓸 수 있다.
+
 ## 4. 수평 확장 (EXPERIMENTAL)
 
 단일 서버의 실제 한계를 먼저 측정한다. 확장이 필요하면 다중 EC2, ALB, 공통 대기열 상태, 중복 스케줄러 방지, 전체 DB 연결 수, WebSocket 서버 간 전달을 검토한다.
