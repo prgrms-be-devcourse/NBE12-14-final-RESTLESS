@@ -52,18 +52,23 @@ public class FakePgClient implements PgClient {
 
     @Override
     public PgApprovalResult approve(PgApproveCommand command) {
-        PgApprovalResult result = approvals.computeIfAbsent(command.idempotencyKey(), key -> approveOnce(command));
+        PgApprovalResult result = approvals.get(command.idempotencyKey());
+        if (result == null) {
+            // Simulated latency runs outside the map locks: sleeping inside computeIfAbsent would also block
+            // unrelated requests whose keys share a hash bin and distort latency experiments.
+            try {
+                Thread.sleep(delays.getOrDefault(command.pgOrderId(), properties.approveDelay()));
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                return new PgApprovalResult.Unknown("Fake PG interrupted", null);
+            }
+            result = approvals.computeIfAbsent(command.idempotencyKey(), key -> approveOnce(command));
+        }
         logResult("approve", command.pgOrderId(), result);
         return result;
     }
 
     private PgApprovalResult approveOnce(PgApproveCommand command) {
-        try {
-            Thread.sleep(delays.getOrDefault(command.pgOrderId(), properties.approveDelay()));
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            return new PgApprovalResult.Unknown("Fake PG interrupted", null);
-        }
         AtomicReference<PgApprovalResult> result = new AtomicReference<>();
         // The per-order compute is the linearization point, including requests with different idempotency keys.
         orders.compute(command.pgOrderId(), (orderId, existing) -> {
@@ -133,6 +138,9 @@ public class FakePgClient implements PgClient {
         synchronized (random) { sample = random.nextDouble(); }
         if (sample < properties.rejectRate()) return new Scenario(Mode.REJECT, "REJECT_CARD_COMPANY");
         if (sample < properties.rejectRate() + properties.unknownRate()) return new Scenario(Mode.TIMEOUT, null);
+        if (sample < properties.rejectRate() + properties.unknownRate() + properties.lostResponseRate()) {
+            return new Scenario(Mode.LOSE_RESPONSE, null);
+        }
         return new Scenario(Mode.APPROVE, null);
     }
 

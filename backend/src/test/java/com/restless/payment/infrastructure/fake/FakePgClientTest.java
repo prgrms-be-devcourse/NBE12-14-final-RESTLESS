@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.*;
 
 class FakePgClientTest {
     static final Instant NOW = Instant.parse("2026-11-12T01:00:00Z");
-    FakePgClient client = new FakePgClient(new FakePgProperties(null, 0, 0), new Random(42), Clock.fixed(NOW, ZoneOffset.UTC));
+    FakePgClient client = new FakePgClient(new FakePgProperties(null, 0, 0, 0), new Random(42), Clock.fixed(NOW, ZoneOffset.UTC));
     PgApproveCommand command(String order, String key) {
         return new PgApproveCommand("payment-" + order, order, 1000, key);
     }
@@ -111,17 +111,17 @@ class FakePgClientTest {
     }
 
     @Test void globalRatesCanForceRejectionOrUnknownAndScenariosOverrideThem() {
-        var reject = new FakePgClient(new FakePgProperties(null, 1, 0), new Random(42), Clock.systemUTC());
+        var reject = new FakePgClient(new FakePgProperties(null, 1, 0, 0), new Random(42), Clock.systemUTC());
         assertThat(reject.approve(command("order-1", "key"))).isInstanceOf(PgApprovalResult.Rejected.class);
         reject.willApprove("order-2");
         assertThat(reject.approve(command("order-2", "key-2"))).isInstanceOf(PgApprovalResult.Approved.class);
-        var unknown = new FakePgClient(new FakePgProperties(null, 0, 1), new Random(42), Clock.systemUTC());
+        var unknown = new FakePgClient(new FakePgProperties(null, 0, 1, 0), new Random(42), Clock.systemUTC());
         assertThat(unknown.approve(command("order-1", "key"))).isInstanceOf(PgApprovalResult.Unknown.class);
         assertThat(unknown.query("order-1")).isEqualTo(new PgQueryResult.NotFound());
     }
 
     @Test void seededRandomProducesRepeatableOutcomes() {
-        var properties = new FakePgProperties(null, 0.3, 0.3);
+        var properties = new FakePgProperties(null, 0.3, 0.3, 0);
         var first = new FakePgClient(properties, new Random(12), Clock.fixed(NOW, ZoneOffset.UTC));
         var second = new FakePgClient(properties, new Random(12), Clock.fixed(NOW, ZoneOffset.UTC));
         for (int i = 0; i < 30; i++) {
@@ -137,10 +137,33 @@ class FakePgClientTest {
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isGreaterThanOrEqualTo(Duration.ofMillis(30));
     }
 
+    @Test void INV10_globalLostResponseRateApprovesAtPgButAnswersUnknown() {
+        var lost = new FakePgClient(new FakePgProperties(null, 0, 0, 1), new Random(42), Clock.fixed(NOW, ZoneOffset.UTC));
+        assertThat(lost.approve(command("order-1", "key"))).isInstanceOf(PgApprovalResult.Unknown.class);
+        assertThat(lost.query("order-1")).isInstanceOf(PgQueryResult.Approved.class);
+    }
+
+    @Test void slowApprovalDoesNotBlockOtherOrders() throws Exception {
+        client.willDelay("slow", Duration.ofSeconds(1));
+        try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+            Future<PgApprovalResult> slow = pool.submit(() -> client.approve(command("slow", "slow-key")));
+            Thread.sleep(50);
+            long start = System.nanoTime();
+            for (int i = 0; i < 64; i++) {
+                assertThat(client.approve(command("fast-" + i, "fast-key-" + i))).isInstanceOf(PgApprovalResult.Approved.class);
+            }
+            // Fast approvals must not wait behind the slow one (latency is simulated outside the map locks).
+            assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofMillis(500));
+            assertThat(slow.isDone()).isFalse();
+            assertThat(slow.get(5, TimeUnit.SECONDS)).isInstanceOf(PgApprovalResult.Approved.class);
+        }
+    }
+
     @Test void invalidRatesOrDelayFailFast() {
-        assertThatIllegalArgumentException().isThrownBy(() -> new FakePgProperties(null, 0.8, 0.8));
-        assertThatIllegalArgumentException().isThrownBy(() -> new FakePgProperties(null, -0.1, 0));
-        assertThatIllegalArgumentException().isThrownBy(() -> new FakePgProperties(null, Double.NaN, 0));
-        assertThatIllegalArgumentException().isThrownBy(() -> new FakePgProperties(Duration.ofMillis(-1), 0, 0));
+        assertThatIllegalArgumentException().isThrownBy(() -> new FakePgProperties(null, 0.8, 0.8, 0));
+        assertThatIllegalArgumentException().isThrownBy(() -> new FakePgProperties(null, -0.1, 0, 0));
+        assertThatIllegalArgumentException().isThrownBy(() -> new FakePgProperties(null, Double.NaN, 0, 0));
+        assertThatIllegalArgumentException().isThrownBy(() -> new FakePgProperties(Duration.ofMillis(-1), 0, 0, 0));
+        assertThatIllegalArgumentException().isThrownBy(() -> new FakePgProperties(null, 0.5, 0.3, 0.3));
     }
 }

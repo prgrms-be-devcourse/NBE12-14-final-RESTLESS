@@ -27,10 +27,16 @@ public final class TossResponseClassifier {
         return new PgApprovalResult.Unknown("HTTP " + httpStatus, code);
     }
 
+    public static final String ALREADY_CANCELED = "ALREADY_CANCELED_PAYMENT";
+
+    /**
+     * ALREADY_CANCELED_PAYMENT carries no cancel transaction key, so it is not a finished Cancelled.
+     * The client looks the payment up to recover the key; until then it stays Unknown.
+     */
     public static PgCancelResult cancelError(int httpStatus, String code, String message) {
         if (isClientError(httpStatus)) {
-            if ("ALREADY_CANCELED_PAYMENT".equals(code)) {
-                return new PgCancelResult.Cancelled(null, null);
+            if (ALREADY_CANCELED.equals(code)) {
+                return new PgCancelResult.Unknown("Already cancelled; cancel transaction lookup required", code);
             }
             if ("NOT_CANCELABLE_PAYMENT".equals(code)) {
                 return new PgCancelResult.Rejected(code, message);

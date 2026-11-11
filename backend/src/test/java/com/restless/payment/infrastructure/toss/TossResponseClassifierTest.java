@@ -59,8 +59,10 @@ class TossResponseClassifierTest {
 
     @Test
     void INV10_cancelOnlyConfirmsKnownOutcomes() {
+        // No cancel transaction key in this response, so it is not a finished Cancelled until looked up.
         assertThat(TossResponseClassifier.cancelError(400, "ALREADY_CANCELED_PAYMENT", "cancelled"))
-            .isEqualTo(new PgCancelResult.Cancelled(null, null));
+            .isEqualTo(new PgCancelResult.Unknown(
+                "Already cancelled; cancel transaction lookup required", "ALREADY_CANCELED_PAYMENT"));
         assertThat(TossResponseClassifier.cancelError(403, "NOT_CANCELABLE_PAYMENT", "declined"))
             .isEqualTo(new PgCancelResult.Rejected("NOT_CANCELABLE_PAYMENT", "declined"));
         assertThat(TossResponseClassifier.cancelError(400, "FAILED_REFUND_PROCESS", "uncertain"))

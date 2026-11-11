@@ -5,7 +5,7 @@ import java.time.Instant;
 public sealed interface PgQueryResult {
     record Approved(String paymentKey, String pgOrderId, long approvedAmount, Instant approvedAt)
         implements PgQueryResult { }
-    /** Metadata may be absent in an idempotent already-cancelled response. */
+    /** Always carries the PG cancel transaction key and time. */
     record Cancelled(String transactionKey, Instant cancelledAt) implements PgQueryResult { }
     record NotApproved(String status, String code, String message) implements PgQueryResult { }
     record InProgress(String status) implements PgQueryResult { }

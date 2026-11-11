@@ -62,10 +62,26 @@ public class TossPaymentsClient implements PgClient {
             .headers(h -> h.setBasicAuth(properties.secretKey(), "", StandardCharsets.UTF_8))
             .header("Idempotency-Key", command.idempotencyKey())
             .contentType(MediaType.APPLICATION_JSON).body(new CancelRequest(command.reason()));
-        return call("cancel", "unavailable", request, p -> {
-            if (!command.paymentKey().equals(p.paymentKey())) throw new IllegalArgumentException("Mismatched payment identity");
-            return TossResponseClassifier.cancelSuccess(p);
-        }, TossResponseClassifier::cancelError, reason -> new PgCancelResult.Unknown(reason, null));
+        PgCancelResult result = call("cancel", "unavailable", request, p -> cancelledPayment(command, p),
+            TossResponseClassifier::cancelError, reason -> new PgCancelResult.Unknown(reason, null));
+        if (result instanceof PgCancelResult.Unknown unknown && TossResponseClassifier.ALREADY_CANCELED.equals(unknown.code())) {
+            return lookupCancellation(command);
+        }
+        return result;
+    }
+
+    /** An earlier cancel already succeeded. Fetch the payment so the result carries its cancel transaction key. */
+    private PgCancelResult lookupCancellation(PgCancelCommand command) {
+        var request = restClient.get().uri("/v1/payments/{paymentKey}", command.paymentKey())
+            .headers(h -> h.setBasicAuth(properties.secretKey(), "", StandardCharsets.UTF_8));
+        return call("cancel-lookup", "unavailable", request, p -> cancelledPayment(command, p),
+            (status, code, message) -> new PgCancelResult.Unknown("HTTP " + status, TossResponseClassifier.ALREADY_CANCELED),
+            reason -> new PgCancelResult.Unknown(reason, TossResponseClassifier.ALREADY_CANCELED));
+    }
+
+    private static PgCancelResult cancelledPayment(PgCancelCommand command, TossPaymentResponse p) {
+        if (!command.paymentKey().equals(p.paymentKey())) throw new IllegalArgumentException("Mismatched payment identity");
+        return TossResponseClassifier.cancelSuccess(p);
     }
 
     private <T> T call(String operation, String orderId, RestClient.RequestHeadersSpec<?> request,
@@ -93,9 +109,17 @@ public class TossPaymentsClient implements PgClient {
         } catch (RestClientException | IllegalArgumentException | DateTimeException exception) {
             T result = unknown.apply("PG transport or response failure");
             // Never log exception messages, raw responses, credentials or Authorization headers.
+            // The exception type alone tells connect failure, read timeout and parse failure apart.
+            log.warn("PG operation={} failureType={} pgOrderId={}", operation, failureType(exception), orderId);
             logResult(operation, orderId, 0, null, result);
             return result;
         }
+    }
+
+    private static String failureType(Throwable exception) {
+        Throwable cause = exception.getCause();
+        return cause == null ? exception.getClass().getSimpleName()
+            : exception.getClass().getSimpleName() + "/" + cause.getClass().getSimpleName();
     }
 
     private static void logResult(String operation, String orderId, int status, String code, Object result) {

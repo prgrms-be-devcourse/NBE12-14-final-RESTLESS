@@ -130,12 +130,41 @@ class TossPaymentsClientTest {
 
     @Test void INV10_cancelErrorsDoNotTreatRefundProcessingFailureAsRejection() {
         server.expect(requestTo(BASE + "/v1/payments/payment-key/cancel")).andRespond(withStatus(HttpStatus.BAD_REQUEST)
-            .contentType(MediaType.APPLICATION_JSON).body("{\"code\":\"ALREADY_CANCELED_PAYMENT\",\"message\":\"done\"}"));
-        server.expect(requestTo(BASE + "/v1/payments/payment-key/cancel")).andRespond(withStatus(HttpStatus.BAD_REQUEST)
             .contentType(MediaType.APPLICATION_JSON).body("{\"code\":\"FAILED_REFUND_PROCESS\",\"message\":\"unknown\"}"));
-        PgCancelCommand command = new PgCancelCommand("payment-key", "reason", "key");
-        assertThat(client.cancel(command)).isEqualTo(new PgCancelResult.Cancelled(null, null));
-        assertThat(client.cancel(command)).isInstanceOf(PgCancelResult.Unknown.class);
+        assertThat(client.cancel(new PgCancelCommand("payment-key", "reason", "key")))
+            .isInstanceOf(PgCancelResult.Unknown.class);
+        server.verify();
+    }
+
+    @Test void alreadyCancelledLooksUpPaymentToRecoverCancelTransactionKey() {
+        server.expect(requestTo(BASE + "/v1/payments/payment-key/cancel")).andRespond(withStatus(HttpStatus.BAD_REQUEST)
+            .contentType(MediaType.APPLICATION_JSON).body("{\"code\":\"ALREADY_CANCELED_PAYMENT\",\"message\":\"done\"}"));
+        server.expect(requestTo(BASE + "/v1/payments/payment-key")).andExpect(method(HttpMethod.GET))
+            .andExpect(header(HttpHeaders.AUTHORIZATION, "Basic "
+                + Base64.getEncoder().encodeToString("test_sk_dummy:".getBytes(StandardCharsets.UTF_8))))
+            .andRespond(withSuccess(CANCELLED, MediaType.APPLICATION_JSON));
+        assertThat(client.cancel(new PgCancelCommand("payment-key", "reason", "key")))
+            .isEqualTo(new PgCancelResult.Cancelled("cancel-tx", Instant.parse("2024-02-14T03:18:14Z")));
+        server.verify();
+    }
+
+    @Test void INV10_alreadyCancelledStaysUnknownWhenLookupFails() {
+        server.expect(requestTo(BASE + "/v1/payments/payment-key/cancel")).andRespond(withStatus(HttpStatus.BAD_REQUEST)
+            .contentType(MediaType.APPLICATION_JSON).body("{\"code\":\"ALREADY_CANCELED_PAYMENT\",\"message\":\"done\"}"));
+        server.expect(requestTo(BASE + "/v1/payments/payment-key"))
+            .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR).contentType(MediaType.APPLICATION_JSON)
+                .body("{\"code\":\"FAILED_INTERNAL_SYSTEM_PROCESSING\",\"message\":\"retry\"}"));
+        assertThat(client.cancel(new PgCancelCommand("payment-key", "reason", "key")))
+            .isEqualTo(new PgCancelResult.Unknown("HTTP 500", "ALREADY_CANCELED_PAYMENT"));
+        server.verify();
+    }
+
+    @Test void transportFailureLogsExceptionTypeWithoutMessage(CapturedOutput output) {
+        server.expect(requestTo(BASE + "/v1/payments/confirm"))
+            .andRespond(withException(new SocketTimeoutException("secret-ish detail")));
+        assertThat(client.approve(COMMAND)).isInstanceOf(PgApprovalResult.Unknown.class);
+        assertThat(output.getAll()).contains("failureType=ResourceAccessException/SocketTimeoutException")
+            .doesNotContain("secret-ish detail");
         server.verify();
     }
 
