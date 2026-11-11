@@ -10,7 +10,7 @@ CREATE TABLE fan_meeting_events
 (
     event_id                  BIGINT       NOT NULL AUTO_INCREMENT,
     title                     VARCHAR(200) NOT NULL,
-    status                    VARCHAR(20)  NOT NULL,
+    status                    VARCHAR(30)  NOT NULL,
     entry_opens_at            DATETIME(6)  NOT NULL,
     entry_closes_at           DATETIME(6)  NOT NULL,
     first_notice_scheduled_at DATETIME(6)  NOT NULL,
