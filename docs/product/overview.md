@@ -2,7 +2,7 @@
 
 ## 서비스
 
-팬덤 이벤트 커머스 플랫폼. 팬이 한정판 굿즈를 구매하고, 콘서트 좌석을 예매하고, 선착순 쿠폰을 받고, 아티스트 관련 상품 경매에 참여한다.
+팬덤 이벤트 커머스 플랫폼. 팬이 한정판 굿즈를 구매하고, 콘서트 좌석을 예매하고, 팬미팅 추첨에 응모하고, 아티스트 관련 상품 경매에 참여한다.
 
 기술적 핵심은 동시 요청이 몰리는 상황에서 거래 정합성을 지키고, 처리량, 지연시간, 안정성을 측정하며 개선하는 것이다.
 
@@ -10,7 +10,7 @@
 
 | 도메인 | 주요 기능 | 문서 |
 |---|---|---|
-| Coupon | 선착순 쿠폰 발급 | [domains/coupon](../domains/coupon/) |
+| Fan Meeting | 팬미팅 응모, 추첨, 당첨자 결제 | [domains/fanmeeting](../domains/fanmeeting/) |
 | Ticketing | 지정 좌석 콘서트 예매, PG 결제 | [domains/ticketing](../domains/ticketing/) |
 | Drop | 한정판 굿즈 판매, 구매 대기열, 재고 예약, PG 결제 | [domains/drop](../domains/drop/) |
 | Auction | 실시간 입찰, 경매 | [domains/auction](../domains/auction/) |

@@ -8,13 +8,13 @@
 | [common.md](common.md) | TBD | 드롭 요구사항 기준 초안 |
 | [ticketing.md](ticketing.md) | 송혜민 | 원본 문서에서 취합 |
 | [drop.md](drop.md) | 이태호 | 원본 |
-| [coupon.md](coupon.md) | 홍승연 | 원본 문서에서 취합, 경로만 변경 |
+| [fanmeeting.md](fanmeeting.md) | 홍승연 | 원본 문서에서 취합 |
 | [auction.md](auction.md) | 천종원 | 원본에 API 없음, 취합자 초안 |
 
 ## 공통 규칙 (PROPOSED)
 
 1. 회원 식별 값은 요청 본문이 아니라 인증 정보에서 꺼낸다.
-2. 자원을 만드는 경쟁 요청(좌석 선점, 재고 예약, 입찰)은 `Idempotency-Key` 헤더를 받는다. 쿠폰 발급은 `UNIQUE(campaign_id, user_id)`로 대신한다.
+2. 자원을 만드는 경쟁 요청(좌석 선점, 재고 예약, 입찰)은 `Idempotency-Key` 헤더를 받는다.
 3. 오류 응답 형식은 아래로 통일한다. 티켓팅의 `details`와 쿠폰의 `traceId`, `timestamp`를 합친 것이다.
 
 ```json

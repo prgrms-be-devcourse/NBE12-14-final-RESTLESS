@@ -18,7 +18,7 @@
 | Method | Endpoint | 기능 |
 |---|---|---|
 | GET | `/api/concerts` | 공연 목록 |
-| GET | `/api/concerts/{concertId}` | 공연 상세 (연결된 드롭, 쿠폰, 경매 포함 여부는 미정) |
+| GET | `/api/concerts/{concertId}` | 공연 상세 (연결된 드롭, 경매 포함 여부는 미정) |
 
 공연 회차 API는 티켓팅 문서에 있다.
 
@@ -32,4 +32,4 @@
 | GET | `/api/payments/orders/{orderId}` | 결제 결과 확인 |
 | POST | `/api/orders/{orderId}/refunds` | 전액 환불 요청 |
 
-티켓팅이 공통 주문을 거치는지는 [erd.md 9절](../../architecture/erd.md)의 확인 항목이다.
+티켓팅이 공통 주문을 거치는지는 [erd.md 4절](../../architecture/erd.md)의 확인 항목이다.
