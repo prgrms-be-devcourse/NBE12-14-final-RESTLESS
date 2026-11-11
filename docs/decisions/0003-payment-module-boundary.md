@@ -21,7 +21,7 @@
 - 팬미팅은 `fan_meeting_orders`를 그대로 쓴다. 팬미팅 스키마와 문서는 바꾸지 않는다.
 - 토스 `orderId`로 쓸 `pg_order_id VARCHAR(64) UNIQUE`를 결제 시도마다 서버가 만든다.
 - `payment_key`는 NULL을 허용한다. 승인을 시작할 때(READY → PROCESSING) 채운다.
-- 물리 FK가 없으므로 결제를 만들 때 결제 모듈이 해당 도메인의 Handler(`load`)로 대상의 존재, 소유자, 금액, 기한을 확인한다.
+- 물리 FK가 없으므로 결제를 만들 때 결제 모듈이 해당 도메인의 Handler(`load`)로 대상의 존재, 소유자, 금액, 기한을 확인한다. 실제 계약 코드는 `com.restless.payment.application.payable`에 있다.
 - 머지된 `V20261111_0920`은 수정하지 않는다. 새 마이그레이션으로 바꾼다.
 
 ### 2. 결과는 결제 모듈이 Handler를 동기 호출해 전달한다
@@ -32,7 +32,7 @@
 // payment 모듈 소유. drop, ticketing, fanmeeting이 구현한다.
 public interface PaymentResultHandler {
     PayableType type();
-    PayableSnapshot load(Long payableId);                  // 결제 생성 시: 소유자, 금액, 기한
+    Optional<PayableSnapshot> load(Long payableId);        // 결제 생성 시: 소유자, 금액, 상품명, 기한. 결제 불가면 empty
     ApprovalDecision onApprovalStarting(Long payableId);   // TX2: 예약 만료 검증, CONFIRMING 전환
     ApprovalDecision onApproved(Long payableId, ApprovedPayment payment); // TX3
     void onFailed(Long payableId);                         // TX4: 실패 확정, 재고 반환
