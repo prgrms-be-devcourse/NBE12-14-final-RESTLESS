@@ -1,0 +1,40 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.iml
+.vscode/
+out/
+backend/bin/
+
+# Backend (Gradle)
+backend/.gradle/
+backend/build/
+!backend/gradle/wrapper/gradle-wrapper.jar
+
+# Frontend (Node)
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+*.tsbuildinfo
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# AI agent personal settings and scratch output (Claude Code, Codex, ChatGPT)
+.claude/settings.local.json
+CLAUDE.local.md
+.ai-output/
+
+# Load test raw results (summaries go to docs/reports/)
+performance/**/results/
+
+# Logs, heap dumps
+*.log
+*.hprof
