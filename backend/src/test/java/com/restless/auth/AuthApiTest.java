@@ -122,6 +122,21 @@ class AuthApiTest {
     }
 
     @Test
+    void 비밀번호는_영문_숫자_특수문자만_64자까지() throws Exception {
+        // ASCII 64자 = 64바이트: BCrypt 한도(72바이트) 안
+        signup(uniqueEmail(), "a".repeat(63) + "!", "철수").andExpect(status().isCreated());
+        signup(uniqueEmail(), "a".repeat(65), "철수")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        // 한글 25자 = 75바이트: 예전에는 암호화 단계에서 500이었다
+        signup(uniqueEmail(), "가".repeat(25), "철수")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        signup(uniqueEmail(), "password 1234", "철수")
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void 토큰이_없으면_401() throws Exception {
         mockMvc.perform(get(ME))
                 .andExpect(status().isUnauthorized())

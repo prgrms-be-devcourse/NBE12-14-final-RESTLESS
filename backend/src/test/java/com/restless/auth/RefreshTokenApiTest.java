@@ -9,9 +9,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.jayway.jsonpath.JsonPath;
 import com.restless.TestcontainersConfiguration;
 import com.restless.auth.application.RefreshTokenService;
-import com.restless.member.infrastructure.MemberRepository;
 import jakarta.servlet.http.Cookie;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -36,9 +40,6 @@ class RefreshTokenApiTest {
 
     @Autowired
     JdbcTemplate jdbcTemplate;
-
-    @Autowired
-    MemberRepository memberRepository;
 
     @Autowired
     RefreshTokenService refreshTokenService;
@@ -150,6 +151,46 @@ class RefreshTokenApiTest {
     }
 
     @Test
+    void 재발급_뒤_옛_토큰으로_로그아웃해도_새_토큰까지_폐기된다() throws Exception {
+        String a = refreshCookie(login(signup()));
+        String b = refreshCookie(refresh(a));
+
+        mockMvc.perform(post("/api/auth/logout").cookie(new Cookie(COOKIE, a)))
+                .andExpect(status().isNoContent());
+
+        assertThat(refresh(b).getStatus()).isEqualTo(401);
+    }
+
+    @Test
+    void 재발급과_로그아웃이_동시에_와도_로그아웃_뒤_살아남는_토큰이_없다() throws Exception {
+        for (int i = 0; i < 20; i++) {
+            String raw = refreshCookie(login(signup()));
+            CountDownLatch start = new CountDownLatch(1);
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            Future<MockHttpServletResponse> refreshed = pool.submit(() -> {
+                start.await();
+                return refresh(raw);
+            });
+            Future<MockHttpServletResponse> loggedOut = pool.submit(() -> {
+                start.await();
+                return mockMvc.perform(post("/api/auth/logout").cookie(new Cookie(COOKIE, raw))).andReturn().getResponse();
+            });
+            start.countDown();
+            pool.shutdown();
+            assertThat(pool.awaitTermination(30, TimeUnit.SECONDS)).isTrue();
+
+            assertThat(loggedOut.get().getStatus()).isEqualTo(204);
+            MockHttpServletResponse res = refreshed.get();
+            if (res.getStatus() == 200) {
+                // 재발급이 먼저 끝났어도 그 새 토큰은 로그아웃으로 폐기돼야 한다
+                assertThat(refresh(refreshCookie(res)).getStatus()).isEqualTo(401);
+            } else {
+                assertThat(res.getStatus()).isEqualTo(401);
+            }
+        }
+    }
+
+    @Test
     void 탈퇴한_회원의_Refresh는_재발급이_안_된다() throws Exception {
         String email = signup();
         String raw = refreshCookie(login(email));
@@ -164,7 +205,7 @@ class RefreshTokenApiTest {
         String email = signup();
         String a = refreshCookie(login(email));
         String b = refreshCookie(login(email));
-        Long userId = memberRepository.findAll().stream().filter(m -> m.getEmail().equals(email)).findFirst().orElseThrow().getId();
+        Long userId = jdbcTemplate.queryForObject("SELECT id FROM users WHERE email = ?", Long.class, email);
 
         assertThat(refreshTokenService.revokeAll(userId)).isEqualTo(2);
         assertThat(refresh(a).getStatus()).isEqualTo(401);

@@ -70,10 +70,16 @@ public class RefreshTokenService {
         return new Rotation(current.getUserId(), next);
     }
 
-    /** 로그아웃. 없거나 이미 폐기된 토큰이어도 조용히 끝낸다. */
+    /**
+     * 로그아웃. 받은 토큰의 묶음(이 기기의 로그인) 전체를 폐기한다.
+     * 재발급과 같은 행 잠금으로 찾으므로, 재발급과 동시에 와도 새로 발급된 토큰까지 폐기된다.
+     * 이미 교체된 옛 토큰으로 로그아웃해도 같은 묶음의 최신 토큰이 폐기된다.
+     * 없는 토큰이면 조용히 끝낸다.
+     */
     @Transactional
     public void revoke(String rawToken) {
-        repository.findByTokenHash(hash(rawToken)).ifPresent(token -> token.revoke(clock.instant()));
+        repository.findByTokenHashForUpdate(hash(rawToken))
+                .ifPresent(token -> repository.revokeFamily(token.getFamilyId(), clock.instant()));
     }
 
     /** 이 묶음 전체를 폐기한다(재발급하려는 회원이 활성이 아닐 때 등). */
