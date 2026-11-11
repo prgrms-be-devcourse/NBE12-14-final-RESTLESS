@@ -13,6 +13,18 @@ spring:
     enabled: true
     out-of-order: true
 
+restless:
+  auth:
+    jwt:
+      # HS256 서명 키, 32바이트 이상. dev는 application-dev.yml에 기본값이 있고, prod는 환경변수로만 넣는다.
+      secret: ${JWT_SECRET}
+      access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:PT1H}
+    refresh:
+      ttl: ${REFRESH_TOKEN_TTL:P7D}
+      cookie-name: refresh_token
+      cookie-secure: ${REFRESH_COOKIE_SECURE:true}
+      same-site: Strict
+
 management:
   endpoints:
     web:

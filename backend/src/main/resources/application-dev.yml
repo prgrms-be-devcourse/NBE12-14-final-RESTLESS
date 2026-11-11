@@ -15,5 +15,11 @@ spring:
       # 앱을 꺼도 MySQL 컨테이너는 계속 실행한다. 끌 때는 docker compose --profile dev stop
       lifecycle-management: start-only
 
+restless:
+  auth:
+    jwt:
+      # 로컬 전용 기본값. 배포에서는 쓰지 않는다(prod는 JWT_SECRET 필수).
+      secret: ${JWT_SECRET:local-dev-only-jwt-secret-do-not-use-in-prod-0123456789}
+
 toss:
   secret-key: ${TOSS_SECRET_KEY:}
