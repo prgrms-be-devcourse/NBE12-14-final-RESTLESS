@@ -1,0 +1,14 @@
+# 배포 설정. 값은 환경변수로만 주입한다. 기본값을 두지 않아 누락 시 기동이 실패한다.
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+server:
+  shutdown: graceful
+
+toss:
+  secret-key: ${TOSS_SECRET_KEY}

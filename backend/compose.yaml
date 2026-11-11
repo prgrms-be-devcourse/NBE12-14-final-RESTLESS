@@ -1,6 +1,15 @@
-# 로컬 개발용 MySQL: backend 폴더에서 docker compose up -d
+# 개발(dev): ./gradlew bootRun 이면 Spring Boot가 dev 프로필 서비스를 자동으로 띄운다.
+#            직접 띄우려면 backend 폴더에서 docker compose --profile dev up -d
+# 배포(prod): docker compose --profile prod up -d (Dockerfile과 이미지 준비 후 사용)
+#
+# 주의: compose는 꺼진 프로필의 서비스까지 변수를 검사한다.
+# app에 ${VAR:?} 필수 표기를 쓰면 dev 실행도 실패하므로, 필수 값 검사는 application-prod.yml이 맡는다.
+name: restless
+
 services:
   mysql:
+    profiles:
+      - dev
     image: mysql:8.4
     environment:
       MYSQL_DATABASE: restless
@@ -8,10 +17,33 @@ services:
       MYSQL_PASSWORD: restless
       MYSQL_ROOT_PASSWORD: root
       TZ: UTC
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    profiles:
+      - prod
+    image: ${APP_IMAGE:-restless:local}
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: ${DB_URL:-}
+      DB_USERNAME: ${DB_USERNAME:-}
+      DB_PASSWORD: ${DB_PASSWORD:-}
+      TOSS_SECRET_KEY: ${TOSS_SECRET_KEY:-}
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
 
 volumes:
   mysql-data:
