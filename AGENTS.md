@@ -120,7 +120,7 @@ Do not invent test results or benchmark numbers.
 - Never commit secrets, tokens, or credentials.
 - Never run destructive database migrations without review.
 - Never edit a migration file that is already merged into
-  develop. Add a new migration instead.
+  dev. Add a new migration instead.
 - Never load-test a real payment provider.
 - Never deploy to production without explicit authorization.
 - Do not disable tests or weaken assertions to obtain
