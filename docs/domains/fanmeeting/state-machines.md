@@ -1,53 +1,73 @@
-# Fan Meeting 상태 머신
+# FanMeeting 상태 머신
 
-행사, 선발, 주문 상태는 따로 저장하고, 선발·주문 조합의 정합성을 검사한다.
+Event, Application, Selection, Order 상태를 따로 저장하고, Selection–Order 조합의 정합성을 검증한다.
 
-## 1. 행사 상태
+## 1. Event
 
-| 현재 | 사건 | 다음 |
+```text
+SCHEDULED → OPEN → CLOSED → DRAWING → PAYMENT_IN_PROGRESS → RECRUITMENT_COMPLETED
+DRAWING → RECRUITMENT_COMPLETED   (추첨 후보 0명)
+```
+
+- 생성하면 바로 `SCHEDULED`.
+- Open Worker가 늦어 `entry_closes_at`까지 지났으면 `OPEN`하지 않고 `SCHEDULED`로 둔다(`FANMEETING_OPEN_MISSED` 로그).
+
+## 2. Application
+
+```text
+(없음) → APPLIED → WITHDRAWN → APPLIED (재응모, 같은 행)
+```
+
+재응모 때 `applied_at`을 현재 시각으로 갱신한다. 취소 때는 `applied_at`을 유지한다.
+
+## 3. Selection
+
+| 현재 | 조건 | 다음 |
 |---|---|---|
-| 없음 | 운영자 등록 | `SCHEDULED` |
-| `SCHEDULED` | 응모 시작 시각 | `OPEN` |
-| `OPEN` | 응모 마감 시각 | `CLOSED` |
-| `CLOSED` | 추첨 시작 | `DRAWING` |
-| `DRAWING` | 추첨 완료 | `PAYMENT_IN_PROGRESS` (응모 0명이면 `RECRUITMENT_COMPLETED`) |
-| `PAYMENT_IN_PROGRESS` | 참가 자격이 모두 정해짐 | `RECRUITMENT_COMPLETED` |
+| (생성) | 추첨 최종화, WINNER | `PAYMENT_PENDING` |
+| (생성) | 추첨 최종화, RESERVE | `WAITING` |
+| `WAITING` | 승격 | `PAYMENT_PENDING` |
+| `WAITING` | 승격 차례에 탈퇴 확인 | `NOT_NEEDED` |
+| `WAITING` | 모집 완료 시 남은 예비 | `NOT_NEEDED` |
+| `PAYMENT_PENDING` | 기한 내 승인 | `CONFIRMED` |
+| `PAYMENT_PENDING` | 늦은 승인·금액 불일치 | `EXPIRED` |
+| `PAYMENT_PENDING` | 기한 경과 + 최종 미승인 | `EXPIRED` |
+| `PAYMENT_PENDING` | 결제 시도 요청 전 포기 | `DECLINED` |
 
-## 2. 선발 상태
+보류 중에는 `PAYMENT_PENDING`을 유지한다(자리를 차지).
 
-```mermaid
-flowchart TD
-    W["WAITING · 예비 대기"] -->|승격| P["PAYMENT_PENDING · 결제 기회"]
-    W -->|승격 안 됨·탈퇴| N["NOT_NEEDED"]
-    S["추첨 당첨 / 잔여석 구매"] --> P
-    P -->|기한 안 승인| C["CONFIRMED"]
-    P -->|기한 경과·늦은 승인| E["EXPIRED"]
-    P -->|결제 시도 전 포기| D["DECLINED"]
-```
+P0에서 끝 상태(더 바뀌지 않음): `CONFIRMED`, `EXPIRED`, `DECLINED`, `NOT_NEEDED`.
 
-결과가 불명확한 동안 선발은 `PAYMENT_PENDING`을 유지해 자리를 지킨다.
+## 4. Order
 
-## 3. 주문 상태
+| 현재 | 조건 | 다음 | Selection | `approved_attempt_id` |
+|---|---|---|---|---|
+| (생성) | 추첨 최종화(WINNER) 또는 승격 | `PENDING_PAYMENT` | `PAYMENT_PENDING` | NULL |
+| `PENDING_PAYMENT` / `PAYMENT_REVIEW` | 승인, 금액 일치, `approvedAt <= 기한` | `PAID` | `CONFIRMED` | 그 시도 |
+| `PENDING_PAYMENT` / `PAYMENT_REVIEW` | 승인, `approvedAt > 기한` | `REFUND_PENDING` | `EXPIRED` | 그 시도 |
+| `PENDING_PAYMENT` / `PAYMENT_REVIEW` | 승인, 금액 불일치 | `REFUND_PENDING` | `EXPIRED` | 그 시도 |
+| `PENDING_PAYMENT` | 시도 실패, 기한 남음 | 유지 | 유지 | — |
+| `PENDING_PAYMENT` | 결과 UNKNOWN/PROCESSING | `PAYMENT_REVIEW` | 유지 | — |
+| `PENDING_PAYMENT` | 기한 경과 + `NOT_STARTED`/`NOT_APPROVED_FINAL` | `EXPIRED` | `EXPIRED` | — |
+| `PENDING_PAYMENT` | 기한 경과 + `PROCESSING`/`UNKNOWN` | `PAYMENT_REVIEW` | 유지 | — |
+| `PENDING_PAYMENT` | 결제 시도 요청 전 포기 | `CANCELLED` | `DECLINED` | — |
+| `PAYMENT_REVIEW` | UNKNOWN/PROCESSING 재도착 | 유지(아무것도 안 바꿈) | 유지 | — |
+| `PAYMENT_REVIEW` | 최종 미승인, 기한 남음 | `PENDING_PAYMENT` | 유지 | — |
+| `PAYMENT_REVIEW` | 최종 미승인, 기한 지남 | `EXPIRED` | `EXPIRED` | — |
+| `EXPIRED` | 승인 도착 (**결제 모듈 계약 위반**) | `REFUND_PENDING` | `EXPIRED` 유지(자리 반환 없음) | 그 시도 |
+| `PAID`, `REFUND_PENDING` | 승인 도착, 시도 ID = `approved_attempt_id` | 유지(무시) | 유지 | 유지 |
+| `PAID`, `REFUND_PENDING` | 승인 도착, 다른 시도 ID (이중 결제) | 유지 + 환불 대상 기록 | 유지 | 유지 |
+| `CANCELLED` | 승인 도착 | 유지 + 오류·환불 대상 기록 | 유지 | 유지 |
 
-```mermaid
-flowchart TD
-    A["PENDING_PAYMENT"] -->|기한 안 승인| B["PAID"]
-    A -->|결과 불명확| R["PAYMENT_REVIEW · 보류"]
-    A -->|기한 경과 + 미승인 확정| X["EXPIRED"]
-    A -->|결제 시도 전 포기| C["CANCELLED"]
-    A -->|기한 뒤 승인·금액 불일치| F["REFUND_PENDING"]
-    R -->|승인 확인| B
-    R -->|미승인 · 기한 남음| A
-    R -->|미승인 · 기한 지남| X
-    R -->|30분 경과| M["경고 → 운영자 수동 처리 (P1)"]
-    M --> B
-    M --> X
-    X -->|만료 뒤 승인 도착| F
-```
+- **보류 시각:** 다른 상태에서 `PAYMENT_REVIEW`로 **바뀔 때만** `review_started_at = now`. 보류에서 나갈 때 `review_started_at`, `review_warned_at`을 NULL. 그래서 30분 경고는 보류 회차당 1회다.
+- 환불은 표시만 한다(`REFUND_PENDING`). 실제 환불 명령은 보내지 않는다.
+- P0에서 끝 상태: `PAID`, `EXPIRED`, `CANCELLED`, `REFUND_PENDING`(P1에서 `REFUNDED`로 이어짐). 끝 상태에 결과가 와도 위 표의 마지막 네 줄만 적용한다.
 
-## 4. 선발·주문 짝
+## 5. Selection–Order 짝
 
-| 선발 | 가능한 주문 |
+이 표에 없는 조합은 버그다 (INV-FM-09).
+
+| Selection | 가능한 Order |
 |---|---|
 | `WAITING`, `NOT_NEEDED` | 없음 |
 | `PAYMENT_PENDING` | `PENDING_PAYMENT`, `PAYMENT_REVIEW` |
@@ -55,8 +75,9 @@ flowchart TD
 | `EXPIRED` | `EXPIRED`, `REFUND_PENDING` |
 | `DECLINED` | `CANCELLED` |
 
-이 표에 없는 조합은 버그로 보고 정합성 SQL로 검사한다.
+## 6. DrawRun
 
-## 5. 보류 처리
-
-보류는 돈이 나갔는지 모르는 상태라 시간이 지나도 자동으로 확정하거나 탈락시키지 않는다. 1분마다 다시 조회하고, 30분이 넘으면 경고를 남겨 운영자가 PG 화면을 확인한 뒤 같은 판정 규칙으로 처리한다 (P1).
+```text
+PENDING → RUNNING → COMPLETED
+RUNNING (lease_until < now) → RUNNING (다른 Worker가 새 lease_token으로 Claim)
+```
