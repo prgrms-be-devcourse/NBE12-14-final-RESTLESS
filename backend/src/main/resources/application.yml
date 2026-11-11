@@ -1,12 +1,10 @@
+# 모든 환경 공통 설정. 환경별 값은 application-dev.yml, application-prod.yml에 둔다.
+# 프로필을 지정하지 않으면 dev로 실행된다. 배포에서는 SPRING_PROFILES_ACTIVE=prod를 반드시 지정한다.
 spring:
   application:
     name: restless
-  config:
-    import: optional:file:.env.local[.properties]
-  datasource:
-    url: ${DB_URL:jdbc:mysql://localhost:3306/restless}
-    username: ${DB_USERNAME:restless}
-    password: ${DB_PASSWORD:restless}
+  profiles:
+    default: dev
   jpa:
     open-in-view: false
     hibernate:
@@ -14,9 +12,6 @@ spring:
   flyway:
     enabled: true
     out-of-order: true
-
-toss:
-  secret-key: ${TOSS_SECRET_KEY:}
 
 management:
   endpoints:

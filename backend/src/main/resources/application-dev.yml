@@ -1,0 +1,19 @@
+# 로컬 개발 설정 (기본 프로필)
+spring:
+  config:
+    import: optional:file:.env.local[.properties]
+  # 기본값은 compose.yaml의 MySQL 설정과 같다.
+  # Gradle bootRun으로 실행하면 compose 연동이 접속 정보를 자동으로 덮어쓴다.
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/restless}
+    username: ${DB_USERNAME:restless}
+    password: ${DB_PASSWORD:restless}
+  docker:
+    compose:
+      profiles:
+        active: dev
+      # 앱을 꺼도 MySQL 컨테이너는 계속 실행한다. 끌 때는 docker compose --profile dev stop
+      lifecycle-management: start-only
+
+toss:
+  secret-key: ${TOSS_SECRET_KEY:}
