@@ -113,6 +113,36 @@ public class Auction {
         }
     }
 
+    /**
+     * 입찰을 받을 수 있는 시각인지 확인한다. 상태가 아니라 시각으로 판단한다 (INV-AU-11).
+     * 시작 전이면 AUCTION_NOT_OPEN, 종료 시각이 지났거나 이미 종료 처리됐으면 AUCTION_CLOSED.
+     */
+    public void requireBiddingOpen(Instant now) {
+        if (status == AuctionStatus.CLOSED || !now.isBefore(endsAt)) {
+            throw new BusinessException(ErrorCode.AUCTION_CLOSED);
+        }
+        if (now.isBefore(startsAt)) {
+            throw new BusinessException(ErrorCode.AUCTION_NOT_OPEN);
+        }
+    }
+
+    /**
+     * 입찰이 수락됐을 때 종료 시각을 늘린다: max(현재 종료, 수락 시각 + 연장 시간).
+     * 종료 시각은 줄지 않는다 (INV-AU-10). 바뀐 것이 없어도 새 최고 입찰이 생겼으므로 revision은 오른다.
+     */
+    public void acceptBid(Instant acceptedAt) {
+        Instant extended = acceptedAt.plusSeconds(extensionDurationSeconds);
+        if (extended.isAfter(endsAt)) {
+            endsAt = extended;
+        }
+        revision++;
+        updatedAt = acceptedAt;
+    }
+
+    public boolean isClosed() {
+        return status == AuctionStatus.CLOSED;
+    }
+
     public boolean isSeller(Long userId) {
         return sellerUserId.equals(userId);
     }

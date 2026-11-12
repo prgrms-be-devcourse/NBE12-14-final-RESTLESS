@@ -73,4 +73,26 @@ class AuctionTest {
         assertThat(a.minimumBidAmount(null)).isEqualTo(10_000);
         assertThat(a.minimumBidAmount(15_000L)).isEqualTo(16_000);
     }
+
+    @Test void 연장은_정책_예시대로_종료_시각을_늘리고_줄이지_않는다_INV_AU_10() {
+        Instant start = Instant.parse("2026-11-20T00:00:00Z");
+        Instant ten = Instant.parse("2026-11-20T10:00:00Z");
+        Auction a = Auction.schedule(1L, terms(1, 1, start.plusSeconds(1), ten, 60), start);
+        a.acceptBid(Instant.parse("2026-11-20T05:00:00Z"));
+        assertThat(a.getEndsAt()).isEqualTo(ten);
+        a.acceptBid(Instant.parse("2026-11-20T09:59:30Z"));
+        assertThat(a.getEndsAt()).isEqualTo(Instant.parse("2026-11-20T10:00:30Z"));
+        a.acceptBid(Instant.parse("2026-11-20T10:00:20Z"));
+        assertThat(a.getEndsAt()).isEqualTo(Instant.parse("2026-11-20T10:01:20Z"));
+        assertThat(a.getBaseEndsAt()).isEqualTo(ten);
+        assertThat(a.getRevision()).isEqualTo(3);
+    }
+
+    @Test void 입찰은_시작_시각부터_종료_시각_전까지만() {
+        Auction a = Auction.schedule(1L, valid(), NOW);
+        assertThat(errorOf(() -> a.requireBiddingOpen(START.minusMillis(1)))).isEqualTo(ErrorCode.AUCTION_NOT_OPEN);
+        assertThat(errorOf(() -> a.requireBiddingOpen(START))).isNull();
+        assertThat(errorOf(() -> a.requireBiddingOpen(END.minusMillis(1)))).isNull();
+        assertThat(errorOf(() -> a.requireBiddingOpen(END))).isEqualTo(ErrorCode.AUCTION_CLOSED);
+    }
 }

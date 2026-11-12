@@ -30,6 +30,12 @@ public enum ErrorCode {
     AUCTION_NOT_FOUND(HttpStatus.NOT_FOUND, "경매를 찾을 수 없습니다."),
     AUCTION_FORBIDDEN(HttpStatus.FORBIDDEN, "이 경매를 변경할 권한이 없습니다."),
     AUCTION_ALREADY_STARTED(HttpStatus.CONFLICT, "이미 시작된 경매는 수정하거나 삭제할 수 없습니다."),
+    AUCTION_NOT_OPEN(HttpStatus.CONFLICT, "아직 시작하지 않은 경매입니다."),
+    AUCTION_CLOSED(HttpStatus.CONFLICT, "종료된 경매입니다."),
+    BID_BY_SELLER(HttpStatus.CONFLICT, "자신의 경매에는 입찰할 수 없습니다."),
+    BID_ALREADY_HIGHEST(HttpStatus.CONFLICT, "이미 현재 최고 입찰자입니다."),
+    BID_AMOUNT_TOO_LOW(HttpStatus.CONFLICT, "최소 입찰 가능 금액보다 낮습니다."),
+    IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "같은 요청 키로 다른 요청을 보냈습니다."),
     CREDIT_INSUFFICIENT(HttpStatus.CONFLICT, "사용 가능한 크레딧이 부족합니다.");
 
     private final HttpStatus httpStatus;

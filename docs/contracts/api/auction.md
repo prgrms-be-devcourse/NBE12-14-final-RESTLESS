@@ -142,7 +142,7 @@ Content-Type: application/json
 }
 ```
 
-- 같은 회원이 같은 `Idempotency-Key`로 같은 경매, 같은 금액을 다시 보내면 처음 응답과 같은 내용을 돌려준다.
+- 같은 회원이 같은 `Idempotency-Key`로 같은 경매, 같은 금액을 다시 보내면 **처음 수락된 입찰을 현재 상태와 함께** 201로 돌려준다. `bidId`, `amount`, `acceptedAt`은 처음과 같고, `status`와 `endsAt`은 지금 값이다 (그사이 추월당했으면 `OUTBID`). 입찰, 크레딧 확보, 연장은 다시 하지 않는다.
 - 같은 키로 다른 경매나 다른 금액을 보내면 409 `IDEMPOTENCY_KEY_CONFLICT`.
 - 거절된 요청은 저장하지 않는다. 같은 키로 재시도하면 새 요청으로 다시 판단한다.
 
