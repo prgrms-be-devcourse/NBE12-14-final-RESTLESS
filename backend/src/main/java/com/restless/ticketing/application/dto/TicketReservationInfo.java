@@ -1,4 +1,4 @@
-package com.restless.ticketing.application;
+package com.restless.ticketing.application.dto;
 
 import com.restless.ticketing.domain.TicketReservationStatus;
 import java.time.Instant;

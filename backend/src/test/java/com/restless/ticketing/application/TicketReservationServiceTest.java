@@ -1,9 +1,11 @@
 package com.restless.ticketing.application;
 
+import com.restless.ticketing.application.dto.TicketReservationInfo;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -349,6 +351,84 @@ class TicketReservationServiceTest {
         assertStoredReservation(original, 2);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM seat_holds WHERE reservation_id = ? AND released_at IS NOT NULL",
                 Integer.class, original.reservationId())).isZero();
+    }
+
+    @ParameterizedTest(name = "{displayName} [{0}]")
+    @EnumSource(TicketReservationStatus.class)
+    @DisplayName("활성 목록은 로그인 회원의 HELD·PAYMENT_PENDING·RECONCILING만 반환하고 타인과 종료 상태를 제외한다")
+    void activeQueryFiltersByAuthenticatedMemberAndStatus(TicketReservationStatus state) throws Exception {
+        TicketReservationInfo own = reserve(fixture.firstUserId(), "own-active", List.of(seat(0), seat(1)));
+        reserve(fixture.secondUserId(), "other-active", List.of(seat(2)));
+        // 후속 상태 전이는 별도 구현 범위이므로 조회 필터의 입력 상태만 준비한다.
+        jdbc.update("UPDATE ticket_reservations SET status = ? WHERE id = ?", state.name(), own.reservationId());
+
+        var response = mockMvc.perform(get("/api/ticket-reservations/active")
+                        .with(jwt().jwt(token -> token.subject(fixture.firstUserId().toString()))))
+                .andExpect(status().isOk());
+
+        boolean active = state == TicketReservationStatus.HELD
+                || state == TicketReservationStatus.PAYMENT_PENDING
+                || state == TicketReservationStatus.RECONCILING;
+        response.andExpect(jsonPath("$.length()").value(active ? 1 : 0));
+        if (active) {
+            response.andExpect(jsonPath("$[0].reservationId").value(own.reservationId()))
+                    .andExpect(jsonPath("$[0].performanceId").value(fixture.performanceId()))
+                    .andExpect(jsonPath("$[0].status").value(state.name()))
+                    .andExpect(jsonPath("$[0].seats.length()").value(2))
+                    .andExpect(jsonPath("$[0].seats[0].seatId").value(seat(0)))
+                    .andExpect(jsonPath("$[0].seats[1].seatId").value(seat(1)))
+                    .andExpect(jsonPath("$[0].seats[0].priceAmount").value(100000));
+        }
+    }
+
+    @Test
+    @DisplayName("본인 상세는 선점 당시 가격과 만료 여부를 조회하고 상태·수량을 변경하지 않으며 종료 후에도 조회된다")
+    void ownerCanReadReservationDetailsIncludingReleasedHistory() throws Exception {
+        TicketReservationInfo own = reserve(fixture.firstUserId(), "detail", List.of(seat(1), seat(0)));
+        jdbc.update("UPDATE performance_seats SET price = 200000 WHERE id = ?", seat(0));
+        markExpired(own.reservationId());
+
+        mockMvc.perform(get("/api/ticket-reservations/{reservationId}", own.reservationId())
+                        .with(jwt().jwt(token -> token.subject(fixture.firstUserId().toString()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reservationId").value(own.reservationId()))
+                .andExpect(jsonPath("$.performanceId").value(fixture.performanceId()))
+                .andExpect(jsonPath("$.status").value("HELD"))
+                .andExpect(jsonPath("$.holdExpired").value(true))
+                .andExpect(jsonPath("$.holdExpiresAt").isString())
+                .andExpect(jsonPath("$.createdAt").isString())
+                .andExpect(jsonPath("$.seats.length()").value(2))
+                .andExpect(jsonPath("$.seats[0].seatId").value(seat(0)))
+                .andExpect(jsonPath("$.seats[0].priceAmount").value(100000))
+                .andExpect(jsonPath("$.seats[1].seatId").value(seat(1)))
+                .andExpect(jsonPath("$.requestKey").doesNotExist())
+                .andExpect(jsonPath("$.holdRequestHash").doesNotExist());
+        assertThat(reservationStatus(own.reservationId())).isEqualTo("HELD");
+        assertStoredReservation(own, 2);
+
+        service.cancel(fixture.firstUserId(), own.reservationId());
+        mockMvc.perform(get("/api/ticket-reservations/{reservationId}", own.reservationId())
+                        .with(jwt().jwt(token -> token.subject(fixture.firstUserId().toString()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reservationId").value(own.reservationId()))
+                .andExpect(jsonPath("$.status").value("RELEASED"))
+                .andExpect(jsonPath("$.seats.length()").value(2))
+                .andExpect(jsonPath("$.seats[0].priceAmount").value(100000));
+    }
+
+    @Test
+    @DisplayName("타인의 예약 상세와 없는 예약은 모두 404 NOT_FOUND로 응답한다")
+    void rejectsForeignAndMissingReservationDetails() throws Exception {
+        TicketReservationInfo own = reserve(fixture.firstUserId(), "private-detail", List.of(seat(0)));
+        Long missingId = jdbc.queryForObject("SELECT COALESCE(MAX(id), 0) + 1 FROM ticket_reservations", Long.class);
+
+        for (Long reservationId : List.of(own.reservationId(), missingId)) {
+            mockMvc.perform(get("/api/ticket-reservations/{reservationId}", reservationId)
+                            .with(jwt().jwt(token -> token.subject(fixture.secondUserId().toString()))))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value("NOT_FOUND"))
+                    .andExpect(jsonPath("$.seats").doesNotExist());
+        }
     }
 
     private Performance performance(Long concertId, Long venueId, Long layoutId, Instant now) {

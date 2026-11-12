@@ -1,4 +1,4 @@
-package com.restless.ticketing.application;
+package com.restless.ticketing.application.dto;
 
 import com.restless.ticketing.domain.TicketSeatStatus;
 import java.math.BigDecimal;

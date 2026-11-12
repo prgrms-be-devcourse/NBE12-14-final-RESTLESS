@@ -13,6 +13,11 @@ import org.springframework.data.repository.query.Param;
 
 public interface TicketReservationRepository extends JpaRepository<TicketReservation, Long> {
 
+    Optional<TicketReservation> findByIdAndUserId(Long id, Long userId);
+
+    List<TicketReservation> findAllByUserIdAndStatusInOrderByCreatedAtDescIdDesc(
+            Long userId, Collection<TicketReservationStatus> statuses);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<TicketReservation> findByUserIdAndRequestKey(Long userId, String requestKey);
 
