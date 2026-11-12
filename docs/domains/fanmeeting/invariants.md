@@ -1,22 +1,29 @@
-# Fan Meeting 불변식
+# FanMeeting 불변식
 
-어떤 동시 요청 상황에서도 반드시 지켜야 하는 조건이다. 테스트 이름이나 주석에 `FM-INV-xx`를 붙여 추적한다.
+단위, 통합, 동시성 테스트의 기준이다. 테스트 이름이나 주석에 `INV-FM-xx`를 붙여 추적한다. 매 시나리오 테스트 끝에 INV-FM-07, 09, 14, 15를 SQL로 확인한다([test-scenarios.md](test-scenarios.md)).
 
-| ID | 불변식 | 지키는 방법 |
-|---|---|---|
-| FM-INV-01 | 회원당 행사별 응모는 하나다 | `UNIQUE(event_id, user_id)` |
-| FM-INV-02 | 마감 뒤 저장된 응모는 0건이다 | 응모는 행사 행 공유 잠금, 마감은 배타 잠금으로 직렬화한다 |
-| FM-INV-03 | 같은 입력이면 같은 추첨 결과다 | HMAC-SHA256 결정적 순위, seed는 마감 때 한 번 저장한다. 추첨 실행은 행사당 하나(`UNIQUE(event_id)`), lease token으로 늦은 Worker의 저장을 막는다 |
-| FM-INV-04 | 확정 + 결제 대기 ≤ 정원 | 승격과 잔여석 구매는 행사 행 배타 잠금 안에서 다시 세고 빈자리만큼만 만든다 |
-| FM-INV-05 | 기한 안에 승인된 결제는 참가 확정된다 | 만료 전에 결제 결과를 조회하고, 확실히 미승인일 때만 만료한다 |
-| FM-INV-06 | 결과가 불명확한 자리는 넘어가지 않는다 | 보류(`PAYMENT_REVIEW`) 중에도 결제 대기로 정원을 차지한다 |
-| FM-INV-07 | 주문 금액 = 참가비 스냅샷 = 승인 금액, 같은 결제 시도는 한 번만 반영한다 | 금액은 서버 값만 쓴다 |
+| ID | 불변식 |
+|---|---|
+| INV-FM-01 | 회원 1명은 행사 1개에 Application 최대 1개 |
+| INV-FM-02 | `CLOSED` 이후 커밋된 응모·취소 0건 |
+| INV-FM-03 | 가입 기준 시각 이후 가입한 회원의 응모 0건 (가입 시각 검사 ON일 때) |
+| INV-FM-04 | 행사당 DrawRun 최대 1개, `COMPLETED` 결과는 덮어쓰지 않음 |
+| INV-FM-05 | 같은 seed·후보 집합·알고리즘 버전이면 같은 추첨 결과 |
+| INV-FM-06 | WINNER ≤ `winner_limit`, RESERVE ≤ `reserve_limit`, Application 하나는 최대 한 번 선발 |
+| INV-FM-07 | **`CONFIRMED + PAYMENT_PENDING ≤ winner_limit`** |
+| INV-FM-08 | 승격된 RESERVE의 최대 순번보다 앞 순번인 `WAITING` 없음 |
+| INV-FM-09 | Selection·Order는 [Selection–Order 짝 표](state-machines.md#5-selectionorder-짝)의 조합으로만 존재 |
+| INV-FM-10 | **기한 안에 승인된 Order의 Selection은 `CONFIRMED`** (기한 내 결제자 자격 상실 0). 단, 결제 모듈이 최종 판정(`finalDecision`)을 지키는 한([ports.md 계약 4](ports.md#2-결제-모듈-계약-p0-가짜가-지킬-최소-규칙)). 그 뒤 승인이 오면 계약 위반으로 기록한다 |
+| INV-FM-11 | 보류 중인 자리는 만료되지 않고 다른 사람에게 넘어가지 않음 |
+| INV-FM-12 | Order 금액 = 생성 시점 참가비 = 승인 금액 (다르면 확정하지 않음) |
+| INV-FM-13 | 같은 결제 시도로 주문 상태가 두 번 바뀌지 않음. (P0 범위: 상태 변경. 이중 결제 기록의 중복 제거는 P1 Inbox) |
+| INV-FM-14 | Selection·Order의 `event_id`와 `user_id` = 가리키는 부모의 `event_id`와 `user_id` |
+| INV-FM-15 | 모집 완료 시 `PAYMENT_PENDING`, `PAYMENT_REVIEW`, `WAITING` 0건 |
+| INV-FM-16 | 승격 Order 중 `issued_at + 60분 > promotion_closes_at`인 것 0건, 야간에 발급된 것 0건 |
+| INV-FM-17 | `DECLINED` Selection의 Order는 `attempt_requested_at`이 NULL |
 
-DB 제약으로 함께 지키는 것:
+AGENTS.md의 핵심 불변식 중 이 도메인에 해당하는 것:
 
-- 응모 하나는 최대 한 번 선발된다: `fan_meeting_selections` `UNIQUE(application_id)`
-- 같은 추첨에서 (구분, 순번)은 중복되지 않는다: `UNIQUE(draw_run_id, selection_type, selection_rank)`
-- 선발 하나에 주문 하나: `fan_meeting_orders` `UNIQUE(selection_id)`
-- 다른 행사·다른 회원의 응모·선발을 가리키지 못한다: 복합 FK ([통합 ERD](../../architecture/erd.md) 3절)
-
-원본은 전체 불변식이 18개라고 하지만, 저장소에는 핵심 7개만 옮겼다. 나머지는 담당자가 추가한다.
+- 정원 초과 금지 → INV-FM-07
+- 결과를 모르는 PG 응답을 실패로 처리하지 않음 → INV-FM-10, INV-FM-11
+- 중복 요청이 중복 주문을 만들지 않음 → INV-FM-01, INV-FM-13, `UNIQUE(selection_id)`
