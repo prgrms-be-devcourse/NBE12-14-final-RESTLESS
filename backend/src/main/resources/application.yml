@@ -24,6 +24,14 @@ restless:
       cookie-name: refresh_token
       cookie-secure: ${REFRESH_COOKIE_SECURE:true}
       same-site: Strict
+  auction:
+    scheduler:
+      # 경매 시작·종료 스케줄러. 테스트에서는 build.gradle이 false로 끈다.
+      enabled: ${AUCTION_SCHEDULER_ENABLED:true}
+      # 한 번 처리한 뒤 다음 실행까지 쉬는 시간(ms)
+      fixed-delay-ms: 1000
+      # 한 번에 처리할 경매 수
+      batch-size: 100
 
 logging:
   pattern:

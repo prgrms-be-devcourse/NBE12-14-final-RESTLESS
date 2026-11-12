@@ -5,7 +5,10 @@ import com.restless.common.error.ErrorCode;
 import com.restless.member.domain.Member;
 import com.restless.member.infrastructure.MemberRepository;
 import java.time.Clock;
+import java.util.Collection;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
@@ -41,6 +44,19 @@ public class MemberService {
     @Transactional(readOnly = true)
     public Optional<Member> findActiveByEmail(String email) {
         return memberRepository.findByEmail(email).filter(Member::isActive);
+    }
+
+    /**
+     * 회원 ID → 닉네임. 다른 도메인이 화면에 이름을 보여 줄 때 쓴다 (예: 경매 최고 입찰자).
+     * 없는 ID는 결과에 없다. 탈퇴 회원도 닉네임을 돌려준다.
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, String> nicknames(Collection<Long> memberIds) {
+        if (memberIds.isEmpty()) {
+            return Map.of();
+        }
+        return memberRepository.findAllById(memberIds).stream()
+                .collect(Collectors.toMap(Member::getId, Member::getNickname));
     }
 
     @Transactional(readOnly = true)

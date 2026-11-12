@@ -65,6 +65,10 @@ public class SecurityConfig implements WebMvcConfigurer {
                         .requestMatchers(HttpMethod.GET, PUBLIC_GET_PATHS).permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        // 경매 등록·수정·삭제는 주최자와 관리자만. 본인 경매인지는 경매 서비스가 확인한다.
+                        .requestMatchers(HttpMethod.POST, "/api/auctions").hasAnyRole("ORGANIZER", "ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/auctions/*").hasAnyRole("ORGANIZER", "ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/auctions/*").hasAnyRole("ORGANIZER", "ADMIN")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .bearerTokenResolver(bearerTokenResolver())
