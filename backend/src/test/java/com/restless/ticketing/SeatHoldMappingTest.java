@@ -20,6 +20,7 @@ import jakarta.persistence.PersistenceException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -29,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@DisplayName("좌석별 선점 이력 매핑")
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.docker.compose.enabled=false"
@@ -74,6 +76,7 @@ class SeatHoldMappingTest {
         seatId = persistSeat(performanceId, "1");
     }
 
+    @DisplayName("좌석별 선점 스냅샷을 조회하고 해제 이력과 새 소유자 연결을 보존한다")
     @Test
     void reloadsSeatHoldSnapshotsAndPreservesHistory() {
         Long secondSeatId = persistSeat(performanceId, "2");
@@ -121,6 +124,7 @@ class SeatHoldMappingTest {
         assertThat(entityManager.find(SeatHold.class, replacement.getId()).getReservationId()).isEqualTo(newReservationId);
     }
 
+    @DisplayName("선점 기록에 다른 회차의 예약을 연결할 수 없다")
     @Test
     void rejectsReservationFromAnotherPerformance() {
         Long otherPerformanceId = persistPerformance(86400);
@@ -134,6 +138,7 @@ class SeatHoldMappingTest {
                 .hasStackTraceContaining("fk_seat_holds_reservation_performance");
     }
 
+    @DisplayName("선점 기록에 다른 회차의 판매 좌석을 연결할 수 없다")
     @Test
     void rejectsSeatFromAnotherPerformance() {
         Long otherPerformanceId = persistPerformance(86400);
@@ -147,6 +152,7 @@ class SeatHoldMappingTest {
                 .hasStackTraceContaining("fk_seat_holds_seat_performance");
     }
 
+    @DisplayName("선점 당시 가격 스냅샷은 음수로 저장할 수 없다")
     @Test
     void rejectsNegativePriceSnapshot() {
         entityManager.flush();

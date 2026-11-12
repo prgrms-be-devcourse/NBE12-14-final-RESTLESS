@@ -11,6 +11,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
 import java.math.BigDecimal;
 import java.time.Instant;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -22,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@DisplayName("좌석 배치·배치별 좌석 매핑")
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.docker.compose.enabled=false"
@@ -35,6 +37,7 @@ class VenueLayoutMappingTest {
     @Autowired
     private EntityManager entityManager;
 
+    @DisplayName("배치 버전별로 같은 실제 좌석을 재사용하고 복합 키·좌표·판매 여부를 조회한다")
     @Test
     void reloadsLayoutAndCompositeSeatKeysAcrossVersions() {
         Venue venue = persistVenue("Hall");
@@ -81,7 +84,8 @@ class VenueLayoutMappingTest {
         assertThat(seats).extracting(LayoutSeat::getId).containsExactly(firstId);
     }
 
-    @ParameterizedTest
+    @DisplayName("배치·실제 좌석·배치별 좌석의 공연장이 서로 다르면 저장할 수 없다")
+    @ParameterizedTest(name = "{displayName} [{index}] {arguments}")
     @CsvSource({"true,fk_layout_seats_layout_venue", "false,fk_layout_seats_seat_venue"})
     void rejectsLayoutSeatWithDifferentVenue(boolean layoutMismatch, String constraint) {
         Venue first = persistVenue("First");
@@ -97,6 +101,7 @@ class VenueLayoutMappingTest {
         }).isInstanceOf(PersistenceException.class).hasStackTraceContaining(constraint);
     }
 
+    @DisplayName("같은 공연장의 배치 코드와 버전 조합은 중복될 수 없다")
     @Test
     void rejectsDuplicateLayoutCodeAndVersionWithinVenue() {
         Venue venue = persistVenue("Hall");
@@ -110,6 +115,7 @@ class VenueLayoutMappingTest {
                 .hasStackTraceContaining("uk_venue_layouts_code_version");
     }
 
+    @DisplayName("배치 버전은 0 이하로 저장할 수 없다")
     @Test
     void rejectsNonpositiveLayoutVersion() {
         Venue venue = persistVenue("Hall");

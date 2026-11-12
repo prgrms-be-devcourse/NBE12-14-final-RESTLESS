@@ -19,6 +19,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -28,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@DisplayName("발급 티켓 매핑")
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.docker.compose.enabled=false"
@@ -72,6 +74,7 @@ class TicketMappingTest {
         seatId = persistSeat(performanceId, "1");
     }
 
+    @DisplayName("좌석별 UUID v4 티켓을 조회하고 사용·취소 이력과 새 예약의 새 번호를 보존한다")
     @Test
     void reloadsUuidTicketsAndPreservesUsageAndCancellationHistory() {
         Long secondSeatId = persistSeat(performanceId, "2");
@@ -127,6 +130,7 @@ class TicketMappingTest {
         assertThat(reissued.getTicketNo()).isNotEqualTo(cancelled.getTicketNo());
     }
 
+    @DisplayName("취소된 티켓이 있어도 같은 예약·좌석에 티켓을 중복 발급할 수 없다")
     @Test
     void rejectsDuplicateReservationSeatEvenAfterCancellation() {
         Ticket first = persistTicket(reservationId, performanceId, seatId, 100000);
@@ -140,6 +144,7 @@ class TicketMappingTest {
                 .hasStackTraceContaining("uk_tickets_reservation_seat");
     }
 
+    @DisplayName("서로 다른 좌석의 티켓도 같은 티켓번호를 사용할 수 없다")
     @Test
     void rejectsDuplicateTicketNumberAcrossDifferentSeats() {
         Long secondSeatId = persistSeat(performanceId, "2");
@@ -153,6 +158,7 @@ class TicketMappingTest {
                 .isInstanceOf(PersistenceException.class).hasStackTraceContaining("uk_tickets_ticket_no");
     }
 
+    @DisplayName("티켓에 다른 회차의 예약을 연결할 수 없다")
     @Test
     void rejectsReservationFromDifferentPerformance() {
         Long otherPerformanceId = persistPerformance(86400);
@@ -165,6 +171,7 @@ class TicketMappingTest {
         }).isInstanceOf(PersistenceException.class).hasStackTraceContaining("fk_tickets_reservation_performance");
     }
 
+    @DisplayName("티켓에 다른 회차의 판매 좌석을 연결할 수 없다")
     @Test
     void rejectsSeatFromDifferentPerformance() {
         Long otherPerformanceId = persistPerformance(86400);
@@ -177,6 +184,7 @@ class TicketMappingTest {
         }).isInstanceOf(PersistenceException.class).hasStackTraceContaining("fk_tickets_seat_performance");
     }
 
+    @DisplayName("티켓 금액은 음수로 저장할 수 없다")
     @Test
     void rejectsNegativeTicketPrice() {
         entityManager.flush();

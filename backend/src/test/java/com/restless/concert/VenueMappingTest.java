@@ -7,6 +7,7 @@ import com.restless.concert.domain.VenueSection;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
 import java.time.Instant;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@DisplayName("공연장·구역·실제 좌석 매핑")
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.docker.compose.enabled=false"
@@ -31,6 +33,7 @@ class VenueMappingTest {
     @Autowired
     private EntityManager entityManager;
 
+    @DisplayName("공연장·구역·좌석의 정보와 접근성 값을 저장하고 다시 조회한다")
     @Test
     void savesAndReloadsVenueSectionAndSeatsFromMigratedSchema() {
         Venue venue = persistVenue("Olympic Hall");
@@ -78,6 +81,7 @@ class VenueMappingTest {
         assertThat(seats).extracting(VenueSeat::isAccessible).containsExactly(true, false);
     }
 
+    @DisplayName("다른 공연장의 구역에 실제 좌석을 연결할 수 없다")
     @Test
     void rejectsSeatLinkedToSectionOfAnotherVenue() {
         Venue first = persistVenue("First Hall");
@@ -92,7 +96,8 @@ class VenueMappingTest {
                 .hasStackTraceContaining("fk_venue_seats_section_venue");
     }
 
-    @ParameterizedTest
+    @DisplayName("같은 공연장의 구역 코드와 같은 구역의 좌석 위치는 중복될 수 없다")
+    @ParameterizedTest(name = "{displayName} [{index}] {arguments}")
     @CsvSource({"true,uk_venue_sections_venue_code", "false,uk_venue_seats_position"})
     void rejectsDuplicateVenueStructureKey(boolean sectionCode, String constraint) {
         Venue venue = persistVenue("Hall");

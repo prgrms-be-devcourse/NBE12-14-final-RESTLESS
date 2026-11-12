@@ -10,6 +10,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
 import java.time.Instant;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -23,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@DisplayName("공연·공연 회차 매핑")
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.docker.compose.enabled=false"
@@ -39,6 +41,7 @@ class ConcertPerformanceMappingTest {
     @Autowired
     private EntityManager entityManager;
 
+    @DisplayName("같은 공연장·배치를 사용하는 공연의 여러 회차와 UTC 시각을 저장하고 조회한다")
     @Test
     void reloadsConcertAndSeparatePerformancesSharingVenueAndLayout() {
         Venue venue = persistVenue("Hall");
@@ -80,7 +83,8 @@ class ConcertPerformanceMappingTest {
         assertThat(performances.get(1).getMaxTicketsPerUser()).isEqualTo(2);
     }
 
-    @ParameterizedTest
+    @DisplayName("회차의 공연장이 공연 또는 배치의 공연장과 다르면 저장할 수 없다")
+    @ParameterizedTest(name = "{displayName} [{index}] {arguments}")
     @CsvSource({"true,fk_performances_concert_venue", "false,fk_performances_layout_venue"})
     void rejectsPerformanceWithDifferentVenue(boolean concertMismatch, String constraint) {
         Venue first = persistVenue("First");
@@ -97,7 +101,8 @@ class ConcertPerformanceMappingTest {
         }).isInstanceOf(PersistenceException.class).hasStackTraceContaining(constraint);
     }
 
-    @ParameterizedTest
+    @DisplayName("예매 기간·공연 시작 시각·인당 구매 한도의 제약을 위반하면 저장할 수 없다")
+    @ParameterizedTest(name = "{displayName} [{index}] {arguments}")
     @MethodSource("invalidBookingConfigurations")
     void rejectsInvalidBookingConfiguration(Instant opensAt, Instant closesAt, int limit, String constraint) {
         Venue venue = persistVenue("Hall");

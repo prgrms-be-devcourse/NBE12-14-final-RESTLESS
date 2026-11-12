@@ -19,6 +19,7 @@ import jakarta.persistence.PersistenceException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -30,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@DisplayName("회차별 판매 좌석 매핑")
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.docker.compose.enabled=false"
@@ -71,6 +73,7 @@ class TicketSeatMappingTest {
         performanceId = persistPerformance(0);
     }
 
+    @DisplayName("같은 실제 좌석의 회차별 가격·등급과 현재 소유자 상태를 저장하고 조회한다")
     @Test
     void reloadsPerformancePricesAndCurrentOwnerStates() {
         Long otherPerformanceId = persistPerformance(86400);
@@ -113,6 +116,7 @@ class TicketSeatMappingTest {
         assertThat(sold.getCurrentHoldId()).isEqualTo(holdId);
     }
 
+    @DisplayName("같은 회차에 같은 실제 좌석을 중복 등록할 수 없다")
     @Test
     void rejectsDuplicatePhysicalSeatWithinPerformance() {
         persistTicketSeat(performanceId, venueSeatId, "VIP", 100000);
@@ -125,6 +129,7 @@ class TicketSeatMappingTest {
                 .hasStackTraceContaining("uk_performance_seats_seat");
     }
 
+    @DisplayName("회차가 선택한 배치와 다른 배치의 좌석을 판매 좌석으로 등록할 수 없다")
     @Test
     void rejectsLayoutDifferentFromSelectedPerformanceLayout() {
         Long otherLayoutId = persistLayout(2);
@@ -139,6 +144,7 @@ class TicketSeatMappingTest {
                 .hasStackTraceContaining("fk_performance_seats_performance_layout");
     }
 
+    @DisplayName("해당 배치에 포함되지 않은 실제 좌석을 판매 좌석으로 등록할 수 없다")
     @Test
     void rejectsPhysicalSeatNotIncludedInLayout() {
         Long missingSeatId = persistPhysicalSeat("2");
@@ -151,6 +157,7 @@ class TicketSeatMappingTest {
                 .hasStackTraceContaining("fk_performance_seats_layout_seat");
     }
 
+    @DisplayName("판매 좌석 가격은 음수로 저장할 수 없다")
     @Test
     void rejectsNegativePrice() {
         entityManager.flush();
@@ -162,7 +169,8 @@ class TicketSeatMappingTest {
                 .hasStackTraceContaining("ck_performance_seats_price");
     }
 
-    @ParameterizedTest
+    @DisplayName("판매 상태와 현재 선점 유무가 맞지 않거나 허용되지 않은 상태이면 거절한다")
+    @ParameterizedTest(name = "{displayName} [{index}] {arguments}")
     @CsvSource({"AVAILABLE,true", "HELD,false", "SOLD,false", "BROKEN,false"})
     void rejectsInvalidStatusOwnerCombination(String status, boolean withOwner) {
         TicketSeat seat = persistTicketSeat(performanceId, venueSeatId, "VIP", 100000);
@@ -174,6 +182,7 @@ class TicketSeatMappingTest {
                 .hasStackTraceContaining("ck_performance_seats_status_owner");
     }
 
+    @DisplayName("다른 좌석의 선점 기록을 현재 소유자로 연결할 수 없다")
     @Test
     void rejectsCurrentHoldBelongingToAnotherSeat() {
         Long otherSeatId = persistPhysicalSeat("2");

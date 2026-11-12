@@ -13,6 +13,7 @@ import jakarta.persistence.PersistenceException;
 import java.time.Instant;
 import java.util.Arrays;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -24,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@DisplayName("티켓 예약 매핑")
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.docker.compose.enabled=false"
@@ -59,6 +61,7 @@ class TicketReservationMappingTest {
         performanceId = persistPerformance(0);
     }
 
+    @DisplayName("예약의 요청 해시·UTC 시각과 결제 전후 선택 필드를 조회하고 기존 NULL 해시를 지원한다")
     @Test
     void reloadsReservationHashAndOptionalCheckoutFields() {
         byte[] source = requestHash();
@@ -104,6 +107,7 @@ class TicketReservationMappingTest {
         assertThat(checkout.getHoldRequestHash()).isNull();
     }
 
+    @DisplayName("같은 사용자는 회차가 달라도 같은 선점 요청 키를 재사용할 수 없다")
     @Test
     void rejectsSameUserKeyAcrossPerformances() {
         Long targetPerformanceId = persistPerformance(86400);
@@ -117,6 +121,7 @@ class TicketReservationMappingTest {
                 .hasStackTraceContaining("uk_ticket_reservations_user_request_key");
     }
 
+    @DisplayName("요청 키의 대소문자·후행 공백과 사용자별 범위를 구분한다")
     @Test
     void preservesCaseAndTrailingSpaceDifferencesInRequestKeys() {
         TicketReservation first = persistReservation(userId, performanceId, "Key");
@@ -137,6 +142,7 @@ class TicketReservationMappingTest {
         assertThat(entityManager.find(TicketReservation.class, otherUser.getId()).getUserId()).isEqualTo(otherUserId);
     }
 
+    @DisplayName("하나의 주문을 서로 다른 예약에 중복 연결할 수 없다")
     @Test
     void rejectsReusingOrderAcrossReservations() {
         TicketReservation first = persistReservation(userId, performanceId, "first");
@@ -150,7 +156,8 @@ class TicketReservationMappingTest {
                 .hasStackTraceContaining("uk_ticket_reservations_order");
     }
 
-    @ParameterizedTest
+    @DisplayName("존재하지 않는 사용자 또는 회차의 예약을 생성할 수 없다")
+    @ParameterizedTest(name = "{displayName} [{index}] {arguments}")
     @CsvSource({"true,fk_ticket_reservations_user", "false,fk_ticket_reservations_performance"})
     void rejectsMissingUserOrPerformance(boolean missingUser, String constraint) {
         entityManager.flush();
@@ -162,6 +169,7 @@ class TicketReservationMappingTest {
         }).isInstanceOf(PersistenceException.class).hasStackTraceContaining(constraint);
     }
 
+    @DisplayName("존재하지 않는 주문을 예약에 연결할 수 없다")
     @Test
     void rejectsMissingOrder() {
         TicketReservation reservation = persistReservation(userId, performanceId, "missing-order");

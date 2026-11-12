@@ -11,6 +11,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -22,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@DisplayName("사용자·회차별 구매 수량 매핑")
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.docker.compose.enabled=false"
@@ -56,6 +58,7 @@ class TicketPurchaseLimitMappingTest {
         performanceId = persistPerformance(0);
     }
 
+    @DisplayName("초기·기존 구매 수량을 조회하고 사용자·회차별 관리 행을 구분한다")
     @Test
     void reloadsCountersAndKeepsUserPerformanceScopesSeparate() {
         TicketPurchaseLimit limit = persistLimit(userId, performanceId);
@@ -96,6 +99,7 @@ class TicketPurchaseLimitMappingTest {
                 .isEqualTo(otherPerformanceId);
     }
 
+    @DisplayName("같은 사용자·회차의 구매 관리 행을 중복 생성할 수 없다")
     @Test
     void rejectsDuplicateUserPerformancePair() {
         persistLimit(userId, performanceId);
@@ -108,7 +112,8 @@ class TicketPurchaseLimitMappingTest {
                 .hasStackTraceContaining("uk_ticket_purchase_limits_user_performance");
     }
 
-    @ParameterizedTest
+    @DisplayName("선점 수량과 확정 수량은 각각 음수로 저장할 수 없다")
+    @ParameterizedTest(name = "{displayName} [{index}] {arguments}")
     @CsvSource({"-1,0", "0,-1"})
     void rejectsNegativeCounts(int reservedCount, int confirmedCount) {
         TicketPurchaseLimit limit = persistLimit(userId, performanceId);
@@ -119,7 +124,8 @@ class TicketPurchaseLimitMappingTest {
                 .hasStackTraceContaining("ck_ticket_purchase_limits_counts");
     }
 
-    @ParameterizedTest
+    @DisplayName("존재하지 않는 사용자 또는 회차의 구매 관리 행을 생성할 수 없다")
+    @ParameterizedTest(name = "{displayName} [{index}] {arguments}")
     @CsvSource({
             "true,fk_ticket_purchase_limits_user",
             "false,fk_ticket_purchase_limits_performance"
