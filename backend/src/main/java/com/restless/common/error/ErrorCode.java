@@ -21,7 +21,10 @@ public enum ErrorCode {
     INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "다시 로그인해 주세요."),
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 가입된 이메일입니다."),
-    MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다.");
+    MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다."),
+
+    // 경매, 크레딧
+    CREDIT_INSUFFICIENT(HttpStatus.CONFLICT, "사용 가능한 크레딧이 부족합니다.");
 
     private final HttpStatus httpStatus;
     private final String message;
