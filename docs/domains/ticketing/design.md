@@ -145,7 +145,7 @@ flowchart LR
 
 ```
 
-선점 기록(`TicketHold`)은 `HELD`, `CONFIRMED`, `RELEASED`로 관리하고, 환불 후에도 과거 이력을 보존한다.
+선점 기록(`SeatHold`)은 `HELD`, `CONFIRMED`, `RELEASED`로 관리하고, 환불 후에도 과거 이력을 보존한다.
 
 ## [7] 주요 시퀀스 다이어그램
 
@@ -229,16 +229,16 @@ erDiagram
     VENUE ||--o{ VENUE_LAYOUT : has
     VENUE_LAYOUT ||--o{ LAYOUT_SEAT : contains
     VENUE ||--o{ CONCERT : hosts
-    CONCERT ||--o{ CONCERT_SESSION : schedules
-    VENUE_LAYOUT ||--o{ CONCERT_SESSION : uses
-    CONCERT_SESSION ||--o{ TICKET_SEAT : offers
+    CONCERT ||--o{ PERFORMANCE : schedules
+    VENUE_LAYOUT ||--o{ PERFORMANCE : uses
+    PERFORMANCE ||--o{ TICKET_SEAT : offers
     LAYOUT_SEAT ||--o{ TICKET_SEAT : maps
     USER ||--o{ TICKET_RESERVATION : creates
-    CONCERT_SESSION ||--o{ TICKET_RESERVATION : receives
-    TICKET_RESERVATION ||--|{ TICKET_HOLD : contains
-    TICKET_SEAT ||--o{ TICKET_HOLD : history
+    PERFORMANCE ||--o{ TICKET_RESERVATION : receives
+    TICKET_RESERVATION ||--|{ SEAT_HOLD : contains
+    TICKET_SEAT ||--o{ SEAT_HOLD : history
     USER ||--o{ TICKET_PURCHASE_LIMIT : owns
-    CONCERT_SESSION ||--o{ TICKET_PURCHASE_LIMIT : tracks
+    PERFORMANCE ||--o{ TICKET_PURCHASE_LIMIT : tracks
 
 ```
 
@@ -247,10 +247,10 @@ erDiagram
 
 | 핵심 엔티티                | 역할             |
 | --------------------- | -------------- |
-| `ConcertSession`      | 회차·예매 시간·구매 제한 |
+| `Performance`      | 회차·예매 시간·구매 제한 |
 | `TicketSeat`          | 회차별 좌석 상태      |
 | `TicketReservation`   | 예약·결제 진행 상태    |
-| `TicketHold`          | 좌석별 선점 이력      |
+| `SeatHold`          | 좌석별 선점 이력      |
 | `TicketPurchaseLimit` | 사용자별 선점·확정 수량  |
 
 

@@ -1,7 +1,9 @@
+> 현재 매핑 테스트 구성은 [문서 색인의 테스트 목록](README.md#매핑-테스트-구성)을 따른다. 아래 단계별 실행 건수는 최초 구현 시점의 이력이다.
+
 # 구매 제한과 사용자·회차별 활성 예약
 
 - 상태: DECIDED (2026-11-12, 담당자 합의).
-- 구현 상태: 정책과 처리 절차만 확정. 애플리케이션은 후속 구현 대상이다.
+- 구현 상태: TicketPurchaseLimit 엔티티 매핑 구현. 비관적 락·한도 검증·수량 변경 애플리케이션은 후속 구현 대상이다.
 
 ## 범위와 불변식
 
@@ -52,7 +54,7 @@
 현재 DB의 사용자·회차 UNIQUE는 관리 행 하나를 보장하며, CHECK는 카운터 음수를 방지한다.
 이 제약만으로 활성 예약 1건이나 회차별 최대 수량을 보장하지는 않는다.
 모든 쓰기 경로가 공통 관리 행 잠금과 위 검증을 거쳐야 한다. 별도 활성 예약 UNIQUE/포인터 제약은 이번 결정에 추가하지 않는다.
-이번 변경은 docs만 반영하고 마이그레이션과 코드는 변경하지 않는다.
+정책에 필요한 DB 제약은 기존 Flyway를 유지한다. 엔티티 매핑 구현 현황은 아래에 기록한다.
 
 ## 검증 계획 (미실행)
 
@@ -64,3 +66,13 @@
 - 중복 확정·만료·환불 처리: 카운터 정확히 한 번 변경.
 - 환불 요청 중 수량 유지, 환불 확정 후 구매 가능 수량 복원.
 - 카운터 변경 중 실패: 예약·좌석 변경까지 전체 롤백.
+
+## 구현 현황: 구매 관리 엔티티
+
+- TicketPurchaseLimit을 ticket_purchase_limits에 매핑했다. id는 BIGINT IDENTITY, userId/performanceId는 NOT NULL 스칼라 ID 참조다.
+- reservedCount/confirmedCount는 NOT NULL INT에 맞춰 int로 매핑한다. create(userId, performanceId)는 두 카운터가 0인 행을 생성한다.
+- 이번 단계는 저장·조회 매핑만 구현한다. 임의 setter·수량 증감 메서드, 구매 한도·활성 예약 검사와 Repository 잠금 메서드는 추가하지 않는다.
+- 기존 UNIQUE(user_id, performance_id), FK, 음수 방지 CHECK를 그대로 사용한다. 새 마이그레이션은 없다.
+- TicketPurchaseLimitMappingTest는 MySQL Testcontainers/Flyway/ddl-auto=validate를 사용하고 영속성 컨텍스트를 비운 뒤 조회한다.
+- 비영 카운터의 읽기와 음수 거절은 SQL fixture로 저장 상태를 준비하여 확인한다. 실제 수량 변경·경합 로직의 구현/검증을 의미하지 않는다.
+- ./gradlew build 실행으로 전용 매핑 테스트 7개를 포함해 전체 179개 테스트가 통과했다. 사용자·회차 범위별 저장·조회, 중복 조합·음수 카운터·미존재 참조 거절을 확인했다.
