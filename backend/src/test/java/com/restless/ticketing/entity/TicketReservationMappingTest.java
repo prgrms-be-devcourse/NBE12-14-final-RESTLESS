@@ -1,4 +1,4 @@
-package com.restless.ticketing;
+package com.restless.ticketing.entity;
 
 import com.restless.TestcontainersConfiguration;
 import com.restless.concert.domain.Concert;
@@ -10,8 +10,6 @@ import com.restless.ticketing.domain.TicketReservation;
 import com.restless.ticketing.domain.TicketReservationStatus;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
-import java.time.Instant;
-import java.util.Arrays;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,6 +19,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

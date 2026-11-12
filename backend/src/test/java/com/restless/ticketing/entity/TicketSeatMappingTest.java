@@ -1,14 +1,7 @@
-package com.restless.ticketing;
+package com.restless.ticketing.entity;
 
 import com.restless.TestcontainersConfiguration;
-import com.restless.concert.domain.Concert;
-import com.restless.concert.domain.LayoutSeat;
-import com.restless.concert.domain.LayoutSeatId;
-import com.restless.concert.domain.Performance;
-import com.restless.concert.domain.Venue;
-import com.restless.concert.domain.VenueLayout;
-import com.restless.concert.domain.VenueSeat;
-import com.restless.concert.domain.VenueSection;
+import com.restless.concert.domain.*;
 import com.restless.member.domain.Member;
 import com.restless.ticketing.domain.SeatHold;
 import com.restless.ticketing.domain.TicketReservation;
@@ -16,8 +9,6 @@ import com.restless.ticketing.domain.TicketSeat;
 import com.restless.ticketing.domain.TicketSeatStatus;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
-import java.math.BigDecimal;
-import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -27,6 +18,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

@@ -44,3 +44,5 @@ Drop 문서([../drop/](../drop/))처럼 policy, invariants, state-machines, tran
 실제 선점·만료·결제 동작/동시성은 해당 서비스 구현 단계에서 검증한다.
 
 정리 후 backend에서 ./gradlew clean build를 실행해 전체 211개 테스트가 통과했다. 별도 커버리지 측정 도구가 없어 커버리지 수치 보존은 주장하지 않는다. 주요 제약·필드의 assertion 보존을 검토하고 기간/한도 방향 오류 주입도 확인했다.
+
+매핑 테스트는 com.restless.concert.entity와 com.restless.ticketing.entity 패키지에 모아둔다. 테스트 클래스·메서드는 한국어 @DisplayName으로 검증 목적을 표시하고, 파라미터 사례에는 번호와 입력값을 함께 표시한다. 표시 이름·패키지 정리 후 테스트는 사용자 요청에 따라 재실행하지 않았다.

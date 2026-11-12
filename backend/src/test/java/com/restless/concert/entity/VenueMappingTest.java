@@ -1,4 +1,4 @@
-package com.restless.concert;
+package com.restless.concert.entity;
 
 import com.restless.TestcontainersConfiguration;
 import com.restless.concert.domain.Venue;
@@ -6,7 +6,6 @@ import com.restless.concert.domain.VenueSeat;
 import com.restless.concert.domain.VenueSection;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
-import java.time.Instant;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -15,6 +14,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
