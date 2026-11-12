@@ -10,6 +10,11 @@ import java.util.Optional;
  * <p>결제 모듈은 결제 상태를 바꾸는 <b>같은 트랜잭션 안에서</b> 이 메서드들을 동기 호출한다.
  * 그래서 결제 상태와 도메인 상태(예약, 재고, 주문)는 함께 커밋되거나 함께 롤백된다.
  *
+ * <p><b>격리 수준:</b> 결제 모듈은 Handler를 부르는 트랜잭션을 {@code READ_COMMITTED}로 연다
+ * ({@code PaymentTransactions}). Handler 안의 도메인 코드도 이 격리 수준으로 실행된다. 같은 행을 다시 읽으면 그 사이 커밋된
+ * 값이 보일 수 있으므로, 판정에 쓰는 도메인 행은 먼저 {@code FOR UPDATE}로 잠근 뒤 읽거나 조건부 UPDATE로 바꾼다.
+ * 잠그지 않은 조회 결과만으로 상태를 결정하지 않는다.
+ *
  * <h2>구현 규칙</h2>
  * <ul>
  *   <li><b>업무상 받을 수 없음</b>(예약 만료, 결제 기한 초과 등)은 {@link ApprovalDecision#reject(String)}로 반환한다.

@@ -68,6 +68,11 @@ public class PaymentTransactions {
                                                             ErrorCode.PAYMENT_NOT_PAYABLE));
                     if (!snapshot.ownerUserId().equals(command.userId()))
                         throw new BusinessException(ErrorCode.PAYMENT_TARGET_NOT_FOUND);
+                    // A free order has nothing to charge or refund through the PG. The domain
+                    // confirms it without a payment (payment_refunds.amount must be positive).
+                    if (snapshot.amount() == 0)
+                        throw new BusinessException(
+                                ErrorCode.PAYMENT_NOT_PAYABLE, Map.of("reason", "FREE_ORDER"));
                     Instant now = clock.instant();
                     if (snapshot.expiresAt() != null && now.isAfter(snapshot.expiresAt())) {
                         throw new BusinessException(ErrorCode.PAYMENT_WINDOW_EXPIRED);

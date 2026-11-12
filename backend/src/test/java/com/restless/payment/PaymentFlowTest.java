@@ -124,6 +124,19 @@ class PaymentFlowTest {
     }
 
     @Test
+    void freeOrderIsNotPreparedForPg() {
+        handler.snapshot = new PayableSnapshot(user, 0, "무료 응모", NOW.plusSeconds(300));
+        assertThatThrownBy(() -> prepare("free"))
+                .isInstanceOfSatisfying(
+                        BusinessException.class,
+                        e -> {
+                            assertThat(e.getErrorCode()).isEqualTo(ErrorCode.PAYMENT_NOT_PAYABLE);
+                            assertThat(e.getDetails()).isEqualTo(Map.of("reason", "FREE_ORDER"));
+                        });
+        assertThat(payments.count()).isZero();
+    }
+
+    @Test
     void supersededReadyCannotMoveMoneyOrCallHandler() {
         var p = prepare("one");
         assertThat(prepare("two").paymentId()).isNotEqualTo(p.paymentId());
