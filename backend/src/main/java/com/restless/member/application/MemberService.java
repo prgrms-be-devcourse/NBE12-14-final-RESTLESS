@@ -7,17 +7,23 @@ import com.restless.member.infrastructure.MemberRepository;
 import java.time.Clock;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** 인증이 쓰는 회원 기능. 프로필 조회·수정, 탈퇴는 회원 기능 작업에서 추가한다. */
+/** 회원 기능. 가입·조회는 인증이 쓰고, 프로필 수정과 탈퇴는 회원 API가 쓴다. */
 @Service
 @RequiredArgsConstructor
 public class MemberService {
 
     private final MemberRepository memberRepository;
     private final Clock clock;
+    private final PasswordEncoder passwordEncoder;
+    private final ObjectProvider<WithdrawalGuard> withdrawalGuards;
+    private final ApplicationEventPublisher events;
 
     /** 가입. 비밀번호는 이미 해시된 값을 받는다. 같은 이메일이 동시에 가입하면 UNIQUE 제약이 막는다. */
     @Transactional
@@ -42,5 +48,33 @@ public class MemberService {
         return memberRepository.findById(memberId)
                 .filter(Member::isActive)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
+    }
+
+    /** 프로필 수정. 탈퇴한 회원이면 404 MEMBER_NOT_FOUND. */
+    @Transactional
+    public Member updateProfile(Long memberId, String nickname, String defaultRecipient, String defaultPhone,
+                                String defaultAddress) {
+        Member member = getActive(memberId);
+        member.updateProfile(nickname, defaultRecipient, defaultPhone, defaultAddress, clock.instant());
+        return member;
+    }
+
+    /**
+     * 탈퇴. 비밀번호를 다시 확인하고, 도메인 Guard가 하나라도 막으면 409로 거절한다.
+     * 행은 지우지 않으므로 다른 도메인의 기록(주문, 결제, 응모)은 그대로 남는다.
+     * 같은 이메일로는 다시 가입할 수 없다(uk_users_email).
+     */
+    @Transactional
+    public void withdraw(Long memberId, String rawPassword) {
+        Member member = getActive(memberId);
+        if (!passwordEncoder.matches(rawPassword, member.getPasswordHash())) {
+            throw new BusinessException(ErrorCode.MEMBER_PASSWORD_MISMATCH);
+        }
+        boolean blocked = withdrawalGuards.orderedStream().anyMatch(guard -> guard.hasActiveParticipation(memberId));
+        if (blocked) {
+            throw new BusinessException(ErrorCode.MEMBER_HAS_ACTIVE_PARTICIPATION);
+        }
+        member.withdraw(clock.instant());
+        events.publishEvent(new MemberWithdrawnEvent(memberId));
     }
 }
