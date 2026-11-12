@@ -25,6 +25,11 @@ restless:
       cookie-secure: ${REFRESH_COOKIE_SECURE:true}
       same-site: Strict
 
+logging:
+  pattern:
+    # 로그 줄마다 traceId를 찍는다. 오류 응답의 traceId로 그 요청의 로그를 찾는다 (common/web/TraceIdFilter).
+    correlation: "[%X{traceId:-}] "
+
 management:
   endpoints:
     web:
