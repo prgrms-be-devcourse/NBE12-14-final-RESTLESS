@@ -1,3 +1,16 @@
+> 구현 범위 변경: 전용 멱등성 테이블·실행권·접수 작업 자동 인계는 후속 구현이다. MVP 중복 방지와 PG 결과 재확인은 유지한다. [단계별 범위](idempotency.md) 참고 (DECIDED, 2026-11-12).
+> 구매 제한과 사용자·회차별 활성 예약 1건은 [purchase-limit.md](purchase-limit.md)의 관리 행 잠금·상태별 수량 규칙을 따른다 (DECIDED, 2026-11-12).
+> 승인 시작·성공·실패·불명확 시 예약 상태 전이는 [PaymentResultHandler 설계](payment-handler.md)를 따른다 (DECIDED, 2026-11-12). 시도 식별 전달 계약은 후속 합의 대상이다.
+> MVP에서는 운영자가 공연장·배치를 사전 등록하고 배치는 초기 데이터로 적재한다. 미등록 배치는 별도 요청 화면 없이 주최자 자료 전달·운영자 검토 후 등록하며, 주최자는 등록된 배치를 선택한다. 예매 오픈 이후 회차 배치 변경은 금지한다. [배치 정책](venue-consistency.md) 참고 (DECIDED, 2026-11-12).
+> 공연장 소속과 회차 배치 정합성은 [venue-consistency.md](venue-consistency.md)를 따른다 (DECIDED, 2026-11-12).
+> 멱등성 키 범위는 사용자 + 작업 종류 + 요청 키로 확정했다. [멱등성 계약](idempotency.md)을 따른다 (DECIDED, 2026-11-12).
+> 예약 만료는 [expiration.md](expiration.md)가 정본이다 (DECIDED, 2026-11-12). 결제 진입 후 승인 시도 없음·모두 실패는 결제 기한에 반환하고, 진행 중·불명확 시도는 보호한다.
+> 결제 결과 불명확이 5분 지속되면 운영 확인으로 전환하고 자동 조회·좌석 보호를 계속한다. 상세는 [transactions.md](transactions.md)를 따른다 (DECIDED, 2026-11-12).
+> 결제 확정 경계는 [transactions.md](transactions.md)가 정본이다 (DECIDED, 2026-11-12). 아래 결제 결과 이벤트 초안은 핵심 상태 확정을 AFTER_COMMIT 리스너에 위임한다는 의미가 아니다. 결제 기한은 서버의 유효한 승인 시도 기록 시점을 기준으로 한다. 기한 내 기록·커밋된 시도는 성공 확인이 늦어져도 확정한다.
+> MySQL 좌석 소유권 설계는 [seat-ownership.md](seat-ownership.md)가 정본이다 (DECIDED, 2026-11-12).
+> 티켓번호는 [티켓 발급 설계](ticket-issuance.md)에 따라 UUID v4로 발급한다 (DECIDED, 2026-11-12). 동일 예약·좌석의 복합 UNIQUE와 잠금 기반 중복 발급 방지도 확정했다.
+> 아래 Notion 원본의 엔티티명은 통합 ERD의 실제 테이블명과 구분한다. DB는 ADR-0002에 따라 MySQL 8이다.
+
 ## [3] MVP 범위 및 핵심 사용자 시나리오
 
 ### 개발 목표
@@ -142,7 +155,7 @@ flowchart LR
 sequenceDiagram
     actor U as 사용자
     participant T as 티켓팅 서버
-    participant DB as PostgreSQL
+    participant DB as MySQL
     U->>T: 좌석 선점 요청
     T->>DB: 사용자별 구매 관리 행 잠금
     T->>DB: 구매 제한·활성 예약 확인
@@ -167,7 +180,7 @@ sequenceDiagram
     actor U as 사용자
     participant T as 티켓팅
     participant P as 공통 결제
-    participant DB as PostgreSQL
+    participant DB as MySQL
     U->>T: 결제 시작
     T->>DB: PAYMENT_PENDING 저장
     T->>P: 결제 요청
@@ -192,7 +205,7 @@ sequenceDiagram
 sequenceDiagram
     participant A as 사용자 A
     participant T as 티켓팅 서버
-    participant DB as PostgreSQL
+    participant DB as MySQL
     participant B as 사용자 B
     A->>T: 좌석 선점
     T->>DB: HELD 저장
@@ -241,7 +254,7 @@ erDiagram
 | `TicketPurchaseLimit` | 사용자별 선점·확정 수량  |
 
 
-DB에서는 UNIQUE 제약조건과 비관적 락을 함께 사용해 중복 선점 및 구매 제한 초과를 방지한다.
+DB에서는 회차별 좌석 행을 잠근 뒤 현재 소유권을 검사·변경한다. UNIQUE 제약은 좌석 행 중복 등 구조적 오류를 방지한다. 상세 보장 범위는 [좌석 소유권 설계](seat-ownership.md)를 따른다.
 
 ### 8.2 주요 API
 
@@ -280,7 +293,7 @@ flowchart LR
 | 발행  | `TicketReservationCancelled` | 취소 알림       |
 
 
-좌석 선점·취소·만료 이벤트는 필요 시 P1에서 추가한다. 이벤트 전달 방식은 팀 협의 후 결정하며, 결제 요청 자체는 직접 호출할 수 있다.
+좌석 선점·취소·만료 이벤트는 필요 시 P1에서 추가한다. 핵심 결제 결과는 Coordinator가 트랜잭션 안에서 직접 조정하며, 발행 이벤트는 커밋 후 후속 작업에 사용한다.
 
 ---
 
@@ -340,7 +353,7 @@ flowchart LR
   | TKT-FR-04 | 구매 제한    | 확정+선점+요청 수량이 제한 이하인지 검증   |
   | TKT-FR-05 | 활성 예약 제한 | 사용자·회차별 진행 중 예약 1건 허용     |
   | TKT-FR-06 | 멱등성      | 동일 키·동일 요청 재시도 시 기존 결과 반환 |
-  | TKT-FR-07 | 선점 만료    | 5분 경과 후 좌석 해제             |
+  | TKT-FR-07 | 선점 만료    | 최초 선점/별도 결제 기한과 승인 시도 상태에 따라 해제 |
   | TKT-FR-08 | 결제 연동    | 결제 성공·실패·불명확 상태 처리        |
   | TKT-FR-09 | 결제 재시도   | 기존 결제 기한 내 재시도 허용         |
   | TKT-FR-10 | 예약 복구    | 활성 예약과 서버 기준 만료 시각 제공     |
@@ -356,7 +369,7 @@ flowchart LR
   | TKT-NFR-01 | 정합성 | 중복 선점 및 중복 판매 0건            |
   | TKT-NFR-02 | 원자성 | 다중 좌석 요청은 전체 성공 또는 전체 실패    |
   | TKT-NFR-03 | 멱등성 | 동일 요청 재시도로 중복 예약·결제 방지      |
-  | TKT-NFR-04 | 동시성 | PostgreSQL 비관적 락 적용         |
+  | TKT-NFR-04 | 동시성 | MySQL 비관적 락 적용         |
   | TKT-NFR-05 | 성능  | p95, p99, RPS, 오류율, 락 대기 측정 |
   | TKT-NFR-06 | 복구  | 결제 결과 불명확 시 좌석 유지 및 재확인     |
   | TKT-NFR-07 | 보안  | 본인 예약만 조회·변경 가능             |
@@ -380,7 +393,7 @@ flowchart LR
   | 대기열 오픈     | 예매 시작 10분 전             |
   | 예매 시작      | 지정된 오픈 시각 정각            |
   | 예매 마감      | 공연 시작 1시간 전             |
-  | 마감 전 생성 예약 | 기존 유효 기한까지 진행 허용        |
+  | 마감 전 생성 예약 | 기한 내 유효 승인 시도 기록, 결과 확인은 이후도 허용        |
   | 환불 요청 마감   | 공연 시작 1시간 전             |
   | 환불 후 재판매   | 환불 확정 즉시 좌석 해제          |
   | 선점 이력      | 삭제하지 않고 보존              |
@@ -422,7 +435,7 @@ flowchart LR
 
   **INV-07. 예매 시간 검증**
   - 예매 시작 전 또는 마감 후에는 신규 좌석 선점을 허용하지 않는다.
-  - 단, 마감 전에 생성한 유효한 예약은 남은 선점·결제 기한 내에 완료할 수 있다.
+  - 단, 마감 전에 생성한 유효한 예약은 선점 기한 내 결제에 진입하고 결제 기한 내 유효 승인 시도를 기록할 수 있다. 해당 시도의 성공 확인은 기한 이후에도 허용한다.
   ## [6] 상태 머신
   ### 6.1 예약 상태 머신
 
@@ -430,7 +443,7 @@ flowchart LR
 
   `RECONCILING`에서 실패가 확정되었을 때 결제 기한이 남아 있다면 `PAYMENT_PENDING`으로 복귀해 재시도를 허용한다.
 
-  단, PG가 결제 기한 이후 성공을 통지한 경우의 보상 처리 방식은 공통 결제 도메인과 협의해야 한다.
+  기한 내 서버에 기록·커밋된 유효 승인 시도는 성공 통지가 늦어도 확정한다. 상세 기한 판정과 예외는 [transactions.md 8절](transactions.md#8-결제-기한-인정-기준-decided-2026-11-12)을 따른다.
   ### 6.2 좌석 상태 머신
 
   ![mermaid-diagram (1).png](attachment:608eace4-9856-4cc7-b747-112c4adc2465:mermaid-diagram_(1).png)
@@ -456,7 +469,7 @@ flowchart LR
 
   ![mermaid-diagram (3).png](attachment:78d50aa6-64f0-4915-9690-066dad29f193:mermaid-diagram_(3).png)
 
-  결제 요청과 결과 전달 방식은 공통 결제 서비스의 계약에 따라 변경될 수 있다.
+  결제 요청·결과 반영의 경계는 [transactions.md](transactions.md)를 따른다. API와 결제 시도 스키마는 후속 공통 계약에서 구체화한다.
   ### 7.3 선점 만료 및 재선점
 
   ![mermaid-diagram (4).png](attachment:1484674a-29cf-40be-971e-dcd6b5ceddfc:mermaid-diagram_(4).png)
@@ -469,30 +482,12 @@ flowchart LR
 
   공연장 좌석 배치와 회차별 판매 좌석을 분리했기 때문에 동일한 좌석 배치를 여러 공연 회차에서 재사용가능
   ### 8.2 주요 DB 제약조건
-  ```
-  -- 동일 회차의 동일 좌석 중복 생성 방지
-  ALTER TABLE ticket_seats
-  ADD CONSTRAINT uq_session_layout_seat
-  UNIQUE (session_id, layout_seat_id);
-  
-  -- 사용자·회차별 구매 관리 행 하나만 허용
-  ALTER TABLE ticket_purchase_limits
-  ADD CONSTRAINT uq_user_session_limit
-  UNIQUE (user_id, session_id);
-  
-  -- 좌석별 활성 선점 하나만 허용
-  CREATE UNIQUE INDEX uq_active_ticket_hold
-  ON ticket_holds (ticket_seat_id)
-  WHERE status = 'HELD';
-  
-  -- 카운터 음수 방지
-  ALTER TABLE ticket_purchase_limits
-  ADD CONSTRAINT chk_purchase_counts
-  CHECK (reserved_count >= 0 AND confirmed_count >= 0);
-  
-  ```
 
-  추가로 예약 만료 검색과 사용자별 예약 조회를 위한 인덱스를 설정한다.
+  MySQL 기준 [좌석 소유권 설계](seat-ownership.md)를 따른다. 기존 PostgreSQL 부분 UNIQUE 인덱스 설계는 대체한다.
+
+  현재 마이그레이션에는 회차별 좌석 UNIQUE, 사용자·회차 구매 관리 UNIQUE, 카운터 음수 방지가 있다.
+  추가 CHECK·복합 FK는 문서 합의 사항이며, 후속 마이그레이션 구현이 필요하다.
+
   ### 8.3 API 명세 초안
   
   | Method | Endpoint                                      | 설명        |
@@ -584,5 +579,5 @@ flowchart LR
   ```
   - 이벤트 중복 수신 시에도 동일한 결과를 보장한다(멱등성).
   - 예약·좌석·구매 수량은 동일 트랜잭션에서 변경한다.
-  - 이벤트 전달 방식은 팀 협의 후 결정한다.
+  - 핵심 결과 반영은 Coordinator의 직접 호출로 처리하고, 후속 이벤트는 ADR-0001을 따른다.
   - 결제 결과 처리는 P0, 티켓팅 발행 이벤트는 실제 구독 기능에 따라 P1 또는 선택 사항으로 구현한다.

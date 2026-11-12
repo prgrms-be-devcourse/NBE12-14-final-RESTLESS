@@ -65,10 +65,14 @@ erDiagram
 ### 공연, 티켓팅
 
 - 공연(`concerts`) 아래 회차가 `performances`다.
+- 공연·회차·배치·좌석의 공연장 소속과 회차별 판매 좌석의 정확한 배치 일치는 [복합 FK 계약](../domains/ticketing/venue-consistency.md)을 따른다. V20261112_1020 마이그레이션에 정의한다.
 - `layout_seats`의 PK는 `(layout_id, venue_seat_id)`다. `performance_seats`는 이 복합 키를 FK로 참조한다.
-- 좌석 하나의 활성 선점은 하나뿐이다: `performance_seats.current_hold_id` UNIQUE.
+- 현재 소유권은 `performance_seats.status`와 `current_hold_id`로 판단한다. 모든 소유권 변경은 좌석 행 잠금 아래 수행한다.
+- `UNIQUE(current_hold_id)`는 같은 선점을 여러 좌석의 현재 소유자로 연결하지 못하게 한다. 이것만으로 좌석별 HELD 이력 중복을 막지는 않는다.
+- 상태·포인터 CHECK와 소유 좌석 일치 복합 FK, 예약·선점·티켓의 회차 일치는 V20261112_1020에 정의한다 ([관계 정합성](../domains/ticketing/reservation-seat-consistency.md)). [확정 설계와 구현 차이](../domains/ticketing/seat-ownership.md)를 참고한다.
 - `performance_seats.current_hold_id`와 `seat_holds.performance_seat_id`는 서로를 참조한다. 마이그레이션에서는 두 테이블을 만든 뒤 `current_hold_id` FK를 마지막에 건다.
 - `ticket_reservations.order_id`는 공통 `orders`를 참조한다.
+- `tickets.ticket_no`는 UUID v4 문자열이며 UNIQUE다. 내부 PK는 BIGINT를 유지한다. 동일 예약·좌석의 중복 발급은 UNIQUE(reservation_id, performance_seat_id)로 막는다. [발급 설계](../domains/ticketing/ticket-issuance.md)에 따라 V20261112_1020 마이그레이션으로 추가한다.
 
 ### 드롭
 
@@ -95,7 +99,7 @@ erDiagram
 | 항목 | 관련 |
 |---|---|
 | `users.role` 이름 (문서마다 USER, FAN, SELLER, ORGANIZER, ADMIN이 다름) | 전체 |
-| `orders.order_type` 값과 티켓팅 사용 여부 | 티켓팅, 공통 결제 |
+| `orders.order_type`의 티켓팅 값 (공통 주문 연결은 확정) | 티켓팅, 공통 결제 |
 | ~~`payments.payment_key`가 NOT NULL인데, 승인 전(READY)에도 값이 있는지~~ 결정: NULL 허용, 승인 시작 때 채움 ([ADR-0003](../decisions/0003-payment-module-boundary.md)) | 공통 결제 |
 | `auction_results.winning_bid_id`가 NOT NULL인데, 유찰을 결과 행으로 남기는지 | 경매 |
 | 경매 입장 자격(`access_policy`, `required_performance_id`)을 티켓팅의 어떤 상태로 판단하는지 | 경매, 티켓팅 |
