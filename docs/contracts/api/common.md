@@ -43,4 +43,4 @@
 | GET | `/api/payments/orders/{orderId}` | 결제 결과 확인 |
 | POST | `/api/orders/{orderId}/refunds` | 전액 환불 요청 |
 
-티켓팅이 공통 주문을 거치는지는 [erd.md 4절](../../architecture/erd.md)의 확인 항목이다.
+티켓팅은 공통 주문에 연결한다. 결제·주문·예매 확정 경계는 [티켓팅 트랜잭션 설계](../../domains/ticketing/transactions.md)를 따른다. 주문 유형·요청/응답 등 공통 API 세부 계약은 후속 합의 대상이다.
