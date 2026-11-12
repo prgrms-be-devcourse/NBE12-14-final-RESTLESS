@@ -1,4 +1,7 @@
 package com.restless.payment.infrastructure;
 
-public interface PaymentRefundRepository {
+import com.restless.payment.domain.PaymentRefund;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Long> {
 }

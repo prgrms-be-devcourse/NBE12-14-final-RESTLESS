@@ -8,7 +8,7 @@ AI는 아래 항목을 임의로 확정하지 않는다. 구현에 영향을 주
 | base package 이름 | `com.restless`로 결정 |
 | Gradle 단일 모듈 최종 합의 | 팀 확인 |
 | ID 타입 | BIGINT AUTO_INCREMENT로 결정 ([ADR-0002](../decisions/0002-common-conventions.md)) |
-| 공통 Order, Payment 테이블 스키마 | 팀 확인 |
+| 공통 Order, Payment 테이블 스키마 | 결제 대상 식별과 결과 전달은 [ADR-0003](../decisions/0003-payment-module-boundary.md)으로 결정. 공통 Order, Payment 전체를 결제 담당이 맡는다. 컬럼 상세는 새 마이그레이션 PR에서 확정 |
 | Drop과 Concert 연결의 필수 여부 | 팀 확인 |
 | 예약 TTL (초기 제안 5분) | PG UX 고려 후 확정 |
 | 구매권 TTL | 미확정 |
