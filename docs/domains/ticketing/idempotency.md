@@ -318,7 +318,7 @@ HAVING COUNT(*) > 1;
 ### 구현 시작 조건
 
 핵심 선점 정책·DB 제약·구매 제한·재요청 처리 방향은 확정되어 좌석 선점 구현을 시작할 수 있다.
-엔티티 매핑과 좌석 조회, 최초 선점 POST·결제 전 HELD 만료 처리를 구현했다. checkout·결제·취소·환불 API는 후속 범위다.
+엔티티 매핑과 좌석 조회, 최초 선점 POST·결제 전 HELD 만료·본인 선점 취소 DELETE를 구현했다. 취소는 별도 요청 키 없이 예약 잠금과 RELEASED 상태로 중복 반환을 막는다. checkout·결제·결제 이후 취소·환불 API는 후속 범위다.
 회차 조회는 concert 모듈의 application 계약으로 제공하여 ticketing이 concert Repository를 직접 참조하지 않게 한다.
 좌석 배열 검증·정규화는 위 MVP 계약, HTTP 오류 매핑은 [API 계약](../../contracts/api/ticketing.md)을 따른다.
 선점·만료는 각각 READ_COMMITTED의 새 트랜잭션으로 실행하며, 구매 관리 행 생성과 사용자별 키 UNIQUE 충돌·교착·잠금 대기 실패는 전체 롤백 후 최대 3회 시도한다.

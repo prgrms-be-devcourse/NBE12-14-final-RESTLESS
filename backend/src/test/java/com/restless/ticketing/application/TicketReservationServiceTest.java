@@ -2,6 +2,10 @@ package com.restless.ticketing.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.restless.TestcontainersConfiguration;
 import com.restless.common.error.BusinessException;
@@ -37,9 +41,11 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -49,6 +55,7 @@ import org.springframework.transaction.support.TransactionTemplate;
         "spring.docker.compose.enabled=false"
 })
 @Import(TestcontainersConfiguration.class)
+@AutoConfigureMockMvc
 class TicketReservationServiceTest {
 
     @Autowired
@@ -59,6 +66,8 @@ class TicketReservationServiceTest {
     private JdbcTemplate jdbc;
     @Autowired
     private PlatformTransactionManager transactionManager;
+    @Autowired
+    private MockMvc mockMvc;
 
     // 만료 시점은 DB fixture로 제어하고 실제 만료 서비스를 직접 호출한다.
     @MockitoBean
@@ -263,6 +272,78 @@ class TicketReservationServiceTest {
         }
 
         service.expireHold(original.reservationId());
+
+        assertThat(reservationStatus(original.reservationId())).isEqualTo(state.name());
+        assertStoredReservation(original, 2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM seat_holds WHERE reservation_id = ? AND released_at IS NOT NULL",
+                Integer.class, original.reservationId())).isZero();
+    }
+
+    @Test
+    @DisplayName("본인 선점 취소는 전체 좌석·수량을 반환하고 반복 취소는 새 예약과 확정 수량에 영향을 주지 않는다")
+    void ownerCancellationReleasesAllSeatsOnlyOnce() throws Exception {
+        jdbc.update("INSERT INTO ticket_purchase_limits (user_id, performance_id, reserved_count, confirmed_count) VALUES (?, ?, 0, 1)",
+                fixture.firstUserId(), fixture.performanceId());
+        TicketReservationInfo original = reserve(fixture.firstUserId(), "cancel", List.of(seat(0), seat(1)));
+
+        mockMvc.perform(delete("/api/ticket-reservations/{reservationId}", original.reservationId())
+                        .with(jwt().jwt(token -> token.subject(fixture.firstUserId().toString()))))
+                .andExpect(status().isNoContent());
+
+        assertThat(reservationStatus(original.reservationId())).isEqualTo("RELEASED");
+        assertThat(reservedCount(fixture.firstUserId())).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id = ? AND status = 'AVAILABLE' AND current_hold_id IS NULL",
+                Integer.class, fixture.performanceId())).isEqualTo(3);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM seat_holds WHERE reservation_id = ? AND status = 'RELEASED' AND released_at IS NOT NULL",
+                Integer.class, original.reservationId())).isEqualTo(2);
+        var releasedAt = jdbc.queryForList("SELECT released_at FROM seat_holds WHERE reservation_id = ? ORDER BY performance_seat_id",
+                LocalDateTime.class, original.reservationId());
+
+        // 새 예약의 수량이 있는 상태에서 이전 취소를 반복해 이중 차감을 검출한다.
+        TicketReservationInfo next = reserve(fixture.firstUserId(), "after-cancel", List.of(seat(0)));
+        mockMvc.perform(delete("/api/ticket-reservations/{reservationId}", original.reservationId())
+                        .with(jwt().jwt(token -> token.subject(fixture.firstUserId().toString()))))
+                .andExpect(status().isNoContent());
+
+        assertStoredReservation(next, 1);
+        assertThat(reservationStatus(original.reservationId())).isEqualTo("RELEASED");
+        assertThat(jdbc.queryForList("SELECT released_at FROM seat_holds WHERE reservation_id = ? ORDER BY performance_seat_id",
+                LocalDateTime.class, original.reservationId())).isEqualTo(releasedAt);
+        assertThat(jdbc.queryForObject("SELECT confirmed_count FROM ticket_purchase_limits WHERE user_id = ? AND performance_id = ?",
+                Integer.class, fixture.firstUserId(), fixture.performanceId())).isEqualTo(1);
+        assertThat(reserve(fixture.firstUserId(), "cancel", original.seatIds()).status())
+                .isEqualTo(TicketReservationStatus.RELEASED);
+        assertThat(count("ticket_reservations")).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("다른 회원의 JWT로 선점 취소를 요청하면 404이고 예약·좌석·수량을 유지한다")
+    void rejectsCancellationByAnotherMember() throws Exception {
+        TicketReservationInfo original = reserve(fixture.firstUserId(), "owner", List.of(seat(0), seat(1)));
+
+        mockMvc.perform(delete("/api/ticket-reservations/{reservationId}", original.reservationId())
+                        .with(jwt().jwt(token -> token.subject(fixture.secondUserId().toString()))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+
+        assertThat(reservationStatus(original.reservationId())).isEqualTo("HELD");
+        assertStoredReservation(original, 2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM seat_holds WHERE reservation_id = ? AND released_at IS NOT NULL",
+                Integer.class, original.reservationId())).isZero();
+    }
+
+    @ParameterizedTest(name = "{displayName} [{0}]")
+    @EnumSource(value = TicketReservationStatus.class, names = {"PAYMENT_PENDING", "RECONCILING"})
+    @DisplayName("본인 예약이어도 결제 진행·결과 확인 중이면 취소를 거절하고 좌석·수량을 유지한다")
+    void rejectsCancellationDuringPayment(TicketReservationStatus state) throws Exception {
+        TicketReservationInfo original = reserve(fixture.firstUserId(), "payment", List.of(seat(0), seat(1)));
+        jdbc.update("UPDATE ticket_reservations SET status = ?, checkout_started_at = UTC_TIMESTAMP(6), payment_expires_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 5 MINUTE) WHERE id = ?",
+                state.name(), original.reservationId());
+
+        mockMvc.perform(delete("/api/ticket-reservations/{reservationId}", original.reservationId())
+                        .with(jwt().jwt(token -> token.subject(fixture.firstUserId().toString()))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("RESERVATION_CANNOT_CANCEL"));
 
         assertThat(reservationStatus(original.reservationId())).isEqualTo(state.name());
         assertStoredReservation(original, 2);

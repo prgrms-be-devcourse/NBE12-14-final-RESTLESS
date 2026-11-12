@@ -7,6 +7,8 @@ import com.restless.ticketing.application.TicketReservationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -27,5 +29,11 @@ public class TicketReservationController {
                                          @RequestHeader("Idempotency-Key") String requestKey,
                                          @Valid @RequestBody TicketReservationRequest request) {
         return ticketReservationService.reserve(userId, requestKey, request.performanceId(), request.seatIds());
+    }
+
+    @DeleteMapping("/{reservationId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void cancel(@LoginMember Long userId, @PathVariable("reservationId") Long reservationId) {
+        ticketReservationService.cancel(userId, reservationId);
     }
 }

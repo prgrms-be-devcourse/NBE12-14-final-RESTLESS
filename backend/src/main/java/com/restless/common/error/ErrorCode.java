@@ -34,6 +34,7 @@ public enum ErrorCode {
     TICKET_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "회차별 구매 한도를 초과했습니다."),
     BOOKING_NOT_OPEN(HttpStatus.CONFLICT, "예매 시작 전입니다."),
     BOOKING_CLOSED(HttpStatus.CONFLICT, "예매가 마감되었습니다."),
+    RESERVATION_CANNOT_CANCEL(HttpStatus.CONFLICT, "결제 전 선점 예약만 취소할 수 있습니다."),
     IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "같은 요청 키를 다른 요청에 사용할 수 없습니다."),
     SEAT_LOCK_TIMEOUT(HttpStatus.CONFLICT, "좌석 처리 경합이 발생했습니다. 같은 요청 키로 재시도해 주세요.");
 

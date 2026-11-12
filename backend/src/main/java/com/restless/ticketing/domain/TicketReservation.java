@@ -92,8 +92,20 @@ public class TicketReservation {
     }
 
     public void releaseExpiredHold(Instant now) {
-        if (!isHoldExpired(now) || orderId != null || checkoutStartedAt != null || paymentExpiresAt != null) {
+        if (!isHoldExpired(now) || !canReleaseHold()) {
             throw new IllegalStateException("결제 전 만료된 선점 예약만 반환할 수 있습니다.");
+        }
+        status = TicketReservationStatus.RELEASED;
+    }
+
+    public boolean canReleaseHold() {
+        return status == TicketReservationStatus.HELD
+                && orderId == null && checkoutStartedAt == null && paymentExpiresAt == null;
+    }
+
+    public void cancelHold() {
+        if (!canReleaseHold()) {
+            throw new IllegalStateException("결제 전 선점 예약만 취소할 수 있습니다.");
         }
         status = TicketReservationStatus.RELEASED;
     }

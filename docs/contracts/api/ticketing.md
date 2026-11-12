@@ -100,6 +100,35 @@ Content-Type: application/json
 | 409 | `IDEMPOTENCY_KEY_CONFLICT` | 같은 키로 다른 회차·좌석 요청 |
 | 409 | `SEAT_LOCK_TIMEOUT` | 잠금·생성 경합 등의 최대 3회 시도 소진. 같은 키로 재요청 가능 |
 
+## 선점 취소
+
+`DELETE /api/ticket-reservations/{reservationId}`는 로그인 필수이며 회원 ID는 `@LoginMember`로 받는다.
+요청 본문과 Idempotency-Key는 필요하지 않다. 본인의 결제 전 HELD 예약 전체를 반환하며 일부 좌석만 취소하지 않는다.
+성공은 본문 없는 `204 No Content`다.
+
+```http
+DELETE /api/ticket-reservations/5001
+Authorization: Bearer <accessToken>
+```
+
+- 구매 관리 행 → 예약 → 판매 좌석 ID 오름차순으로 잠그고 소유자·상태·현재 선점 포인터를 재검증한다.
+- 예약과 선점 이력은 RELEASED, 좌석은 AVAILABLE/current_hold_id=NULL로 변경하고 reserved_count를 반환 좌석 수만큼 줄인다. confirmed_count는 변경하지 않는다.
+- 변경은 모두 같은 트랜잭션에서 커밋하거나 롤백하며 이력·최초 기한·요청 키는 보존한다.
+- 본인의 이미 RELEASED인 예약에 반복 요청하면 204로 응답하며 좌석·수량을 다시 변경하지 않는다. 만료 처리와 경합해도 반환은 한 번만 반영한다.
+- 만료 시각이 지난 결제 전 HELD도 취소 가능하다. PAYMENT_PENDING/RECONCILING/CONFIRMED 및 환불 상태는 이 API로 반환하지 않는다.
+- HELD라도 주문 ID·결제 진입 시각·결제 기한이 있으면 취소하지 않는다. 결제·환불 취소 흐름은 별도 구현 대상이다.
+
+| HTTP | 코드 | 조건 |
+|---|---|---|
+| 400 | `INVALID_REQUEST` | 유효하지 않은 예약 ID |
+| 401 | `UNAUTHORIZED` | 인증 실패 |
+| 404 | `NOT_FOUND` | 없는 예약 또는 타인의 예약 |
+| 409 | `RESERVATION_CANNOT_CANCEL` | 결제 전 HELD/반환 완료 RELEASED 이외 상태 또는 결제 관련 필드 존재 |
+| 409 | `SEAT_LOCK_TIMEOUT` | 잠금 경합으로 최대 3회 시도 소진 |
+
+좌석 소유 포인터·이력·카운터가 불일치하면 전체 롤백하며 서버 오류로 남긴다. 다른 소유자의 좌석을 강제로 반환하거나 수량을 임의 보정하지 않는다.
+TicketReservationServiceTest에 본인·타인 취소, 중복 취소의 수량 보존, 결제 진행·결과 확인 중 취소 거절 테스트를 작성했으며 아직 실행하지 않았다.
+
 ## 오류 코드
 
 | 코드 | 의미 |
@@ -112,6 +141,7 @@ Content-Type: application/json
 | `BOOKING_CLOSED` | 예매 마감 |
 | `IDEMPOTENCY_KEY_CONFLICT` | 같은 키로 다른 요청 |
 | `SEAT_LOCK_TIMEOUT` | 잠금 대기 초과 |
+| `RESERVATION_CANNOT_CANCEL` | 결제 전 선점 취소 불가 |
 
 위 선점 API 외 후속 API의 오류 HTTP 상태 코드는 해당 API 구현 시 정한다.
 

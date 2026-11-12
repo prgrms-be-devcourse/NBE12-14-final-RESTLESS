@@ -199,6 +199,45 @@ public class TicketReservationService {
                 reservation.getHoldExpiresAt());
     }
 
+    /** 본인 예약만 취소한다. 반환 완료된 예약은 수량·좌석을 다시 변경하지 않는다. */
+    public void cancel(Long userId, Long reservationId) {
+        if (userId == null || userId <= 0) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        if (reservationId == null || reservationId <= 0) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        }
+        for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+            try {
+                transaction.executeWithoutResult(status -> cancelInTransaction(userId, reservationId));
+                return;
+            } catch (PessimisticLockingFailureException conflict) {
+                // 전체 롤백 후 소유자·예약 상태를 다시 검사한다.
+            }
+        }
+        throw new BusinessException(ErrorCode.SEAT_LOCK_TIMEOUT);
+    }
+
+    private void cancelInTransaction(Long userId, Long reservationId) {
+        var owner = ticketReservationRepository.findOwnerById(reservationId)
+                .filter(candidate -> userId.equals(candidate.getUserId()))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        TicketPurchaseLimit limit = ticketPurchaseLimitRepository
+                .findByUserIdAndPerformanceId(userId, owner.getPerformanceId())
+                .orElseThrow(() -> new IllegalStateException("예약의 구매 관리 행이 없습니다."));
+        TicketReservation reservation = ticketReservationRepository.findLockedById(reservationId)
+                .filter(candidate -> userId.equals(candidate.getUserId()))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        if (reservation.getStatus() == TicketReservationStatus.RELEASED) {
+            return;
+        }
+        if (!reservation.canReleaseHold()) {
+            throw new BusinessException(ErrorCode.RESERVATION_CANNOT_CANCEL);
+        }
+        releaseHeldSeats(reservation, limit);
+        reservation.cancelHold();
+    }
+
     /** 결제 전 HELD만 반환한다. PAYMENT_PENDING/RECONCILING은 기한만으로 해제하지 않는다. */
     public void expireHold(Long reservationId) {
         for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -221,7 +260,14 @@ public class TicketReservationService {
         if (!reservation.isHoldExpired(databaseNow())) {
             return;
         }
-        List<SeatHold> originalHolds = seatHoldRepository.findAllByReservationIdOrderByPerformanceSeatIdAsc(reservationId);
+        releaseHeldSeats(reservation, limit);
+        reservation.releaseExpiredHold(databaseNow());
+    }
+
+    /** 호출자는 구매 관리 행과 예약 잠금을 보유해야 한다. 좌석·이력·수량을 함께 반환한다. */
+    private void releaseHeldSeats(TicketReservation reservation, TicketPurchaseLimit limit) {
+        List<SeatHold> originalHolds = seatHoldRepository
+                .findAllByReservationIdOrderByPerformanceSeatIdAsc(reservation.getId());
         if (originalHolds.isEmpty()) {
             throw new IllegalStateException("반환할 선점 이력이 없습니다.");
         }
@@ -233,13 +279,12 @@ public class TicketReservationService {
             if (hold.getStatus() != SeatHoldStatus.HELD
                     || !hold.getPerformanceId().equals(reservation.getPerformanceId())
                     || !seat.getPerformanceId().equals(reservation.getPerformanceId())) {
-                throw new IllegalStateException("만료 예약의 선점·좌석 관계가 일치하지 않습니다.");
+                throw new IllegalStateException("반환 예약의 선점·좌석 관계가 일치하지 않습니다.");
             }
             seat.release(hold.getId());
             hold.release(now);
         }
         limit.release(originalHolds.size());
-        reservation.releaseExpiredHold(now);
     }
 
     private List<TicketSeat> lockSeats(List<Long> orderedIds) {
