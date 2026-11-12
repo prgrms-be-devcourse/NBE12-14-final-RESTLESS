@@ -7,13 +7,17 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /** 경매 통합 테스트용 데이터와 불변식 확인 SQL. 시각은 UTC 벽시계 값으로 넣는다 (엔티티가 TIMESTAMP_UTC). */
 class AuctionFixtures {
     final JdbcTemplate jdbc;
+    final TransactionTemplate tx;
 
     AuctionFixtures(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
+        this.tx = new TransactionTemplate(new DataSourceTransactionManager(jdbc.getDataSource()));
     }
 
     static LocalDateTime utc(Instant instant) {
@@ -120,5 +124,76 @@ class AuctionFixtures {
             JOIN auctions a ON a.auction_id = b1.auction_id
             WHERE b2.bid_amount < b1.bid_amount + a.minimum_increment_amount
             """)).as("INV-AU-03 다음 입찰은 이전 + 최소 인상액 이상").isEmpty();
+        assertClosedCombinations();
+    }
+
+    /** state-machines.md 6절 상태 조합 중 종료된 경매 부분. */
+    void assertClosedCombinations() {
+        assertThat(jdbc.queryForList("""
+            SELECT a.auction_id FROM auctions a LEFT JOIN auction_results r ON r.auction_id = a.auction_id
+            WHERE (a.status = 'CLOSED') <> (r.auction_id IS NOT NULL)
+            """)).as("CLOSED와 결과 행은 함께 있다").isEmpty();
+        assertThat(jdbc.queryForList("""
+            SELECT h.credit_hold_id FROM credit_holds h
+            JOIN auction_bids b ON b.auction_bid_id = h.auction_bid_id
+            JOIN auctions a ON a.auction_id = b.auction_id
+            WHERE a.status = 'CLOSED' AND h.status = 'HELD'
+            """)).as("종료된 경매에 HELD 확보가 없다").isEmpty();
+        assertThat(jdbc.queryForList("""
+            SELECT r.auction_id FROM auction_results r
+            LEFT JOIN auction_bids b ON b.auction_bid_id = r.winning_bid_id
+            LEFT JOIN credit_holds h ON h.auction_bid_id = r.winning_bid_id
+            WHERE r.result_type = 'SOLD'
+              AND (b.bid_sequence <> (SELECT MAX(bid_sequence) FROM auction_bids WHERE auction_id = r.auction_id)
+                   OR h.status <> 'CAPTURED')
+            """)).as("SOLD는 마지막 입찰이고 그 확보는 CAPTURED (INV-AU-13)").isEmpty();
+        assertThat(jdbc.queryForList("""
+            SELECT r.auction_id FROM auction_results r
+            WHERE r.result_type = 'UNSOLD' AND EXISTS (SELECT 1 FROM auction_bids b WHERE b.auction_id = r.auction_id)
+            """)).as("UNSOLD 경매에는 입찰이 없다").isEmpty();
+        assertThat(jdbc.queryForList("""
+            SELECT b.auction_bid_id FROM auction_bids b JOIN auctions a ON a.auction_id = b.auction_id
+            WHERE a.status = 'CLOSED' AND b.accepted_at >= a.ends_at
+            """)).as("INV-AU-11 종료 시각 이후 수락된 입찰이 없다").isEmpty();
+    }
+
+    /** 시간이 흐른 것처럼 종료 시각을 옮긴다. 앞당기면 base_ends_at도 함께 당겨 CHECK(base <= ends)를 지킨다. */
+    void setEndsAt(Long auctionId, Instant endsAt) {
+        jdbc.update("UPDATE auctions SET base_ends_at = LEAST(base_ends_at, ?), ends_at = ? WHERE auction_id = ?",
+            utc(endsAt), utc(endsAt), auctionId);
+    }
+
+    /**
+     * 시간이 흘러 종료 시각에 도달한 것처럼 종료 시각을 "지금"으로 당긴다.
+     *
+     * <p>먼저 경매 행을 잠가 진행 중인 입찰이 끝나기를 기다린 뒤, 다음 문장에서 시각을 계산한다.
+     * MySQL은 UTC_TIMESTAMP()를 문장 시작 때 계산하므로, 한 문장으로 하면 잠금을 기다리는 동안
+     * 이미 수락된 입찰보다 앞선 시각으로 당겨 버린다. 실제 서비스는 종료 시각을 당기지 않는다 (INV-AU-10).
+     * 마지막 입찰 수락 시각보다 앞서지 않게 GREATEST로 한 번 더 막는다.
+     */
+    void expireNow(Long auctionId) {
+        tx.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT auction_id FROM auctions WHERE auction_id = ? FOR UPDATE", Long.class, auctionId);
+            jdbc.update("""
+                UPDATE auctions
+                SET ends_at = GREATEST(UTC_TIMESTAMP(6), COALESCE(
+                        (SELECT MAX(accepted_at) + INTERVAL 1 MICROSECOND FROM auction_bids WHERE auction_id = ?),
+                        UTC_TIMESTAMP(6))),
+                    base_ends_at = LEAST(base_ends_at, ends_at)
+                WHERE auction_id = ?
+                """, auctionId, auctionId);
+        });
+    }
+
+    void setStatus(Long auctionId, String status) {
+        jdbc.update("UPDATE auctions SET status = ? WHERE auction_id = ?", status, auctionId);
+    }
+
+    String status(Long auctionId) {
+        return jdbc.queryForObject("SELECT status FROM auctions WHERE auction_id = ?", String.class, auctionId);
+    }
+
+    long balance(Long userId) {
+        return jdbc.queryForObject("SELECT balance_amount FROM credit_wallets WHERE user_id = ?", Long.class, userId);
     }
 }

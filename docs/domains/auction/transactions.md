@@ -49,14 +49,16 @@
 
 ## TX-AU-3. 경매 시작 (스케줄러)
 
-1초마다 `status = 'SCHEDULED' AND starts_at <= 지금`인 경매를 찾고, 경매마다:
+1초마다 `status = 'SCHEDULED' AND starts_at <= 지금`인 경매 ID를 찾고, **경매마다 별도 트랜잭션**으로:
 
-```sql
-UPDATE auctions SET status = 'OPEN', revision = revision + 1, updated_at = ?
-WHERE auction_id = ? AND status = 'SCHEDULED'
-```
+1. 경매 행 `FOR UPDATE`
+2. 아직 `SCHEDULED`이고 `starts_at <= 지금 < ends_at`이면 `OPEN`, `revision += 1`
+   - 종료 시각까지 지났으면 열지 않는다. 종료(TX-AU-4)가 `SCHEDULED`에서 바로 닫는다.
+3. 커밋 → `AuctionChangedEvent` 발행
 
-바뀐 행이 있으면 커밋 후 `AuctionChangedEvent`를 발행한다. 조건부 UPDATE이므로 두 번 실행돼도 한 번만 바뀐다.
+잠금 뒤 상태를 다시 보므로 두 번 실행돼도 한 번만 바뀐다.
+
+**스케줄러 설정** (`application.yml` `restless.auction.scheduler`): `enabled`(기본 true), `fixed-delay-ms`(기본 1000), `batch-size`(한 번에 처리할 경매 수, 기본 100). 테스트에서는 `build.gradle`이 `enabled=false`로 끄고, 스케줄러 테스트만 다시 켠다. 경매 하나가 실패하면 로그와 `auction.scheduler.failure` 메트릭을 남기고 다음 경매를 계속 처리한다.
 
 ## TX-AU-4. 경매 종료 (스케줄러)
 

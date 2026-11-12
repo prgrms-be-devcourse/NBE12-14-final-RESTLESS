@@ -139,6 +139,33 @@ public class Auction {
         updatedAt = acceptedAt;
     }
 
+    /** 시작 시각이 지난 예정 경매를 진행 중으로 바꾼다. 바꿨으면 true. 종료 시각까지 지났으면 바꾸지 않는다 (종료가 처리). */
+    public boolean openIfDue(Instant now) {
+        if (status != AuctionStatus.SCHEDULED || now.isBefore(startsAt) || !now.isBefore(endsAt)) {
+            return false;
+        }
+        status = AuctionStatus.OPEN;
+        revision++;
+        updatedAt = now;
+        return true;
+    }
+
+    /** 종료 시각이 지났고 아직 종료되지 않았는지. 종료 트랜잭션은 잠금 뒤 이것으로 다시 확인한다. */
+    public boolean isDueToClose(Instant now) {
+        return status != AuctionStatus.CLOSED && !now.isBefore(endsAt);
+    }
+
+    /** 종료 처리. 결과 저장과 크레딧 차감은 같은 트랜잭션에서 서비스가 한다. */
+    public void close(Instant now) {
+        if (!isDueToClose(now)) {
+            throw new IllegalStateException("Auction is not due to close");
+        }
+        status = AuctionStatus.CLOSED;
+        closedAt = now;
+        revision++;
+        updatedAt = now;
+    }
+
     public boolean isClosed() {
         return status == AuctionStatus.CLOSED;
     }
