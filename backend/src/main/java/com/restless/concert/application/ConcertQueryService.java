@@ -1,12 +1,13 @@
 package com.restless.concert.application;
 
 import com.restless.common.error.BusinessException;
+import com.restless.concert.application.dto.BookingPerformance;
+import com.restless.concert.application.dto.PerformanceLayout;
+import com.restless.concert.application.dto.SeatPosition;
 import com.restless.common.error.ErrorCode;
 import com.restless.concert.domain.Performance;
 import com.restless.concert.infrastructure.LayoutSeatRepository;
 import com.restless.concert.infrastructure.PerformanceRepository;
-import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -32,16 +33,6 @@ public class ConcertQueryService {
         return new PerformanceLayout(performance.getLayoutId(), seats);
     }
 
-    public record PerformanceLayout(Long layoutId, List<SeatPosition> seats) {
-        public PerformanceLayout {
-            seats = List.copyOf(seats);
-        }
-    }
-
-    public record SeatPosition(Long venueSeatId, String sectionLabel, String rowLabel,
-                               String seatNumber, BigDecimal posX, BigDecimal posY) {
-    }
-
     /** 선점에 필요한 회차 정책과 판매 가능한 배치 좌석만 제공한다. */
     @Transactional(readOnly = true)
     public BookingPerformance getBookingPerformance(Long performanceId) {
@@ -55,10 +46,5 @@ public class ConcertQueryService {
                 performance.getBookingClosesAt(), performance.getMaxTicketsPerUser(), sellableSeatIds);
     }
 
-    public record BookingPerformance(Long layoutId, Instant bookingOpensAt, Instant bookingClosesAt,
-                                     int maxTicketsPerUser, Set<Long> sellableSeatIds) {
-        public BookingPerformance {
-            sellableSeatIds = Set.copyOf(sellableSeatIds);
-        }
-    }
+
 }

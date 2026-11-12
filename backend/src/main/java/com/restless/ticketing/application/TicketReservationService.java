@@ -1,9 +1,10 @@
 package com.restless.ticketing.application;
 
+import com.restless.ticketing.application.dto.TicketReservationInfo;
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
 import com.restless.concert.application.ConcertQueryService;
-import com.restless.concert.application.ConcertQueryService.BookingPerformance;
+import com.restless.concert.application.dto.BookingPerformance;
 import com.restless.ticketing.domain.*;
 import com.restless.ticketing.infrastructure.SeatHoldRepository;
 import com.restless.ticketing.infrastructure.TicketPurchaseLimitRepository;

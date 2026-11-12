@@ -1,6 +1,6 @@
 package com.restless.ticketing.api;
 
-import com.restless.ticketing.application.TicketSeatInfo;
+import com.restless.ticketing.application.dto.TicketSeatInfo;
 import com.restless.ticketing.application.TicketSeatQueryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
