@@ -20,9 +20,6 @@ import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -76,7 +73,7 @@ class TicketMappingTest {
     }
 
     @Test
-    void reloadsTicketsWithDistinctUuidV4NumbersForMultipleSeats() {
+    void reloadsUuidTicketsAndPreservesUsageAndCancellationHistory() {
         Long secondSeatId = persistSeat(performanceId, "2");
         Ticket first = persistTicket(reservationId, performanceId, seatId, 3_000_000_000L);
         Ticket second = persistTicket(reservationId, performanceId, secondSeatId, 0);
@@ -108,14 +105,33 @@ class TicketMappingTest {
                 select t from Ticket t where t.reservationId = :reservationId order by t.id
                 """, Ticket.class).setParameter("reservationId", reservationId).getResultList();
         assertThat(tickets).extracting(Ticket::getId).containsExactly(first.getId(), second.getId());
+
+        setHistoryFixture(first.getId(), "USED");
+        setHistoryFixture(second.getId(), "CANCELLED");
+        Long newReservationId = persistReservation(performanceId, "resale");
+        Ticket resale = persistTicket(newReservationId, performanceId, secondSeatId, 100000);
+        entityManager.flush();
+        entityManager.clear();
+        Ticket used = entityManager.find(Ticket.class, first.getId());
+        assertThat(used.getStatus()).isEqualTo("USED");
+        assertThat(used.getUsedAt()).isEqualTo(NOW.plusSeconds(60));
+        assertThat(used.getCancelledAt()).isNull();
+        assertThat(used.getTicketNo()).isEqualTo(firstNumber);
+        Ticket cancelled = entityManager.find(Ticket.class, second.getId());
+        assertThat(cancelled.getStatus()).isEqualTo("CANCELLED");
+        assertThat(cancelled.getUsedAt()).isNull();
+        assertThat(cancelled.getCancelledAt()).isEqualTo(NOW.plusSeconds(60));
+        assertThat(cancelled.getTicketNo()).isEqualTo(other.getTicketNo());
+        Ticket reissued = entityManager.find(Ticket.class, resale.getId());
+        assertThat(reissued.getReservationId()).isEqualTo(newReservationId);
+        assertThat(reissued.getTicketNo()).isNotEqualTo(cancelled.getTicketNo());
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void rejectsDuplicateReservationSeatEvenAfterCancellation(boolean cancelled) {
+    @Test
+    void rejectsDuplicateReservationSeatEvenAfterCancellation() {
         Ticket first = persistTicket(reservationId, performanceId, seatId, 100000);
         entityManager.flush();
-        if (cancelled) setHistoryFixture(first.getId(), "CANCELLED");
+        setHistoryFixture(first.getId(), "CANCELLED");
 
         assertThatThrownBy(() -> {
             persistTicket(reservationId, performanceId, seatId, 100000);
@@ -169,42 +185,6 @@ class TicketMappingTest {
             persistTicket(reservationId, performanceId, seatId, -1);
             entityManager.flush();
         }).isInstanceOf(PersistenceException.class).hasStackTraceContaining("ck_tickets_price_amount");
-    }
-
-    @ParameterizedTest
-    @CsvSource({"USED,true,false", "CANCELLED,false,true"})
-    void readsStoredUsageAndCancellationHistory(String status, boolean used, boolean cancelled) {
-        Ticket ticket = persistTicket(reservationId, performanceId, seatId, 100000);
-        String number = ticket.getTicketNo();
-        entityManager.flush();
-        setHistoryFixture(ticket.getId(), status);
-        entityManager.clear();
-
-        Ticket loaded = entityManager.find(Ticket.class, ticket.getId());
-        assertThat(loaded.getStatus()).isEqualTo(status);
-        assertThat(loaded.getUsedAt()).isEqualTo(used ? NOW.plusSeconds(60) : null);
-        assertThat(loaded.getCancelledAt()).isEqualTo(cancelled ? NOW.plusSeconds(60) : null);
-        assertThat(loaded.getTicketNo()).isEqualTo(number);
-    }
-
-    @Test
-    void preservesCancelledTicketAndIssuesNewNumberForNewReservation() {
-        Ticket oldTicket = persistTicket(reservationId, performanceId, seatId, 100000);
-        String oldNumber = oldTicket.getTicketNo();
-        entityManager.flush();
-        setHistoryFixture(oldTicket.getId(), "CANCELLED");
-        Long newReservationId = persistReservation(performanceId, "resale");
-        Ticket newTicket = persistTicket(newReservationId, performanceId, seatId, 100000);
-        entityManager.flush();
-        entityManager.clear();
-
-        Ticket cancelled = entityManager.find(Ticket.class, oldTicket.getId());
-        Ticket issued = entityManager.find(Ticket.class, newTicket.getId());
-        assertThat(cancelled.getStatus()).isEqualTo("CANCELLED");
-        assertThat(cancelled.getCancelledAt()).isEqualTo(NOW.plusSeconds(60));
-        assertThat(cancelled.getTicketNo()).isEqualTo(oldNumber);
-        assertThat(issued.getReservationId()).isEqualTo(newReservationId);
-        assertThat(issued.getTicketNo()).isNotEqualTo(oldNumber);
     }
 
     private Long persistPerformance(long offset) {

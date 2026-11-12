@@ -12,6 +12,8 @@ import jakarta.persistence.PersistenceException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -79,8 +81,9 @@ class VenueLayoutMappingTest {
         assertThat(seats).extracting(LayoutSeat::getId).containsExactly(firstId);
     }
 
-    @Test
-    void rejectsLayoutSeatWithDifferentLayoutVenue() {
+    @ParameterizedTest
+    @CsvSource({"true,fk_layout_seats_layout_venue", "false,fk_layout_seats_seat_venue"})
+    void rejectsLayoutSeatWithDifferentVenue(boolean layoutMismatch, String constraint) {
         Venue first = persistVenue("First");
         Venue second = persistVenue("Second");
         VenueLayout layout = persistLayout(first.getId(), 1);
@@ -89,26 +92,9 @@ class VenueLayoutMappingTest {
 
         assertThatThrownBy(() -> {
             entityManager.persist(layoutSeat(new LayoutSeatId(layout.getId(), seat.getId()),
-                    second.getId(), "A", true));
+                    layoutMismatch ? second.getId() : first.getId(), "A", true));
             entityManager.flush();
-        }).isInstanceOf(PersistenceException.class)
-                .hasStackTraceContaining("fk_layout_seats_layout_venue");
-    }
-
-    @Test
-    void rejectsLayoutSeatWithDifferentPhysicalSeatVenue() {
-        Venue first = persistVenue("First");
-        Venue second = persistVenue("Second");
-        VenueLayout layout = persistLayout(first.getId(), 1);
-        VenueSeat seat = persistSeat(second.getId());
-        entityManager.flush();
-
-        assertThatThrownBy(() -> {
-            entityManager.persist(layoutSeat(new LayoutSeatId(layout.getId(), seat.getId()),
-                    first.getId(), "A", true));
-            entityManager.flush();
-        }).isInstanceOf(PersistenceException.class)
-                .hasStackTraceContaining("fk_layout_seats_seat_venue");
+        }).isInstanceOf(PersistenceException.class).hasStackTraceContaining(constraint);
     }
 
     @Test

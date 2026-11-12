@@ -1,3 +1,5 @@
+> 현재 매핑 테스트 구성은 [문서 색인의 테스트 목록](README.md#매핑-테스트-구성)을 따른다. 아래 단계별 실행 건수는 최초 구현 시점의 이력이다.
+
 > 최신 결제 연결은 ADR-0003과 [Handler 설계](payment-handler.md)를 따른다. 아래 초기 Coordinator 설명은 공통 결제의 동기 Handler 조정으로 구체화한다. 결제는 payable_type/payable_id로 대상을 참조하며 payment.order_id를 전제하지 않는다.
 # 티켓팅 결제 트랜잭션 경계
 

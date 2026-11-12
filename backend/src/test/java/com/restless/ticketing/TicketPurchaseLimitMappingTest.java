@@ -57,7 +57,7 @@ class TicketPurchaseLimitMappingTest {
     }
 
     @Test
-    void savesAndReloadsZeroCountsThenReadsExistingNonzeroCounts() {
+    void reloadsCountersAndKeepsUserPerformanceScopesSeparate() {
         TicketPurchaseLimit limit = persistLimit(userId, performanceId);
         entityManager.flush();
         entityManager.clear();
@@ -75,13 +75,10 @@ class TicketPurchaseLimitMappingTest {
         TicketPurchaseLimit updated = entityManager.find(TicketPurchaseLimit.class, limit.getId());
         assertThat(updated.getReservedCount()).isEqualTo(1);
         assertThat(updated.getConfirmedCount()).isEqualTo(2);
-    }
 
-    @Test
-    void keepsSeparateRowsForDifferentUsersAndPerformances() {
         Long otherUserId = persistMember("other-limit-mapping@example.com");
         Long otherPerformanceId = persistPerformance(86400);
-        TicketPurchaseLimit first = persistLimit(userId, performanceId);
+        TicketPurchaseLimit first = updated;
         TicketPurchaseLimit otherUser = persistLimit(otherUserId, performanceId);
         TicketPurchaseLimit otherPerformance = persistLimit(userId, otherPerformanceId);
         entityManager.flush();

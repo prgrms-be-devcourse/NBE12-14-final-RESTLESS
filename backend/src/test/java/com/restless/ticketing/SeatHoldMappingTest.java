@@ -21,8 +21,6 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -77,7 +75,7 @@ class SeatHoldMappingTest {
     }
 
     @Test
-    void reloadsMultipleSeatHoldsForOneReservationWithPriceSnapshots() {
+    void reloadsSeatHoldSnapshotsAndPreservesHistory() {
         Long secondSeatId = persistSeat(performanceId, "2");
         SeatHold first = persistHold(reservationId, performanceId, seatId, 3_000_000_000L);
         SeatHold second = persistHold(reservationId, performanceId, secondSeatId, 0L);
@@ -99,19 +97,28 @@ class SeatHoldMappingTest {
                 select h from SeatHold h where h.reservationId = :reservationId order by h.id
                 """, SeatHold.class).setParameter("reservationId", reservationId).getResultList();
         assertThat(holds).extracting(SeatHold::getId).containsExactly(first.getId(), second.getId());
-    }
 
-    @ParameterizedTest
-    @EnumSource(value = SeatHoldStatus.class, names = {"CONFIRMED", "RELEASED"})
-    void readsStoredHistoryStatusAndReleaseTime(SeatHoldStatus status) {
-        SeatHold hold = persistHold(reservationId, performanceId, seatId, 100000);
+        setHistoryFixture(first.getId(), SeatHoldStatus.RELEASED);
+        setHistoryFixture(second.getId(), SeatHoldStatus.CONFIRMED);
+        entityManager.createNativeQuery("UPDATE ticket_reservations SET status = 'RELEASED' WHERE id = :id")
+                .setParameter("id", reservationId).executeUpdate();
+        Long newReservationId = persistReservation(performanceId, "replacement");
+        SeatHold replacement = persistHold(newReservationId, performanceId, seatId, 100000);
         entityManager.flush();
-        setHistoryFixture(hold.getId(), status);
+        setOwnerFixture(replacement.getId());
         entityManager.clear();
-
-        SeatHold loaded = entityManager.find(SeatHold.class, hold.getId());
-        assertThat(loaded.getStatus()).isEqualTo(status);
-        assertThat(loaded.getReleasedAt()).isEqualTo(status == SeatHoldStatus.RELEASED ? NOW.plusSeconds(60) : null);
+        SeatHold released = entityManager.find(SeatHold.class, first.getId());
+        assertThat(released.getStatus()).isEqualTo(SeatHoldStatus.RELEASED);
+        assertThat(released.getReleasedAt()).isEqualTo(NOW.plusSeconds(60));
+        assertThat(released.getPriceAmount()).isEqualTo(3_000_000_000L);
+        assertThat(entityManager.find(SeatHold.class, second.getId()).getStatus()).isEqualTo(SeatHoldStatus.CONFIRMED);
+        assertThat(entityManager.find(SeatHold.class, second.getId()).getReleasedAt()).isNull();
+        TicketSeat currentSeat = entityManager.find(TicketSeat.class, seatId);
+        assertThat(currentSeat.getStatus()).isEqualTo(TicketSeatStatus.HELD);
+        assertThat(currentSeat.getCurrentHoldId()).isEqualTo(replacement.getId());
+        assertThat(entityManager.find(SeatHold.class, currentSeat.getCurrentHoldId()).getPerformanceSeatId())
+                .isEqualTo(seatId);
+        assertThat(entityManager.find(SeatHold.class, replacement.getId()).getReservationId()).isEqualTo(newReservationId);
     }
 
     @Test
@@ -149,41 +156,6 @@ class SeatHoldMappingTest {
             entityManager.flush();
         }).isInstanceOf(PersistenceException.class)
                 .hasStackTraceContaining("ck_seat_holds_price_amount");
-    }
-
-    @Test
-    void linksPersistedHoldAsCurrentSeatOwner() {
-        SeatHold hold = persistHold(reservationId, performanceId, seatId, 100000);
-        entityManager.flush();
-        setOwnerFixture(hold.getId());
-        entityManager.clear();
-
-        TicketSeat seat = entityManager.find(TicketSeat.class, seatId);
-        assertThat(seat.getStatus()).isEqualTo(TicketSeatStatus.HELD);
-        assertThat(seat.getCurrentHoldId()).isEqualTo(hold.getId());
-        assertThat(entityManager.find(SeatHold.class, seat.getCurrentHoldId()).getPerformanceSeatId())
-                .isEqualTo(seatId);
-    }
-
-    @Test
-    void preservesReleasedHistoryWhenNewHoldOwnsSameSeat() {
-        SeatHold oldHold = persistHold(reservationId, performanceId, seatId, 100000);
-        entityManager.flush();
-        setHistoryFixture(oldHold.getId(), SeatHoldStatus.RELEASED);
-        entityManager.createNativeQuery("UPDATE ticket_reservations SET status = 'RELEASED' WHERE id = :id")
-                .setParameter("id", reservationId).executeUpdate();
-        Long newReservationId = persistReservation(performanceId, "replacement");
-        SeatHold newHold = persistHold(newReservationId, performanceId, seatId, 100000);
-        entityManager.flush();
-        setOwnerFixture(newHold.getId());
-        entityManager.clear();
-
-        assertThat(entityManager.find(SeatHold.class, oldHold.getId()).getStatus())
-                .isEqualTo(SeatHoldStatus.RELEASED);
-        assertThat(entityManager.find(SeatHold.class, oldHold.getId()).getReleasedAt())
-                .isEqualTo(NOW.plusSeconds(60));
-        assertThat(entityManager.find(TicketSeat.class, seatId).getCurrentHoldId()).isEqualTo(newHold.getId());
-        assertThat(entityManager.find(SeatHold.class, newHold.getId()).getReservationId()).isEqualTo(newReservationId);
     }
 
     private Long persistPerformance(long offset) {

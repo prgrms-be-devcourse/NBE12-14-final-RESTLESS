@@ -8,6 +8,8 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -90,31 +92,21 @@ class VenueMappingTest {
                 .hasStackTraceContaining("fk_venue_seats_section_venue");
     }
 
-    @Test
-    void rejectsDuplicateSectionCodeWithinVenue() {
-        Venue venue = persistVenue("Hall");
-        persistSection(venue.getId());
-        entityManager.flush();
-
-        assertThatThrownBy(() -> {
-            persistSection(venue.getId());
-            entityManager.flush();
-        }).isInstanceOf(PersistenceException.class)
-                .hasStackTraceContaining("uk_venue_sections_venue_code");
-    }
-
-    @Test
-    void rejectsDuplicateSeatPositionWithinSection() {
+    @ParameterizedTest
+    @CsvSource({"true,uk_venue_sections_venue_code", "false,uk_venue_seats_position"})
+    void rejectsDuplicateVenueStructureKey(boolean sectionCode, String constraint) {
         Venue venue = persistVenue("Hall");
         VenueSection section = persistSection(venue.getId());
-        entityManager.persist(VenueSeat.create(venue.getId(), section.getId(), "1", "1", false, "ACTIVE"));
+        if (!sectionCode) {
+            entityManager.persist(VenueSeat.create(venue.getId(), section.getId(), "1", "1", false, "ACTIVE"));
+        }
         entityManager.flush();
 
         assertThatThrownBy(() -> {
-            entityManager.persist(VenueSeat.create(venue.getId(), section.getId(), "1", "1", true, "ACTIVE"));
+            if (sectionCode) persistSection(venue.getId());
+            else entityManager.persist(VenueSeat.create(venue.getId(), section.getId(), "1", "1", true, "ACTIVE"));
             entityManager.flush();
-        }).isInstanceOf(PersistenceException.class)
-                .hasStackTraceContaining("uk_venue_seats_position");
+        }).isInstanceOf(PersistenceException.class).hasStackTraceContaining(constraint);
     }
 
     private Venue persistVenue(String name) {

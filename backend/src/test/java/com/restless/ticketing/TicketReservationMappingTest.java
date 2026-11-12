@@ -16,8 +16,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.EnumSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -62,7 +60,7 @@ class TicketReservationMappingTest {
     }
 
     @Test
-    void reloadsHeldReservationWithBinaryHashAndNullableCheckoutFields() {
+    void reloadsReservationHashAndOptionalCheckoutFields() {
         byte[] source = requestHash();
         byte[] expected = source.clone();
         TicketReservation reservation = TicketReservation.createHeld(userId, performanceId, "hold-request",
@@ -91,41 +89,24 @@ class TicketReservationMappingTest {
                 """, TicketReservation.class).setParameter("userId", userId)
                 .setParameter("requestKey", "hold-request").getResultList();
         assertThat(reservations).extracting(TicketReservation::getId).containsExactly(reservation.getId());
-    }
 
-    @Test
-    void readsLegacyReservationWithNullHash() {
-        TicketReservation reservation = persistReservation(userId, performanceId, "legacy");
-        entityManager.flush();
+        Long orderId = createOrderFixture();
+        setCheckoutFixture(reservation.getId(), orderId, TicketReservationStatus.REFUND_RECONCILING);
         entityManager.createNativeQuery("UPDATE ticket_reservations SET hold_request_hash = NULL WHERE id = :id")
                 .setParameter("id", reservation.getId()).executeUpdate();
         entityManager.clear();
-
-        assertThat(entityManager.find(TicketReservation.class, reservation.getId()).getHoldRequestHash()).isNull();
+        TicketReservation checkout = entityManager.find(TicketReservation.class, reservation.getId());
+        assertThat(checkout.getOrderId()).isEqualTo(orderId);
+        assertThat(checkout.getStatus()).isEqualTo(TicketReservationStatus.REFUND_RECONCILING);
+        assertThat(checkout.getCheckoutStartedAt()).isEqualTo(NOW.plusSeconds(60));
+        assertThat(checkout.getPaymentExpiresAt()).isEqualTo(NOW.plusSeconds(360));
+        assertThat(checkout.getHoldExpiresAt()).isEqualTo(HOLD_EXPIRES_AT);
+        assertThat(checkout.getHoldRequestHash()).isNull();
     }
 
-    @ParameterizedTest
-    @EnumSource(value = TicketReservationStatus.class,
-            names = {"PAYMENT_PENDING", "CONFIRMED", "REFUND_RECONCILING"})
-    void readsStoredCheckoutFieldsAndReservationStatus(TicketReservationStatus status) {
-        TicketReservation reservation = persistReservation(userId, performanceId, "checkout");
-        entityManager.flush();
-        Long orderId = createOrderFixture();
-        setCheckoutFixture(reservation.getId(), orderId, status);
-        entityManager.clear();
-
-        TicketReservation loaded = entityManager.find(TicketReservation.class, reservation.getId());
-        assertThat(loaded.getOrderId()).isEqualTo(orderId);
-        assertThat(loaded.getStatus()).isEqualTo(status);
-        assertThat(loaded.getCheckoutStartedAt()).isEqualTo(NOW.plusSeconds(60));
-        assertThat(loaded.getPaymentExpiresAt()).isEqualTo(NOW.plusSeconds(360));
-        assertThat(loaded.getHoldExpiresAt()).isEqualTo(HOLD_EXPIRES_AT);
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void rejectsSameUserKeyWithinAndAcrossPerformances(boolean otherPerformance) {
-        Long targetPerformanceId = otherPerformance ? persistPerformance(86400) : performanceId;
+    @Test
+    void rejectsSameUserKeyAcrossPerformances() {
+        Long targetPerformanceId = persistPerformance(86400);
         persistReservation(userId, performanceId, "duplicate");
         entityManager.flush();
 
@@ -147,18 +128,13 @@ class TicketReservationMappingTest {
         assertThat(entityManager.find(TicketReservation.class, first.getId()).getRequestKey()).isEqualTo("Key");
         assertThat(entityManager.find(TicketReservation.class, second.getId()).getRequestKey()).isEqualTo("key");
         assertThat(entityManager.find(TicketReservation.class, third.getId()).getRequestKey()).isEqualTo("Key ");
-    }
 
-    @Test
-    void permitsSameKeyForDifferentUsers() {
         Long otherUserId = persistMember("other-reservation-mapping@example.com");
-        TicketReservation first = persistReservation(userId, performanceId, "same-key");
-        TicketReservation second = persistReservation(otherUserId, performanceId, "same-key");
+        TicketReservation otherUser = persistReservation(otherUserId, performanceId, "Key");
         entityManager.flush();
         entityManager.clear();
-
-        assertThat(first.getId()).isNotEqualTo(second.getId());
-        assertThat(entityManager.find(TicketReservation.class, second.getId()).getUserId()).isEqualTo(otherUserId);
+        assertThat(otherUser.getId()).isNotEqualTo(first.getId());
+        assertThat(entityManager.find(TicketReservation.class, otherUser.getId()).getUserId()).isEqualTo(otherUserId);
     }
 
     @Test

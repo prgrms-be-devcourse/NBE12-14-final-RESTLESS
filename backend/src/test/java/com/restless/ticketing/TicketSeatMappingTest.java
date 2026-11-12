@@ -72,7 +72,7 @@ class TicketSeatMappingTest {
     }
 
     @Test
-    void reloadsSeparatePricesAndStatesForSamePhysicalSeatAcrossPerformances() {
+    void reloadsPerformancePricesAndCurrentOwnerStates() {
         Long otherPerformanceId = persistPerformance(86400);
         TicketSeat first = persistTicketSeat(performanceId, venueSeatId, "VIP", 3_000_000_000L);
         TicketSeat second = persistTicketSeat(otherPerformanceId, venueSeatId, "R", 0L);
@@ -99,6 +99,18 @@ class TicketSeatMappingTest {
                 select s from TicketSeat s where s.performanceId = :performanceId
                 """, TicketSeat.class).setParameter("performanceId", performanceId).getResultList();
         assertThat(seats).extracting(TicketSeat::getId).containsExactly(first.getId());
+
+        Long holdId = createHoldFixture(first.getId());
+        setOwnerFixture(first.getId(), "HELD", holdId);
+        entityManager.clear();
+        TicketSeat held = entityManager.find(TicketSeat.class, first.getId());
+        assertThat(held.getStatus()).isEqualTo(TicketSeatStatus.HELD);
+        assertThat(held.getCurrentHoldId()).isEqualTo(holdId);
+        setOwnerFixture(first.getId(), "SOLD", holdId);
+        entityManager.clear();
+        TicketSeat sold = entityManager.find(TicketSeat.class, first.getId());
+        assertThat(sold.getStatus()).isEqualTo(TicketSeatStatus.SOLD);
+        assertThat(sold.getCurrentHoldId()).isEqualTo(holdId);
     }
 
     @Test
@@ -148,25 +160,6 @@ class TicketSeatMappingTest {
             entityManager.flush();
         }).isInstanceOf(PersistenceException.class)
                 .hasStackTraceContaining("ck_performance_seats_price");
-    }
-
-    @Test
-    void reloadsHeldAndSoldWithSameCurrentHoldPointer() {
-        TicketSeat seat = persistTicketSeat(performanceId, venueSeatId, "VIP", 100000);
-        entityManager.flush();
-        Long holdId = createHoldFixture(seat.getId());
-        setOwnerFixture(seat.getId(), "HELD", holdId);
-        entityManager.clear();
-
-        TicketSeat held = entityManager.find(TicketSeat.class, seat.getId());
-        assertThat(held.getStatus()).isEqualTo(TicketSeatStatus.HELD);
-        assertThat(held.getCurrentHoldId()).isEqualTo(holdId);
-
-        setOwnerFixture(seat.getId(), "SOLD", holdId);
-        entityManager.clear();
-        TicketSeat sold = entityManager.find(TicketSeat.class, seat.getId());
-        assertThat(sold.getStatus()).isEqualTo(TicketSeatStatus.SOLD);
-        assertThat(sold.getCurrentHoldId()).isEqualTo(holdId);
     }
 
     @ParameterizedTest

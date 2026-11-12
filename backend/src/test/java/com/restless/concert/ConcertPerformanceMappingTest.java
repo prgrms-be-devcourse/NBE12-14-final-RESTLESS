@@ -13,6 +13,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -79,8 +80,9 @@ class ConcertPerformanceMappingTest {
         assertThat(performances.get(1).getMaxTicketsPerUser()).isEqualTo(2);
     }
 
-    @Test
-    void rejectsPerformanceWithDifferentConcertVenue() {
+    @ParameterizedTest
+    @CsvSource({"true,fk_performances_concert_venue", "false,fk_performances_layout_venue"})
+    void rejectsPerformanceWithDifferentVenue(boolean concertMismatch, String constraint) {
         Venue first = persistVenue("First");
         Venue second = persistVenue("Second");
         Concert concert = persistConcert(first.getId());
@@ -88,27 +90,11 @@ class ConcertPerformanceMappingTest {
         entityManager.flush();
 
         assertThatThrownBy(() -> {
-            entityManager.persist(Performance.create(concert.getId(), second.getId(), layout.getId(),
+            entityManager.persist(Performance.create(concert.getId(),
+                    concertMismatch ? second.getId() : first.getId(), layout.getId(),
                     STARTS_AT, OPENS_AT, CLOSES_AT, 4, "SCHEDULED"));
             entityManager.flush();
-        }).isInstanceOf(PersistenceException.class)
-                .hasStackTraceContaining("fk_performances_concert_venue");
-    }
-
-    @Test
-    void rejectsPerformanceWithDifferentLayoutVenue() {
-        Venue first = persistVenue("First");
-        Venue second = persistVenue("Second");
-        Concert concert = persistConcert(first.getId());
-        VenueLayout layout = persistLayout(second.getId());
-        entityManager.flush();
-
-        assertThatThrownBy(() -> {
-            entityManager.persist(Performance.create(concert.getId(), first.getId(), layout.getId(),
-                    STARTS_AT, OPENS_AT, CLOSES_AT, 4, "SCHEDULED"));
-            entityManager.flush();
-        }).isInstanceOf(PersistenceException.class)
-                .hasStackTraceContaining("fk_performances_layout_venue");
+        }).isInstanceOf(PersistenceException.class).hasStackTraceContaining(constraint);
     }
 
     @ParameterizedTest
