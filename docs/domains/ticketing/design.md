@@ -261,7 +261,7 @@ DB에서는 회차별 좌석 행을 잠근 뒤 현재 소유권을 검사·변�
 
 | API                                                | 기능    |
 | -------------------------------------------------- | ----- |
-| `GET /api/concert-sessions/{id}/seats`             | 좌석 조회 |
+| `GET /api/performances/{performanceId}/seats`             | 좌석 조회 (로그인 필수) |
 | `POST /api/ticket-reservations`                    | 좌석 선점 |
 | `GET /api/ticket-reservations/active`              | 예약 복구 |
 | `DELETE /api/ticket-reservations/{id}`             | 선점 취소 |
@@ -493,7 +493,7 @@ flowchart LR
   | Method | Endpoint                                      | 설명        |
   | ------ | --------------------------------------------- | --------- |
   | GET    | `/api/concerts/{id}/sessions`                 | 공연 회차 목록  |
-  | GET    | `/api/concert-sessions/{id}/seats`            | 회차별 좌석 상태 |
+  | GET    | `/api/performances/{performanceId}/seats`            | 회차별 좌석 상태 (로그인 필수) |
   | POST   | `/api/ticket-reservations`                    | 좌석 선점     |
   | GET    | `/api/ticket-reservations/{id}`               | 예약 상세 조회  |
   | GET    | `/api/ticket-reservations/active`             | 활성 예약 조회  |
@@ -512,7 +512,7 @@ flowchart LR
   ```
   ```
   {
-    "sessionId": 100,
+    "performanceId": 100,
     "seatIds": [10, 11]
   }
   

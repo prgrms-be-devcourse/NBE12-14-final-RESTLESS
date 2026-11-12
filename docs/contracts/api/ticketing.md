@@ -8,7 +8,7 @@
 | Method | Endpoint | 기능 |
 |---|---|---|
 | GET | `/api/concerts/{concertId}/sessions` | 공연 회차 목록 |
-| GET | `/api/concert-sessions/{sessionId}/seats` | 회차별 좌석 상태 (3초 폴링) |
+| GET | `/api/performances/{performanceId}/seats` | 회차별 좌석 상태 (3초 폴링) |
 | POST | `/api/ticket-reservations` | 좌석 선점 (`Idempotency-Key`) |
 | GET | `/api/ticket-reservations/{reservationId}` | 예약 상세 |
 | GET | `/api/ticket-reservations/active` | 활성 예약 조회, 복구 |
@@ -16,6 +16,38 @@
 | POST | `/api/ticket-reservations/{reservationId}/checkout` | 결제 시작 |
 | POST | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 요청 |
 | GET | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 상태 조회 |
+
+## 회차별 좌석 조회
+
+`GET /api/performances/{performanceId}/seats`는 로그인이 필수이며,
+`Authorization: Bearer <accessToken>` 헤더로 인증한다. 비로그인 요청은 `401 UNAUTHORIZED`로 응답한다.
+공연 상세·회차 목록은 비로그인 조회를 허용하고, 회차를 클릭해 좌석 선택에 진입할 때부터 로그인을 요구한다.
+프론트엔드는 로그인 완료 후 선택한 회차의 좌석 화면으로 복귀하도록 연결한다 (프론트엔드 구현은 별도).
+`performanceId`를 내부 Performance ID로 전달하며, 해당 회차의 판매 좌석만 좌석 ID 오름차순으로 반환한다.
+
+성공 (`200 OK`):
+
+```json
+[
+  {
+    "seatId": 10,
+    "venueSeatId": 101,
+    "sectionLabel": "A",
+    "rowLabel": "1",
+    "seatNumber": "1",
+    "posX": 10.00,
+    "posY": 20.00,
+    "grade": "VIP",
+    "price": 150000,
+    "status": "AVAILABLE"
+  }
+]
+```
+
+`seatId`는 회차별 판매 좌석 ID이며 `venueSeatId`는 물리 좌석 ID다.
+상태는 `AVAILABLE`, `HELD`, `SOLD` 중 하나다. 현재 상태를 조회하며 만료 처리나 선점은 수행하지 않는다.
+회차에 판매 좌석이 없으면 빈 배열을 반환한다. 없는 회차는 `404 NOT_FOUND`,
+Long으로 변환할 수 없는 performanceId는 `400 INVALID_REQUEST`로 응답한다.
 
 ## 좌석 선점
 
@@ -26,7 +58,7 @@ POST /api/ticket-reservations
 Idempotency-Key: 7f83a2b1-...
 Content-Type: application/json
 
-{ "sessionId": 100, "seatIds": [10, 11] }
+{ "performanceId": 100, "seatIds": [10, 11] }
 ```
 
 성공:
@@ -94,5 +126,7 @@ checkout은 예약 잠금·기존 주문 참조로 중복 생성과 기한 연�
 ## 내부 회차 명칭
 
 Java 엔티티·Repository는 Performance/PerformanceRepository, DB 테이블은 performances로 통일한다.
-API 호환성을 위해 /api/concert-sessions 경로와 기존 sessionId 요청 필드는 그대로 유지한다.
-API의 sessionId는 내부 Performance의 ID로 해석한다.
+좌석 조회 API는 /api/performances/{performanceId}/seats로 통일하며 performanceId는 Performance의 ID다.
+좌석 선점 요청 본문도 performanceId를 사용하며, 내부 Performance의 ID로 해석한다.
+기존 concert-sessions 조회 경로와 선점 요청의 sessionId 필드는 제공하지 않는다.
+선점 요청 DTO와 API 처리는 아직 구현 전이며, 구현 시 위 계약을 따른다.

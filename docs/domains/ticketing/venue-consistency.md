@@ -134,4 +134,4 @@ WHERE c.layout_id <> p.layout_id;
 - ./gradlew clean test --tests 'com.restless.concert.*' 실행으로 공연 도메인 테스트 총 17개가 통과했다. 최초 실행의 클래스 로딩 오류는 빌드 산출물 초기화 후 재실행에서 해소됐다.
 - 주최자 권한, 회차 등록 API, 오픈 후 배치 변경 제한의 서비스 처리, 판매 좌석·예매 로직은 이번 매핑 구현 범위가 아니다.
 
-회차 내부 명칭은 Performance/PerformanceRepository로 통일하고 테스트도 ConcertPerformanceMappingTest로 변경했다. DB performances 및 API /api/concert-sessions와 sessionId는 유지한다. 이름 변경 후 ./gradlew build 실행으로 전체 테스트 161개가 통과했다.
+회차 내부 명칭은 Performance/PerformanceRepository로 통일하고 테스트도 ConcertPerformanceMappingTest로 변경했다. DB performances는 유지한다. 좌석 조회 API는 후속 결정에 따라 /api/performances/{performanceId}/seats로 통일했다. 선점 요청 본문의 회차 식별자도 performanceId로 통일한다. 선점 요청 DTO와 API 처리는 아직 구현 전이다. 내부 이름 변경 당시 ./gradlew build 실행으로 전체 테스트 161개가 통과했으며, 후속 API 명명 변경에 대한 테스트는 아직 실행하지 않았다.

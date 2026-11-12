@@ -1,6 +1,7 @@
 package com.restless.concert.entity;
 
 import com.restless.TestcontainersConfiguration;
+import com.restless.concert.infrastructure.PerformanceRepository;
 import com.restless.concert.domain.Concert;
 import com.restless.concert.domain.Performance;
 import com.restless.concert.domain.Venue;
@@ -42,6 +43,9 @@ class ConcertPerformanceMappingTest {
     @Autowired
     private EntityManager entityManager;
 
+    @Autowired
+    private PerformanceRepository performanceRepository;
+
     @DisplayName("같은 공연장·배치를 사용하는 공연의 여러 회차와 UTC 시각을 저장하고 조회한다")
     @Test
     void reloadsConcertAndSeparatePerformancesSharingVenueAndLayout() {
@@ -52,8 +56,12 @@ class ConcertPerformanceMappingTest {
                 STARTS_AT, OPENS_AT, CLOSES_AT, 4, "SCHEDULED");
         Performance second = Performance.create(concert.getId(), venue.getId(), layout.getId(),
                 STARTS_AT.plusSeconds(86400), OPENS_AT, CLOSES_AT.plusSeconds(86400), 2, "SCHEDULED");
-        entityManager.persist(first);
         entityManager.persist(second);
+        entityManager.persist(first);
+        Concert otherConcert = Concert.create(venue.getId(), concert.getSellerId(), "Other", "SCHEDULED", CREATED_AT);
+        entityManager.persist(otherConcert);
+        entityManager.persist(Performance.create(otherConcert.getId(), venue.getId(), layout.getId(),
+                STARTS_AT, OPENS_AT, CLOSES_AT, 4, "SCHEDULED"));
         entityManager.flush();
         entityManager.clear();
 
@@ -76,9 +84,7 @@ class ConcertPerformanceMappingTest {
         assertThat(performance.getMaxTicketsPerUser()).isEqualTo(4);
         assertThat(performance.getStatus()).isEqualTo("SCHEDULED");
 
-        var performances = entityManager.createQuery("""
-                select s from Performance s where s.concertId = :concertId order by s.startsAt
-                """, Performance.class).setParameter("concertId", concert.getId()).getResultList();
+        var performances = performanceRepository.findAllByConcertIdOrderByStartsAtAsc(concert.getId());
         assertThat(performances).extracting(Performance::getId).containsExactly(first.getId(), second.getId());
         assertThat(performances.get(1).getStartsAt()).isEqualTo(STARTS_AT.plusSeconds(86400));
         assertThat(performances.get(1).getMaxTicketsPerUser()).isEqualTo(2);
