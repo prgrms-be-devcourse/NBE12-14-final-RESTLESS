@@ -22,6 +22,7 @@
 | 도메인 기능 구현 | domains/<도메인>/ 전체, contracts/api/<도메인>.md, architecture/overview.md 2절, architecture/erd.md |
 | 재고, 결제, 환불 로직 변경 | domains/drop/invariants.md, transactions.md, state-machines.md, operations/failure-handling.md, decisions/0003-payment-module-boundary.md |
 | 이벤트, 알림 작업 | decisions/0001-event-handling.md, contracts/events/drop.md |
+| 경매 등록, 입찰, 종료, 크레딧 | domains/auction/ 전체 (design.md는 원본), contracts/api/auction.md |
 | 팬미팅 응모, 추첨, 결제, 승격 | domains/fanmeeting/ 전체, contracts/api/fanmeeting.md, contracts/events/fanmeeting.md |
 | 테스트 작성 | testing/strategy.md, 해당 도메인 invariants.md (팬미팅은 test-scenarios.md도) |
 | 성능 실험 | testing/performance.md, 관련 ADR |
