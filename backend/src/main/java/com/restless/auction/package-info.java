@@ -1,7 +1,8 @@
 /**
- * 경매, 입찰, 크레딧
+ * 경매, 입찰
  *
- * <p>크레딧을 공통 모듈로 뺄지는 미정이다 (docs/architecture/erd.md 7절).
+ * <p>크레딧 확보·해제·차감은 {@code com.restless.credit}의 CreditWalletService를 쓴다.
+ * 크레딧 Repository를 직접 쓰지 않는다.
  *
  * <p>담당: 천종원
  *

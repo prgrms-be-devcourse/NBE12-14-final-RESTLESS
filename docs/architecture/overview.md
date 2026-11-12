@@ -29,7 +29,7 @@
 ```text
 backend/src/main/java/com/restless/
 ├── auth/ member/
-├── fanmeeting/ ticketing/ auction/
+├── fanmeeting/ ticketing/ auction/ credit/
 ├── drop/
 │   ├── api/            # Controller, DTO
 │   ├── application/    # 유스케이스, 트랜잭션 경계

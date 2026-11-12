@@ -44,4 +44,7 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // 경매 시작·종료 스케줄러는 테스트에서 끈다. 다른 테스트의 데이터 정리와 겹치지 않게 하기 위해서다.
+    // 스케줄러를 검증하는 테스트만 @SpringBootTest(properties)로 다시 켠다.
+    systemProperty 'restless.auction.scheduler.enabled', 'false'
 }
