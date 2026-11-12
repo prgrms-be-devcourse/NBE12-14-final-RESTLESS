@@ -99,7 +99,7 @@ erDiagram
 | 항목 | 관련 |
 |---|---|
 | `users.role` 이름 (문서마다 USER, FAN, SELLER, ORGANIZER, ADMIN이 다름) | 전체 |
-| `orders.order_type`의 티켓팅 값 (공통 주문 연결은 확정) | 티켓팅, 공통 결제 |
+| ~~`orders.order_type`의 티켓팅 값~~ 결정: `DROP`, `TICKET` (`ck_orders_order_type`, `V20261112_2100`). 상태도 `ck_orders_status`로 제한 | 티켓팅, 공통 결제 |
 | ~~`payments.payment_key`가 NOT NULL인데, 승인 전(READY)에도 값이 있는지~~ 결정: NULL 허용, 승인 시작 때 채움 ([ADR-0003](../decisions/0003-payment-module-boundary.md)) | 공통 결제 |
 | ~~`auction_results.winning_bid_id`가 NOT NULL인데, 유찰을 결과 행으로 남기는지~~ 결정: 미낙찰도 결과 행으로 남김. `result_type`(`SOLD`/`UNSOLD`) 추가, `winning_bid_id` NULL 허용 (`V20261112_1045`) | 경매 |
 | 경매 입장 자격(`access_policy`, `required_performance_id`)을 티켓팅의 어떤 상태로 판단하는지 | 경매, 티켓팅 |
