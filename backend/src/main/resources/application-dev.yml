@@ -23,3 +23,6 @@ restless:
 
 toss:
   secret-key: ${TOSS_SECRET_KEY:}
+
+pg:
+  provider: ${PG_PROVIDER:fake}
