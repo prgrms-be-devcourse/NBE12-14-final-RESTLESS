@@ -4,7 +4,11 @@
 - 상태: PROPOSED (1차 구현 기준). 정책은 [policy.md](../../domains/auction/policy.md)를 따른다.
 - 오류 응답 형식은 [공통 규칙](README.md)을 따른다.
 
-## 조회 (로그인 불필요)
+모든 경매 API는 로그인이 필요하다 (`Authorization: Bearer <accessToken>`). 토큰이 없으면 401 `UNAUTHORIZED`.
+
+> 현재 `SecurityConfig.PUBLIC_GET_PATHS`에 경매 조회 경로가 공개로 들어 있다. 공개 목록에서 빼는 작업은 인증 담당(홍승연)이 한다.
+
+## 조회
 
 | Method | Endpoint | 기능 |
 |---|---|---|
@@ -25,6 +29,21 @@
 | POST | `/api/me/wallet/grants` | 테스트용 10,000 지급. 운영(prod)에서는 없음 |
 
 `LOST`는 종료된 경매에서 내 마지막 입찰이 낙찰되지 않은 경우다.
+
+### 테스트용 크레딧 지급
+
+```http
+POST /api/me/wallet/grants
+```
+
+- 본문 없음. 누를 때마다 10,000을 지급한다. 횟수 제한과 중복 방지는 없다.
+- 응답 200 (`GET /api/me/wallet`과 같은 형식):
+
+```json
+{ "balanceAmount": 20000, "reservedAmount": 5000, "availableAmount": 15000 }
+```
+
+- 운영(prod) 프로필에서는 API를 등록하지 않으므로 404 `NOT_FOUND`.
 
 ## 주최자 (ORGANIZER, ADMIN)
 
@@ -106,7 +125,9 @@ Content-Type: application/json
 }
 ```
 
-같은 회원이 같은 `Idempotency-Key`로 다시 보내면 처음 응답과 같은 내용을 돌려준다.
+- 같은 회원이 같은 `Idempotency-Key`로 같은 경매, 같은 금액을 다시 보내면 처음 응답과 같은 내용을 돌려준다.
+- 같은 키로 다른 경매나 다른 금액을 보내면 409 `IDEMPOTENCY_KEY_CONFLICT`.
+- 거절된 요청은 저장하지 않는다. 같은 키로 재시도하면 새 요청으로 다시 판단한다.
 
 금액 부족 409:
 
@@ -123,7 +144,10 @@ Content-Type: application/json
 ```http
 GET /api/auctions/12/stream
 Accept: text/event-stream
+Authorization: Bearer <accessToken>
 ```
+
+브라우저 기본 `EventSource`는 헤더를 붙일 수 없으므로, 프론트는 fetch 기반 SSE 클라이언트(예: `@microsoft/fetch-event-source`)를 쓴다. 토큰을 쿼리 문자열에 넣지 않는다.
 
 서버는 연결 직후 현재 상태를 한 번 보내고, 이후 경매별로 변경을 모아 0.2초마다 최신 상태를 보낸다.
 
@@ -138,7 +162,7 @@ data: {"auctionId":12,"status":"OPEN","revision":15,
 - `id`는 `revision`이다. 클라이언트는 받은 `revision`보다 작거나 같은 메시지를 무시한다.
 - 종료되면 `status`가 `CLOSED`이고 `result`에 `{ "type": "WON", "winnerNickname": "...", "amount": 60000 }` 또는 `{ "type": "NO_BID" }`가 온다.
 - 연결이 끊기면 상세 API로 최신 상태를 받은 뒤 다시 연결한다.
-- 이 경로는 `SecurityConfig.PUBLIC_GET_PATHS`에 추가해야 한다 (구현 6단계).
+- 토큰은 연결할 때만 검사한다. 연결 중에 Access Token이 만료돼도 열린 연결은 유지되고, 다시 연결할 때는 유효한 토큰이 필요하다.
 
 ## 오류 코드
 

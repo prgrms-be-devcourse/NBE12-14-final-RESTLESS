@@ -40,4 +40,4 @@ flowchart LR
 
 컬럼은 [통합 ERD](../../architecture/erd.md)와 `V20261111_1030`, `V20261111_1040` 마이그레이션에 있다. 1차 구현 전에 보강할 제약은 [invariants.md](invariants.md) 마지막 절에 있다.
 
-design.md는 받은 그대로 두었다. 결정이 다르면 이 폴더의 다른 문서가 우선한다.
+design.md는 받은 그대로 두었다. policy, invariants, state-machines, transactions와 API 계약은 담당자(천종원)가 결정한 1차 구현 기준이다. 원본과 다르면 이 문서들을 따른다. 상태는 PROPOSED이며, 다른 도메인과 맞닿는 부분(권한 경로, 회원 닉네임 조회)은 해당 담당자 리뷰 후 확정한다.
