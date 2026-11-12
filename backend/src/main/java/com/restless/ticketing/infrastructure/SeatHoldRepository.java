@@ -1,4 +1,4 @@
 package com.restless.ticketing.infrastructure;
 
-public interface TicketHoldRepository {
+public interface SeatHoldRepository {
 }
