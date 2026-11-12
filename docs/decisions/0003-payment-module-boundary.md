@@ -2,6 +2,7 @@
 
 - 상태: Accepted
 - 날짜: 2026-11-12
+- 개정: 2026-11-12, Handler 상태 변경 메서드에 결제 시도 문맥과 환불 종류 전달 ([4절](#4-개정-시도-문맥과-환불-종류-2026-11-12))
 - 관련: 공통 Payment, Drop TX2·TX3·TX5, 티켓팅 결제, 팬미팅 `PaymentPort` (`domains/fanmeeting/ports.md`)
 
 ## 배경
@@ -33,13 +34,15 @@
 public interface PaymentResultHandler {
     PayableType type();
     Optional<PayableSnapshot> load(Long payableId);        // 결제 생성 시: 소유자, 금액, 상품명, 기한. 결제 불가면 empty
-    ApprovalDecision onApprovalStarting(Long payableId);   // TX2: 예약 만료 검증, CONFIRMING 전환
-    ApprovalDecision onApproved(Long payableId, ApprovedPayment payment); // TX3
-    void onFailed(Long payableId);                         // TX4: 실패 확정, 재고 반환
-    void onUnknown(Long payableId);                        // 결과 불명확: 자원 보호 상태로 전환
-    void onRefunded(Long payableId);                       // TX5: 환불 확정, 재고 복원
+    ApprovalDecision onApprovalStarting(Long payableId, PaymentAttemptContext attempt); // TX2: 예약 만료 검증, CONFIRMING 전환
+    ApprovalDecision onApproved(Long payableId, ApprovedPayment payment);              // TX3
+    void onFailed(Long payableId, PaymentAttemptContext attempt);    // TX4: 이 시도 실패 확정. 반환 여부는 도메인 정책
+    void onUnknown(Long payableId, PaymentAttemptContext attempt);   // 결과 불명확: 자원 보호 상태로 전환
+    void onRefunded(Long payableId, RefundContext refund);           // TX5: 환불 확정. 손님 환불/보상 취소 구분
 }
 ```
+
+시그니처는 4절 개정을 반영했다.
 
 정상 승인(TX3) 흐름:
 
@@ -60,6 +63,27 @@ public interface PaymentResultHandler {
 | 잠금 순서: 결제 행을 먼저, 도메인 행을 나중에 잠근다 | 데드락 방지 (FAIL-DR-11) |
 | 도메인 쪽 상태 변경도 조건부 전이로 멱등하게 만든다 | 중복 확정, 이중 반환 방지 (INV-11) |
 | 의존 방향은 도메인 → 결제 한 방향이다. 결제 모듈은 도메인 패키지를 import하지 않고, 등록된 Handler 빈을 `type()`으로 찾는다 | 순환 의존 방지, 모듈 경계 유지 |
+
+### 4. 개정: 시도 문맥과 환불 종류 (2026-11-12)
+
+배경: 처음 계약은 `onApproved`만 `paymentId`를 받았다. 실패 후 다시 결제하면 대상 하나에 시도가 여러 개 생기는데,
+나머지 메서드는 어느 시도의 결과인지 전달하지 못했다. 환불도 확정된 구매의 환불인지, 거절한 승인의 보상 취소인지 구분하지 못했다
+(`domains/ticketing/payment-handler.md`).
+
+| 결정 | 내용 |
+|---|---|
+| 시도 식별 | `payments` 행 하나가 시도 하나다. `payments.id`를 시도 ID로 쓰고 별도 시도 ID를 두지 않는다. 최종 실패 후 다시 결제하면 새 행과 새 ID가 생긴다 |
+| 시도 문맥 | 상태 변경 메서드는 모두 `PaymentAttemptContext(paymentId, approvalStartedAt)` 또는 그 값을 담은 `ApprovedPayment`를 받는다. 도메인은 승인 시작을 받아들인 시도가 아닌 결과로 자원을 바꾸지 않는다 |
+| 승인 시작 시각 | `payments.approval_started_at`에 READY → PROCESSING 전환 시각을 저장한다. PG 승인 시각(`approved_at`)과 다르다. 승인 전에 닫힌 시도는 null |
+| 기한 판정 | 기준은 도메인 정책이 정한다. 결제 모듈은 두 시각을 모두 전달한다. 드롭·티켓팅은 기한 안에 승인 시작을 받아들인 시도라면 늦게 확인된 승인도 확정한다. 팬미팅은 `approvedAt <= 기한`으로 판정한다 |
+| `onApprovalStarting` 기한 판정 | 도메인 행을 잠근 뒤 읽은 현재 시각으로 한다. `approvalStartedAt`은 잠금 대기 전 값이라 쓰지 않는다 |
+| 실패 처리 | `onFailed`는 무조건 자원 반환이 아니다. 기한이 남았으면 자원을 유지하고 다시 결제할 수 있게 할 수 있다 |
+| 환불 종류 | `RefundContext(paymentId, kind)`. `kind`는 `CUSTOMER_REFUND`, `COMPENSATION`이고 `payment_refunds.kind`에 저장한다 |
+
+중복 결과를 거르는 1차 방어선은 결제 모듈이다. 결제 행을 잠그고 조건부로 전이하며, 진행 중인 시도는 대상당 1건(UNIQUE)이다.
+도메인의 `paymentId` 확인은 2차 방어선이다. 이 확인은 승인을 확정한 시도를 기록하는 데도 쓴다.
+
+마이그레이션: `V20261112_1900__common_add_payment_attempt_context.sql`.
 
 ## 검토한 대안
 
