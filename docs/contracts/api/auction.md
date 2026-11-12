@@ -75,7 +75,24 @@ Content-Type: application/json
 
 - `extensionDurationSeconds`는 생략하면 60이고, 30 ~ 300만 받는다.
 - 응답: 201 `{ "auctionId": 12 }`
-- 수정(PATCH)은 같은 필드를 받는다.
+- 수정(PATCH)은 같은 필드를 **모두** 다시 받는다 (부분 수정 아님). 응답은 200과 상세 형식.
+- 삭제(DELETE)는 204, 본문 없음.
+
+## 목록
+
+`GET /api/auctions?status=OPEN&page=0&size=20` (`page`는 0부터, `size`는 1 ~ 100, 기본 20)
+
+```json
+{
+  "items": [
+    { "auctionId": 12, "title": "투어 사인 포스터 경매", "itemName": "사인 포스터", "status": "OPEN",
+      "startingPriceAmount": 10000, "startsAt": "2026-11-20T10:00:00Z", "endsAt": "2026-11-20T11:00:00Z" }
+  ],
+  "page": 0, "size": 20, "totalElements": 1, "totalPages": 1
+}
+```
+
+정렬: `OPEN`은 곧 끝나는 순, `SCHEDULED`는 곧 시작하는 순, `CLOSED`와 전체는 최근 순.
 
 ## 상세
 

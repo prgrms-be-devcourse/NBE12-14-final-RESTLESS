@@ -27,6 +27,9 @@ public enum ErrorCode {
     MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다."),
 
     // 경매, 크레딧
+    AUCTION_NOT_FOUND(HttpStatus.NOT_FOUND, "경매를 찾을 수 없습니다."),
+    AUCTION_FORBIDDEN(HttpStatus.FORBIDDEN, "이 경매를 변경할 권한이 없습니다."),
+    AUCTION_ALREADY_STARTED(HttpStatus.CONFLICT, "이미 시작된 경매는 수정하거나 삭제할 수 없습니다."),
     CREDIT_INSUFFICIENT(HttpStatus.CONFLICT, "사용 가능한 크레딧이 부족합니다.");
 
     private final HttpStatus httpStatus;
