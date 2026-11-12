@@ -102,3 +102,29 @@ MySQL Testcontainers에서 다음을 검증한다. 아래는 계획이며 실행
 - 결제 진행·결과 불명확 중 최초 선점 기한 경과: 좌석 유지.
 - 판매 확정·환불 완료 반복 처리: 포인터·티켓·카운터 일관성 유지.
 - 다른 좌석의 선점 포인터, 상태/NULL 불일치: 추가 DB 제약으로 거절.
+
+## 구현 현황: 회차별 판매 좌석 매핑
+
+- TicketSeat를 performance_seats에 매핑했다. performanceId/layoutId/venueSeatId/currentHoldId는 스칼라 ID 참조다.
+- price는 BIGINT에 맞춰 long, status는 TicketSeatStatus(AVAILABLE/HELD/SOLD)를 VARCHAR로 매핑한다. grade는 기존 VARCHAR(20) 문자열로 유지한다.
+- createAvailable은 AVAILABLE/current_hold_id=NULL인 신규 판매 좌석만 생성한다. 임의 상태 setter나 선점·판매·반환 메서드는 이번 단계에서 추가하지 않는다.
+- TicketSeatMappingTest는 MySQL Testcontainers/Flyway/ddl-auto=validate로 회차별 가격·등급·상태 저장과 조회, BIGINT 가격·0원 보존, 동일 회차 중복 좌석 거절을 검증한다.
+- 회차와 다른 배치, 배치에 없는 좌석, 음수 가격, 잘못된 상태/소유자 조합과 다른 좌석의 선점 포인터 거절을 검증한다.
+- HELD/SOLD 및 currentHoldId 읽기 검증은 예약·선점 엔티티로 이력을 생성하고 SQL fixture로 좌석 상태·포인터를 준비한다. 실제 선점·결제 전이 구현을 뜻하지 않는다.
+- 기존 Flyway·API·Repository는 변경하지 않는다. 조회 API·비관적 락·예약·선점 로직은 후속 구현이다.
+- 이번 매핑 추가 후 ./gradlew build 실행 성공. TicketSeatMappingTest 11개를 포함해 전체 172개 테스트가 통과했다.
+
+## 구현 현황: 좌석별 선점 이력 매핑
+
+- SeatHold를 seat_holds에 매핑했다. 예약·회차·판매 좌석은 Long 스칼라 ID, 가격 스냅샷은 long, 만료·생성·해제 시각은 UTC Instant다.
+- SeatHoldStatus는 HELD/CONFIRMED/RELEASED를 기존 VARCHAR(20)에 매핑한다. createHeld는 HELD/released_at=NULL로 생성한다.
+- 만료·생성 시각과 가격은 호출자가 전달한다. 기한 계산·회차/가격 검증·좌석 잠금·카운터 반영·이력 전이는 후속 application 구현 범위다.
+- 선점 엔티티 생성만으로 현재 소유권이 바뀌지 않는다. 실제 선점 서비스는 좌석 포인터 변경과 예약·카운터 변경을 같은 트랜잭션에서 수행해야 한다.
+- SeatHoldMappingTest는 MySQL Testcontainers/Flyway/ddl-auto=validate로 다중 좌석 이력·가격 스냅샷·UTC 마이크로초·NULL 해제 시각을 저장하고 영속성 컨텍스트를 비워 조회한다.
+- 기존 복합 FK로 예약·판매 좌석의 회차 불일치, CHECK로 음수 가격 거절을 검증한다. 후속 상태와 과거 이력 보존·현재 포인터 연결은 SQL fixture로 준비하여 매핑을 확인한다.
+- TicketSeatMappingTest도 구현된 예약·선점 엔티티를 사용하도록 fixture를 갱신했다. 실제 선점·해제 알고리즘을 테스트한 것은 아니다.
+- 기존 Flyway·공개 API·Repository는 변경하지 않는다.
+- ./gradlew build 실행으로 선점 이력 매핑 테스트 8개를 포함해 전체 200개 테스트가 통과했다.
+
+선점 이력의 내부 이름은 SeatHold/SeatHoldStatus/SeatHoldRepository로 통일하고 매핑 테스트는 SeatHoldMappingTest로 변경했다. 만료 스케줄러 골격도 SeatHoldExpirationScheduler로 맞췄다. DB seat_holds와 컬럼·제약은 유지한다. 멱등성 작업 코드 TICKET_HOLD는 엔티티명과 별도 계약이므로 유지한다.
+이름 통일 후 ./gradlew clean build를 실행해 전체 테스트 210개가 통과했다.

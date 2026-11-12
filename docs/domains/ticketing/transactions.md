@@ -141,3 +141,15 @@ AFTER_COMMIT 리스너가 결제 성공을 받아 핵심 예매 상태를 확정
 ## 10. 만료 계약
 
 승인 시도 유무와 최종 결과에 따른 좌석 반환, 승인 준비와의 경합은 [만료 설계](expiration.md)를 따른다. PAYMENT_PENDING이라는 예약 상태만으로 보호·반환을 판단하지 않는다.
+
+## 구현 현황: 예약 엔티티 매핑
+
+- TicketReservation을 ticket_reservations에 매핑했다. 사용자·회차·주문은 Long 스칼라 참조, 시각은 UTC Instant, 상태는 TicketReservationStatus의 VARCHAR 문자열이다.
+- createHeld는 신규 HELD 예약을 생성한다. orderId/checkoutStartedAt/paymentExpiresAt은 최초 생성 시 NULL이다.
+- 요청 키는 VARCHAR(100), holdRequestHash는 BINARY(32)에 맞춘다. 신규 생성은 32바이트 비교값을 요구하고 입력·반환 배열을 복사하여 외부 변형을 막는다. 기존 행의 NULL 해시는 조회 가능하다.
+- 선점 기한·생성 시각은 호출자가 전달한다. 5분 기한 계산·현재 시각 검증·요청 정규화/해시 계산은 후속 application 구현 범위다.
+- 사용자별 키와 order_id의 UNIQUE, 사용자·회차·주문 FK는 기존 Flyway를 그대로 사용한다. 새 마이그레이션은 없다.
+- TicketReservationMappingTest는 MySQL Testcontainers/Flyway/ddl-auto=validate로 실제 저장 후 영속성 컨텍스트를 비워 조회한다.
+- 결제 진입 필드·후속 상태는 SQL fixture로 준비해 매핑만 검증한다. 실제 checkout·승인·환불 전이와 활성 예약 1건 잠금 검증을 구현한 것은 아니다.
+- Repository·Controller·서비스·공통 결제 계약은 이번 단계에서 변경하지 않는다.
+- ./gradlew build 실행으로 예약 매핑 테스트 13개를 포함해 전체 192개 테스트가 통과했다. UTC 시각·해시·NULL 필드·저장된 결제 상태 조회, 사용자별 키/주문 중복 및 미존재 참조 거절을 확인했다.

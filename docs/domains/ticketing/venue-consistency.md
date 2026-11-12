@@ -101,3 +101,37 @@ WHERE c.layout_id <> p.layout_id;
 추가 배치는 기존 배치와 이력을 덮어쓰지 않도록 별도 배치/버전으로 등록한다. 초기 적재와 추가 등록의 구체적인 스크립트·절차는 후속 구현 대상이다.
 새 배치가 등록돼도 이미 예매 오픈된 회차의 배치를 교체할 수 없다.
 이번 변경은 정책 문서만 반영하며 초기 데이터 파일·적재 코드·마이그레이션은 추가하지 않는다.
+
+## 구현 현황: 공연장 기본 엔티티
+
+- concert 모듈에 Venue/venues, VenueSection/venue_sections, VenueSeat/venue_seats JPA 매핑을 구현했다.
+- 공연장·구역 관계는 venueId/sectionId 스칼라 ID로 참조한다. 실제 소속 일치는 기존 복합 FK가 최종 검증한다.
+- 기존 BIGINT IDENTITY, 문자열 길이·NOT NULL, 접근성 boolean, UTC created_at을 유지하며 마이그레이션은 변경하지 않는다.
+- status는 기존 VARCHAR 컬럼에 맞춰 문자열로 매핑한다. 새 상태값 집합이나 상태 변경 정책은 이번 단계에서 확정하지 않는다.
+- VenueMappingTest는 MySQL Testcontainers와 Flyway, ddl-auto=validate를 사용한다. 저장 후 영속성 컨텍스트를 비우고 조회하며 UTC 마이크로초·접근성 값을 확인한다.
+- 다른 공연장 구역 연결, 같은 공연장 내 구역 코드 중복, 같은 구역 내 좌석 위치 중복 거절까지 4개 테스트 실행을 확인했다.
+- 등록 API·서비스는 후속 단계다. 배치·회차 매핑은 아래 구현 현황을 참고한다.
+
+## 구현 현황: 배치 엔티티
+
+- VenueLayout/venue_layouts와 LayoutSeat/layout_seats를 JPA로 매핑했다. 기존 Flyway는 변경하지 않는다.
+- LayoutSeatId를 @Embeddable로 두고 (layout_id, venue_seat_id)를 @EmbeddedId로 매핑한다. 복합 키는 두 ID로 equals/hashCode를 구현하며 별도 자동 증가 ID는 만들지 않는다.
+- venueId 등 관계는 기존 단계와 같이 스칼라 ID로 참조한다. 배치·실제 좌석의 소속 일치는 DB 복합 FK로 검증한다.
+- 배치 version은 일반 버전 번호이며 JPA 낙관적 락의 @Version이 아니다.
+- published_at은 기존 NOT NULL DATETIME(6)에 맞춰 UTC Instant로 매핑한다. 좌표는 DECIMAL(10,2)에 맞춰 BigDecimal, 판매 가능 여부는 boolean으로 매핑한다.
+- 관리 status는 문자열로 유지한다. 테스트의 PUBLISHED 값은 예시이며 게시·수정·회차 선택 정책을 구현한 것은 아니다.
+- VenueLayoutMappingTest 5개로 영속성 컨텍스트 초기화 후 복합 키 조회, 배치 버전별 같은 물리 좌석 재사용, 좌표·표시명·판매 여부 보존, 서로 다른 공연장 연결 두 경로 거절, 배치 코드/버전 중복과 비양수 버전 거절을 확인했다.
+- 기존 VenueMappingTest와 함께 ./gradlew test --tests 'com.restless.concert.*' 실행으로 총 9개 테스트가 통과했다.
+
+## 구현 현황: 공연·회차 엔티티
+
+- Concert는 concerts, Performance는 performances에 매핑한다. 회차의 Java 이름을 Performance로 통일하고 Flyway 테이블명 performances는 유지한다.
+- 공연은 venueId/sellerId, 회차는 concertId/venueId/layoutId를 스칼라 ID로 참조한다. 소속 일치는 기존 복합 FK가 최종 검증한다.
+- BIGINT IDENTITY, NOT NULL, 문자열 길이, UTC Instant/DATETIME(6) 시각을 기존 스키마에 맞췄다. 신규 마이그레이션은 없다.
+- status는 문자열로 유지한다. 테스트의 SCHEDULED는 저장·조회 예시이며 상태값 집합을 새로 확정하지 않는다.
+- ConcertPerformanceMappingTest 8개는 저장 후 영속성 컨텍스트를 비우고 여러 회차를 조회하며, 생성·시작·예매 시각의 마이크로초를 확인한다.
+- 서로 다른 공연장 소속 공연/배치 연결과 잘못된 예매 기간·비양수 구매 한도가 기존 DB 제약으로 거절되는지 검증한다.
+- ./gradlew clean test --tests 'com.restless.concert.*' 실행으로 공연 도메인 테스트 총 17개가 통과했다. 최초 실행의 클래스 로딩 오류는 빌드 산출물 초기화 후 재실행에서 해소됐다.
+- 주최자 권한, 회차 등록 API, 오픈 후 배치 변경 제한의 서비스 처리, 판매 좌석·예매 로직은 이번 매핑 구현 범위가 아니다.
+
+회차 내부 명칭은 Performance/PerformanceRepository로 통일하고 테스트도 ConcertPerformanceMappingTest로 변경했다. DB performances 및 API /api/concert-sessions와 sessionId는 유지한다. 이름 변경 후 ./gradlew build 실행으로 전체 테스트 161개가 통과했다.

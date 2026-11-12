@@ -90,3 +90,9 @@ MVP에서는 배치를 초기 데이터로 등록하고, 미등록 배치는 별
 선점은 사용자별 request_key UNIQUE와 최초 요청 해시 비교로 성공한 요청을 재현한다. 다른 회차·좌석의 키 재사용은 충돌이다.
 checkout은 예약 잠금·기존 주문 참조로 중복 생성과 기한 연장을 막는다. 범용 사용자·작업별 키 충돌 계약은 MVP checkout에 적용하지 않는다.
 결제 키는 공통 계약과 후속 조율한다. [세부 규칙](../../domains/ticketing/idempotency.md)을 따른다.
+
+## 내부 회차 명칭
+
+Java 엔티티·Repository는 Performance/PerformanceRepository, DB 테이블은 performances로 통일한다.
+API 호환성을 위해 /api/concert-sessions 경로와 기존 sessionId 요청 필드는 그대로 유지한다.
+API의 sessionId는 내부 Performance의 ID로 해석한다.

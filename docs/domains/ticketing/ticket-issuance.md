@@ -2,7 +2,7 @@
 
 - 티켓번호: DECIDED (2026-11-12, 담당자 합의).
 - 중복 발급 방지 절차와 추가 제약: DECIDED (2026-11-12, 담당자 합의).
-- 구현 상태: 복합 UNIQUE를 새 Flyway 마이그레이션으로 추가했다. UUID 생성·잠금·멱등 처리 코드는 후속 구현 대상이다. DB 적용 여부는 환경별 Flyway 실행 결과로 확인한다.
+- 구현 상태: 복합 UNIQUE를 새 Flyway 마이그레이션으로 추가했다. Ticket 엔티티 매핑과 UUID v4 생성은 구현했다. 결제 확정 잠금·멱등 처리 코드는 후속 구현 대상이다. DB 적용 여부는 환경별 Flyway 실행 결과로 확인한다.
 
 ## 1. 티켓번호
 
@@ -72,3 +72,15 @@ UUID 번호 자체의 충돌은 발급 대상 중복과 구분하여 새 번호�
 - 취소 후 과거 성공 결과 도착: 재발급·상태 복구 없음.
 - 환불 후 새 예약의 동일 좌석 구매: 새 번호 발급, 기존 취소 이력 유지.
 - 동일 예약·좌석 중복 INSERT는 추가 UNIQUE로 거절. UUID 충돌은 별도로 거절.
+
+## 구현 현황: 발급 티켓 매핑
+
+- Ticket을 tickets에 매핑했다. 예약·회차·판매 좌석은 Long 스칼라 참조, 금액은 long, 발급·사용·취소 시각은 UTC Instant다.
+- Ticket.issue는 내부 BIGINT ID와 별도로 UUID.randomUUID().toString()의 소문자 하이픈 포함 v4 번호를 생성한다. ticketNo/issuedAt은 JPA에서 updatable=false이며 번호를 변경하는 setter는 제공하지 않는다.
+- usedAt/cancelledAt은 최초 발급 시 NULL이다. status는 기존 VARCHAR(20) 문자열로 매핑하고 호출자가 전달한다. ISSUED/USED/CANCELLED는 테스트 예시이며 허용 상태값 집합·입장/환불 정책은 아직 별도 정의 대상이다.
+- 기존 UNIQUE(ticket_no), UNIQUE(reservation_id, performance_seat_id), 회차 일치 복합 FK와 금액 CHECK를 사용한다. 새 마이그레이션은 없다.
+- TicketMappingTest는 MySQL Testcontainers/Flyway/ddl-auto=validate로 영속성 컨텍스트를 비운 뒤 저장 결과를 조회한다.
+- UUID 버전·형식·번호 보존, 다중 좌석의 서로 다른 번호, 동일 발급 대상 중복·의도적 번호 충돌, 예약/판매 좌석의 회차 불일치·음수 금액 거절을 검증한다.
+- 사용·취소 시각 및 새 예약 발급 시 과거 취소 티켓/번호 보존은 SQL fixture로 준비해 읽기와 제약을 검증한다. 실제 결제·환불·입장·재판매 로직을 구현한 것은 아니다.
+- 이 엔티티만 생성해도 예약 확정·좌석 SOLD·카운터 변경이 일어나지는 않는다. 후속 결제 확정 트랜잭션에서 함께 처리해야 한다.
+- ./gradlew build 실행으로 발급 티켓 매핑 테스트 10개를 포함해 전체 210개 테스트가 통과했다.
