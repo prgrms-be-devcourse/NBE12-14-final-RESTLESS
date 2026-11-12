@@ -7,7 +7,8 @@
 
 | Method | Endpoint | 기능 |
 |---|---|---|
-| GET | `/api/concerts/{concertId}/sessions` | 공연 회차 목록 |
+| GET | `/api/concerts/{concertId}` | 공연 상세 |
+| GET | `/api/concerts/{concertId}/performances` | 공연 회차 목록 |
 | GET | `/api/performances/{performanceId}/seats` | 회차별 좌석 상태 (3초 폴링) |
 | POST | `/api/ticket-reservations` | 좌석 선점 (`Idempotency-Key`) |
 | GET | `/api/ticket-reservations/{reservationId}` | 예약 상세 |
@@ -16,6 +17,49 @@
 | POST | `/api/ticket-reservations/{reservationId}/checkout` | 결제 시작 |
 | POST | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 요청 |
 | GET | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 상태 조회 |
+
+## 공연 상세·회차 목록 조회
+
+두 API는 비로그인 조회를 허용한다. 좌석 화면 진입부터 로그인이 필요하다.
+
+`GET /api/concerts/{concertId}`는 공연 상세를 `200 OK`로 반환한다.
+
+```json
+{
+  "concertId": 1,
+  "venueId": 10,
+  "title": "RESTLESS 공연",
+  "status": "SCHEDULED",
+  "createdAt": "2026-11-13T01:00:00Z"
+}
+```
+
+`GET /api/concerts/{concertId}/performances`는 해당 공연의 회차만 시작 시각 오름차순으로 반환한다.
+응답의 performanceId로 `/api/performances/{performanceId}/seats`를 호출할 수 있다.
+
+```json
+[
+  {
+    "performanceId": 100,
+    "concertId": 1,
+    "venueId": 10,
+    "layoutId": 20,
+    "startsAt": "2026-11-20T10:00:00Z",
+    "bookingOpensAt": "2026-11-13T02:00:00Z",
+    "bookingClosesAt": "2026-11-20T09:00:00Z",
+    "maxTicketsPerUser": 3,
+    "status": "SCHEDULED"
+  }
+]
+```
+
+- 존재하는 공연에 회차가 없으면 `200 OK`와 빈 배열을 반환한다. 없는 공연은 상세·목록 모두 `404 NOT_FOUND`다.
+- concertId가 양수가 아니거나 Long으로 변환할 수 없으면 `400 INVALID_REQUEST`다.
+- 시각은 UTC Instant로 반환한다. 공연장 이름·주소, 소개·포스터 등은 현재 상세 응답에 포함하지 않는다.
+- 상태값은 저장된 문자열을 반환한다. 예시의 SCHEDULED가 허용 상태 집합을 정의하지 않으며, 게시·공개 상태별 필터는 정책 확정 후 적용한다.
+- 회차 목록의 기존 문서 경로 `/api/concerts/{concertId}/sessions`는 내부·API 회차 명칭 통일에 따라 `/performances`로 변경하며 별도 호환 경로는 제공하지 않는다.
+- 서비스 조회 결과 DTO인 ConcertDetail·PerformanceInfo는 concert/application/dto에 둔다. Controller는 엔티티를 노출하지 않고 해당 DTO를 반환한다.
+- ConcertPerformanceMappingTest의 기존 준비 데이터를 재사용해 비로그인 상세·회차 조회, 공연별 회차 분리·시작 시각 정렬 및 두 API의 없는 공연 404 검증을 작성했으며 아직 실행하지 않았다.
 
 ## 회차별 좌석 조회
 

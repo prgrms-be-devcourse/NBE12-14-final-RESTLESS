@@ -2,11 +2,15 @@ package com.restless.concert.application;
 
 import com.restless.common.error.BusinessException;
 import com.restless.concert.application.dto.BookingPerformance;
+import com.restless.concert.application.dto.ConcertDetail;
+import com.restless.concert.application.dto.PerformanceInfo;
 import com.restless.concert.application.dto.PerformanceLayout;
 import com.restless.concert.application.dto.SeatPosition;
 import com.restless.common.error.ErrorCode;
+import com.restless.concert.domain.Concert;
 import com.restless.concert.domain.Performance;
 import com.restless.concert.infrastructure.LayoutSeatRepository;
+import com.restless.concert.infrastructure.ConcertRepository;
 import com.restless.concert.infrastructure.PerformanceRepository;
 import java.util.List;
 import java.util.Set;
@@ -21,6 +25,33 @@ public class ConcertQueryService {
 
     private final PerformanceRepository performanceRepository;
     private final LayoutSeatRepository layoutSeatRepository;
+    private final ConcertRepository concertRepository;
+
+    @Transactional(readOnly = true)
+    public ConcertDetail getDetail(Long concertId) {
+        Concert concert = getConcert(concertId);
+        return new ConcertDetail(concert.getId(), concert.getVenueId(), concert.getTitle(), concert.getStatus(),
+                concert.getCreatedAt());
+    }
+
+    @Transactional(readOnly = true)
+    public List<PerformanceInfo> getPerformances(Long concertId) {
+        getConcert(concertId);
+        return performanceRepository.findAllByConcertIdOrderByStartsAtAsc(concertId).stream()
+                .map(performance -> new PerformanceInfo(performance.getId(), performance.getConcertId(),
+                        performance.getVenueId(), performance.getLayoutId(), performance.getStartsAt(),
+                        performance.getBookingOpensAt(), performance.getBookingClosesAt(),
+                        performance.getMaxTicketsPerUser(), performance.getStatus()))
+                .toList();
+    }
+
+    private Concert getConcert(Long concertId) {
+        if (concertId == null || concertId <= 0) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        }
+        return concertRepository.findById(concertId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연을 찾을 수 없습니다."));
+    }
 
     @Transactional(readOnly = true)
     public PerformanceLayout getPerformanceLayout(Long performanceId) {
@@ -45,6 +76,4 @@ public class ConcertQueryService {
         return new BookingPerformance(performance.getLayoutId(), performance.getBookingOpensAt(),
                 performance.getBookingClosesAt(), performance.getMaxTicketsPerUser(), sellableSeatIds);
     }
-
-
 }

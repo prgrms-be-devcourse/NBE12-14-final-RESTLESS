@@ -492,7 +492,8 @@ flowchart LR
   
   | Method | Endpoint                                      | 설명        |
   | ------ | --------------------------------------------- | --------- |
-  | GET    | `/api/concerts/{id}/sessions`                 | 공연 회차 목록  |
+  | GET    | `/api/concerts/{concertId}`                 | 공연 상세  |
+  | GET    | `/api/concerts/{concertId}/performances`     | 공연 회차 목록  |
   | GET    | `/api/performances/{performanceId}/seats`            | 회차별 좌석 상태 (로그인 필수) |
   | POST   | `/api/ticket-reservations`                    | 좌석 선점     |
   | GET    | `/api/ticket-reservations/{id}`               | 예약 상세 조회  |
