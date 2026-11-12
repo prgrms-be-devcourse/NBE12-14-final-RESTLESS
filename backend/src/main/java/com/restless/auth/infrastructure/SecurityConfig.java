@@ -1,5 +1,6 @@
 package com.restless.auth.infrastructure;
 
+import java.time.Clock;
 import java.util.List;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -18,6 +19,7 @@ import org.springframework.security.oauth2.server.resource.web.DefaultBearerToke
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * 인증 규칙.
@@ -50,8 +52,9 @@ public class SecurityConfig implements WebMvcConfigurer {
     };
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        JsonSecurityErrorHandler errorHandler = new JsonSecurityErrorHandler();
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, JsonMapper jsonMapper, Clock clock)
+            throws Exception {
+        JsonSecurityErrorHandler errorHandler = new JsonSecurityErrorHandler(jsonMapper, clock);
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)

@@ -24,6 +24,25 @@
 - **로그인 회원 ID**: 컨트롤러 파라미터에 `@LoginMember Long userId`를 쓴다. 요청 본문으로 회원 ID를 받지 않는다.
 - **현재 시각**: `Instant.now()` 대신 `Clock`을 주입받아 `clock.instant()`로 읽는다(`common/config/ClockConfig`). 테스트에서 시각을 바꿀 수 있다.
 
+## 오류 응답 규칙
+
+- **형식**: 모든 오류는 `{code, message, details, traceId, timestamp}`([README 공통 규칙 3](README.md)). 필터 단계의 401, 403도 같다. 성공 응답은 감싸지 않는다.
+- **도메인 오류**: `ErrorCode`(한 파일)에 `도메인_상황` 이름으로 추가하고 `throw new BusinessException(ErrorCode.X)`. 추가 정보는 `new BusinessException(ErrorCode.X, Map.of("seatIds", ids))`처럼 `details`로 준다. 없으면 `details`는 null.
+- **traceId**: 요청마다 서버가 만들어 응답 헤더 `X-Trace-Id`와 로그 줄(`[traceId]`)에 넣는다. 오류를 전달받으면 이 값으로 서버 로그를 찾는다.
+- **공통 처리**:
+
+| 상황 | 상태 | code | details |
+|---|---|---|---|
+| 입력 검증 실패 | 400 | `INVALID_REQUEST` | `fields`: 필드별 메시지 |
+| 필수 헤더 누락 (`Idempotency-Key` 등) | 400 | `INVALID_REQUEST` | `header`: 헤더 이름 |
+| 필수 쿼리 값 누락 | 400 | `INVALID_REQUEST` | `parameter`: 값 이름 |
+| 본문 해석 불가, 타입 불일치 | 400 | `INVALID_REQUEST` | |
+| 없는 경로 | 404 | `NOT_FOUND` | |
+| 지원하지 않는 메서드 | 405 | `METHOD_NOT_ALLOWED` | |
+| 업로드 크기 초과 | 413 | `FILE_SIZE_EXCEEDED` | |
+| 지원하지 않는 Content-Type | 415 | `UNSUPPORTED_MEDIA_TYPE` | |
+| 그 밖의 예외 | 500 | `INTERNAL_ERROR` | (로그에 스택과 traceId) |
+
 ## 공연
 
 | Method | Endpoint | 기능 |
