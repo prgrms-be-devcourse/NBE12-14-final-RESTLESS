@@ -1,4 +1,4 @@
-package com.restless.auction.domain;
+package com.restless.credit.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

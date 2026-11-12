@@ -1,11 +1,11 @@
-package com.restless.auction;
+package com.restless.credit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.restless.auction.domain.CreditHold;
-import com.restless.auction.domain.CreditHoldStatus;
-import com.restless.auction.domain.CreditWallet;
+import com.restless.credit.domain.CreditHold;
+import com.restless.credit.domain.CreditHoldStatus;
+import com.restless.credit.domain.CreditWallet;
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
 import java.lang.reflect.Constructor;

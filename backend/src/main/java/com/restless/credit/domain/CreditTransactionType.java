@@ -1,4 +1,4 @@
-package com.restless.auction.domain;
+package com.restless.credit.domain;
 
 /** 크레딧 변동 종류. docs/domains/auction/state-machines.md 5절. */
 public enum CreditTransactionType {

@@ -1,6 +1,6 @@
-package com.restless.auction.infrastructure;
+package com.restless.credit.infrastructure;
 
-import com.restless.auction.domain.CreditWallet;
+import com.restless.credit.domain.CreditWallet;
 import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
 import java.util.Collection;

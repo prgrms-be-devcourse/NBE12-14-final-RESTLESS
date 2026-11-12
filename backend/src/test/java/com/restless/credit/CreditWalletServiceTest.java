@@ -1,11 +1,11 @@
-package com.restless.auction;
+package com.restless.credit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.restless.TestcontainersConfiguration;
-import com.restless.auction.application.CreditWalletService;
-import com.restless.auction.application.CreditWalletService.WalletView;
+import com.restless.credit.application.CreditWalletService;
+import com.restless.credit.application.CreditWalletService.WalletView;
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
 import java.sql.Timestamp;

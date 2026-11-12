@@ -1,7 +1,7 @@
-package com.restless.auction.api;
+package com.restless.credit.api;
 
-import com.restless.auction.application.CreditWalletService;
-import com.restless.auction.application.CreditWalletService.WalletView;
+import com.restless.credit.application.CreditWalletService;
+import com.restless.credit.application.CreditWalletService.WalletView;
 import com.restless.auth.LoginMember;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;

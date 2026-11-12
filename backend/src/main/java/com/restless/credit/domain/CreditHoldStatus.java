@@ -1,4 +1,4 @@
-package com.restless.auction.domain;
+package com.restless.credit.domain;
 
 /** 입찰 하나에 묶인 크레딧의 상태. RELEASED, CAPTURED는 끝 상태다. */
 public enum CreditHoldStatus {

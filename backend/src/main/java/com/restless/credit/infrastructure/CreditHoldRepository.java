@@ -1,6 +1,6 @@
-package com.restless.auction.infrastructure;
+package com.restless.credit.infrastructure;
 
-import com.restless.auction.domain.CreditHold;
+import com.restless.credit.domain.CreditHold;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 

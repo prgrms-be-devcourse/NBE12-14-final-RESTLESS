@@ -1,4 +1,4 @@
-package com.restless.auction.domain;
+package com.restless.credit.domain;
 
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
