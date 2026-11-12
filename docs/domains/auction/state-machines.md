@@ -34,14 +34,16 @@ HIGHEST → WON         (최고 입찰인 채로 경매 종료)
 | `OUTBID` | 그 경매에 `bid_sequence`가 더 큰 입찰이 있다 (확보는 `RELEASED`) |
 | `WON` | `auction_results.winning_bid_id` = 이 입찰 |
 
-같은 회원이 한 경매에 여러 번 입찰할 수 있다 (추월당한 뒤 다시 입찰). 내 입찰 조회(`GET /api/me/bids`)는 경매별로 내 마지막 입찰의 상태를 보여 주며, 종료된 경매에서 낙찰되지 못한 경우는 `OUTBID` 대신 `LOST`로 표시한다.
+같은 회원이 한 경매에 여러 번 입찰할 수 있다 (추월당한 뒤 다시 입찰). 내 입찰 조회(`GET /api/me/bids`)는 경매별로 내 마지막 입찰의 상태를 경매 상태와 함께 보여 준다. 종료된 경매에서 낙찰되지 못한 입찰은 `OUTBID`이며, 화면은 경매 상태 `CLOSED` + `OUTBID`를 "낙찰 실패"로 표시한다.
+
+입찰 상태는 원본 명세(design.md 9절)의 세 가지(최고 입찰, 추월됨, 낙찰됨)만 쓴다. 입찰 상태 `WON`(이 입찰이 낙찰됨)과 경매 결과 `SOLD`(이 경매가 팔림)는 주어가 달라 이름을 구분한다.
 
 ## 3. 경매 결과 (`auction_results.result_type`)
 
 | 값 | 뜻 | `winning_bid_id` |
 |---|---|---|
-| `WON` | 최고 입찰자가 낙찰 | 낙찰 입찰 ID (필수) |
-| `NO_BID` | 입찰 없이 종료, 미낙찰 | NULL |
+| `SOLD` | 낙찰: 최고 입찰자가 낙찰받음 | 낙찰 입찰 ID (필수) |
+| `UNSOLD` | 유찰: 입찰 없이 종료 | NULL |
 
 결과는 경매가 `CLOSED`가 될 때 한 번만 만들어지고 바뀌지 않는다.
 
@@ -69,7 +71,7 @@ HELD → CAPTURED       (해당 입찰이 낙찰됨, 보유액에서 차감)
 |---|---|---|---|
 | `SCHEDULED` | 없음 | 입찰 없음 | 입찰 없음 |
 | `OPEN` | 없음 | `HELD` (입찰이 있으면) | 모두 `RELEASED` |
-| `CLOSED` | `WON` | `CAPTURED` | 모두 `RELEASED` |
-| `CLOSED` | `NO_BID` | 입찰 없음 | 입찰 없음 |
+| `CLOSED` | `SOLD` | `CAPTURED` | 모두 `RELEASED` |
+| `CLOSED` | `UNSOLD` | 입찰 없음 | 입찰 없음 |
 
 이 표에 없는 조합은 버그다. 동시성 테스트 끝에 확인한다 ([invariants.md](invariants.md)).

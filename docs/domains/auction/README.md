@@ -22,8 +22,8 @@ flowchart LR
     B -->|입찰 수락| C["크레딧 확보 · 이전 최고 해제 · 종료 시각 연장"]
     C --> B
     B -->|ends_at| D{"입찰 있음?"}
-    D -->|예| E["낙찰 WON · 크레딧 차감"]
-    D -->|아니요| F["미낙찰 NO_BID"]
+    D -->|예| E["낙찰 SOLD · 크레딧 차감"]
+    D -->|아니요| F["유찰 UNSOLD"]
 ```
 
 ## 테이블
@@ -32,7 +32,7 @@ flowchart LR
 |---|---|
 | `auctions` | 판매자, 물품, 가격 조건, 일정, 상태, `revision`. 입찰과 종료의 잠금 기준 행 |
 | `auction_bids` | 수락된 입찰 전체. `bid_sequence`가 가장 큰 입찰이 현재 최고 입찰 |
-| `auction_results` | 경매당 결과 하나 (`WON` / `NO_BID`) |
+| `auction_results` | 경매당 결과 하나 (`SOLD` 낙찰 / `UNSOLD` 유찰) |
 | `credit_wallets` | 회원당 지갑 하나. 보유액, 묶인 금액 |
 | `credit_holds` | 입찰 하나에 묶인 크레딧 (`HELD` / `RELEASED` / `CAPTURED`) |
 | `credit_transactions` | 크레딧 변동 내역 |

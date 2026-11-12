@@ -15,13 +15,13 @@ ALTER TABLE auction_bids
     ADD CONSTRAINT uk_auction_bids_bidder_request_key UNIQUE (bidder_user_id, request_key),
     DROP INDEX uk_auction_bids_request_key;
 
--- 결과: 미낙찰(NO_BID)도 결과 행으로 남긴다. WON이면 낙찰 입찰이 있고, NO_BID면 없다 (INV-AU-02)
+-- 결과: 유찰(UNSOLD)도 결과 행으로 남긴다. 낙찰(SOLD)이면 낙찰 입찰이 있고, UNSOLD면 없다 (INV-AU-02)
 ALTER TABLE auction_results
     MODIFY COLUMN winning_bid_id BIGINT NULL,
     ADD COLUMN result_type VARCHAR(20) NOT NULL AFTER auction_id,
     ADD CONSTRAINT ck_auction_results_result_type CHECK (
-        (result_type = 'WON' AND winning_bid_id IS NOT NULL)
-        OR (result_type = 'NO_BID' AND winning_bid_id IS NULL));
+        (result_type = 'SOLD' AND winning_bid_id IS NOT NULL)
+        OR (result_type = 'UNSOLD' AND winning_bid_id IS NULL));
 
 -- 지갑: 사용 가능 크레딧(balance - reserved)은 음수가 될 수 없다 (INV-AU-06)
 ALTER TABLE credit_wallets

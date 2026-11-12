@@ -104,24 +104,24 @@ class AuctionSchemaConstraintTest {
             .isInstanceOf(DataAccessException.class).hasMessageContaining("uk_auction_bids_bidder_request_key");
     }
 
-    @Test void 결과는_WON이면_입찰이_있고_NO_BID면_없다_INV_AU_02() {
+    @Test void 결과는_SOLD면_입찰이_있고_UNSOLD면_없다_INV_AU_02() {
         Long noBid = auction("CLOSED", 60);
-        jdbc.update("INSERT INTO auction_results (auction_id, result_type, winning_bid_id, finalized_at) VALUES (?, 'NO_BID', NULL, ?)", noBid, T);
+        jdbc.update("INSERT INTO auction_results (auction_id, result_type, winning_bid_id, finalized_at) VALUES (?, 'UNSOLD', NULL, ?)", noBid, T);
 
         Long won = auction("CLOSED", 60);
         Long bidId = bid(won, bidderId, 1, "won-key");
-        jdbc.update("INSERT INTO auction_results (auction_id, result_type, winning_bid_id, finalized_at) VALUES (?, 'WON', ?, ?)", won, bidId, T);
+        jdbc.update("INSERT INTO auction_results (auction_id, result_type, winning_bid_id, finalized_at) VALUES (?, 'SOLD', ?, ?)", won, bidId, T);
 
         Long broken = auction("CLOSED", 60);
         Long brokenBid = bid(broken, bidderId, 1, "broken-key");
         assertThatThrownBy(() -> jdbc.update(
-            "INSERT INTO auction_results (auction_id, result_type, winning_bid_id, finalized_at) VALUES (?, 'WON', NULL, ?)", broken, T))
+            "INSERT INTO auction_results (auction_id, result_type, winning_bid_id, finalized_at) VALUES (?, 'SOLD', NULL, ?)", broken, T))
             .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_auction_results_result_type");
         assertThatThrownBy(() -> jdbc.update(
-            "INSERT INTO auction_results (auction_id, result_type, winning_bid_id, finalized_at) VALUES (?, 'NO_BID', ?, ?)", broken, brokenBid, T))
+            "INSERT INTO auction_results (auction_id, result_type, winning_bid_id, finalized_at) VALUES (?, 'UNSOLD', ?, ?)", broken, brokenBid, T))
             .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_auction_results_result_type");
         assertThatThrownBy(() -> jdbc.update(
-            "INSERT INTO auction_results (auction_id, result_type, winning_bid_id, finalized_at) VALUES (?, 'NO_BID', NULL, ?)", noBid, T))
+            "INSERT INTO auction_results (auction_id, result_type, winning_bid_id, finalized_at) VALUES (?, 'UNSOLD', NULL, ?)", noBid, T))
             .isInstanceOf(DataAccessException.class);
     }
 

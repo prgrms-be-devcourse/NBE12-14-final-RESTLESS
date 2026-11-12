@@ -66,8 +66,8 @@ WHERE auction_id = ? AND status = 'SCHEDULED'
 2. 이미 `CLOSED`면 끝낸다 (다른 실행이 처리함)
 3. `ends_at`을 다시 확인한다. 그사이 연장돼 `지금 < ends_at`이면 끝낸다
 4. 최고 입찰을 찾는다
-   - **없으면:** 결과 `NO_BID` 저장
-   - **있으면:** 낙찰자 지갑 `FOR UPDATE` → 확보 `CAPTURED` → 지갑 `balance −= 금액`, `reserved −= 금액` → 내역 `CAPTURE` → 결과 `WON` 저장
+   - **없으면:** 결과 `UNSOLD`(유찰) 저장
+   - **있으면:** 낙찰자 지갑 `FOR UPDATE` → 확보 `CAPTURED` → 지갑 `balance −= 금액`, `reserved −= 금액` → 내역 `CAPTURE` → 결과 `SOLD`(낙찰) 저장
 5. 경매 `CLOSED`, `closed_at = 지금`, `revision += 1`
 6. 커밋 → `AuctionChangedEvent` 발행
 

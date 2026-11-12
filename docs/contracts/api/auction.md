@@ -24,11 +24,11 @@
 | Method | Endpoint | 기능 |
 |---|---|---|
 | POST | `/api/auctions/{auctionId}/bids` | 입찰. `Idempotency-Key` 헤더 필수 |
-| GET | `/api/me/bids?status=` | 내가 참여한 경매별 마지막 입찰과 상태(`HIGHEST`, `OUTBID`, `WON`, `LOST`) |
+| GET | `/api/me/bids?status=` | 내가 참여한 경매별 마지막 입찰, 입찰 상태(`HIGHEST`, `OUTBID`, `WON`), 경매 상태 |
 | GET | `/api/me/wallet` | 보유, 묶인, 사용 가능 크레딧 |
 | POST | `/api/me/wallet/grants` | 테스트용 10,000 지급. 운영(prod)에서는 없음 |
 
-`LOST`는 종료된 경매에서 내 마지막 입찰이 낙찰되지 않은 경우다.
+종료된 경매(`CLOSED`)에서 낙찰되지 못한 입찰은 `OUTBID`다. 화면은 이를 "낙찰 실패"로 표시한다.
 
 ### 테스트용 크레딧 지급
 
@@ -177,7 +177,7 @@ data: {"auctionId":12,"status":"OPEN","revision":15,
 ```
 
 - `id`는 `revision`이다. 클라이언트는 받은 `revision`보다 작거나 같은 메시지를 무시한다.
-- 종료되면 `status`가 `CLOSED`이고 `result`에 `{ "type": "WON", "winnerNickname": "...", "amount": 60000 }` 또는 `{ "type": "NO_BID" }`가 온다.
+- 종료되면 `status`가 `CLOSED`이고 `result`에 `{ "type": "SOLD", "winnerNickname": "...", "amount": 60000 }`(낙찰) 또는 `{ "type": "UNSOLD" }`(유찰)가 온다.
 - 연결이 끊기면 상세 API로 최신 상태를 받은 뒤 다시 연결한다.
 - 토큰은 연결할 때만 검사한다. 연결 중에 Access Token이 만료돼도 열린 연결은 유지되고, 다시 연결할 때는 유효한 토큰이 필요하다.
 

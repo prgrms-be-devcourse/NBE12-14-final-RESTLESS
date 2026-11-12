@@ -84,7 +84,7 @@ HAVING w.balance_amount <> COALESCE(SUM(t.balance_delta), 0)
 |---|---|
 | `credit_wallets` CHECK `reserved_amount <= balance_amount` | INV-AU-06 |
 | `auction_bids` UNIQUE를 `(request_key)`에서 `(bidder_user_id, request_key)`로 변경 | INV-AU-12 |
-| `auction_results.winning_bid_id` NULL 허용, `result_type` 추가, `WON`이면 입찰 있음·`NO_BID`면 없음 CHECK | INV-AU-02 |
+| `auction_results.winning_bid_id` NULL 허용, `result_type` 추가, `SOLD`면 입찰 있음·`UNSOLD`면 없음 CHECK | INV-AU-02 |
 | `auctions` `extension_duration_seconds` CHECK 30 ~ 300 | 정책 4절 |
 | `auctions.status`, `credit_holds.status`, `credit_transactions.transaction_type`, `auction_results.result_type` 값 CHECK | 상태 오기입 방지 |
 | `auctions` 인덱스 `(status, starts_at)`, `(status, ends_at)` | 스케줄러 조회 |
