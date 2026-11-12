@@ -97,7 +97,7 @@ erDiagram
 | `users.role` 이름 (문서마다 USER, FAN, SELLER, ORGANIZER, ADMIN이 다름) | 전체 |
 | `orders.order_type` 값과 티켓팅 사용 여부 | 티켓팅, 공통 결제 |
 | ~~`payments.payment_key`가 NOT NULL인데, 승인 전(READY)에도 값이 있는지~~ 결정: NULL 허용, 승인 시작 때 채움 ([ADR-0003](../decisions/0003-payment-module-boundary.md)) | 공통 결제 |
-| `auction_results.winning_bid_id`가 NOT NULL인데, 유찰을 결과 행으로 남기는지 | 경매 |
+| ~~`auction_results.winning_bid_id`가 NOT NULL인데, 유찰을 결과 행으로 남기는지~~ 결정: 미낙찰도 결과 행으로 남김. `result_type`(`WON`/`NO_BID`) 추가, `winning_bid_id` NULL 허용 (`V20261112_1045`) | 경매 |
 | 경매 입장 자격(`access_policy`, `required_performance_id`)을 티켓팅의 어떤 상태로 판단하는지 | 경매, 티켓팅 |
 | 크레딧을 공통 모듈로 둘지 경매가 소유할지, 드롭 구매에도 쓰는지 | 경매, 드롭, 공통 |
 | ~~팬미팅 결제(`fan_meeting_orders.payment_id`)를 공통 `payments`와 어떻게 연결하는지~~ 결정: `payments.(payable_type, payable_id)`로 연결, 물리 FK 없음 ([ADR-0003](../decisions/0003-payment-module-boundary.md)) | 팬미팅, 공통 결제 |
