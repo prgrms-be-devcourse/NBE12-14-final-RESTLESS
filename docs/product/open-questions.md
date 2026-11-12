@@ -9,6 +9,11 @@ AI는 아래 항목을 임의로 확정하지 않는다. 구현에 영향을 주
 | Gradle 단일 모듈 최종 합의 | 팀 확인 |
 | ID 타입 | BIGINT AUTO_INCREMENT로 결정 ([ADR-0002](../decisions/0002-common-conventions.md)) |
 | 공통 Order, Payment 테이블 스키마 | 결제 대상 식별과 결과 전달은 [ADR-0003](../decisions/0003-payment-module-boundary.md)으로 결정. 공통 Order, Payment 전체를 결제 담당이 맡는다. 컬럼 상세는 새 마이그레이션 PR에서 확정 |
+| 티켓팅 결제 기한 인정 기준 | DECIDED: 기한 내 서버의 유효 승인 시도 기록·커밋. 늦은 성공 확인도 확정 ([상세](../domains/ticketing/transactions.md)) |
+| 티켓팅 불명확 결제 운영 전환 | DECIDED: 최초 불명확 진입 후 5분이면 운영 확인 등록·알림, 자동 조회와 좌석 보호 지속 ([상세](../domains/ticketing/transactions.md)) |
+| 티켓팅 멱등성 | DEFERRED: 전용 테이블·실행권·접수 작업 자동 인계. 설계는 보존. MVP 선점은 사용자별 키 UNIQUE+요청 해시, checkout은 예약 기준 중복 방지로 확정. 결제 키는 공통 담당자와 조율. PG 불명확 결과 재확인은 유지 ([상세](../domains/ticketing/idempotency.md)) |
+| 티켓팅 결제 시도 식별 | DECIDED: payments.id를 모든 상태 변경 Handler에 전달. DTO·기록 시각·저장 구조는 공통 담당자와 조율 ([상세](../domains/ticketing/payment-handler.md)) |
+| 티켓팅·공통 결제 복구 계약 | 승인 시도 스키마, 전체 잠금 순서, 조회 간격·운영 담당·알림 채널, 미완료 시도 탐지, 안전한 재실행·최종 실패 조건 합의 필요 |
 | Drop과 Concert 연결의 필수 여부 | 팀 확인 |
 | 예약 TTL (초기 제안 5분) | PG UX 고려 후 확정 |
 | 구매권 TTL | 미확정 |
@@ -18,7 +23,9 @@ AI는 아래 항목을 임의로 확정하지 않는다. 구현에 영향을 주
 | 판매 시작 직전 대기열 허용 여부 | 정책 확인 |
 | 회원, 주최자 권한 범위 | 팀 확인 |
 | 쿠폰의 드롭 결제 할인 연결 | 후순위 협의 |
-| 운영자 등록 화면의 실제 권한 | 팀 확인 |
+| 공연장·좌석 배치 등록/선택 | DECIDED: 배치는 초기 데이터로 운영자 등록. 미등록 배치는 화면 없이 자료 전달·검토 후 등록. 주최자는 등록 배치 선택, 예매 오픈 이후 변경 금지 ([상세](../domains/ticketing/venue-consistency.md)) |
+| 운영자 등록 화면의 실제 권한 | MVP 배치 관리자 화면은 제외. 초기 적재·추가 등록 절차, 공연장 등록 수단과 공통 역할 enum 매핑은 팀 확인 |
+| 미등록 배치와 배치 버전 정책 | 자료 전달·검토 후 등록은 확정. 전달 채널·담당자, 오픈 전 교체 조건, 게시 배치 불변 버전은 후속 합의 |
 | Spring 이벤트 후속 기능 선정 | 팀 확인 |
 | 프론트엔드 정적 배포 가능 여부 | 저장소 확인 |
 | Outbox/Kafka 채택 | [ADR-0001](../decisions/0001-event-handling.md) 재검토 조건에 따름 |

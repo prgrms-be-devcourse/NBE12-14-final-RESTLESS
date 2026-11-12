@@ -13,7 +13,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-/** 회원. DB 테이블 이름은 users다. 프로필 수정, 탈퇴는 회원 기능 작업에서 추가한다. */
+/** 회원. DB 테이블 이름은 users다. 탈퇴하면 행은 남기고 status와 deleted_at만 바꾼다. */
 @Entity
 @Table(name = "users")
 @Getter
@@ -76,5 +76,34 @@ public class Member {
 
     public boolean isActive() {
         return status == MemberStatus.ACTIVE;
+    }
+
+    /**
+     * 프로필을 바꾼다. null인 값은 그대로 두고, 기본 배송지에 빈 문자열이 오면 그 값을 지운다.
+     */
+    public void updateProfile(String nickname, String defaultRecipient, String defaultPhone, String defaultAddress,
+                              Instant now) {
+        if (nickname != null) {
+            this.nickname = nickname.strip();
+        }
+        this.defaultRecipient = merge(this.defaultRecipient, defaultRecipient);
+        this.defaultPhone = merge(this.defaultPhone, defaultPhone);
+        this.defaultAddress = merge(this.defaultAddress, defaultAddress);
+        this.updatedAt = now;
+    }
+
+    /** 탈퇴. 행은 지우지 않는다. status와 deleted_at은 DB CHECK(ck_users_deleted_at)로 함께 맞춘다. */
+    public void withdraw(Instant now) {
+        this.status = MemberStatus.WITHDRAWN;
+        this.deletedAt = now;
+        this.updatedAt = now;
+    }
+
+    private static String merge(String current, String requested) {
+        if (requested == null) {
+            return current;
+        }
+        String value = requested.strip();
+        return value.isEmpty() ? null : value;
     }
 }

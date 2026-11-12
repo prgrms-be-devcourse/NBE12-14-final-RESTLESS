@@ -11,8 +11,59 @@
 | POST | `/api/auth/login` | 로그인 → 200 `{accessToken, tokenType, expiresIn}` + Refresh 쿠키 | 구현 |
 | POST | `/api/auth/refresh` | Refresh 쿠키로 새 Access, 새 Refresh 쿠키 발급 | 구현 |
 | POST | `/api/auth/logout` | 이 기기의 Refresh 폐기, 쿠키 삭제 → 204 | 구현 |
-| GET | `/api/me/profile` | 내 프로필, 기본 배송지 | 예정 |
-| PATCH | `/api/me/profile` | 프로필, 기본 배송지 수정 | 예정 |
+| GET | `/api/me/profile` | 내 프로필, 기본 배송지 → 200 프로필 | 구현 |
+| PATCH | `/api/me/profile` | 닉네임, 기본 배송지 수정 → 200 바뀐 프로필 | 구현 |
+| POST | `/api/me/withdraw` | 탈퇴 `{password}` → 204 | 구현 |
+
+### 프로필
+
+응답 (조회, 수정 공통). 기본 배송지를 등록하지 않았으면 null이다.
+
+```json
+{
+  "memberId": 1,
+  "email": "user@example.com",
+  "nickname": "철수",
+  "role": "USER",
+  "defaultRecipient": "김철수",
+  "defaultPhone": "010-1234-5678",
+  "defaultAddress": "서울시 강남구 1"
+}
+```
+
+수정 요청은 보낸 필드만 바꾼다.
+
+| 필드 | 규칙 |
+|---|---|
+| `nickname` | 2~30자, 공백만은 안 됨. 지울 수 없음 |
+| `defaultRecipient` | 50자까지 |
+| `defaultPhone` | 20자까지, 숫자와 `-`만 |
+| `defaultAddress` | 255자까지 |
+
+- 필드를 빼거나 null이면 그대로 둔다. 기본 배송지 필드에 `""`를 보내면 그 값을 지운다.
+- 이메일, 역할은 바꿀 수 없다(보내도 무시).
+- 탈퇴한 회원은 Access Token이 남아 있어도 404 `MEMBER_NOT_FOUND`.
+- 드롭 주문의 "기본 배송지 불러오기"는 이 조회 API를 쓴다.
+
+### 탈퇴
+
+- 비밀번호를 다시 받는다. 틀리면 400 `MEMBER_PASSWORD_MISMATCH`.
+- 행은 지우지 않는다(`status = WITHDRAWN`, `deleted_at`). 주문, 결제, 응모 같은 다른 도메인 기록은 그대로 남는다.
+- 모든 기기의 Refresh Token을 폐기한다. 다시 로그인할 수 없고, 같은 이메일로 다시 가입할 수도 없다(`uk_users_email`).
+- Access Token은 만료(최대 1시간)까지 남는다. 회원 API는 404를 주지만 다른 도메인 API는 통과할 수 있으니, 결제·응모처럼 중요한 처리는 서비스에서 `memberService.getActive(userId)`로 한 번 더 확인한다.
+- **진행 중인 거래가 있으면 막는다 (`WithdrawalGuard`).** 도메인은 `member.application.WithdrawalGuard`를 구현한 `@Component`를 자기 패키지에 두면 된다. 하나라도 `true`를 돌려주면 409 `MEMBER_HAS_ACTIVE_PARTICIPATION`. 지금 등록된 Guard는 없다.
+
+```java
+@Component
+class FanMeetingWithdrawalGuard implements WithdrawalGuard {
+    @Override
+    public boolean hasActiveParticipation(Long userId) {
+        // 이 도메인에서 탈퇴를 막아야 할 진행 중인 거래가 있으면 true
+    }
+}
+```
+
+- 탈퇴가 끝나면 `MemberWithdrawnEvent(userId)`가 같은 트랜잭션에서 발행된다. 인증은 이 이벤트로 Refresh Token을 폐기한다.
 
 ## 인증 규칙
 
@@ -62,4 +113,4 @@
 | GET | `/api/payments/orders/{orderId}` | 결제 결과 확인 |
 | POST | `/api/orders/{orderId}/refunds` | 전액 환불 요청 |
 
-티켓팅이 공통 주문을 거치는지는 [erd.md 4절](../../architecture/erd.md)의 확인 항목이다.
+티켓팅은 공통 주문에 연결한다. 결제·주문·예매 확정 경계는 [티켓팅 트랜잭션 설계](../../domains/ticketing/transactions.md)를 따른다. 주문 유형·요청/응답 등 공통 API 세부 계약은 후속 합의 대상이다.

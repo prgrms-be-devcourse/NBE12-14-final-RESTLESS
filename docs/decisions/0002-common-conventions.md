@@ -14,5 +14,5 @@
 
 ## 영향
 
-- 티켓팅, 쿠폰 원본 문서의 PostgreSQL 전용 문법은 MySQL 대안으로 바꾼다 ([erd.md 8절](../architecture/erd.md)).
+- 티켓팅, 쿠폰 원본 문서의 PostgreSQL 전용 문법은 MySQL 대안으로 바꾼다 (티켓팅은 [좌석 소유권 설계](../domains/ticketing/seat-ownership.md) 참고).
 - 쿠폰의 UUID PK, 드롭과 쿠폰의 `/api/v1` 경로는 이 규약으로 바꾼다.
