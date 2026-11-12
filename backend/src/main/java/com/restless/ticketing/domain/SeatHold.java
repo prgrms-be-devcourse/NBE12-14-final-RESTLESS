@@ -71,4 +71,12 @@ public class SeatHold {
                                         long priceAmount, Instant expiresAt, Instant now) {
         return new SeatHold(reservationId, performanceId, performanceSeatId, priceAmount, expiresAt, now);
     }
+
+    public void release(Instant now) {
+        if (status != SeatHoldStatus.HELD) {
+            throw new IllegalStateException("반환 가능한 선점이 아닙니다.");
+        }
+        status = SeatHoldStatus.RELEASED;
+        releasedAt = Objects.requireNonNull(now);
+    }
 }

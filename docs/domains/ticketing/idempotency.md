@@ -302,7 +302,10 @@ GROUP BY user_id, request_key COLLATE utf8mb4_0900_bin
 HAVING COUNT(*) > 1;
 ```
 
-현재 버전은 고정 정규화 형식을 사용한다. 구체적인 직렬화 형식은 선점 구현에서 문서·테스트로 고정하고 이후 변경 시 기존 해시 호환을 유지한다.
+현재 MVP의 정규화 형식은 UTF-8 문자열 `v1\n<performanceId>\n<오름차순 판매 좌석 ID를 쉼표로 연결>`이며 마지막 줄 끝에는 개행이 없다.
+예를 들어 회차 100의 좌석 [11, 10]은 `v1\n100\n10,11`의 SHA-256으로 저장한다.
+빈 목록·중복·NULL·0 이하 ID는 정규화 전에 거절한다. 키는 공백만 있는 값과 100자 초과를 거절하며 trim/소문자 변환을 하지 않는다.
+향후 형식을 바꾸더라도 기존 해시의 재요청 호환성을 유지해야 한다. TicketReservationServiceTest에 동일 키의 동시·순차 재요청, 좌석 순서 정규화, 다른 회차·좌석 충돌 검증을 작성했으며 아직 실행하지 않았다.
 
 ### checkout
 
@@ -315,7 +318,11 @@ HAVING COUNT(*) > 1;
 ### 구현 시작 조건
 
 핵심 선점 정책·DB 제약·구매 제한·재요청 처리 방향은 확정되어 좌석 선점 구현을 시작할 수 있다.
-현재 엔티티·서비스·Controller는 골격 상태이므로 데이터 매핑부터 구현한다.
+엔티티 매핑과 좌석 조회, 최초 선점 POST·결제 전 HELD 만료 처리를 구현했다. checkout·결제·취소·환불 API는 후속 범위다.
 회차 조회는 concert 모듈의 application 계약으로 제공하여 ticketing이 concert Repository를 직접 참조하지 않게 한다.
-좌석 배열 검증·정규화 형식·HTTP 오류 매핑·잠금 대기 설정은 선점 구현 계획에서 구체화한다.
+좌석 배열 검증·정규화는 위 MVP 계약, HTTP 오류 매핑은 [API 계약](../../contracts/api/ticketing.md)을 따른다.
+선점·만료는 각각 READ_COMMITTED의 새 트랜잭션으로 실행하며, 구매 관리 행 생성과 사용자별 키 UNIQUE 충돌·교착·잠금 대기 실패는 전체 롤백 후 최대 3회 시도한다.
+재시도 가능한 UNIQUE는 uk_ticket_purchase_limits_user_performance와 uk_ticket_reservations_user_request_key로 제한한다. 그 외 무결성 오류는 키 충돌로 오인하지 않는다.
+잠금 대기 시간은 환경의 MySQL innodb_lock_wait_timeout을 사용하며 이번 구현에서 DB·세션 값을 변경하지 않는다. 시도 소진은 SEAT_LOCK_TIMEOUT이다.
+만료 예약 발견 시 기존 선점 트랜잭션을 롤백한 뒤 해당 예약의 전체 반환을 별도 트랜잭션에서 수행하고 최초 입력으로 재시도한다.
 첫 범위는 지정석 선점과 기존 예약 반환까지로 두고, 결제 Handler 변경·전용 멱등성 테이블은 포함하지 않는다.

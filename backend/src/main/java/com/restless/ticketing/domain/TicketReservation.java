@@ -86,4 +86,15 @@ public class TicketReservation {
     public byte[] getHoldRequestHash() {
         return holdRequestHash == null ? null : holdRequestHash.clone();
     }
+
+    public boolean isHoldExpired(Instant now) {
+        return status == TicketReservationStatus.HELD && !now.isBefore(holdExpiresAt);
+    }
+
+    public void releaseExpiredHold(Instant now) {
+        if (!isHoldExpired(now) || orderId != null || checkoutStartedAt != null || paymentExpiresAt != null) {
+            throw new IllegalStateException("결제 전 만료된 선점 예약만 반환할 수 있습니다.");
+        }
+        status = TicketReservationStatus.RELEASED;
+    }
 }

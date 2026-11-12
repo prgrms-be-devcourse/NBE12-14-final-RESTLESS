@@ -51,26 +51,54 @@ Long으로 변환할 수 없는 performanceId는 `400 INVALID_REQUEST`로 응답
 
 ## 좌석 선점
 
+로그인 필수다. 회원 ID는 본문에서 받지 않고 `@LoginMember`로 인증된 토큰에서 추출한다.
+`performanceId`와 `seatIds`는 양수여야 하며 좌석 목록은 비어 있거나 중복될 수 없다.
+`seatIds`는 물리 좌석 ID가 아닌 조회 응답의 판매 좌석 `seatId`다.
+`Idempotency-Key`는 필수이며 공백만 있는 값은 거절하고 최대 100자로 제한한다.
+키의 대소문자·후행 공백은 구분하며, 좌석 ID의 순서 차이는 같은 요청으로 취급한다.
+
 요청:
 
 ```http
 POST /api/ticket-reservations
+Authorization: Bearer <accessToken>
 Idempotency-Key: 7f83a2b1-...
 Content-Type: application/json
 
 { "performanceId": 100, "seatIds": [10, 11] }
 ```
 
-성공:
+성공 (`201 Created`):
 
 ```json
 {
   "reservationId": 5001,
   "status": "HELD",
   "seatIds": [10, 11],
-  "holdExpiresAt": "2026-11-06T11:30:00+09:00"
+  "holdExpiresAt": "2026-11-12T02:30:00Z"
 }
 ```
+
+좌석 ID는 오름차순으로 반환하며, 잠금 획득 후 DB UTC 시각 기준으로 5분간 선점한다.
+예매 시간은 시작 정각부터 마감 직전까지 허용한다. 좌석 하나라도 선점 불가하면 전체 요청을 롤백한다.
+같은 사용자·키·회차·좌석 집합으로 재요청하면 기존 예약의 현재 상태와 최초 기한을 `201`로 반환한다.
+만료·취소된 예약도 재생성하지 않는다. 만료된 결제 전 HELD 예약은 전체 반환 후 RELEASED 상태로 연결한다.
+다른 회차나 좌석으로 같은 키를 재사용하면 `409 IDEMPOTENCY_KEY_CONFLICT`다.
+최초 요청의 5분 기한은 새로고침·재요청으로 연장되지 않는다.
+
+선점 API의 오류 HTTP 상태:
+
+| HTTP | 코드 | 조건 |
+|---|---|---|
+| 400 | `INVALID_REQUEST` | 필수 헤더 누락, 유효하지 않은 본문·키, 중복 좌석 |
+| 401 | `UNAUTHORIZED` | 인증 정보 없음 또는 유효하지 않은 토큰 |
+| 404 | `NOT_FOUND` | 없는 공연 회차 |
+| 409 | `SEAT_UNAVAILABLE` | 없는 판매 좌석, 다른 회차·배치, 판매 제외, 이미 선점·판매된 좌석 |
+| 409 | `ACTIVE_RESERVATION_EXISTS` | 해당 사용자·회차의 활성 예약 존재 |
+| 409 | `TICKET_LIMIT_EXCEEDED` | 확정+선점+신규 수량이 회차 한도 초과 |
+| 409 | `BOOKING_NOT_OPEN`, `BOOKING_CLOSED` | 예매 시간 범위 밖 |
+| 409 | `IDEMPOTENCY_KEY_CONFLICT` | 같은 키로 다른 회차·좌석 요청 |
+| 409 | `SEAT_LOCK_TIMEOUT` | 잠금·생성 경합 등의 최대 3회 시도 소진. 같은 키로 재요청 가능 |
 
 ## 오류 코드
 
@@ -85,7 +113,7 @@ Content-Type: application/json
 | `IDEMPOTENCY_KEY_CONFLICT` | 같은 키로 다른 요청 |
 | `SEAT_LOCK_TIMEOUT` | 잠금 대기 초과 |
 
-아래 멱등성 계약의 202·409 외 오류의 HTTP 상태 코드는 후속 API 설계에서 정한다.
+위 선점 API 외 후속 API의 오류 HTTP 상태 코드는 해당 API 구현 시 정한다.
 
 ## 결제 기한 정책 (DECIDED)
 
@@ -129,4 +157,4 @@ Java 엔티티·Repository는 Performance/PerformanceRepository, DB 테이블은
 좌석 조회 API는 /api/performances/{performanceId}/seats로 통일하며 performanceId는 Performance의 ID다.
 좌석 선점 요청 본문도 performanceId를 사용하며, 내부 Performance의 ID로 해석한다.
 기존 concert-sessions 조회 경로와 선점 요청의 sessionId 필드는 제공하지 않는다.
-선점 요청 DTO와 API 처리는 아직 구현 전이며, 구현 시 위 계약을 따른다.
+선점 요청 DTO와 POST API는 위 명칭으로 구현했다. 테스트·동시성 실행 검증은 아직 하지 않았다.

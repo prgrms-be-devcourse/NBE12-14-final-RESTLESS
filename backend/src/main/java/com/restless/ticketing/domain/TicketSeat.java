@@ -62,4 +62,20 @@ public class TicketSeat {
                                              String grade, long price) {
         return new TicketSeat(performanceId, layoutId, venueSeatId, grade, price);
     }
+
+    public void hold(Long holdId) {
+        if (status != TicketSeatStatus.AVAILABLE || currentHoldId != null) {
+            throw new IllegalStateException("선점 가능한 좌석이 아닙니다.");
+        }
+        currentHoldId = Objects.requireNonNull(holdId);
+        status = TicketSeatStatus.HELD;
+    }
+
+    public void release(Long holdId) {
+        if (status != TicketSeatStatus.HELD || !Objects.equals(currentHoldId, holdId)) {
+            throw new IllegalStateException("좌석의 현재 선점 소유자가 일치하지 않습니다.");
+        }
+        status = TicketSeatStatus.AVAILABLE;
+        currentHoldId = null;
+    }
 }

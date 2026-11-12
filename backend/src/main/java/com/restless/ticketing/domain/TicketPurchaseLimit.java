@@ -42,4 +42,18 @@ public class TicketPurchaseLimit {
     public static TicketPurchaseLimit create(Long userId, Long performanceId) {
         return new TicketPurchaseLimit(userId, performanceId);
     }
+
+    public void reserve(int quantity, int maximum) {
+        if (quantity <= 0 || (long) confirmedCount + reservedCount + quantity > maximum) {
+            throw new IllegalStateException("구매 가능 수량을 초과했습니다.");
+        }
+        reservedCount = Math.addExact(reservedCount, quantity);
+    }
+
+    public void release(int quantity) {
+        if (quantity <= 0 || reservedCount < quantity) {
+            throw new IllegalStateException("반환할 선점 수량이 일치하지 않습니다.");
+        }
+        reservedCount -= quantity;
+    }
 }
