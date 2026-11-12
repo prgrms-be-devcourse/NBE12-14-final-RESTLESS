@@ -135,3 +135,11 @@ WHERE c.layout_id <> p.layout_id;
 - 주최자 권한, 회차 등록 API, 오픈 후 배치 변경 제한의 서비스 처리, 판매 좌석·예매 로직은 이번 매핑 구현 범위가 아니다.
 
 회차 내부 명칭은 Performance/PerformanceRepository로 통일하고 테스트도 ConcertPerformanceMappingTest로 변경했다. DB performances는 유지한다. 좌석 조회 API는 후속 결정에 따라 /api/performances/{performanceId}/seats로 통일했다. 선점 요청 본문의 회차 식별자도 performanceId로 통일하고 요청 DTO·POST API를 구현했다. 내부 이름 변경 당시 ./gradlew build 실행으로 전체 테스트 161개가 통과했으며, 후속 API 명명 변경·선점 구현에 대한 테스트는 아직 실행하지 않았다.
+
+## 구현 현황: 공연 상세·회차 목록 조회
+
+- ConcertController에서 비로그인 공연 상세와 회차 목록 GET을 제공한다. 회차 명칭은 Performance로 통일하며 목록 경로는 /api/concerts/{concertId}/performances다.
+- ConcertQueryService가 공연 존재 여부를 먼저 확인한다. 없는 공연은 404, 회차가 없는 기존 공연은 빈 목록을 반환한다.
+- 해당 concertId의 회차만 시작 시각 오름차순으로 조회한다. 상세·회차 결과는 application/dto로 변환하며 엔티티·Repository는 모듈 밖에 노출하지 않는다.
+- 공연·회차의 상태값 집합과 공개 상태 필터는 임의로 정의하지 않는다. 조회는 저장된 상태를 반환하며 데이터·소유권을 변경하지 않는다.
+- ConcertPerformanceMappingTest의 기존 Repository 조회 검증을 비로그인 API 검증으로 교체하고 상세·회차 목록의 없는 공연 404를 추가했다. 테스트는 아직 실행하지 않았다.
