@@ -21,48 +21,73 @@ TX2~TX5의 드롭 쪽 단계는 결제 모듈이 같은 트랜잭션에서 호�
 
 짧은 MySQL 트랜잭션에서:
 
-1. 예약 상태와 만료 검증
-2. RESERVED → CONFIRMING
+1. 예약 상태와 만료 검증 (예약 행을 잠근 뒤 읽은 현재 시각으로 판정)
+2. RESERVED → CONFIRMING, 예약에 이 시도의 `paymentId` 기록 (`current_payment_id`)
 3. Order → PAYMENT_CONFIRMING
-4. Payment 승인 시도 상태 기록
+4. Payment 승인 시도 상태 기록 (READY → PROCESSING, `approval_started_at`)
 5. Commit
 
 그다음 트랜잭션 밖에서 PG 승인 API를 호출한다.
+
+재결제도 같은 흐름이다. 새 `payments` 행이 생기고 `current_payment_id`가 새 시도로 바뀐다.
 
 ## TX3. 구매 확정
 
 PG 승인이 확인된 뒤 하나의 트랜잭션에서:
 
 1. 결제 승인 결과 기록
-2. 예약 CONFIRMED
-3. reserved -1, sold +1
-4. 주문 PAID
-5. 구매 슬롯 해제 (같은 사용자가 다시 구매할 수 있게)
-6. Commit
+2. 결과의 `paymentId`가 예약의 `current_payment_id`인지 확인. 아니면 REJECT (결제 모듈이 보상 취소)
+3. 예약 CONFIRMED
+4. reserved -1, sold +1
+5. 주문 PAID
+6. 구매 슬롯 해제 (같은 사용자가 다시 구매할 수 있게)
+7. Commit
+
+승인 시각(`approvedAt`)이 예약 기한 뒤여도 확정한다. 기한은 TX2에서 판정했다.
 
 비핵심 후속 작업은 커밋 후 Spring Event Listener로 처리한다. Outbox 기록은 넣지 않는다 ([ADR-0001](../../decisions/0001-event-handling.md)).
 
-## TX4. 실패, 만료 예약 반환
+## TX4. 결제 실패, 예약 만료
+
+### TX4-a. 결제 실패 확정 (`onFailed`)
 
 하나의 트랜잭션에서:
 
-1. 예약 상태 조건부 검증
-2. EXPIRED 또는 RELEASED로 전환
+1. 예약 행 잠금, 상태가 CONFIRMING 또는 RECONCILING인지 조건부 검증
+2. 실패한 시도의 `paymentId`가 `current_payment_id`인지 확인. 아니면 아무것도 바꾸지 않는다
+3. 현재 시각이 예약 기한 전이면:
+   - 예약 → RESERVED, Order → PENDING_PAYMENT
+   - 재고와 구매 슬롯은 그대로 둔다 (재결제 대기)
+4. 기한과 같거나 뒤면:
+   - 예약 → RELEASED, reserved -1, available +1
+   - Order CANCELLED, 구매 슬롯 해제
+5. Commit
+
+### TX4-b. 예약 만료 (만료 작업)
+
+하나의 트랜잭션에서:
+
+1. 예약 상태가 RESERVED이고 기한이 지났는지 조건부 검증
+2. EXPIRED로 전환
 3. reserved -1, available +1
 4. Order CANCELLED
 5. 구매 슬롯 해제
 6. Commit
 
-CONFIRMING, RECONCILING 상태의 거래는 일반 만료 작업이 반환하지 않는다.
+재결제 대기로 돌아온 RESERVED 예약도 같은 작업이 닫는다.
+CONFIRMING, RECONCILING, COMPENSATING 상태의 거래는 일반 만료 작업이 반환하지 않는다.
+TX2와 TX4-b는 같은 예약 행 잠금으로 직렬화한다. 기한 직전의 재결제 시작과 만료가 겹쳐도 한쪽만 반영된다.
 
-## TX5. 전액 환불 확정
+## TX5. 전액 환불 확정 (`onRefunded`)
 
 PG 취소가 확인된 뒤 하나의 트랜잭션에서:
 
 1. 환불 결과 기록
-2. Order REFUNDED
-3. Reservation RESTORED
-4. sold -1, available +1
-5. Commit
+2. 환불 종류에 따라 분기
+   - `CUSTOMER_REFUND`: 예약 CONFIRMED → RESTORED, sold -1, available +1, Order REFUNDED
+   - `COMPENSATION`: 예약 COMPENSATING → RELEASED, reserved -1, available +1, Order CANCELLED, 구매 슬롯 해제
+3. Commit
+
+종류와 예약 상태가 맞지 않으면 재고를 바꾸지 않고 오류 로그와 메트릭을 남긴다.
 
 PG 취소 결과가 불명확하면 재고를 복원하지 않는다.
