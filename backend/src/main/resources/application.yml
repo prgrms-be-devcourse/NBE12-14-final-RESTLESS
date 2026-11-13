@@ -14,6 +14,15 @@ spring:
     out-of-order: true
 
 restless:
+  drop:
+    queue:
+      required: true
+      heartbeat-timeout: 30s
+      admission-ttl: 5m
+      admit-per-run: 100
+      scheduler:
+        enabled: true
+        fixed-delay-ms: 1000
   payment:
     reconcile:
       enabled: ${PAYMENT_RECONCILE_ENABLED:true}

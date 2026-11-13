@@ -27,7 +27,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import static org.assertj.core.api.Assertions.*;
 
 @SpringBootTest(properties = {"pg.provider=fake", "spring.docker.compose.enabled=false",
-        "restless.drop.reservation.ttl=2m"})
+        "restless.drop.reservation.ttl=2m", "restless.drop.queue.required=false"})
 @Import({TestcontainersConfiguration.class, DropReservationIntegrationTest.TimeConfig.class})
 class DropReservationIntegrationTest {
     @Autowired JdbcTemplate jdbc;
