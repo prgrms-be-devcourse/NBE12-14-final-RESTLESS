@@ -76,9 +76,9 @@ HAVING w.balance_amount <> COALESCE(SUM(t.balance_delta), 0)
 - "Auction closing must produce at most one winner." → INV-AU-02
 - "Duplicate purchase requests must not create duplicate orders." → INV-AU-12
 
-## 스키마 보강이 필요한 항목
+## 스키마 보강 항목 (반영됨)
 
-아래 제약은 머지된 마이그레이션(`V20261111_1030`, `V20261111_1040`)에 없다. 1단계에서 새 마이그레이션으로 추가한다.
+아래 제약은 처음 머지된 마이그레이션(`V20261111_1030`, `V20261111_1040`)에 없어서 `V20261112_1045__auction_alter_tables.sql`로 추가했다. 위반하면 DB가 거부하는지는 `AuctionSchemaConstraintTest`가 확인한다.
 
 | 제약 | 관련 불변식 |
 |---|---|

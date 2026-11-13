@@ -19,7 +19,7 @@
 | DB 배포 | RDS MySQL | PROPOSED |
 | 프론트 배포 | S3 + CloudFront | PROPOSED |
 | 다중 서버 | 단일 서버 병목 확인 후 | EXPERIMENTAL |
-| 실시간 경매 | WebSocket 후보 | PROPOSED |
+| 실시간 경매 | SSE (서버 → 클라이언트). 입찰은 일반 POST ([경매 정책 8절](../domains/auction/policy.md)) | PROPOSED |
 | 팬 채팅 | MVP 제외 | DEFERRED |
 
 모듈러 모놀리스의 핵심은 배포 단위 하나 안에서 도메인 소유권과 의존성을 명확히 나누는 것이다.
@@ -77,6 +77,6 @@ Spring Boot → Toss Payments HTTPS API
 
 ## 4. 수평 확장 (EXPERIMENTAL)
 
-단일 서버의 실제 한계를 먼저 측정한다. 확장이 필요하면 다중 EC2, ALB, 공통 대기열 상태, 중복 스케줄러 방지, 전체 DB 연결 수, WebSocket 서버 간 전달을 검토한다.
+단일 서버의 실제 한계를 먼저 측정한다. 확장이 필요하면 다중 EC2, ALB, 공통 대기열 상태, 중복 스케줄러 방지, 전체 DB 연결 수, 경매 실시간 전달(SSE)의 서버 간 전달을 검토한다.
 
 확장 목적이 처리량, 가용성, 무중단 배포 중 무엇인지 구분한다.
