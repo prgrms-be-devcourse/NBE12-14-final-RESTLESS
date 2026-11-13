@@ -35,6 +35,9 @@ CLAUDE.local.md
 # Load test raw results (summaries go to docs/reports/)
 performance/**/results/
 
+# Python cache (tools/harness)
+__pycache__/
+
 # Logs, heap dumps
 *.log
 *.hprof

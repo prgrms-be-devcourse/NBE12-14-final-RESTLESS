@@ -1,6 +1,7 @@
 # Codex 작업 spec 템플릿 (드롭 단계 구현)
 
-Claude가 `{...}`를 채워 클립보드에 넣고, 사용자가 Codex 탭(`codex -s danger-full-access -a never`)에 붙여넣는다 (Orca 자동 작업자는 안전장치에 막혀 쓰지 않음).
+전체 작업 순서는 `tools/harness/README.md` 2절이 기준이다. 이 파일은 그중 "지시하기"에 쓰는 템플릿이다.
+Claude가 `{...}`를 채워 클립보드에 넣고, 사용자가 Codex 탭(`codex -s danger-full-access -a never`)에 붙여넣는다.
 
 ---
 
@@ -13,20 +14,20 @@ Claude가 `{...}`를 채워 클립보드에 넣고, 사용자가 Codex 탭(`code
 ### 완료 기준 (이것만 통과하면 된다)
 1. `backend/src/test/java/com/restless/drop/acceptance/{ACCEPTANCE_CLASS}.java`의 **`@Disabled` 한 줄만 지운다** (필요하면 import 한 줄도). 그 밖의 줄은 바꾸지 않는다.
 2. 그 수용 테스트가 전부 통과한다. 이전 단계 수용 테스트와 기존 테스트도 전부 통과한다.
-3. `bash .ai-output/harness/harness-check.sh` 결과가 `RESULT: PASS`.
+3. `bash tools/harness/harness-check.sh` 결과가 `RESULT: PASS`.
 
 ### 하네스 파일 (수정 금지)
 - `backend/src/test/java/com/restless/drop/acceptance/**` (위 1번의 `@Disabled` 줄 삭제만 예외)
 - `backend/src/test/resources/harness/**`, `backend/src/test/java/com/restless/architecture/**`
-- `.ai-output/harness/**`
+- `tools/harness/**` (하네스 도구), `.ai-output/harness/**` (단계 보고서 `reports/{STAGE}-report.md`만 예외)
 테스트가 계약과 맞지 않아 보이면 고치지 말고 보고서에 적는다. 테스트를 통과시키려고 동작을 계약과 다르게 만들지 않는다.
 
 ### 가드 (구현 중 자동 차단)
-아래 행동은 편집 hook과 git pre-commit hook이 **실행 자체를 막는다**. 차단되면 우회하지 말고 차단 메시지를 보고서에 그대로 적는다.
+아래 행동은 편집 hook과 git pre-commit hook이 막고, 놓친 것은 `harness-check.sh`가 FAIL로 판정한다. 차단되면 우회하지 말고 차단 메시지를 보고서에 그대로 적는다.
 - 하네스 파일 수정·추가·삭제 (`@Disabled` 줄과 그 import 삭제만 허용. 이 삭제는 apply_patch로 한다)
 - 머지된 마이그레이션 수정 (새 마이그레이션 파일 추가는 허용)
 - 다른 도메인(ticketing, fanmeeting, auction, concert, credit, coupon) 코드 수정
-- `.ai-output/harness/**`, `.codex/**`, `.git/hooks/**` 수정, `git commit --no-verify`, `git push`, `HARNESS_EDIT`
+- `tools/harness/**`, `.ai-output/harness/**`, `.codex/**`, `.git/hooks/**` 수정, `git commit --no-verify`, `git push`, `HARNESS_EDIT`
 - 보호 경로를 셸 명령(sed -i, 리다이렉트, mv, rm, git checkout 등)으로 바꾸는 것. 읽기는 cat/grep/sed -n으로 리다이렉트 없이 한다
 
 ### 읽을 것
@@ -53,7 +54,7 @@ Claude가 `{...}`를 채워 클립보드에 넣고, 사용자가 Codex 탭(`code
 - 가드는 보호 경로에 쓰는 명령을 막는다. 로그는 `> .ai-output/<이름>.log`처럼 보호 경로 밖으로 쓴다. 보호 경로를 `cp`·`python`으로 다루지 않는다.
 
 ### 마무리
-1. `bash .ai-output/harness/harness-check.sh` → `RESULT: PASS`가 나올 때까지 고친다.
+1. `bash tools/harness/harness-check.sh` → `RESULT: PASS`가 나올 때까지 고친다.
    - 검사는 브랜치가 최신 `origin/dev`보다 뒤처져 있으면 **dev를 합친 결과**를 빌드한다 (CI와 같음). `최신 origin/dev와 충돌함`이 나오면 `git merge origin/dev`로 합쳐 충돌을 정리하고 그 병합 커밋도 남긴다. 기존 테스트가 합친 결과에서만 깨지면 그것도 이번 작업에서 고친다.
 2. **커밋을 작은 논리 단위로 나눈다** (PR 하나 = 커밋 하나로 만들지 않는다). 바꾼 파일만 경로로 지정해 아래 순서처럼 나눠 커밋한다. **push, PR 금지.**
    - `feat(drop): add <...> migration` — 새 마이그레이션
