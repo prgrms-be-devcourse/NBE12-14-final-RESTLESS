@@ -1,5 +1,9 @@
 # Drop 상태 머신
 
+> 관련 코드: `backend/src/main/java/com/restless/drop/domain/`, `backend/src/main/java/com/restless/order/domain/`, `backend/src/main/java/com/restless/payment/domain/`
+>
+> 마지막 확인: 2026-11-13 (#79에서 코드와 대조)
+
 Order, Payment, Reservation 상태는 따로 저장하고, 조합 간 정합성을 검증한다.
 
 ## 1. Drop 판매 상태

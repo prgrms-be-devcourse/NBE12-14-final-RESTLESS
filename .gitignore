@@ -31,6 +31,9 @@ frontend/coverage/
 .claude/settings.local.json
 CLAUDE.local.md
 .ai-output/
+# Drop owner's agent instructions (personal, not shared with the team)
+backend/src/main/java/com/restless/drop/AGENTS.md
+backend/src/main/java/com/restless/drop/CLAUDE.md
 
 # Load test raw results (summaries go to docs/reports/)
 performance/**/results/
