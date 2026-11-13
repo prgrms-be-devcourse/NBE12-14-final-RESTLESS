@@ -110,6 +110,8 @@ def broken_links(root, doc):
 
 def git_last_change(root, paths):
     specs = [f":(glob){p.rstrip('/')}" + ("/**" if p.endswith("/") else "") for p in paths]
+    # Docs inside a code folder (e.g. drop/AGENTS.md) are not code changes.
+    specs.append(":(exclude,glob)**/*.md")
     r = subprocess.run(["git", "log", "-1", "--format=%cs", "--", *specs], cwd=root,
                        capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else ""
