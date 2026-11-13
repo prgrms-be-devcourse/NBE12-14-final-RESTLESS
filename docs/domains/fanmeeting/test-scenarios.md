@@ -43,7 +43,7 @@
 | C33 | 탈퇴자 처리 | 탈퇴 응모자는 선발 안 되고 응모 행 유지, 예비 1순위 탈퇴 시 2순위부터 승격·1순위 NOT_NEEDED, `hasActiveParticipation` 참/거짓 |
 | C34 | 보류 30분 경과 | 경고 1회(다음 회차에 다시 안 남음), 자동 확정·탈락 없음 |
 | C36 | 알림 요청 | 최종화 시 당첨자 수만큼 기록, 롤백되면 기록 0 |
-| C41 | 일반 회원이 관리자 API 호출(생성·summary) | 403 `FORBIDDEN`, 상태 변화 없음 |
+| C41 | 일반 회원이 주최자 API(생성)·관리자 API(summary) 호출 | 403 `FORBIDDEN`, 상태 변화 없음 |
 | C42 | 다른 행사의 eventId + 내 orderId로 결제 시작·포기 | 404 `ORDER_NOT_FOUND`, 어느 Event도 상태 변화 없음 |
 | C43 | 같은 주문에 서로 다른 Idempotency-Key로 결제 시작 동시 2건 (latch) | 시도 1개 생성(201), 다른 쪽 409 `PAYMENT_ATTEMPT_IN_PROGRESS` |
 | C44 | ① READY 시도가 있는 주문에 새 키 ② 주문 `PENDING_PAYMENT`에서 같은 키 재요청(시도 READY·FAILED) ③ 주문 `PAID`·`PAYMENT_REVIEW`에서 같은 키 재요청 ④ 이전 시도 FAILED 뒤 새 키 ⑤ 키 A 시도가 FAILED가 된 뒤 키 A 재요청 | ① 409 `PAYMENT_ATTEMPT_IN_PROGRESS`, 시도 수 그대로 ② 그 시도의 현재 상태(READY만 URL, 200) ③ 409 `ORDER_NOT_PAYABLE` / 409 `PAYMENT_UNDER_REVIEW`, 결제 모듈 호출 없음 ④ 새 시도(201) ⑤ 같은 FAILED 시도(200), 새 시도 안 생김 |

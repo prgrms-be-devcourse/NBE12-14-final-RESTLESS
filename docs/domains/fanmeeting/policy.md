@@ -4,7 +4,7 @@
 
 ### P0 포함
 
-행사 생성(관리자), 응모·취소·재응모, 응모 기간 자동 열기·마감, 결정적 추첨(당첨·예비), 당첨자 결제 기한(60분) 안 결제, 결제 포기, 결제 결과 보류, 기한 만료, 빈자리 예비 승격, 모집 완료, 관리자 summary.
+행사 생성(주최자·관리자), 응모·취소·재응모, 응모 기간 자동 열기·마감, 결정적 추첨(당첨·예비), 당첨자 결제 기한(60분) 안 결제, 결제 포기, 결제 결과 보류, 기한 만료, 빈자리 예비 승격, 모집 완료, 관리자 summary.
 
 ### 만들지 말 것 (P0 범위 밖)
 
@@ -43,7 +43,9 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 
 ## 3. 행사 생성
 
-권한: ADMIN (6절). 결과: `SCHEDULED`.
+권한: ORGANIZER, ADMIN (6절). 만든 회원이 그 행사의 주최자(`organizer_id`)가 된다. 결과: `SCHEDULED`.
+
+오픈 시각 공개 여부(`opens_at_public`, 필수): `true`면 예고 오픈(OPEN 전에도 상세에 `entryOpensAt` 공개), `false`면 게릴라 오픈(OPEN 전에는 `entryOpensAt`을 null로 준다).
 
 검증(위반 시 400 `INVALID_FAN_MEETING_SETTINGS`, 메시지에 어긴 규칙):
 
@@ -85,11 +87,13 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 
 알려진 틈: 탈퇴 확인(`false`)과 승격·추첨 최종화가 동시에 일어나면 탈퇴한 사람에게 주문이 생길 수 있다. 결제를 못 하므로 기한 뒤 만료 → 승격으로 처리된다(정원·자격 정합성 문제 없음, 자리만 늦게 참).
 
-## 6. 관리자 권한
+## 6. 주최자·관리자 권한
 
-- `/api/admin/**`(생성, summary)는 `role = ADMIN`인 회원만 호출한다. 인증 모듈의 보안 설정이 경로 단위로 막고, 권한이 없으면 403 `FORBIDDEN`(팀 공통 오류 형식 `{code, message}`), 로그인하지 않았으면 401 `UNAUTHORIZED`다([공통 API](../../contracts/api/common.md)).
-- 팬미팅 컨트롤러는 권한을 다시 검사하지 않는다. 로그인 회원 ID는 `@LoginMember Long userId`로 받는다.
-- **[팀 미확정]** 판매자(SELLER) 역할이 생기면 주최자에게도 열지는 팀 결정을 따른다.
+- `/api/organizer/**`(행사 생성)는 `role = ORGANIZER` 또는 `ADMIN`인 회원만 호출한다.
+- `/api/admin/**`(summary)는 `role = ADMIN`만 호출한다.
+- 역할은 인증 모듈의 보안 설정이 경로 단위로 막는다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`이고, 형식은 팀 공통 오류 응답 `{code, message, details, traceId, timestamp}`다([공통 API](../../contracts/api/common.md)).
+- 팬미팅 컨트롤러는 역할을 다시 검사하지 않는다. 로그인 회원 ID는 `@LoginMember Long userId`로 받는다.
+- 주최자는 자기 행사(`organizer_id`)만 다룬다. 남의 행사는 404로 답한다. 주최자용 조회·관리 API(P1)를 만들 때 서비스에서 확인한다. ADMIN은 모든 행사를 다룬다.
 
 ## 7. 설정값 (설정 파일)
 

@@ -69,7 +69,15 @@ public enum ErrorCode {
     DROP_NOT_ON_SALE(HttpStatus.CONFLICT, "드롭 판매 기간이 아닙니다."),
     DROP_SOLD_OUT(HttpStatus.CONFLICT, "드롭 재고가 소진되었습니다."),
     DROP_ACTIVE_PURCHASE_EXISTS(HttpStatus.CONFLICT, "진행 중인 드롭 구매가 있습니다."),
-    DROP_ADMISSION_REQUIRED(HttpStatus.FORBIDDEN, "드롭 구매권이 필요합니다.");
+    DROP_ADMISSION_REQUIRED(HttpStatus.FORBIDDEN, "드롭 구매권이 필요합니다."),
+
+    // 팬미팅
+    FAN_MEETING_NOT_FOUND(HttpStatus.NOT_FOUND, "팬미팅을 찾을 수 없습니다."),
+    INVALID_FAN_MEETING_SETTINGS(HttpStatus.BAD_REQUEST, "팬미팅 설정이 올바르지 않습니다."),
+    APPLICATION_WINDOW_CLOSED(HttpStatus.CONFLICT, "응모 기간이 아닙니다."),
+    ALREADY_APPLIED(HttpStatus.CONFLICT, "이미 응모했습니다."),
+    APPLICATION_NOT_ACTIVE(HttpStatus.CONFLICT, "취소할 응모가 없습니다."),
+    APPLICATION_BUSY(HttpStatus.SERVICE_UNAVAILABLE, "응모 요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.");
 
     private final HttpStatus httpStatus;
     private final String message;

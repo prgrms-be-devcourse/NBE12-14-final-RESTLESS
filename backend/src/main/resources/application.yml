@@ -50,6 +50,13 @@ restless:
       fixed-delay-ms: 1000
       # 한 번에 처리할 경매 수
       batch-size: 100
+  fanmeeting:
+    worker:
+      # 팬미팅 응모 기간 열기·마감 Worker. 테스트에서는 build.gradle이 false로 끈다.
+      enabled: ${FANMEETING_WORKER_ENABLED:true}
+      fixed-delay-ms: 1000
+      # 한 번에 처리할 행사 수
+      batch-size: 100
 
 logging:
   pattern:
