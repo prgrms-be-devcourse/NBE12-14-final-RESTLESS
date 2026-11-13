@@ -1,6 +1,5 @@
 package com.restless.drop.acceptance;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,7 +16,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 각 테스트는 "막힘"과 "풀림"을 함께 본다. 너무 적게 막는 구현과 너무 많이 막는 구현을 모두 잡기 위해서다.
  * <b>하네스 파일이다.</b> #41 구현 PR에서 아래 {@code @Disabled} 한 줄만 지운다. 테스트 내용은 바꾸지 않는다.
  */
-@Disabled("#41 드롭 탈퇴 제한 구현 전")
 @DisplayName("드롭 탈퇴 제한")
 class DropWithdrawalAcceptanceTest extends DropAcceptanceSupport {
 
