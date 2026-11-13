@@ -46,7 +46,7 @@
 
 ### `GET /api/drops` (공개)
 
-- 게시된 드롭만 (DRAFT, CANCELLED 제외). 판매 시작 시각 오름차순.
+- 게시된 드롭만 (DRAFT, CANCELLED 제외). 판매 시작 시각 오름차순, 같으면 `dropId` 오름차순. 상세의 `variants`는 등록 순서.
 - 200 `{ "items": [ { "dropId", "title", "imageUrl", "opensAt", "closesAt", "saleStatus" } ] }`
 
 ### `GET /api/drops/{dropId}` (공개)
@@ -97,6 +97,7 @@
 
 - 결제 준비: `POST /api/payments` `{ "payableType": "DROP", "payableId": <reservationId> }` ([common.md](common.md)).
 - 드롭 `PaymentResultHandler`는 [transactions.md](../../domains/drop/transactions.md) TX2~TX5와 [policy.md](../../domains/drop/policy.md) 8·10절을 따른다 (재결제 허용, 환불 종류별 재고 처리). 환불 요청은 받아들인다(전액 환불 지원).
+- 결제창에 보이는 주문명은 드롭 제목이다. 100자를 넘으면 100자로 자른다. 금액은 주문 스냅샷 금액이다.
 - 만료 작업 빈 이름 `dropReservationExpiryJob`, 메서드 `runOnce()`. RESERVED이고 기한이 지난 재고 점유를 EXPIRED로 닫는다. 설정 `restless.drop.expiry.enabled=false`는 **주기 실행만 멈추고 빈은 남는다** (수용 테스트가 직접 호출).
 
 ### `POST /api/drops/{dropId}/reservations/{reservationId}/cancel` (본인)
