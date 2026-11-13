@@ -12,7 +12,7 @@
 | 프론트엔드 빌드 (CI와 동일) | `npm run build` |
 | 아키텍처 검사 (모듈 경계) | `./gradlew test --tests 'com.restless.architecture.*'` |
 | 드롭 수용 테스트 (블랙박스) | `./gradlew test --tests 'com.restless.drop.acceptance.*'` |
-| 동시성 테스트 | TBD |
+| 동시성 테스트 (드롭·결제) | `./gradlew test --tests 'com.restless.drop.*' --tests 'com.restless.payment.*'` (재고 1개에 100명, 같은 키 동시 요청, 입장 작업 동시 실행, 승인 동시 요청 등) |
 | 부하 테스트 | TBD |
 
 ## 2. 기술
