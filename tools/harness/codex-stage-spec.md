@@ -10,7 +10,7 @@ Claude가 `{...}`를 채워 클립보드에 넣고, 사용자가 Codex 탭(`code
 저장소: {REPO}
 메인 폴더: {MAIN_REPO} (단계 worktree가 아니라 원래 저장소 폴더)
 브랜치: `{BRANCH}` (Claude가 만들어 체크아웃해 두었다. 새 브랜치를 만들지 말 것)
-작업 전 `AGENTS.md`와 **`{MAIN_REPO}/backend/src/main/java/com/restless/drop/AGENTS.md`(드롭 전용 지침)**를 읽고 따른다. 이 파일은 git에 올리지 않는 개인 파일이라 메인 폴더에만 있다. 단계 worktree에는 없으므로 위 절대 경로로 연다. 용어, 읽을 문서, 모듈 경계, 트랜잭션, 마이그레이션, 시각, 메트릭 규칙은 그 파일이 기준이고 아래에 다시 적지 않는다.
+작업 전 `{MAIN_REPO}/AGENTS.md`(루트 지침)와 **`backend/src/main/java/com/restless/drop/AGENTS.md`(드롭 전용 지침)**를 읽고 따른다. 루트 지침은 git에 없는 개인 파일이라 메인 폴더에만 있으므로 절대 경로로 연다. 드롭 지침은 레포에 있지만, 레포 루트에서 실행한 Codex는 하위 폴더 지침을 자동으로 읽지 않으므로 직접 연다. 용어, 읽을 문서, 모듈 경계, 트랜잭션, 마이그레이션, 시각, 메트릭 규칙은 그 파일이 기준이고 아래에 다시 적지 않는다.
 
 ### 완료 기준 (이것만 통과하면 된다)
 1. `backend/src/test/java/com/restless/drop/acceptance/{ACCEPTANCE_CLASS}.java`의 **`@Disabled` 한 줄만 지운다** (필요하면 import 한 줄도). 그 밖의 줄은 바꾸지 않는다.
