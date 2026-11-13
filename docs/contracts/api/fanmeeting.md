@@ -6,8 +6,8 @@
 
 | Method | Endpoint | 설명 | 권한 |
 |---|---|---|---|
-| POST | `/api/admin/fan-meetings` | Event 생성 | ADMIN |
-| GET | `/api/fan-meetings/{eventId}` | 상세. OPEN 전 `entry_opens_at`은 숨김. OPEN 중 `entryClosesAt` 포함 | 공개 |
+| POST | `/api/organizer/fan-meetings` | Event 생성. 만든 회원이 주최자 | ORGANIZER, ADMIN |
+| GET | `/api/fan-meetings/{eventId}` | 상세. 게릴라 오픈이면 OPEN 전 `entryOpensAt` null. `entryClosesAt`은 OPEN 중에만 | 공개 |
 | POST | `/api/fan-meetings/{eventId}/applications` | 응모·재응모 | 회원 |
 | DELETE | `/api/fan-meetings/{eventId}/applications/me` | 응모 취소 | 회원 |
 | GET | `/api/fan-meetings/{eventId}/applications/me` | 내 응모 상태 | 회원 |
@@ -17,9 +17,59 @@
 | POST | `/api/fan-meetings/{eventId}/orders/{orderId}/decline` | 결제 포기 | 회원 |
 | GET | `/api/admin/fan-meetings/{eventId}/summary` | 상태, 응모 수, Selection·Order 상태별 인원, 정원 점유, 승격된 예비 최대 순번, `promotion_closes_at`, 보류 목록(경과 시간), `REFUND_PENDING` 목록, 계약 위반 승인 목록 | ADMIN |
 
-관리자 API는 `role = ADMIN`만 호출할 수 있다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`([공통 API](common.md)).
+주최자 API(`/api/organizer/**`)는 `role = ORGANIZER` 또는 `ADMIN`, 관리자 API(`/api/admin/**`)는 `role = ADMIN`만 호출할 수 있다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`([공통 API](common.md)).
 
 응모는 `UNIQUE(event_id, user_id)`로 중복을 막으므로 `Idempotency-Key`를 쓰지 않는다. 결제 시작만 `Idempotency-Key`를 받는다.
+
+## 행사 생성 `POST /api/organizer/fan-meetings`
+
+요청(시각은 ISO-8601 UTC, 예 `2026-11-20T12:00:00Z`). `promotionClosesAt`만 선택이고 나머지는 필수다.
+
+```json
+{
+  "title": "연말 팬미팅",
+  "entryOpensAt": "2026-11-20T12:00:00Z",
+  "firstNoticeScheduledAt": "2026-11-17T12:00:00Z",
+  "winnerLimit": 300,
+  "reserveLimit": 100,
+  "feeAmount": 50000,
+  "meetingAt": "2026-11-23T09:00:00Z",
+  "promotionClosesAt": null,
+  "opensAtPublic": true
+}
+```
+
+- 201 `{"eventId": 1}`
+- 필수 값 누락·형식 오류: 400 `INVALID_REQUEST`
+- 생성 규칙 위반([policy.md 3절](../../domains/fanmeeting/policy.md)): 400 `INVALID_FAN_MEETING_SETTINGS`, `message`에 어긴 규칙
+
+## 행사 상세 `GET /api/fan-meetings/{eventId}`
+
+```json
+{
+  "eventId": 1, "title": "연말 팬미팅", "status": "SCHEDULED",
+  "entryOpensAt": null, "entryClosesAt": null,
+  "meetingAt": "2026-11-23T09:00:00Z", "winnerLimit": 300, "reserveLimit": 100, "feeAmount": 50000
+}
+```
+
+필드는 항상 있고, 공개하지 않는 시각은 null이다.
+
+| 필드 | 공개 조건 |
+|---|---|
+| `entryOpensAt` | `opens_at_public = true`(예고 오픈)이거나 상태가 `SCHEDULED`가 아님 |
+| `entryClosesAt` | 상태가 `OPEN` |
+
+## 응모·취소·내 응모
+
+| 요청 | 성공 | 본문 |
+|---|---|---|
+| `POST .../applications` (첫 응모, 재응모) | 201 | `{"status": "APPLIED", "appliedAt": "..."}` |
+| `DELETE .../applications/me` | 204 | 없음 |
+| `GET .../applications/me` | 200 | `{"status": "APPLIED" \| "WITHDRAWN" \| "NONE", "appliedAt": ... }`. 응모한 적 없으면 `NONE`, `appliedAt` null |
+
+- 응모·취소는 `OPEN`이고 `entry_opens_at <= now < entry_closes_at`일 때만. 아니면 409 `APPLICATION_WINDOW_CLOSED`.
+- 행사가 없으면 세 요청 모두 404 `FAN_MEETING_NOT_FOUND`.
 
 ## 결제 시작 응답
 
