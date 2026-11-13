@@ -1,6 +1,7 @@
 package com.restless.payment;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -29,7 +30,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.*;
+import org.testcontainers.mysql.MySQLContainer;
 
+import java.sql.DriverManager;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -53,6 +56,7 @@ class PaymentFlowTest {
     @Autowired PlatformTransactionManager tm;
     @Autowired MockMvc mvc;
     @Autowired JwtProperties jwtProperties;
+    @Autowired MySQLContainer mysql;
     JwtTokenProvider tokens;
     Long user;
 
@@ -406,6 +410,125 @@ class PaymentFlowTest {
     }
 
     @Test
+    void prepareAndApprovalStartOverlapWithoutDeadlockOr500() throws Exception {
+        var first = prepare("first");
+        var loaded = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        enableLockingHandler(loaded, release);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            try {
+                var preparation = pool.submit(() -> outcome(() -> prepare("replacement")));
+                assertThat(loaded.await(10, TimeUnit.SECONDS)).isTrue();
+                var confirmation = pool.submit(() -> outcome(() -> confirm(first)));
+                // Old order: confirmation owns P1 and waits for the domain row.
+                // Fixed order: preparation owns P1 and confirmation waits for P1.
+                // Observe an actual InnoDB wait before allowing preparation to continue.
+                awaitPaymentLockWait();
+                release.countDown();
+                Object prepared = preparation.get(20, TimeUnit.SECONDS);
+                Object confirmed = confirmation.get(20, TimeUnit.SECONDS);
+                if (prepared instanceof PreparePaymentResult replacement) {
+                    assertThat(replacement.created()).isTrue();
+                    assertThat(replacement.status()).isEqualTo(PaymentStatus.READY);
+                    assertThat(confirmed).isEqualTo(ErrorCode.PAYMENT_FAILED);
+                    assertThat(payment(first.paymentId()).getFailureCode()).isEqualTo("SUPERSEDED");
+                } else {
+                    assertThat(prepared)
+                            .isIn(ErrorCode.PAYMENT_ATTEMPT_IN_PROGRESS, ErrorCode.PAYMENT_NOT_PAYABLE);
+                    assertThat(confirmed).isInstanceOfSatisfying(
+                            ConfirmPaymentResult.class,
+                            result -> assertThat(result.status()).isEqualTo(PaymentStatus.APPROVED));
+                }
+                assertOneActiveAttempt();
+            } finally {
+                release.countDown();
+            }
+        }
+    }
+
+    @Test
+    void sameKeyCommittedWhilePrepareWaitsIsReplayed() throws Exception {
+        prepare("first");
+        var loaded = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        enableLockingHandler(loaded, release);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            try {
+                var first = pool.submit(() -> prepare("same-waiting-key"));
+                assertThat(loaded.await(10, TimeUnit.SECONDS)).isTrue();
+                var second = pool.submit(() -> prepare("same-waiting-key"));
+                awaitPaymentLockWait();
+                release.countDown();
+                var created = first.get(20, TimeUnit.SECONDS);
+                var replay = second.get(20, TimeUnit.SECONDS);
+                assertThat(created.created()).isTrue();
+                assertThat(replay.created()).isFalse();
+                assertThat(replay.paymentId()).isEqualTo(created.paymentId());
+                assertThat(replay.status()).isEqualTo(PaymentStatus.READY);
+                assertThat(payments.count()).isEqualTo(2);
+                assertOneActiveAttempt();
+            } finally {
+                release.countDown();
+            }
+        }
+    }
+
+    void enableLockingHandler(CountDownLatch loaded, CountDownLatch release) {
+        jdbc.execute("CREATE TABLE IF NOT EXISTS test_payment_lock_rows"
+                + " (id BIGINT PRIMARY KEY, touches INT NOT NULL) ENGINE=InnoDB");
+        jdbc.update("DELETE FROM test_payment_lock_rows");
+        for (int i = 1; i <= 32; i++)
+            jdbc.update("INSERT INTO test_payment_lock_rows VALUES (?, 0)", i);
+        handler.lockDomainRows = true;
+        handler.afterLoadLock = () -> {
+            loaded.countDown();
+            try {
+                assertThat(release.await(15, TimeUnit.SECONDS)).isTrue();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(e);
+            }
+        };
+    }
+
+    void awaitPaymentLockWait() throws Exception {
+        // Container-local root is used only to observe performance_schema; application SQL
+        // still uses the normal datasource and its real transactions/row locks.
+        try (var connection = DriverManager.getConnection(
+                mysql.getJdbcUrl(), "root", mysql.getPassword());
+                var statement = connection.createStatement()) {
+            await().atMost(Duration.ofSeconds(10)).until(() -> {
+                try (var rows = statement.executeQuery("""
+                        SELECT COUNT(*) FROM performance_schema.data_lock_waits w
+                        JOIN performance_schema.data_locks l
+                          ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID
+                        WHERE l.OBJECT_SCHEMA = DATABASE()
+                          AND l.OBJECT_NAME IN ('payments', 'test_payment_lock_rows')
+                        """)) {
+                    rows.next();
+                    return rows.getInt(1) > 0;
+                }
+            });
+        }
+    }
+
+    Object outcome(Callable<?> request) throws Exception {
+        try {
+            return request.call();
+        } catch (BusinessException e) {
+            assertThat(e.getErrorCode().getHttpStatus().value()).isLessThan(500);
+            return e.getErrorCode();
+        }
+    }
+
+    void assertOneActiveAttempt() {
+        assertThat(payments.findAll().stream()
+                .filter(p -> p.getPayableType() == PayableType.DROP && p.getPayableId() == 123L)
+                .filter(p -> p.getStatus() != PaymentStatus.FAILED
+                        && p.getStatus() != PaymentStatus.CANCELLED)).hasSize(1);
+    }
+
+    @Test
     void storedAttemptOwnerIsCheckedEvenIfSnapshotOwnerChanges() {
         prepare("one");
         handler.snapshot = new PayableSnapshot(user + 1, 39000, "item", null);
@@ -542,6 +665,8 @@ class PaymentFlowTest {
         volatile PayableSnapshot snapshot;
         volatile ApprovalDecision startDecision, approvedDecision;
         volatile boolean throwApproved, throwRefunded;
+        volatile boolean lockDomainRows;
+        volatile Runnable afterLoadLock;
         final JdbcTemplate jdbc;
 
         Handler(JdbcTemplate jdbc) {
@@ -560,6 +685,8 @@ class PaymentFlowTest {
             approvedDecision = ApprovalDecision.accept();
             throwApproved = false;
             throwRefunded = false;
+            lockDomainRows = false;
+            afterLoadLock = () -> {};
             starting.clear();
             failed.clear();
             unknown.clear();
@@ -572,6 +699,13 @@ class PaymentFlowTest {
         }
 
         public Optional<PayableSnapshot> load(Long id) {
+            if (lockDomainRows) {
+                jdbc.queryForObject("SELECT id FROM test_payment_lock_rows WHERE id=1 FOR UPDATE", Long.class);
+                // Make the preparing transaction heavier so InnoDB consistently chooses
+                // approval start as the old-code deadlock victim; prepare's retry cannot hide it.
+                jdbc.update("UPDATE test_payment_lock_rows SET touches=touches+1");
+                afterLoadLock.run();
+            }
             return Optional.ofNullable(snapshot);
         }
 
@@ -581,6 +715,8 @@ class PaymentFlowTest {
 
         public ApprovalDecision onApprovalStarting(Long id, PaymentAttemptContext a) {
             inTx();
+            if (lockDomainRows)
+                jdbc.queryForObject("SELECT id FROM test_payment_lock_rows WHERE id=1 FOR UPDATE", Long.class);
             starting.add(a);
             return startDecision;
         }
