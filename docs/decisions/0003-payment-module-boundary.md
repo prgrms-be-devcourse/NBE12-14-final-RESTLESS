@@ -38,6 +38,10 @@ public interface PaymentResultHandler {
     ApprovalDecision onApproved(Long payableId, ApprovedPayment payment);              // TX3
     void onFailed(Long payableId, PaymentAttemptContext attempt);    // TX4: 이 시도 실패 확정. 반환 여부는 도메인 정책
     void onUnknown(Long payableId, PaymentAttemptContext attempt);   // 결과 불명확: 자원 보호 상태로 전환
+    default ApprovalDecision onRefundRequesting(Long payableId, RefundContext refund) {
+        return ApprovalDecision.reject("REFUND_NOT_SUPPORTED");
+    }
+    default void onRefundRejected(Long payableId, RefundContext refund) {}
     void onRefunded(Long payableId, RefundContext refund);           // TX5: 환불 확정. 손님 환불/보상 취소 구분
 }
 ```
@@ -79,6 +83,8 @@ public interface PaymentResultHandler {
 | `onApprovalStarting` 기한 판정 | 도메인 행을 잠근 뒤 읽은 현재 시각으로 한다. `approvalStartedAt`은 잠금 대기 전 값이라 쓰지 않는다 |
 | 실패 처리 | `onFailed`는 무조건 자원 반환이 아니다. 기한이 남았으면 자원을 유지하고 다시 결제할 수 있게 할 수 있다 |
 | 환불 종류 | `RefundContext(paymentId, kind)`. `kind`는 `CUSTOMER_REFUND`, `COMPENSATION`이고 `payment_refunds.kind`에 저장한다 |
+| 손님 환불 요청·거절 (2026-11-13, #47) | 기본 메서드 `onRefundRequesting(payableId, RefundContext)`는 요청 트랜잭션에서 도메인의 환불 가능 여부를 판단하고 수락 시 환불 대기로 바꾼다. 기본은 `REFUND_NOT_SUPPORTED` 거절. `onRefundRejected(payableId, RefundContext)`는 PG 최종 취소 거절 시 결제 APPROVED 복귀·환불 FAILED와 같은 트랜잭션에서 환불 대기를 운영 확인 상태로 바꾼다(기본 no-op). 둘 다 CUSTOMER_REFUND 전용이며 COMPENSATION에는 호출하지 않는다. `onRefunded`만 자원을 복원한다 |
+| 손님 환불 멱등성 (#47 보정) | 클라이언트 키는 `(payment_id, kind, client_key)` 범위 UNIQUE로 재현한다. 별도 전역 UNIQUE `idempotency_key`는 PG 재시도용 서버 생성 키이며 보상 취소와 이름 공간을 구분한다. 기존 PG 키는 보존·백필해 진행 중 취소를 끊지 않는다. 환불 메트릭은 커밋된 전이를 한 번만 세고 API 재요청 횟수와 분리한다 |
 
 중복 결과를 거르는 1차 방어선은 결제 모듈이다. 결제 행을 잠그고 조건부로 전이하며, 진행 중인 시도는 대상당 1건(UNIQUE)이다.
 도메인의 `paymentId` 확인은 2차 방어선이다. 이 확인은 승인을 확정한 시도를 기록하는 데도 쓴다.
