@@ -62,6 +62,10 @@ public class Payment {
     @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
     private Instant approvedAt;
 
+    /** First UNKNOWN entry survives polling/restarts for operations monitoring. */
+    @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
+    private Instant unknownSinceAt;
+
     @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
     private Instant expiresAt;
 
@@ -124,7 +128,13 @@ public class Payment {
         failureMessage = message;
     }
 
-    public void markUnknown(Instant now) { transition(PaymentStatus.UNKNOWN, now); }
+    public void markUnknown(Instant now) {
+        transition(PaymentStatus.UNKNOWN, now);
+        if (unknownSinceAt == null) unknownSinceAt = now;
+    }
+
+    /** Poll cadence only; never changes the first UNKNOWN timestamp or business status. */
+    public void recordReconciliationCheck(Instant now) { updatedAt = Objects.requireNonNull(now); }
     public void requestCancel(Instant now) { transition(PaymentStatus.CANCEL_PENDING, now); }
     public void completeCancel(Instant now) { transition(PaymentStatus.CANCELLED, now); }
     public void markCancelUnknown(Instant now) { transition(PaymentStatus.CANCEL_UNKNOWN, now); }
