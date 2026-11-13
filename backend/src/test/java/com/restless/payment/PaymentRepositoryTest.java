@@ -124,6 +124,29 @@ class PaymentRepositoryTest {
             .isInstanceOf(DataIntegrityViolationException.class).hasMessageContaining("uk_payment_refunds_idempotency_key");
     }
 
+    @Test void paymentKeysDifferingOnlyInCaseAreDifferentAttempts() {
+        Payment lower = payments.saveAndFlush(attempt("key-a"));
+        lower.fail("SUPERSEDED", "replaced", NOW);
+        payments.saveAndFlush(lower);
+        Payment upper = payments.saveAndFlush(attempt("KEY-A"));
+        assertThat(upper.getId()).isNotEqualTo(lower.getId());
+        assertThat(payments.findByPayableTypeAndPayableIdAndIdempotencyKey(PayableType.DROP, 1L, "key-a"))
+            .get().extracting(Payment::getId).isEqualTo(lower.getId());
+        assertThat(payments.findByPayableTypeAndPayableIdAndIdempotencyKey(PayableType.DROP, 1L, "KEY-A"))
+            .get().extracting(Payment::getId).isEqualTo(upper.getId());
+    }
+    @Test void refundKeysDifferingOnlyInCaseAreDifferentRequests() {
+        Long id = payments.saveAndFlush(attempt("one")).getId();
+        PaymentRefund lower = PaymentRefund.requestCustomer(id, 1000L, "refund-key", "reason", NOW);
+        lower.fail("REJECTED", "confirmed", NOW);
+        refunds.saveAndFlush(lower);
+        PaymentRefund upper = refunds.saveAndFlush(PaymentRefund.requestCustomer(id, 1000L, "REFUND-KEY", "reason", NOW));
+        assertThat(refunds.findByPaymentIdAndKindAndClientKey(id, PaymentRefundKind.CUSTOMER_REFUND, "refund-key"))
+            .get().extracting(PaymentRefund::getId).isEqualTo(lower.getId());
+        assertThat(refunds.findByPaymentIdAndKindAndClientKey(id, PaymentRefundKind.CUSTOMER_REFUND, "REFUND-KEY"))
+            .get().extracting(PaymentRefund::getId).isEqualTo(upper.getId());
+    }
+
     /** Locked load + entity method: the second transaction waits, then sees APPROVED and does nothing. */
     boolean approveUnderLock(Long id) {
         return new TransactionTemplate(transactionManager).execute(status -> {
