@@ -50,6 +50,7 @@ tasks.named('test') {
     // 스케줄러를 검증하는 테스트만 @SpringBootTest(properties)로 다시 켠다.
     systemProperty 'restless.auction.scheduler.enabled', 'false'
     systemProperty 'restless.payment.reconcile.enabled', 'false'
+    systemProperty 'restless.drop.queue.scheduler.enabled', 'false'
     // 팬미팅 응모 기간 Worker도 같은 이유로 끈다. 워커 테스트는 FanMeetingEntryWorker를 직접 부른다.
     systemProperty 'restless.fanmeeting.worker.enabled', 'false'
 }

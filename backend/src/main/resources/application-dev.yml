@@ -16,6 +16,15 @@ spring:
       lifecycle-management: start-only
 
 restless:
+  drop:
+    queue:
+      required: true
+      heartbeat-timeout: 30s
+      admission-ttl: 5m
+      admit-per-run: 100
+      scheduler:
+        enabled: true
+        fixed-delay-ms: 1000
   auth:
     jwt:
       # 로컬 전용 기본값. 배포에서는 쓰지 않는다(prod는 JWT_SECRET 필수).
