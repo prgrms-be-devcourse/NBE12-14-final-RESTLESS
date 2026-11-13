@@ -1,5 +1,6 @@
 package com.restless.fanmeeting;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -13,8 +14,14 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -27,7 +34,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
-/** 팬미팅 API 테스트 공통: 회원 토큰, 행사 만들기, 행사 상태·시각 바꾸기, 응모·취소. */
+/** 팬미팅 API 테스트 공통: 회원 토큰, 행사 만들기, 행사 상태·시각 바꾸기, 응모·취소, 동시 요청. */
 @SpringBootTest(properties = "spring.docker.compose.enabled=false")
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
@@ -100,6 +107,27 @@ abstract class FanMeetingApiSupport {
         Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM fan_meeting_applications WHERE event_id = ?",
                 Integer.class, eventId);
         return n == null ? 0 : n;
+    }
+
+    /** requests개를 동시에 출발시켜 결과를 모은다. 서버 여러 대·따닥 요청을 흉내 낸다. */
+    static <T> List<T> concurrently(int requests, Callable<T> task) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(requests);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<T>> futures = new ArrayList<>();
+        for (int i = 0; i < requests; i++) {
+            futures.add(pool.submit(() -> {
+                start.await();
+                return task.call();
+            }));
+        }
+        start.countDown();
+        pool.shutdown();
+        assertThat(pool.awaitTermination(60, TimeUnit.SECONDS)).isTrue();
+        List<T> results = new ArrayList<>();
+        for (Future<T> f : futures) {
+            results.add(f.get());
+        }
+        return results;
     }
 
     static String contentOf(MvcResult result) {

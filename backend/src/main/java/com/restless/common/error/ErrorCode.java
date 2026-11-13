@@ -72,7 +72,8 @@ public enum ErrorCode {
     INVALID_FAN_MEETING_SETTINGS(HttpStatus.BAD_REQUEST, "팬미팅 설정이 올바르지 않습니다."),
     APPLICATION_WINDOW_CLOSED(HttpStatus.CONFLICT, "응모 기간이 아닙니다."),
     ALREADY_APPLIED(HttpStatus.CONFLICT, "이미 응모했습니다."),
-    APPLICATION_NOT_ACTIVE(HttpStatus.CONFLICT, "취소할 응모가 없습니다.");
+    APPLICATION_NOT_ACTIVE(HttpStatus.CONFLICT, "취소할 응모가 없습니다."),
+    APPLICATION_BUSY(HttpStatus.SERVICE_UNAVAILABLE, "응모 요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.");
 
     private final HttpStatus httpStatus;
     private final String message;
