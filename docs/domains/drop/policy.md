@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/`
 >
-> 마지막 확인: 2026-11-13 (#79에서 코드와 대조)
+> 마지막 확인: 2026-11-14 (#41 탈퇴 제한 구현과 대조)
 
 상태 표기: `DECIDED` 결정됨, `PROPOSED` 제안, `OPEN` 미확정, `DEFERRED` 보류
 
@@ -213,7 +213,7 @@ Drop 전용: 드롭 목록, 드롭 상세, 배송·결제 페이지, 결제 대�
 
 PG가 손님 환불을 최종 거절하면 주문은 `REFUND_REVIEW`가 되고 판매 재고는 그대로다. 손님은 다시 환불을 요청할 수 있다 (`REFUND_REVIEW` → `PAID` → `REFUND_PENDING`, 한 트랜잭션, DECIDED 2026-11-13).
 
-## 11. 탈퇴 제한 (PROPOSED, 2026-11-14 계약 반영, #41)
+## 11. 탈퇴 제한 (PROPOSED, 2026-11-14 구현, #41)
 
 `WithdrawalGuard` 드롭 구현(`hasActiveParticipation(userId)`)으로 진행 중인 거래가 있는 회원의 탈퇴를 막는다 (`member/application/WithdrawalGuard.java`).
 등록된 Guard가 없으면 결제 진행 중인 회원도 탈퇴할 수 있으므로 드롭 구매 흐름 구현 때 함께 넣는다 (#41).
