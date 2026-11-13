@@ -72,6 +72,7 @@ class FanMeetingWithdrawalGuard implements WithdrawalGuard {
 - **로그인 필요**: 아래 공개 경로를 뺀 모든 API. 토큰이 없거나 만료·위조면 401 `UNAUTHORIZED`.
 - **공개 경로**: 가입·로그인·재발급·로그아웃, 공연·회차 좌석·드롭·경매·팬미팅 상세 조회(GET), `/actuator/health`. 로그인 없이 볼 조회 API를 만들면 `SecurityConfig.PUBLIC_GET_PATHS`에 추가한다.
 - **관리자**: `/api/admin/**`는 `role = ADMIN`만. 아니면 403 `FORBIDDEN`. 관리자 기능은 이 경로 아래로 만든다(컨트롤러에서 권한을 다시 검사하지 않는다). 가입하면 USER이고, ADMIN은 DB에서 지정한다.
+- **주최자**: `/api/organizer/**`는 `role = ORGANIZER` 또는 `ADMIN`만. 아니면 403 `FORBIDDEN`. 주최자 기능은 이 경로 아래로 만든다. 보안 설정은 역할만 보므로, 본인 것인지(예: 자기 행사)는 각 도메인 서비스가 확인한다. ORGANIZER도 DB에서 지정한다.
 - **로그인 회원 ID**: 컨트롤러 파라미터에 `@LoginMember Long userId`를 쓴다. 요청 본문으로 회원 ID를 받지 않는다.
 - **현재 시각**: `Instant.now()` 대신 `Clock`을 주입받아 `clock.instant()`로 읽는다(`common/config/ClockConfig`). 테스트에서 시각을 바꿀 수 있다.
 
