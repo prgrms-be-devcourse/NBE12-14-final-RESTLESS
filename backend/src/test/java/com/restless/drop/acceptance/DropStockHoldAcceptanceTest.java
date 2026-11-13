@@ -18,7 +18,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <b>하네스 파일이다.</b> D2 구현 PR에서 아래 {@code @Disabled} 한 줄만 지운다. 테스트 내용은 바꾸지 않는다.
  * 대기열은 꺼 둔다({@code restless.drop.queue.required=false}, 지원 클래스 설정).
  */
-@Disabled("D2 구현 전. D2 구현 PR에서 이 줄만 지운다")
 @DisplayName("D2 재고 점유 + 주문 생성")
 class DropStockHoldAcceptanceTest extends DropAcceptanceSupport {
 
