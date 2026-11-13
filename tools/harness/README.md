@@ -9,7 +9,7 @@ AI가 드롭 기능을 구현하고(Codex) 다른 AI가 검증할 때(Claude) �
 | 무엇 | 위치 | 성격 |
 |---|---|---|
 | 무엇이 맞는가 (계약, 불변식, 정책, 테스트 전략) | `docs/contracts/api/drop.md`, `docs/domains/drop/`, `docs/testing/strategy.md` | 사람이 합의하는 기준. 드롭 문서 머리에 `관련 코드`와 `마지막 확인` 날짜 |
-| 드롭 전용 에이전트 지침 | 메인 폴더의 `backend/src/main/java/com/restless/drop/AGENTS.md` (+ `CLAUDE.md`는 `@AGENTS.md` 한 줄). **git-ignore, 개인 PC** | 용어, 읽을 문서, 모듈 경계, 검증 명령. 지시서는 이 파일을 절대 경로로 가리키기만 한다 |
+| 에이전트 지침 | 드롭: `backend/src/main/java/com/restless/drop/AGENTS.md` (+ `CLAUDE.md`는 `@AGENTS.md` 한 줄, 레포). 루트: `AGENTS.md`, `CLAUDE.md` (**git-ignore, 개인 PC**, #89) | 드롭 지침은 용어, 읽을 문서, 모듈 경계, 검증 명령. 지시서는 두 파일을 가리키기만 한다 |
 | 자동 채점 (수용 테스트, 불변식 SQL, 모듈 경계) | `backend/src/test/java/com/restless/drop/acceptance/`, `backend/src/test/resources/harness/`, `backend/src/test/java/com/restless/architecture/` | CI가 실행. 구현 단계에서는 `@Disabled` 줄 삭제만 허용 |
 | 작업 도구 (이 폴더) | `tools/harness/` | 검사 스크립트, 가드, 지시서 템플릿, 테스트 힘 검사 |
 | 실행 기록 | `.ai-output/harness/` (git-ignore, 개인 PC) | 진행표, 단계 보고서, 차단 기록, 빌드 로그, 대신 정한 정책 |
@@ -35,7 +35,7 @@ AI가 드롭 기능을 구현하고(Codex) 다른 AI가 검증할 때(Claude) �
    - `python3 tools/harness/test-strength.py red <수용 테스트 클래스>` → `RESULT: PASS`. 구현 없이 통과하는 테스트가 있으면 아무것도 검사하지 않는 테스트이므로 고친다.
    - 하네스 PR로 올린다. 이 PR만 `HARNESS_EDIT=1`로 검사한다.
 2. **지시하기** (Claude → 사람)
-   - 이슈와 단계 브랜치를 만들고, `codex-stage-spec.md`의 `{...}`를 채워 클립보드에 넣는다. `{MAIN_REPO}`의 드롭 지침 파일이 있는지 먼저 확인한다 (단계 규칙 대부분이 그 파일에 있다).
+   - 이슈와 단계 브랜치를 만들고, `codex-stage-spec.md`의 `{...}`를 채워 클립보드에 넣는다. `{MAIN_REPO}/AGENTS.md`(루트 지침)가 있는지 먼저 확인한다. git에 없는 파일이라 단계 worktree에는 생기지 않는다.
    - 사람이 Codex 탭에 붙여넣는다. 자동 작업자(Orca)는 안전장치에 막혀 쓰지 않는다.
 3. **구현** (Codex)
    - `@Disabled` 한 줄만 지우고 구현한다. `bash tools/harness/harness-check.sh`가 `RESULT: PASS`가 될 때까지 고친다.
@@ -121,7 +121,7 @@ AI가 드롭 기능을 구현하고(Codex) 다른 AI가 검증할 때(Claude) �
 - 문서 검사는 링크·경로가 있는지와 날짜만 본다. 문서 내용이 코드와 맞는지는 판단하지 못한다. 경고가 나오면 사람이나 Claude가 대조한다. 관련 코드를 폴더 단위로 적은 문서는 그 폴더의 어떤 변경에도 경고한다.
 - 레포 루트에 셸 명령(`cat > memo.md`)으로 만든 `.md`는 ①이 보지 못한다. 커밋할 때 ②가 막는다. 커밋하지 않은 메모는 막지 않는다.
 - 레포 루트에서 실행한 Codex는 하위 폴더 `AGENTS.md`를 자동으로 읽지 않는다 (2026-11-14, codex-cli 0.167.2로 확인). 그 폴더에서 실행하면 읽는다. 그래서 지시서가 드롭 지침을 직접 가리킨다.
-- 드롭 지침은 git에 없는 개인 파일이다. PC를 바꾸거나 메인 폴더를 지우면 사라진다. 백업이 필요하면 `.ai-output/harness/`에 사본을 둔다.
+- 루트 `AGENTS.md`, `CLAUDE.md`는 git에 없는 개인 파일이다 (#89). PC를 바꾸거나 메인 폴더를 지우면 사라진다. 사본: `.ai-output/harness/root-backup/`. 예전 팀 버전은 `git show 0fb7131:AGENTS.md`.
 - 드롭 전용 설정(보호 경로, 다른 도메인 목록, 문서 검사 대상)은 `guard.py` 맨 위, `harness-check.sh`, `test-strength.py`, `doc-check.py` 맨 위에 있다. 다른 도메인이 이 하네스를 쓰려면 그 부분을 바꾼다.
 
 ## 7. 하네스를 바꾸려면
