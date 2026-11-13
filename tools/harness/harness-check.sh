@@ -1,24 +1,30 @@
 #!/usr/bin/env bash
-# Drop harness check. Run from anywhere:  bash .ai-output/harness/harness-check.sh [base-ref]
-# Exit 0 = pass (warnings allowed), 1 = fail. Prints a summary at the end.
+# Drop harness check (the verdict). Run from the folder to check:  bash tools/harness/harness-check.sh [base-ref]
+# Exit 0 = pass (warnings allowed), 1 = fail. Prints a summary at the end. See tools/harness/README.md.
 set -o pipefail   # no -u: macOS bash 3.2 treats empty arrays as unbound
 
-HARNESS_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_MARKER="NBE12-14-final-RESTLESS"
 # Check the folder the command runs in (a worktree for parallel stages), not the folder holding this script.
+is_restless() { case "$1|$(git -C "$1" config --get remote.origin.url 2>/dev/null)" in *"$REPO_MARKER"*) return 0;; esac; return 1; }
 REPO="$(git rev-parse --show-toplevel 2>/dev/null)"
-case "$REPO" in *NBE12-14-final-RESTLESS*) ;; *) REPO="$(git -C "$HARNESS_DIR" rev-parse --show-toplevel)";; esac
+{ [ -n "$REPO" ] && is_restless "$REPO"; } || REPO="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 FOLDER_TAG="$(basename "$REPO")"
 cd "$REPO" || exit 1
-# Base: origin/dev once the harness is merged (HEAD built on top of it). For a branch stacked on an
-# unmerged harness branch, the newest harness commit it contains. An explicit argument wins.
-HARNESS_BRANCH="chore/drop-55-harness"
+# Local state (lock, build log) lives in the main checkout's git-ignored .ai-output/harness, shared by worktrees.
+STATE_DIR="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.ai-output/harness"
+mkdir -p "$STATE_DIR"
+# Base: origin/dev, unless this branch is stacked on an unmerged harness branch (HARNESS_BRANCH):
+# then the newest harness commit it contains, so the harness changes are not counted as this
+# branch's changes (HD-01). Works after a squash merge too. An explicit argument wins.
+HARNESS_BRANCH="${HARNESS_BRANCH:-chore/drop-80-harness}"
+STACK_BASE=""
+if git rev-parse -q --verify "$HARNESS_BRANCH" >/dev/null; then
+  STACK_BASE="$(git merge-base HEAD "$HARNESS_BRANCH" 2>/dev/null)"
+  [ -n "$STACK_BASE" ] && git merge-base --is-ancestor "$STACK_BASE" origin/dev 2>/dev/null && STACK_BASE=""
+fi
 if [ -n "${1:-}" ]; then BASE_REF="$1"
-elif git merge-base --is-ancestor origin/dev HEAD 2>/dev/null \
-     && [ -f backend/src/test/resources/harness/drop-invariants.sql ] \
-     && git cat-file -e origin/dev:backend/src/test/resources/harness/drop-invariants.sql 2>/dev/null; then
-  BASE_REF="origin/dev"
-elif git rev-parse -q --verify "$HARNESS_BRANCH" >/dev/null; then
-  BASE_REF="$(git merge-base HEAD "$HARNESS_BRANCH")"
+elif [ -n "$STACK_BASE" ] && [ "$(git branch --show-current)" != "$HARNESS_BRANCH" ]; then BASE_REF="$STACK_BASE"
 else BASE_REF="origin/dev"; fi
 BASE="$(git merge-base HEAD "$BASE_REF")"
 FAILS=()
@@ -55,6 +61,11 @@ if [ -n "$CHANGED_PROTECTED" ] && [ "$HARNESS_EDIT" != 1 ]; then
   fi
 fi
 
+# 1b. Versioned harness tooling (tools/harness) changes only in a harness PR.
+CHANGED_TOOLS="$(git diff --name-only "$BASE" -- tools/harness; echo "$UNTRACKED" | grep '^tools/harness/')"
+CHANGED_TOOLS="$(echo "$CHANGED_TOOLS" | sed '/^$/d')"
+[ -n "$CHANGED_TOOLS" ] && [ "$HARNESS_EDIT" != 1 ] && fail "하네스 도구(tools/harness) 수정 금지:"$'\n'"$CHANGED_TOOLS"
+
 # 2. Merged migrations must not change (only new files allowed).
 MIG="$(git diff --name-status "$BASE" -- backend/src/main/resources/db/migration | grep -vE '^A')"
 [ -n "$MIG" ] && fail "머지된 마이그레이션 수정/삭제 금지:"$'\n'"$MIG"
@@ -90,7 +101,7 @@ if [ "${SKIP_BUILD:-0}" = 1 ]; then
 fi
 # Build lock (HD-02): one full build per working folder. Waits for another harness-check build
 # or any Gradle test worker running from this folder, then holds a lock until the script exits.
-LOCK="$HARNESS_DIR/.build.lock-$FOLDER_TAG"
+LOCK="$STATE_DIR/.build.lock-$FOLDER_TAG"
 WAITED=0
 while true; do
   if mkdir "$LOCK" 2>/dev/null; then echo $$ > "$LOCK/pid"; trap 'rm -rf "$LOCK"' EXIT; fi
@@ -102,8 +113,9 @@ while true; do
   sleep 5
 done
 START_HEAD="$(git rev-parse HEAD)"; START_BRANCH="$(git branch --show-current)"
-( docker info >/dev/null 2>&1 ) || { open -a Docker >/dev/null 2>&1; for _ in $(seq 1 40); do docker info >/dev/null 2>&1 && break; sleep 3; done; }
-LOG="$HARNESS_DIR/last-build-$FOLDER_TAG.log"
+# Start Docker Desktop on macOS if it is not running (Testcontainers needs it).
+( docker info >/dev/null 2>&1 ) || { command -v open >/dev/null && open -a Docker >/dev/null 2>&1; for _ in $(seq 1 40); do docker info >/dev/null 2>&1 && break; sleep 3; done; }
+LOG="$STATE_DIR/last-build-$FOLDER_TAG.log"
 # HD-09: CI builds "PR merged into dev", not the branch. Two changes that pass alone can break together
 # (enum separator, a default that another stage changed). When HEAD is behind origin/dev, build the
 # merge result in a temporary worktree instead. NO_DEV_MERGE=1 builds HEAD as is.
