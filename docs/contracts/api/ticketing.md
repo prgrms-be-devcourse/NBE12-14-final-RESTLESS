@@ -7,7 +7,9 @@
 
 | Method | Endpoint | 기능 |
 |---|---|---|
-| GET | `/api/concerts/{concertId}/sessions` | 공연 회차 목록 |
+| GET | `/api/concerts` | 공연 목록 (페이지 조회) |
+| GET | `/api/concerts/{concertId}` | 공연 상세 |
+| GET | `/api/concerts/{concertId}/performances` | 공연 회차 목록 |
 | GET | `/api/performances/{performanceId}/seats` | 회차별 좌석 상태 (3초 폴링) |
 | POST | `/api/ticket-reservations` | 좌석 선점 (`Idempotency-Key`) |
 | GET | `/api/ticket-reservations/{reservationId}` | 예약 상세 |
@@ -16,6 +18,80 @@
 | POST | `/api/ticket-reservations/{reservationId}/checkout` | 결제 시작 |
 | POST | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 요청 |
 | GET | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 상태 조회 |
+
+## 공연 목록 조회
+
+`GET /api/concerts?page=0&size=20`는 비로그인으로 공연 목록을 `200 OK`로 조회한다.
+기존 공연 상세 DTO와 같은 필드를 목록 항목으로 사용한다.
+
+```json
+{
+  "content": [
+    {
+      "concertId": 1,
+      "venueId": 10,
+      "title": "RESTLESS 공연",
+      "status": "SCHEDULED",
+      "createdAt": "2026-11-13T01:00:00Z"
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+- page는 0부터 시작하고 기본값은 0이다. size는 기본 20, 허용 범위는 1~100이다.
+- 생성 시각 내림차순으로 정렬하며, 같은 시각은 공연 ID 내림차순으로 정렬한다. 첫 회차 시작 시각순이 아닌 공연 등록 최신순이다.
+- 공연이 없거나 페이지 범위를 벗어나면 content는 빈 배열이다. 전체 개수·페이지 수는 실제 전체 공연 수를 기준으로 반환한다.
+- 음수 page, 범위 밖 size, 정수로 변환할 수 없는 파라미터는 `400 INVALID_REQUEST`다.
+- 검색·상태 필터는 이번 범위에 포함하지 않는다. 상세 조회와 동일하게 저장된 공연을 반환하며 공개 상태별 필터는 정책 확정 후 적용한다.
+- ConcertPage는 서비스 조회 결과이므로 concert/application/dto에 둔다. content는 기존 ConcertDetail을 재사용하며 Spring Data Page나 엔티티를 HTTP 응답에 직접 노출하지 않는다.
+- ConcertPerformanceMappingTest에 비로그인 목록·최신순 및 동률 ID 정렬·페이지 기본값과 이동·범위 밖 빈 결과·잘못된 파라미터 400 검증을 작성했으며 아직 실행하지 않았다.
+
+## 공연 상세·회차 목록 조회
+
+두 API는 비로그인 조회를 허용한다. 좌석 화면 진입부터 로그인이 필요하다.
+
+`GET /api/concerts/{concertId}`는 공연 상세를 `200 OK`로 반환한다.
+
+```json
+{
+  "concertId": 1,
+  "venueId": 10,
+  "title": "RESTLESS 공연",
+  "status": "SCHEDULED",
+  "createdAt": "2026-11-13T01:00:00Z"
+}
+```
+
+`GET /api/concerts/{concertId}/performances`는 해당 공연의 회차만 시작 시각 오름차순으로 반환한다.
+응답의 performanceId로 `/api/performances/{performanceId}/seats`를 호출할 수 있다.
+
+```json
+[
+  {
+    "performanceId": 100,
+    "concertId": 1,
+    "venueId": 10,
+    "layoutId": 20,
+    "startsAt": "2026-11-20T10:00:00Z",
+    "bookingOpensAt": "2026-11-13T02:00:00Z",
+    "bookingClosesAt": "2026-11-20T09:00:00Z",
+    "maxTicketsPerUser": 3,
+    "status": "SCHEDULED"
+  }
+]
+```
+
+- 존재하는 공연에 회차가 없으면 `200 OK`와 빈 배열을 반환한다. 없는 공연은 상세·목록 모두 `404 NOT_FOUND`다.
+- concertId가 양수가 아니거나 Long으로 변환할 수 없으면 `400 INVALID_REQUEST`다.
+- 시각은 UTC Instant로 반환한다. 공연장 이름·주소, 소개·포스터 등은 현재 상세 응답에 포함하지 않는다.
+- 상태값은 저장된 문자열을 반환한다. 예시의 SCHEDULED가 허용 상태 집합을 정의하지 않으며, 게시·공개 상태별 필터는 정책 확정 후 적용한다.
+- 회차 목록의 기존 문서 경로 `/api/concerts/{concertId}/sessions`는 내부·API 회차 명칭 통일에 따라 `/performances`로 변경하며 별도 호환 경로는 제공하지 않는다.
+- 서비스 조회 결과 DTO인 ConcertDetail·PerformanceInfo는 concert/application/dto에 둔다. Controller는 엔티티를 노출하지 않고 해당 DTO를 반환한다.
+- ConcertPerformanceMappingTest의 기존 준비 데이터를 재사용해 비로그인 상세·회차 조회, 공연별 회차 분리·시작 시각 정렬 및 두 API의 없는 공연 404 검증을 작성했으며 아직 실행하지 않았다.
 
 ## 회차별 좌석 조회
 
@@ -48,6 +124,41 @@
 상태는 `AVAILABLE`, `HELD`, `SOLD` 중 하나다. 현재 상태를 조회하며 만료 처리나 선점은 수행하지 않는다.
 회차에 판매 좌석이 없으면 빈 배열을 반환한다. 없는 회차는 `404 NOT_FOUND`,
 Long으로 변환할 수 없는 performanceId는 `400 INVALID_REQUEST`로 응답한다.
+
+## 활성 예약·예약 상세 조회
+
+두 API 모두 로그인 필수이며 회원 ID는 `@LoginMember`로 인증 정보에서 추출한다.
+요청 본문·경로·쿼리로 다른 회원의 ID를 받지 않는다.
+
+- `GET /api/ticket-reservations/active`: 본인의 HELD/PAYMENT_PENDING/RECONCILING 예약을 생성 시각 내림차순, 동률이면 예약 ID 내림차순으로 반환한다. 회차마다 활성 예약이 있을 수 있어 결과는 배열이며, 없으면 `200 OK`와 빈 배열이다.
+- `GET /api/ticket-reservations/{reservationId}`: 예약 ID와 로그인 회원 ID를 함께 조건으로 조회한다. 본인 예약은 종료 상태를 포함해 `200 OK`로 반환하며, 없는 예약과 타인 예약은 모두 `404 NOT_FOUND`다.
+
+상세 응답 예시 (활성 목록은 아래 객체의 배열):
+
+```json
+{
+  "reservationId": 5001,
+  "performanceId": 100,
+  "status": "HELD",
+  "seats": [
+    { "seatId": 10, "priceAmount": 100000 },
+    { "seatId": 11, "priceAmount": 100000 }
+  ],
+  "holdExpiresAt": "2026-11-13T02:05:00Z",
+  "holdExpired": false,
+  "orderId": null,
+  "paymentExpiresAt": null,
+  "createdAt": "2026-11-13T02:00:00Z"
+}
+```
+
+- `seatId`는 회차별 판매 좌석 ID이며 좌석 목록은 ID 오름차순이다. 가격은 현재 판매가가 아닌 최초 선점 이력의 가격이다.
+- `orderId`, `paymentExpiresAt`는 연결 전에는 null이다. 공통 JSON 설정에 따라 null 필드는 생략될 수 있다.
+- 조회는 잠금·상태 변경·기한 연장·만료 반환을 수행하지 않는다. 예약과 이력은 읽기 전용 REPEATABLE_READ 트랜잭션에서 같은 스냅샷으로 조회한다.
+- 활성 목록은 저장된 예약 상태를 기준으로 한다. 만료 정리 전 HELD도 포함하며, DB UTC 시각이 선점 기한 이상이면 `holdExpired=true`다. 이 값은 결제 전 HELD 만료 여부이며 결제 가능 여부나 현재 좌석 소유권을 보장하지 않는다.
+- PAYMENT_PENDING/RECONCILING은 최초 선점 기한이 지나도 `holdExpired=false`이고 활성 목록에 남는다. 결제 기한은 `paymentExpiresAt`를 사용하며 결제 진행·불명확 상태를 기한만으로 실패 처리하지 않는다.
+- 비로그인은 `401 UNAUTHORIZED`, 잘못된 상세 예약 ID는 `400 INVALID_REQUEST`다. 요청 키·해시·타인의 회원 정보는 반환하지 않는다.
+- TicketReservationServiceTest에 본인 상세·가격 스냅샷·읽기 전용 동작, 활성 상태와 회원별 목록 분리, 타인·없는 예약의 404 검증을 작성했으며 아직 실행하지 않았다.
 
 ## 좌석 선점
 
