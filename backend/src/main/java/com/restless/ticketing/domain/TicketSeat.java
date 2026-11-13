@@ -71,6 +71,13 @@ public class TicketSeat {
         status = TicketSeatStatus.HELD;
     }
 
+    public void sell(Long holdId) {
+        if (status != TicketSeatStatus.HELD || !Objects.equals(currentHoldId, holdId)) {
+            throw new IllegalStateException("좌석의 현재 선점 소유자만 판매 확정할 수 있습니다.");
+        }
+        status = TicketSeatStatus.SOLD;
+    }
+
     public void release(Long holdId) {
         if (status != TicketSeatStatus.HELD || !Objects.equals(currentHoldId, holdId)) {
             throw new IllegalStateException("좌석의 현재 선점 소유자가 일치하지 않습니다.");

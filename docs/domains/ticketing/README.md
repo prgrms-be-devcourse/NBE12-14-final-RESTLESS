@@ -58,3 +58,7 @@ POST /api/ticket-reservations/{reservationId}/checkout을 구현했다. 본인 �
 ## 단계별 구현: 결제 대상 조회·승인 시작 검증
 
 TicketPaymentService가 공통 트랜잭션 안에서 예약 ID 기준 PayableSnapshot 조회와 잠금 후 승인 시작 검증을 수행하도록 구현했다. 수락 시 승인 시도 기록과 주문 PAYMENT_CONFIRMING을 함께 저장한다. Handler 등록과 실제 결과 처리는 다음 단계다. 대상 조회·승인 시작 필수 통합 검증은 기존 checkout fixture 안에서 현재 10개다. 티켓팅 잠금 후 기록 시점으로 기한을 판정하며 기존 OrderService.find/changeStatus만 사용한다. 기록 후 주문 잠금 대기와 기록 전 티켓팅 잠금 대기를 구분한다. 상세는 [Handler 문서](payment-handler.md#단계별-구현-대상-조회승인-시작-검증-2026-11-13)를 따른다.
+
+## 단계별 구현: 승인 성공·티켓 발급
+
+내부 TicketPaymentService.onApproved에서 수락한 시도와 현재 소유권을 확인해 예약/선점 CONFIRMED·좌석 SOLD·구매 수량 이동·ISSUED 티켓 발급·주문 PAID를 같은 트랜잭션으로 처리한다. 중복·동시 성공은 기존 티켓과 수량을 보존한다. 성공 내부 서비스 10개와 기존 준비·매핑을 포함한 집중 39개가 통과했다. 기존 공통 API만 사용하며 Handler 등록·나머지 실패/불명확/만료/보상 처리는 다음 단계다. [발급 문서](ticket-issuance.md#승인-성공-내부-서비스와-발급-상태-2026-11-13)를 따른다.

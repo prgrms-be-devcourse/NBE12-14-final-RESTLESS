@@ -340,4 +340,4 @@ Java 엔티티·Repository는 Performance/PerformanceRepository, DB 테이블은
 ## 공통 결제 대상 식별 (DECIDED, 2026-11-13)
 
 티켓팅은 공통 결제의 `payableType=TICKET`, `payableId=예약 ID`로 연결한다. 공통 주문 ID와 결제창의 pgOrderId는 별개다. 금액은 예약에 연결된 공통 주문에서 확인한다.
-현재 예약의 수락 시도 저장 기반과 내부 서비스의 대상 조회·승인 시작 검증을 구현했으며 티켓팅 PaymentResultHandler는 아직 등록하지 않았다. 따라서 이 매핑 합의가 티켓팅의 공통 결제 준비·승인 API 사용 가능을 뜻하지 않는다. checkout 응답과 기존 API 동작은 유지한다.
+현재 예약의 수락 시도 저장 기반과 내부 서비스의 대상 조회·승인 시작·성공 확정/티켓 발급을 구현했으며 티켓팅 PaymentResultHandler는 아직 등록하지 않았다. 따라서 이 매핑 합의가 티켓팅의 공통 결제 준비·승인 API 사용 가능을 뜻하지 않는다. checkout 응답과 기존 API 동작은 유지한다.

@@ -1,7 +1,7 @@
 # 티켓팅 PaymentResultHandler 연결
 
 - 상태: 상태 전이는 DECIDED (2026-11-12, 담당자 합의).
-- 기준: ADR-0003의 동기 Handler 계약. 승인 시도 저장 및 내부 서비스의 대상 조회·승인 시작 검증을 구현했다. PaymentResultHandler 구현·빈 등록과 결과 처리는 아직 다음 단계다.
+- 기준: ADR-0003의 동기 Handler 계약. 승인 시도 저장 및 내부 서비스의 대상 조회·승인 시작·성공 확정/발급을 구현했다. PaymentResultHandler 빈 등록과 실패/불명확/만료/보상 처리는 아직 다음 단계다.
 - paymentId를 모든 상태 변경 Handler에 전달하는 원칙은 DECIDED (2026-11-12). 공통 DTO·인터페이스는 ADR-0003 개정에 반영됐고 티켓팅 예약의 시도 저장·수락 도메인 메서드를 구현했다. 실제 Handler 연결은 후속 단계다. 결제 대상 매핑은 예약 ID 기준으로 확정했다 (2026-11-13, 사용자 합의).
 
 ## 경계
@@ -65,7 +65,7 @@ DB 오류 등 기술 실패는 예외로 전체 롤백한다. 업무상 승인 �
 티켓팅은 승인 시작을 받아들인 paymentId와 시각을 영속화하고 결과가 같은 시도인지 확인해야 한다.
 예약의 current_payment_id, approval_started_at, payment_result_pending을 V20261113_1500으로 추가했다. current_payment_id는 공통 payments.id의 스칼라 문맥으로 저장하며 물리 FK를 추가하지 않는다. 실제 대상·시도 관계는 공통 결제의 잠금·callback 계약과 티켓팅 Handler 검증으로 보장한다.
 current_payment_id는 NULL 허용 UNIQUE이며, DB CHECK는 ID/시각의 부분 저장과 checkout 이전·결제 기한 이상인 승인 시작 시각을 막는다. 아직 시도가 없는 기존 예약은 NULL/NULL/false이며 과거 시도를 추정해 채우지 않는다.
-payment_result_pending은 수락한 승인 결과 또는 필요한 보상 취소가 미확정임을 뜻한다. 예약 상태 PAYMENT_PENDING은 checkout 직후와 승인 진행 중 모두 쓰므로 이를 구분하는 별도 필드다. 이 필드를 실제로 종료하거나 만료 판단에 사용하는 Handler·만료 연결은 후속 단계다.
+payment_result_pending은 수락한 승인 결과 또는 필요한 보상 취소가 미확정임을 뜻한다. 예약 상태 PAYMENT_PENDING은 checkout 직후와 승인 진행 중 모두 쓰므로 이를 구분하는 별도 필드다. 성공 확정에서는 이 필드를 false로 바꾸고 시도 ID/시각을 보존한다. 실패/보상 종료와 만료 판단에 사용하는 Handler·만료 연결은 후속 단계다.
 승인 전 READY 만료 실패의 approvalStartedAt은 null일 수 있다. 정상 환불과 보상 취소를 구분하고 예매 확정 전 보상 취소에 confirmed_count 감소를 적용하지 않는다.
 
 ## 공통 대사와 checkout의 관계
@@ -125,3 +125,15 @@ TicketCheckoutServiceTest.ApprovalPreparation에 기존 공연·예약 fixture�
 TicketReservationPaymentAttemptTest에서 0번 ID 거절만 확인하는 단순 방어 로직 테스트 1개를 제거했다. 현재 도메인 테스트는 8개이며 시도 식별·덮어쓰기 방지·기한 경계·상태 검증은 유지한다. checkout의 인증·주문 생성·중복 요청과 기존 매핑 제약 테스트는 복제하지 않았다.
 최초 9개 서비스 사례의 집중 실행: `./gradlew test --tests 'com.restless.ticketing.application.TicketCheckoutServiceTest*' --tests 'com.restless.ticketing.domain.TicketReservationPaymentAttemptTest' --tests 'com.restless.order.OrderServiceTest'` — 37개 통과, 실패·오류·건너뜀 0개. 기존 주문 API 전환 후에는 같은 명령으로 38개가 통과했다.
 이 검증은 내부 서비스까지이며 Handler 등록·실제 PG 승인·성공 발급·실패/불명확/만료/보상 처리의 검증은 아니다.
+
+## 단계별 구현: 승인 성공과 티켓 발급 (2026-11-13)
+
+TicketPaymentService.onApproved(예약 ID, ApprovedPayment)를 추가했다. 공통 트랜잭션에 MANDATORY로 참여하며 기존 OrderService.find/changeStatus만 사용한다. 공통 주문 서비스·결제 인터페이스는 변경하지 않았다.
+
+- 수락한 paymentId/approvalStartedAt과 성공 문맥·주문 금액을 대조하고, PAYMENT_PENDING 또는 RECONCILING의 미확정 시도만 최초 확정한다. 현재 시각·PG 승인 시각으로 기한을 다시 판정하지 않는다.
+- 구매 관리 → 예약 → 좌석 ID 오름차순으로 잠근 뒤 모든 좌석의 현재 선점 소유권·이력·수량/금액을 검증한다. 성공 반영은 예약/선점 CONFIRMED·좌석 SOLD·구매 수량 이동·ISSUED 티켓·주문 PAID이며 중간 실패 시 전체 롤백한다.
+- 같은 시도로 이미 CONFIRMED이면 기존 티켓·소유권·주문·수량이 일관된지 확인하고 ACCEPT한다. 결과 재수신으로 티켓이나 수량을 바꾸지 않는다. 종료된 예약을 과거 성공으로 되돌리지 않는다.
+- 업무 거절은 TICKET_RESERVATION_NOT_FOUND, TICKET_PAYMENT_ATTEMPT_MISMATCH, TICKET_NOT_CONFIRMABLE, TICKET_PAYMENT_AMOUNT_MISMATCH, TICKET_ORDER_NOT_CONFIRMABLE, TICKET_SEAT_OWNERSHIP_LOST를 reason으로 REJECT한다. DB/참조/금액 합계/수량/이미 확정된 기록 불일치는 예외로 전체 롤백한다.
+- 발급 상태 ISSUED는 사용자 합의로 확정했다. 기존 티켓 DB 제약을 사용하며 새 마이그레이션은 없다. 상세 발급·검증 범위는 [티켓 발급 문서](ticket-issuance.md#승인-성공-내부-서비스와-발급-상태-2026-11-13)를 따른다.
+
+아직 PaymentResultHandler 빈은 등록하지 않았다. 내부 성공 처리가 실제 PG API·실패/불명확·만료·보상 취소까지 연결된 것은 아니다. 다음 단계에서 나머지 결과 처리와 함께 등록한다.

@@ -205,7 +205,7 @@
 | `performance_seat_id` | 티켓의 판매 좌석 ID | performance_seats.id |
 | `ticket_no` | 사용자에게 제공하는 고유 티켓번호 | UUID v4 문자열로 발급하는 정책. VARCHAR(50), UNIQUE. 내부 PK와 다름 |
 | `price_amount` | 티켓에 기록한 좌석 금액 | 원 단위, 0 이상. 할인·결제 금액 배분 방식은 후속 조율 |
-| `status` | 티켓 상태 | 발급·사용·취소 등의 허용 상태값과 전이는 후속 정의 |
+| `status` | 티켓 상태 | 발급 직후 ISSUED 확정(2026-11-13). 입장 사용·취소의 상태 전이는 후속 정의 |
 | `issued_at` | 티켓 발급 시각 | 예매 확정 트랜잭션에서 기록 |
 | `used_at` | 티켓 사용 처리 시각 | NULL 가능. 입장 처리 기능은 별도 설계 |
 | `cancelled_at` | 티켓 취소 시각 | NULL 가능. 환불 확정 후 취소 반영 |

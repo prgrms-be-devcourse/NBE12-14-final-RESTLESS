@@ -165,6 +165,20 @@ public class TicketReservation {
                 && currentPaymentId.equals(paymentId) && approvalStartedAt.equals(attemptStartedAt);
     }
 
+    public boolean canConfirmPayment(Long paymentId, Instant attemptStartedAt) {
+        return (status == TicketReservationStatus.PAYMENT_PENDING || status == TicketReservationStatus.RECONCILING)
+                && paymentResultPending && matchesPaymentAttempt(paymentId, attemptStartedAt);
+    }
+
+    /** 승인 시작 수락 때 기한을 검증했으므로 성공 확인 시각으로 다시 만료시키지 않는다. */
+    public void confirmPayment(Long paymentId, Instant attemptStartedAt) {
+        if (!canConfirmPayment(paymentId, attemptStartedAt)) {
+            throw new IllegalStateException("수락한 미확정 결제 시도만 예매를 확정할 수 있습니다.");
+        }
+        status = TicketReservationStatus.CONFIRMED;
+        paymentResultPending = false;
+    }
+
     public void cancelHold() {
         if (!canReleaseHold()) {
             throw new IllegalStateException("결제 전 선점 예약만 취소할 수 있습니다.");

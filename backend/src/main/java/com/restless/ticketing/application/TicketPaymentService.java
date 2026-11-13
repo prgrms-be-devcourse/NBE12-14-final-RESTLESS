@@ -5,10 +5,12 @@ import com.restless.order.application.OrderView;
 import com.restless.order.domain.OrderStatus;
 import com.restless.order.domain.OrderType;
 import com.restless.payment.application.payable.ApprovalDecision;
+import com.restless.payment.application.payable.ApprovedPayment;
 import com.restless.payment.application.payable.PayableSnapshot;
 import com.restless.payment.application.payable.PaymentAttemptContext;
 import com.restless.ticketing.domain.SeatHold;
 import com.restless.ticketing.domain.SeatHoldStatus;
+import com.restless.ticketing.domain.Ticket;
 import com.restless.ticketing.domain.TicketPurchaseLimit;
 import com.restless.ticketing.domain.TicketReservation;
 import com.restless.ticketing.domain.TicketReservationStatus;
@@ -18,6 +20,7 @@ import com.restless.ticketing.infrastructure.SeatHoldRepository;
 import com.restless.ticketing.infrastructure.TicketPurchaseLimitRepository;
 import com.restless.ticketing.infrastructure.TicketReservationRepository;
 import com.restless.ticketing.infrastructure.TicketSeatRepository;
+import com.restless.ticketing.infrastructure.TicketRepository;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -42,6 +45,7 @@ public class TicketPaymentService {
     private final TicketReservationRepository reservations;
     private final SeatHoldRepository holds;
     private final TicketSeatRepository seats;
+    private final TicketRepository tickets;
     private final OrderService orders;
     private final JdbcTemplate jdbc;
 
@@ -129,6 +133,69 @@ public class TicketPaymentService {
         return ApprovalDecision.accept();
     }
 
+    /** 공통 결제의 APPROVED 반영 트랜잭션에 함께 참여한다. 실제 PG 호출은 하지 않는다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public ApprovalDecision onApproved(Long reservationId, ApprovedPayment payment) {
+        Objects.requireNonNull(payment, "payment");
+        LockedReservation locked = lockReservation(reservationId).orElse(null);
+        if (locked == null) {
+            return ApprovalDecision.reject("TICKET_RESERVATION_NOT_FOUND");
+        }
+        TicketReservation reservation = locked.reservation();
+        if (!reservation.matchesPaymentAttempt(payment.paymentId(), payment.approvalStartedAt())) {
+            return ApprovalDecision.reject("TICKET_PAYMENT_ATTEMPT_MISMATCH");
+        }
+        boolean alreadyConfirmed = reservation.getStatus() == TicketReservationStatus.CONFIRMED
+                && !reservation.isPaymentResultPending();
+        if (!alreadyConfirmed && !reservation.canConfirmPayment(payment.paymentId(), payment.approvalStartedAt())) {
+            return ApprovalDecision.reject("TICKET_NOT_CONFIRMABLE");
+        }
+        if (!hasCheckout(reservation)) {
+            throw new IllegalStateException("승인 시도를 수락한 예약의 주문·결제 기한이 없습니다.");
+        }
+        List<HeldSeat> lockedSeats = lockReservationSeats(reservation);
+        OrderView order = validateOrder(reservation, orders.find(reservation.getOrderId()));
+        if (payment.amount() != order.totalAmount()) {
+            return ApprovalDecision.reject("TICKET_PAYMENT_AMOUNT_MISMATCH");
+        }
+        long heldAmount = 0;
+        for (HeldSeat held : lockedSeats) {
+            heldAmount = Math.addExact(heldAmount, held.hold().getPriceAmount());
+        }
+        if (heldAmount != order.totalAmount()) {
+            throw new IllegalStateException("선점 가격 합계와 공통 주문 금액이 다릅니다.");
+        }
+        if (alreadyConfirmed) {
+            validateConfirmedReservation(locked, lockedSeats, order);
+            return ApprovalDecision.accept();
+        }
+        if (order.status() != OrderStatus.PAYMENT_CONFIRMING && order.status() != OrderStatus.PAYMENT_REVIEW) {
+            return ApprovalDecision.reject("TICKET_ORDER_NOT_CONFIRMABLE");
+        }
+        if (locked.limit().getReservedCount() != lockedSeats.size()) {
+            throw new IllegalStateException("예약의 선점 좌석 수와 구매 관리 수량이 다릅니다.");
+        }
+        // 하나라도 소유권을 잃었으면 어떠한 핵심 상태도 변경하지 않고 공통 보상 취소로 넘긴다.
+        for (HeldSeat held : lockedSeats) {
+            if (held.hold().getStatus() != SeatHoldStatus.HELD || held.seat().getStatus() != TicketSeatStatus.HELD
+                    || !held.hold().getId().equals(held.seat().getCurrentHoldId())) {
+                return ApprovalDecision.reject("TICKET_SEAT_OWNERSHIP_LOST");
+            }
+        }
+        Instant issuedAt = databaseNow();
+        // 성공 확인 시각·PG approvedAt으로 최초 승인 시작 자격을 다시 만료시키지 않는다.
+        for (HeldSeat held : lockedSeats) {
+            held.hold().confirm();
+            held.seat().sell(held.hold().getId());
+            tickets.save(Ticket.issue(reservation.getId(), reservation.getPerformanceId(), held.seat().getId(),
+                    held.hold().getPriceAmount(), issuedAt));
+        }
+        locked.limit().confirm(lockedSeats.size());
+        reservation.confirmPayment(payment.paymentId(), payment.approvalStartedAt());
+        orders.changeStatus(order.orderId(), OrderStatus.PAID);
+        return ApprovalDecision.accept();
+    }
+
     private Optional<LockedReservation> lockReservation(Long reservationId) {
         if (reservationId == null || reservationId <= 0) {
             return Optional.empty();
@@ -146,6 +213,26 @@ public class TicketPaymentService {
             throw new IllegalStateException("잠금 전후 예약의 사용자·회차가 다릅니다.");
         }
         return Optional.of(new LockedReservation(limit, reservation));
+    }
+
+    private void validateConfirmedReservation(LockedReservation locked, List<HeldSeat> lockedSeats, OrderView order) {
+        List<Ticket> issued = tickets.findAllByReservationIdOrderByPerformanceSeatIdAsc(locked.reservation().getId());
+        if (order.status() != OrderStatus.PAID || issued.size() != lockedSeats.size()
+                || locked.limit().getConfirmedCount() < lockedSeats.size()) {
+            throw new IllegalStateException("확정된 예약의 주문·티켓·구매 수량이 일치하지 않습니다.");
+        }
+        for (int index = 0; index < lockedSeats.size(); index++) {
+            HeldSeat held = lockedSeats.get(index);
+            Ticket ticket = issued.get(index);
+            if (held.hold().getStatus() != SeatHoldStatus.CONFIRMED || held.seat().getStatus() != TicketSeatStatus.SOLD
+                    || !held.hold().getId().equals(held.seat().getCurrentHoldId())
+                    || !ticket.getReservationId().equals(locked.reservation().getId())
+                    || !ticket.getPerformanceId().equals(locked.reservation().getPerformanceId())
+                    || !ticket.getPerformanceSeatId().equals(held.seat().getId())
+                    || ticket.getPriceAmount() != held.hold().getPriceAmount()) {
+                throw new IllegalStateException("확정된 예약의 티켓·좌석 소유권이 일치하지 않습니다.");
+            }
+        }
     }
 
     private List<HeldSeat> lockReservationSeats(TicketReservation reservation) {
