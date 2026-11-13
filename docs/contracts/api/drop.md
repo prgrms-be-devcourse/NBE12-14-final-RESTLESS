@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/api/`, `backend/src/main/java/com/restless/drop/application/dto/`, `backend/src/test/java/com/restless/drop/acceptance/`
 >
-> 마지막 확인: 2026-11-14 (#93에서 수용 테스트와 대조. 등록 검증·판매 상태·탈퇴 제한은 구현 전)
+> 마지막 확인: 2026-11-14 (#92 등록 검증·판매 상태 구현과 대조. 탈퇴 제한은 #41)
 
 - 상태: v1 DECIDED (2026-11-13). 수용 테스트(`backend/src/test/java/com/restless/drop/acceptance/`)가 이 계약을 기준으로 판정한다.
 - Base URL: `/api` ([ADR-0002](../../decisions/0002-common-conventions.md)). 오류는 공통 형식 `{code, message, details, traceId, timestamp}` ([common.md](common.md)).
@@ -77,7 +77,7 @@
 ```
 
 - 수량 필드는 없다. 주문 하나 = SKU 한 종류, 수량 1 (INV-04).
-- 판매 가능 = 게시됨(`SCHEDULED` 또는 `OPEN`)이고 `opensAt <= 서버 시각 < closesAt`. 상태 전환(OPEN, CLOSED)은 표시용이며 판매 판정은 시각으로 한다.
+- 판매 가능 = 게시됨(`SCHEDULED` 또는 `OPEN`)이고 `opensAt <= 서버 시각 < closesAt`. `OPEN` 전환은 판정에 영향이 없다. `CLOSED`·`CANCELLED`는 시각과 관계없이 판매하지 않는다 (#92).
 - 하나의 트랜잭션: 판매 기간·상태 확인 → 구매 슬롯 점유(INV-05) → SKU 재고 조건부 차감(`available - 1`, `reserved + 1`) → 공통 주문(PENDING_PAYMENT, 금액 = 서버 가격, 배송지 스냅샷) 생성 → 재고 점유(RESERVED, 기한 = 지금 + TTL) 저장. 재고 점유가 주문을 NOT NULL FK로 가리켜서 주문을 먼저 만든다.
 - 201
 ```json

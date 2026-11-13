@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/`
 >
-> 마지막 확인: 2026-11-13 (#79에서 코드와 대조)
+> 마지막 확인: 2026-11-14 (#41 탈퇴 제한, #92 등록 검증 구현과 대조)
 
 상태 표기: `DECIDED` 결정됨, `PROPOSED` 제안, `OPEN` 미확정, `DEFERRED` 보류
 
