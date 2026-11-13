@@ -50,4 +50,5 @@ tasks.named('test') {
     // 스케줄러를 검증하는 테스트만 @SpringBootTest(properties)로 다시 켠다.
     systemProperty 'restless.auction.scheduler.enabled', 'false'
     systemProperty 'restless.payment.reconcile.enabled', 'false'
+    systemProperty 'restless.drop.queue.scheduler.enabled', 'false'
 }
