@@ -15,7 +15,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * D1 상품 등록·조회 수용 테스트. 기준: {@code docs/contracts/api/drop.md} D1.
  * <b>하네스 파일이다.</b> D1 구현 PR에서 아래 {@code @Disabled} 한 줄만 지운다. 테스트 내용은 바꾸지 않는다.
  */
-@Disabled("D1 구현 전. D1 구현 PR에서 이 줄만 지운다")
 @DisplayName("D1 상품 등록·조회")
 class DropCatalogAcceptanceTest extends DropAcceptanceSupport {
 
