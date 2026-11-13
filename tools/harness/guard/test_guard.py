@@ -22,7 +22,13 @@ cases = [
  ("write report via shell", {"tool_name": "shell", "tool_input": {"command": "cat > .ai-output/harness/reports/D2-report.md <<'X'\n# D2\nX"}}, (0, 0, 0)),
  ("overwrite stage spec", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: .ai-output/harness/reports/D2-spec.md\n@@\n-a\n+b")}}, (B, B, B)),
  ("drop main code", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: backend/src/main/java/com/restless/drop/application/DropService.java\n@@\n-a\n+b")}}, (0, 0, 0)),
- ("other domain", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: backend/src/main/java/com/restless/ticketing/A.java\n@@\n-a\n+b")}}, (B, B, 0)),
+ ("other domain", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: backend/src/main/java/com/restless/ticketing/A.java\n@@\n-a\n+b")}}, (B, B, B)),
+ ("versioned harness tool (patch)", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: tools/harness/harness-check.sh\n@@\n-a\n+b")}}, (B, B, B)),
+ ("versioned guard (shell)", {"tool_name": "shell", "tool_input": {"command": "echo x > tools/harness/guard/guard.py"}}, (B, B, B)),
+ ("run versioned harness-check", {"tool_name": "shell", "tool_input": {"command": "bash tools/harness/harness-check.sh > .ai-output/x.log 2>&1"}}, (0, 0, 0)),
+ # Known gap: the shell check matches path text, so cd + relative path is not seen here.
+ # pre-commit and harness-check.sh (diff based) still catch the change. Kept to document the limit.
+ ("known gap: cd then relative write", {"tool_name": "shell", "tool_input": {"command": "cd backend/src/test/java/com/restless/drop && sed -i '' 's/1/2/' acceptance/X.java"}}, (0, 0, 0)),
  ("harness script", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: .ai-output/harness/harness-check.sh\n@@\n-a\n+b")}}, (B, B, B)),
  ("codex hooks config", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Add File: .codex/hooks.json\n+{}")}}, (B, B, B)),
  ("move into acceptance", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: backend/src/main/java/com/restless/drop/A.java\n*** Move to: backend/src/test/java/com/restless/drop/acceptance/A.java\n@@\n-a\n+b")}}, (B, 0, B)),

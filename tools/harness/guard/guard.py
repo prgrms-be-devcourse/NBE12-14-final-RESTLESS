@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
-"""Drop harness guard: blocks harness violations while implementing, not after.
+"""Drop harness guard: stops harness violations early, while the agent is still working.
 
-Modes
-  guard.py codex-hook   Codex PreToolUse hook. Reads the hook JSON on stdin.
-                        Blocks (exit 2, reason on stderr) edits or shell commands that would
-                        break the harness rules. Does nothing outside this repository.
-  guard.py pre-commit   git pre-commit hook. Checks the staged diff with the same rules.
+The guard is the first of three layers, not the verdict:
+  1. guard.py codex-hook   Codex PreToolUse hook. Reads the hook JSON on stdin and blocks
+                           (exit 2, reason on stderr) patches and shell commands that would break
+                           the rules. Patches are checked exactly. Shell commands are checked by
+                           pattern, so a reworded command can slip through (e.g. cd into a folder,
+                           then a relative path). Layers 2 and 3 catch those.
+  2. guard.py pre-commit   git pre-commit hook. Checks the staged diff with the same file rules.
+  3. harness-check.sh      Diffs the branch against its base. This is the verdict.
 
 Rules (same as harness-check.sh checks 1-4, plus tamper protection)
   - Harness files (acceptance tests, harness SQL, ArchUnit): only removing an @Disabled line
     and its import is allowed. No new, deleted or moved files.
   - Migrations: files already in origin/dev must not change. New (unmerged) ones may.
-  - Other domains (ticketing, fanmeeting, auction, concert, credit, coupon): no changes (drop branches only).
-  - Guard and harness tooling (.ai-output/harness, .codex, .git/hooks): no changes,
-    except stage reports .ai-output/harness/reports/<STAGE><n>-report.md (D3, P72, ...).
+  - Other domains (ticketing, fanmeeting, auction, concert, credit, coupon): no changes, on any branch.
+  - Harness tooling (tools/harness) and local state (.ai-output/harness, .codex, .git/hooks, .claude):
+    no changes, except stage reports .ai-output/harness/reports/<STAGE><n>-report.md (D3, P72, ...).
   - No `git commit --no-verify`, no `git push`, no HARNESS_EDIT override, no hooksPath change.
 
-Harness branches (chore/drop-*-harness) may change harness files; tamper protection still applies.
-Every block is appended to .ai-output/harness/guard-blocks.log.
+Harness branches (chore/drop-*-harness) may change harness files, and may commit tools/harness.
+The Codex hook never lets an agent edit tools/harness, on any branch.
+Every block is appended to .ai-output/harness/guard-blocks.log in the main checkout.
 """
 import datetime
 import json
@@ -26,9 +30,9 @@ import re
 import subprocess
 import sys
 
-REPO_MARKER = "NBE12-14-final-RESTLESS"
+# ---- Domain settings (drop). Another domain adopting the harness changes this block only. ----
+REPO_MARKER = "NBE12-14-final-RESTLESS"  # folder name or origin URL must contain this
 HARNESS_BRANCH = re.compile(r"^chore/drop-\d+-harness$")
-DROP_BRANCH = re.compile(r"drop")  # only the other-domain rule is limited to drop branches
 
 PROTECTED = (
     "backend/src/test/java/com/restless/drop/acceptance/",
@@ -37,7 +41,9 @@ PROTECTED = (
 )
 MIGRATIONS = "backend/src/main/resources/db/migration/"
 FOREIGN = re.compile(r"^backend/src/main/java/com/restless/(ticketing|fanmeeting|auction|concert|credit|coupon)/")
-TOOLING = (".ai-output/harness/", ".codex/", ".git/hooks/", ".claude/")
+# ---- End of domain settings. ----
+HARNESS_TOOLS = "tools/harness/"  # versioned tooling: harness branches may commit it
+TOOLING = (HARNESS_TOOLS, ".ai-output/harness/", ".codex/", ".git/hooks/", ".claude/")
 # Codex writes its stage report here (codex-stage-spec.md step 3).
 REPORT = re.compile(r"^\.ai-output/harness/reports/[A-Za-z]+\d+-report\.md$")
 REPORT_IN_CMD = re.compile(r"\.ai-output/harness/reports/[A-Za-z]+\d+-report\.md")
@@ -57,7 +63,7 @@ ALLOWED_REMOVED = (re.compile(r"^@Disabled\("), re.compile(r"^import org\.junit\
 # Path fragments that mark a command as touching guarded files (relative-path independent).
 GUARDED_FRAGMENTS = (
     "drop/acceptance", "test/resources/harness", "restless/architecture",
-    ".ai-output/harness", ".codex/", ".git/hooks", "hooksPath",
+    "tools/harness", ".ai-output/harness", ".codex/", ".git/hooks", "hooksPath",
     "restless/ticketing", "restless/fanmeeting", "restless/auction",
     "restless/concert", "restless/credit", "restless/coupon",
 )
@@ -87,7 +93,9 @@ def repo_root(cwd):
     if not common:
         return None
     root = os.path.dirname(common)
-    return root if os.path.basename(root) == REPO_MARKER else None
+    if os.path.basename(root) == REPO_MARKER:
+        return root
+    return root if REPO_MARKER in git(["config", "--get", "remote.origin.url"], cwd) else None
 
 
 def log_block(root, source, branch, reason):
@@ -103,13 +111,16 @@ def log_block(root, source, branch, reason):
         pass
 
 
-def file_reason(path, op, removed, added, harness_branch, drop_scope=True, cwd="."):
-    """Reason to block a change to one file, or None. op: add/delete/update/move."""
+def file_reason(path, op, removed, added, harness_branch, cwd=".", agent=True):
+    """Reason to block a change to one file, or None. op: add/delete/update/move.
+    agent=True for the Codex hook (an agent edits), False for pre-commit (a commit on a branch)."""
     if REPORT.match(path) and op in ("add", "update"):
+        return None
+    if path.startswith(HARNESS_TOOLS) and harness_branch and not agent:
         return None
     if path.startswith(TOOLING) or "/.git/hooks/" in path:
         return f"{path}: 하네스 도구·가드 파일은 수정할 수 없음"
-    if FOREIGN.match(path) and drop_scope:
+    if FOREIGN.match(path):
         return f"{path}: 다른 도메인 코드는 수정할 수 없음"
     if path.startswith(MIGRATIONS) and op != "add" and merged(path, cwd):
         return f"{path}: 머지된 마이그레이션은 수정할 수 없음 (새 마이그레이션 파일을 추가할 것)"
@@ -172,7 +183,7 @@ def command_text(tool_input):
     return cmd if isinstance(cmd, str) else ""
 
 
-def command_reason(cmd, drop_scope=True):
+def command_reason(cmd):
     if re.search(r"\bgit\b[^;&|]*\bcommit\b[^;&|]*(\s--no-verify\b|\s-[a-zA-Z]*n[a-zA-Z]*\b)", cmd):
         return "git commit --no-verify 금지 (pre-commit 가드를 건너뛸 수 없음)"
     if re.search(r"\bgit\b[^;&|]*\bpush\b", cmd):
@@ -182,7 +193,7 @@ def command_reason(cmd, drop_scope=True):
     if re.search(r"core\.hooksPath|--no-verify", cmd):
         return "git hook 우회 금지"
     stripped = HARMLESS_REDIRECT.sub(" ", cmd)
-    fragments = GUARDED_FRAGMENTS if drop_scope else tuple(f for f in GUARDED_FRAGMENTS if not f.startswith("restless/") or f == "restless/architecture")
+    fragments = GUARDED_FRAGMENTS
     stripped_reports = REPORT_IN_CMD.sub(" ", stripped)
     hit = next((f for f in fragments if f in stripped_reports), None)
     if hit and WRITES.search(stripped) and not OPAQUE_WRITES.search(stripped):
@@ -209,19 +220,18 @@ def codex_hook():
         return 0
     branch = git(["branch", "--show-current"], cwd)
     harness_branch = bool(HARNESS_BRANCH.match(branch))
-    drop_scope = bool(DROP_BRANCH.search(branch))
     tool_input = event.get("tool_input", event)
 
     reasons = []
     for s in strings(tool_input):
         if "*** Begin Patch" in s:
             for path, op, removed, added in parse_patch(s):
-                r = file_reason(rel(path, root, cwd), op, removed, added, harness_branch, drop_scope, cwd)
+                r = file_reason(rel(path, root, cwd), op, removed, added, harness_branch, cwd)
                 if r:
                     reasons.append(r)
     cmd = command_text(tool_input)
     if cmd and "*** Begin Patch" not in cmd:
-        r = command_reason(cmd, drop_scope)
+        r = command_reason(cmd)
         if r:
             reasons.append(r)
 
@@ -240,7 +250,6 @@ def pre_commit():
         return 0
     branch = git(["branch", "--show-current"], cwd)
     harness_branch = bool(HARNESS_BRANCH.match(branch))
-    drop_scope = bool(DROP_BRANCH.search(branch))
     status = git(["diff", "--cached", "--name-status", "-M"], cwd)
     # Merge commit: files equal to the merged-in side are someone else's already-reviewed work
     # (e.g. dev's fan meeting code). Check only what differs from BOTH parents (HD-11).
@@ -267,7 +276,7 @@ def pre_commit():
                     elif l.startswith("+"):
                         added.append(l[1:])
             this_op = "add" if (op == "move" and i == 1) else op
-            r = file_reason(path, this_op, removed, added, harness_branch, drop_scope, cwd)
+            r = file_reason(path, this_op, removed, added, harness_branch, cwd, agent=False)
             if r:
                 reasons.append(r)
     if not reasons:
