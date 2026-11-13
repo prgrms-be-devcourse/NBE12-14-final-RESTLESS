@@ -185,7 +185,7 @@
 | `performance_id` | 회차 ID | 예약·판매 좌석의 회차와 같아야 함 |
 | `performance_seat_id` | 선점한 판매 좌석 ID | performance_seats.id |
 | `price_amount` | 선점 당시 좌석 가격 | 원 단위 스냅샷, 0 이상 |
-| `expires_at` | 선점 기록의 만료 시각 | 예약·승인 상태와 함께 판단. 결제 진입 후 이 값의 갱신/동기화 세부는 후속 구현에서 명시 |
+| `expires_at` | 선점 기록의 만료 시각 | 예약·승인 상태와 함께 판단. checkout에서 변경하지 않음. 결제 진입 후 별도 payment_expires_at으로 판단 |
 | `status` | 선점 이력 상태 | HELD, CONFIRMED, RELEASED |
 | `created_at` | 선점 기록 생성 시각 | 이력 추적 |
 | `released_at` | 선점 해제 시각 | NULL 가능. 환불 후 CONFIRMED 이력은 보존 |

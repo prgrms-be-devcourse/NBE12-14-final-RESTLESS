@@ -4,7 +4,7 @@
 # 티켓팅 결제 트랜잭션 경계
 
 - 상태: DECIDED (2026-11-12, 담당자 합의).
-- 구현 상태: 설계만 반영. 애플리케이션과 결제 시도 저장 구조는 후속 구현 대상이다.
+- 구현 상태: checkout 주문 준비를 구현했다. 결제 시도 생성·티켓팅 Handler·PG 승인·결제 후 만료는 후속 구현 대상이다. checkout 통합 테스트 13개가 통과했다. 실행 범위는 아래 검증 기록을 따른다.
 - OPEN: 공통 결제 전체 잠금 순서, 복구 작업 주기·담당, 재시도 세부 규칙.
 
 ## 1. 책임과 연결
@@ -13,8 +13,9 @@
 공통 주문은 구매자·내역·최종 금액을, 공통 결제는 PG 요청과 결과를 소유한다.
 checkout의 공통 Application Coordinator가 각 모듈의 Application Service를 통해 흐름을 조정한다.
 다른 도메인의 Repository를 직접 접근하지 않는다.
-예약은 ticket_reservations.order_id로 주문과 연결하고, 결제는 그 주문과 연결한다.
-주문 유형·항목 스냅샷·결제 시도 컬럼과 API 상세는 공통 담당자와 후속 계약으로 정한다.
+예약은 ticket_reservations.order_id로 공통 주문과 연결한다. 결제 대상은 payable_type/payable_id로 식별하며 payments.order_id는 전제하지 않는다.
+checkout은 TicketCheckoutService가 OrderService.create(CreateOrderCommand)를 호출한다. OrderService의 MANDATORY 계약으로 주문·항목과 예약 변경이 호출자 트랜잭션에 참여한다.
+OrderType.TICKET, shipping=null이며 좌석별 수량은 1, 단가는 SeatHold.priceAmount다. 항목은 TICKET/판매 좌석 ID, 이름은 서버 회차 ID, 옵션은 서버 좌석 등급·ID로 구성한다. 클라이언트의 가격·이름은 받지 않는다.
 
 ## 2. 결제 진입과 승인 시도 준비
 
@@ -22,10 +23,13 @@ checkout의 공통 Application Coordinator가 각 모듈의 Application Service�
 
 결제 진입 트랜잭션:
 
-- 본인 예약, 좌석 소유권, 선점 기한을 검증한다.
+- @LoginMember의 본인 예약인지 확인하고 구매 관리 행 → 예약 → 좌석 ID 오름차순으로 잠근다. 없는 예약과 타인 예약은 동일한 NOT_FOUND다.
+- 기존 order_id가 있으면 상태·기한과 무관하게 기존 주문·최초 결제 기한을 반환한다. 이후 결제 가능 여부는 별도 승인 준비에서 검사한다.
+- 최초 진입은 결제 관련 필드가 없는 HELD만 허용한다. 모든 좌석 잠금 후 DB UTC_TIMESTAMP(6)으로 now < hold_expires_at을 재검증하고 선점 HELD·동일 회차·current_hold_id 일치를 확인한다.
+- checkout_started_at=now, payment_expires_at=now+5분이다. 최초 hold_expires_at과 SeatHold.expires_at은 변경하지 않으며 좌석 HELD와 구매 카운터를 유지한다.
 - 최초 진입 시 공통 주문을 생성·연결하고 PAYMENT_PENDING 및 최초 결제 진입 시각·별도 결제 기한을 저장한다.
 - 중복 진입은 기존 주문·기한을 반환한다. 주문 중복 생성과 기한 연장을 허용하지 않는다.
-- 주문 생성·연결과 예약 변경은 함께 커밋하거나 함께 롤백한다.
+- 주문 생성·연결과 예약 변경은 READ_COMMITTED 새 트랜잭션에서 함께 커밋하거나 함께 롤백한다. 교착·잠금 대기 실패는 전체 롤백 후 최대 3회 시도하고 SEAT_LOCK_TIMEOUT으로 반환한다. PG 호출과 결제 시도 생성은 이 트랜잭션에 없다.
 
 실제 PG 승인 직전의 별도 준비 트랜잭션:
 
@@ -33,7 +37,7 @@ checkout의 공통 Application Coordinator가 각 모듈의 Application Service�
 - 동시에 여러 승인 요청이 나가지 않도록 진행 중 시도를 식별한다.
 - 승인 시도가 진행 중이거나 결과 불명확하면 단순 시간 경과로 좌석을 반환하지 않는다.
 - 이 기록을 커밋한 뒤에만 외부 PG를 호출한다.
-- 기한 판정은 8절을 따른다. 승인 시도 식별자·상태·컬럼의 구체적인 형태는 후속 공통 결제 계약에서 정한다.
+- 기한 판정은 8절을 따른다. 공통 시도 문맥은 ADR-0003의 PaymentAttemptContext/RefundContext를 따른다. 티켓팅의 시도 저장·검증 연결은 후속 구현이다.
 
 ## 3. PG 호출 구간: DB 트랜잭션 없음
 
@@ -155,3 +159,24 @@ AFTER_COMMIT 리스너가 결제 성공을 받아 핵심 예매 상태를 확정
 - 결제 진입 필드·후속 상태는 SQL fixture로 준비해 매핑만 검증한다. 실제 checkout·승인·환불 전이와 활성 예약 1건 잠금 검증을 구현한 것은 아니다.
 - Repository·Controller·서비스·공통 결제 계약은 이번 단계에서 변경하지 않는다.
 - ./gradlew build 실행으로 예약 매핑 테스트 13개를 포함해 전체 192개 테스트가 통과했다. UTC 시각·해시·NULL 필드·저장된 결제 상태 조회, 사용자별 키/주문 중복 및 미존재 참조 거절을 확인했다.
+
+## checkout 컴파일 확인 (2026-11-13)
+
+최초 구현 시 backend에서 `./gradlew compileJava` 실행 성공. 당시 사용자 요청으로 테스트를 작성·실행하지 않았으며, 이후 요청에 따른 실행 결과는 아래에 기록한다.
+
+## checkout 테스트 검증 (2026-11-13)
+
+backend에서 `./gradlew test --tests 'com.restless.ticketing.application.TicketCheckoutServiceTest'` 실행 성공: 13개, 실패·오류·건너뜀 0개.
+MySQL 8.4 Testcontainers와 실제 Spring 트랜잭션·Repository·OrderService를 사용했다. 스케줄러만 비활성화하고 테스트가 직접 만료 서비스를 호출한다.
+
+- HTTP 로그인·본인 예약 검증, 타인·없는 예약의 동일한 404, 본문·키 없는 checkout 응답.
+- 최초 주문의 SeatHold 가격 스냅샷·항목·배송 없음, DB UTC 범위의 checkoutStartedAt과 별도 300초 기한, 좌석·구매 수량 보존.
+- 순차 중복 요청과 과거로 준비한 결제 기한의 재요청, 8개 동시 checkout의 주문 한 건·최초 시각·기한 보존.
+- 만료·취소된 예약 및 현재 소유권 불일치의 주문 생성 거절.
+- latch로 선행 잠금을 고정한 checkout/취소·checkout/만료 경합 각각 두 순서. checkout이 먼저면 기존 선점 기한을 경과시켜도 결제 중 좌석·수량을 유지하고, 반환이 먼저면 새 주문을 만들지 않는다.
+- 실제 주문·항목 저장 직후와 예약 변경을 DB flush한 직후 오류 주입: 주문·항목 제거, 예약 HELD/결제 필드 NULL·최초 선점 기한·좌석 소유권·구매 수량 보존.
+
+프로덕션 코드는 이 테스트 작업에서 변경하지 않았다.
+이 검증은 checkout 주문 준비 범위이며 실제 PG 호출·승인 시도 생성·결제 이후 만료를 검증한 결과는 아니다.
+
+백엔드 전체 `./gradlew build`도 실행 성공: 총 370개 테스트, 실패 0·오류 0·건너뜀 0개. 신규 checkout 13개와 기존 주문·예약·결제 회귀 테스트를 포함한다. 프론트엔드는 변경하지 않아 별도 빌드를 실행하지 않았다.

@@ -46,3 +46,7 @@ Drop 문서([../drop/](../drop/))처럼 policy, invariants, state-machines, tran
 정리 후 backend에서 ./gradlew clean build를 실행해 전체 211개 테스트가 통과했다. 별도 커버리지 측정 도구가 없어 커버리지 수치 보존은 주장하지 않는다. 주요 제약·필드의 assertion 보존을 검토하고 기간/한도 방향 오류 주입도 확인했다.
 
 매핑 테스트는 com.restless.concert.entity와 com.restless.ticketing.entity 패키지에 모아둔다. 테스트 클래스·메서드는 한국어 @DisplayName으로 검증 목적을 표시하고, 파라미터 사례에는 번호와 입력값을 함께 표시한다. 표시 이름·패키지 정리 후 테스트는 사용자 요청에 따라 재실행하지 않았다.
+
+## 구현 현황: checkout 주문 준비
+
+POST /api/ticket-reservations/{reservationId}/checkout을 구현했다. 본인 예약과 현재 소유권·선점 기한을 잠금 아래 확인하고, 최초 진입에서만 공통 주문과 별도 5분 기한을 같은 트랜잭션에 저장한다. 재요청은 기존 주문·최초 기한을 반환한다. 상세는 [API 계약](../../contracts/api/ticketing.md)과 [트랜잭션 설계](transactions.md)를 따른다. PG 승인·결제 시도 생성·티켓팅 Handler·결제 이후 만료는 후속이다. TicketCheckoutServiceTest의 MySQL Testcontainers 테스트 13개가 통과했다. 상세 실행 범위는 [checkout 테스트 검증](transactions.md#checkout-테스트-검증-2026-11-13)을 따른다.

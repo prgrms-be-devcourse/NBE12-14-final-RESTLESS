@@ -1,6 +1,8 @@
 package com.restless.ticketing.api;
 
 import com.restless.auth.LoginMember;
+import com.restless.ticketing.api.dto.TicketCheckoutResponse;
+import com.restless.ticketing.application.TicketCheckoutService;
 import com.restless.ticketing.api.dto.TicketReservationRequest;
 import com.restless.ticketing.application.dto.TicketReservationInfo;
 import com.restless.ticketing.application.dto.TicketReservationDetail;
@@ -25,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class TicketReservationController {
 
+    private final TicketCheckoutService ticketCheckoutService;
     private final TicketReservationService ticketReservationService;
     private final TicketReservationQueryService ticketReservationQueryService;
 
@@ -45,6 +48,12 @@ public class TicketReservationController {
                                          @RequestHeader("Idempotency-Key") String requestKey,
                                          @Valid @RequestBody TicketReservationRequest request) {
         return ticketReservationService.reserve(userId, requestKey, request.performanceId(), request.seatIds());
+    }
+
+    @PostMapping("/{reservationId}/checkout")
+    public TicketCheckoutResponse checkout(@LoginMember Long userId,
+                                            @PathVariable("reservationId") Long reservationId) {
+        return TicketCheckoutResponse.from(ticketCheckoutService.checkout(userId, reservationId));
     }
 
     @DeleteMapping("/{reservationId}")

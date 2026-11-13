@@ -240,6 +240,42 @@ Authorization: Bearer <accessToken>
 좌석 소유 포인터·이력·카운터가 불일치하면 전체 롤백하며 서버 오류로 남긴다. 다른 소유자의 좌석을 강제로 반환하거나 수량을 임의 보정하지 않는다.
 TicketReservationServiceTest에 본인·타인 취소, 중복 취소의 수량 보존, 결제 진행·결과 확인 중 취소 거절 테스트를 작성했으며 아직 실행하지 않았다.
 
+## Checkout: 공통 주문 준비
+
+`POST /api/ticket-reservations/{reservationId}/checkout`은 로그인 필수이며 `@LoginMember`로 본인 예약인지 확인한다.
+요청 본문과 Idempotency-Key는 필요하지 않다. 최초·중복 요청 모두 `200 OK`이며 응답 예시는 다음과 같다.
+
+```json
+{
+  "reservationId": 5001,
+  "orderId": 7001,
+  "totalAmount": 150000,
+  "checkoutStartedAt": "2026-11-13T03:04:00Z",
+  "paymentExpiresAt": "2026-11-13T03:09:00Z"
+}
+```
+
+- 구매 관리 행 → 예약 → 판매 좌석 ID 오름차순으로 잠근다. 최초 진입은 결제 관련 필드가 없는 HELD만 허용한다.
+- 모든 잠금을 획득한 뒤 DB UTC 시각으로 선점 기한과 각 좌석의 HELD/current_hold_id·선점 이력·회차 일치를 재검증한다. `now >= hold_expires_at`이면 거절하며 기존 만료 경로가 전체 반환한다.
+- 최초 진입에서만 SeatHold의 가격 스냅샷으로 배송 없는 공통 TICKET 주문을 생성·연결하고 예약을 PAYMENT_PENDING으로 전환한다. totalAmount는 공통 주문 총액이다.
+- 주문 항목은 서버의 회차 ID로 이름을 구성하고, 좌석 등급·판매 좌석 ID로 옵션을 구성한다. 클라이언트 금액·상품명은 받지 않는다.
+- checkoutStartedAt은 잠금 후 DB UTC 시각, paymentExpiresAt은 그 시각부터 별도 5분이다. 최초 선점 기한·이력 기한·좌석 소유권·구매 수량은 유지한다.
+- 기존 orderId가 있으면 기한 경과나 후속 상태와 무관하게 기존 주문과 최초 시각·기한을 반환한다. 새 주문·기한 연장은 없다. 이 응답은 현재 승인 가능함을 보장하지 않는다.
+- 주문 생성과 예약 변경은 같은 READ_COMMITTED 트랜잭션에서 커밋/롤백한다. 교착·잠금 대기 실패는 전체 롤백 후 최대 3회 시도한다.
+- 범용 Idempotency-Key 응답 재현은 후속이다. 결제 시도 생성, 티켓팅 PaymentResultHandler, PG 승인·티켓 발급 및 결제 이후 만료도 후속 구현이다. 현재 스케줄러는 결제 전 HELD만 반환한다.
+
+| HTTP | 코드 | 조건 |
+|---|---|---|
+| 400 | `INVALID_REQUEST` | 유효하지 않은 예약 ID |
+| 401 | `UNAUTHORIZED` | 인증 실패 |
+| 404 | `NOT_FOUND` | 없는 예약 또는 타인 예약 |
+| 409 | `RESERVATION_EXPIRED` | 최초 checkout의 선점 기한 도달·경과 |
+| 409 | `RESERVATION_CANNOT_CHECKOUT` | 기존 주문이 없고 유효한 결제 전 HELD가 아님 |
+| 409 | `SEAT_LOCK_TIMEOUT` | 잠금 경합으로 최대 3회 시도 소진 |
+
+좌석 소유권·이력 또는 연결 주문의 소유자·종류·최초 기한 불일치는 전체 롤백하고 서버 오류로 남긴다. 새 주문 생성이나 소유권 강제 보정으로 복구하지 않는다.
+TicketCheckoutServiceTest의 MySQL Testcontainers 테스트 13개가 통과했다. 본인 인증·소유자 검증, 선점 가격 주문 생성, 중복·8개 동시 요청의 주문/기한 보존, 만료·취소 선행/후행 경합, 저장·flush 후 전체 롤백을 검증했다. 실행 명령과 범위는 [트랜잭션 문서](../../domains/ticketing/transactions.md#checkout-테스트-검증-2026-11-13)를 따른다.
+
 ## 오류 코드
 
 | 코드 | 의미 |
@@ -253,6 +289,7 @@ TicketReservationServiceTest에 본인·타인 취소, 중복 취소의 수량 �
 | `IDEMPOTENCY_KEY_CONFLICT` | 같은 키로 다른 요청 |
 | `SEAT_LOCK_TIMEOUT` | 잠금 대기 초과 |
 | `RESERVATION_CANNOT_CANCEL` | 결제 전 선점 취소 불가 |
+| `RESERVATION_CANNOT_CHECKOUT` | 최초 결제 진입 불가 |
 
 위 선점 API 외 후속 API의 오류 HTTP 상태 코드는 해당 API 구현 시 정한다.
 

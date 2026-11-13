@@ -103,6 +103,19 @@ public class TicketReservation {
                 && orderId == null && checkoutStartedAt == null && paymentExpiresAt == null;
     }
 
+    public void startCheckout(Long orderId, Instant now, Instant paymentExpiresAt) {
+        Objects.requireNonNull(orderId);
+        Objects.requireNonNull(now);
+        Objects.requireNonNull(paymentExpiresAt);
+        if (!canReleaseHold() || !now.isBefore(holdExpiresAt) || !now.isBefore(paymentExpiresAt)) {
+            throw new IllegalStateException("유효한 결제 전 선점 예약만 결제를 시작할 수 있습니다.");
+        }
+        this.orderId = orderId;
+        this.checkoutStartedAt = now;
+        this.paymentExpiresAt = paymentExpiresAt;
+        this.status = TicketReservationStatus.PAYMENT_PENDING;
+    }
+
     public void cancelHold() {
         if (!canReleaseHold()) {
             throw new IllegalStateException("결제 전 선점 예약만 취소할 수 있습니다.");
