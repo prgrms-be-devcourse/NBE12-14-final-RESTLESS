@@ -1,10 +1,16 @@
 package com.restless.architecture;
 
+import com.tngtech.archunit.core.domain.Dependency;
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
+import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ArchRule;
+import com.tngtech.archunit.lang.ConditionEvents;
+import com.tngtech.archunit.lang.SimpleConditionEvent;
 
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 /**
@@ -68,4 +74,43 @@ class OwnedModuleBoundaryTest {
             .orShould().dependOnClassesThat().haveFullyQualifiedName("com.restless.order.domain.OrderItem")
             .orShould().dependOnClassesThat().haveFullyQualifiedName("com.restless.order.domain.OrderShippingSnapshot")
             .because("주문 엔티티는 주문 모듈 밖으로 나오지 않는다. OrderService와 OrderView를 쓴다");
+
+    /** 결제·주문·드롭 담당자가 소유한 모듈. 다른 담당자의 모듈은 검사하지 않는다. */
+    private static final String[] OWNED = {"com.restless.drop..", "com.restless.order..", "com.restless.payment.."};
+    private static final String ROOT = "com.restless.";
+
+    @ArchTest
+    static final ArchRule ownedModulesUseNoForeignInfrastructure = classes()
+            .that().resideInAnyPackage(OWNED)
+            .should(notDependOnAnotherModulesInfrastructure())
+            .because("다른 모듈의 Repository(infrastructure)를 직접 쓰지 않는다 (AGENTS.md 5절). "
+                    + "위 목록 규칙과 달리 새로 생기는 모듈(auth, credit, coupon 등)도 자동으로 포함된다");
+
+    private static ArchCondition<JavaClass> notDependOnAnotherModulesInfrastructure() {
+        return new ArchCondition<>("not depend on another module's infrastructure package") {
+            @Override
+            public void check(JavaClass origin, ConditionEvents events) {
+                String from = module(origin.getPackageName());
+                for (Dependency dependency : origin.getDirectDependenciesFromSelf()) {
+                    String targetPackage = dependency.getTargetClass().getBaseComponentType().getPackageName();
+                    String to = module(targetPackage);
+                    boolean foreignInfrastructure = to != null && !to.equals(from)
+                            && (targetPackage + ".").startsWith(ROOT + to + ".infrastructure.");
+                    if (foreignInfrastructure) {
+                        events.add(SimpleConditionEvent.violated(dependency, dependency.getDescription()));
+                    }
+                }
+            }
+        };
+    }
+
+    /** {@code com.restless.drop.application} → {@code drop}. Outside a module → null. */
+    private static String module(String packageName) {
+        if (!packageName.startsWith(ROOT)) {
+            return null;
+        }
+        String rest = packageName.substring(ROOT.length());
+        int dot = rest.indexOf('.');
+        return dot < 0 ? rest : rest.substring(0, dot);
+    }
 }

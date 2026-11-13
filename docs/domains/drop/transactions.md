@@ -1,5 +1,9 @@
 # Drop 트랜잭션 경계
 
+> 관련 코드: `backend/src/main/java/com/restless/drop/application/`
+>
+> 마지막 확인: 2026-11-13 (#79에서 코드와 대조)
+
 PG 호출 중에는 DB 트랜잭션을 열어 두지 않는다.
 
 TX2~TX5의 드롭 쪽 단계는 결제 모듈이 같은 트랜잭션에서 호출하는 `PaymentResultHandler` 드롭 구현 안에서 수행한다 ([ADR-0003](../../decisions/0003-payment-module-boundary.md)).

@@ -8,8 +8,9 @@ Claude가 `{...}`를 채워 클립보드에 넣고, 사용자가 Codex 탭(`code
 ## 작업: 드롭 {STAGE} — {TITLE} (이슈 #{ISSUE})
 
 저장소: {REPO}
+메인 폴더: {MAIN_REPO} (단계 worktree가 아니라 원래 저장소 폴더)
 브랜치: `{BRANCH}` (Claude가 만들어 체크아웃해 두었다. 새 브랜치를 만들지 말 것)
-작업 전 `AGENTS.md`를 읽고 따른다.
+작업 전 `AGENTS.md`와 **`{MAIN_REPO}/backend/src/main/java/com/restless/drop/AGENTS.md`(드롭 전용 지침)**를 읽고 따른다. 이 파일은 git에 올리지 않는 개인 파일이라 메인 폴더에만 있다. 단계 worktree에는 없으므로 위 절대 경로로 연다. 용어, 읽을 문서, 모듈 경계, 트랜잭션, 마이그레이션, 시각, 메트릭 규칙은 그 파일이 기준이고 아래에 다시 적지 않는다.
 
 ### 완료 기준 (이것만 통과하면 된다)
 1. `backend/src/test/java/com/restless/drop/acceptance/{ACCEPTANCE_CLASS}.java`의 **`@Disabled` 한 줄만 지운다** (필요하면 import 한 줄도). 그 밖의 줄은 바꾸지 않는다.
@@ -27,30 +28,23 @@ Claude가 `{...}`를 채워 클립보드에 넣고, 사용자가 Codex 탭(`code
 - 하네스 파일 수정·추가·삭제 (`@Disabled` 줄과 그 import 삭제만 허용. 이 삭제는 apply_patch로 한다)
 - 머지된 마이그레이션 수정 (새 마이그레이션 파일 추가는 허용)
 - 다른 도메인(ticketing, fanmeeting, auction, concert, credit, coupon) 코드 수정
-- `tools/harness/**`, `.ai-output/harness/**`, `.codex/**`, `.git/hooks/**` 수정, `git commit --no-verify`, `git push`, `HARNESS_EDIT`
+- `tools/harness/**`, `.ai-output/harness/**`, `.codex/**`, `.git/hooks/**`, 드롭 지침(`drop/AGENTS.md`, `drop/CLAUDE.md`) 수정, `git commit --no-verify`, `git push`, `HARNESS_EDIT`
+- 레포 루트에 새 `.md` 만들기 (메모·보고서는 `.ai-output/`에)
 - 보호 경로를 셸 명령(sed -i, 리다이렉트, mv, rm, git checkout 등)으로 바꾸는 것. 읽기는 cat/grep/sed -n으로 리다이렉트 없이 한다
 
 ### 읽을 것
-- 계약: `docs/contracts/api/drop.md` {STAGE} 절 (요청·응답·오류 코드의 기준)
-- 정책·불변식: `docs/domains/drop/policy.md`, `invariants.md`, `state-machines.md`, `transactions.md`, `data-model.md`
+- 드롭 지침의 "먼저 읽을 문서" 전부. 이번 범위는 계약 `docs/contracts/api/drop.md`의 {STAGE} 절
 - 사용자가 정한 것: `.ai-output/harness/drop-decisions.md`
-- 공통 모듈 사용법: `order/application/OrderService` (쓰기는 호출자 트랜잭션 필수), `payment/application/payable/*` (Handler 계약)
 {EXTRA_READING}
 
 ### 범위
 {SCOPE}
 
-### 규칙
-- 다른 도메인의 Repository를 쓰지 않는다. 주문은 `OrderService`, 결제는 `PaymentResultHandler` 계약으로만 (ArchUnit이 검사).
+### 규칙 (드롭 지침에 더해 이 하네스 단계에만 해당)
 - 새로 만든 빈 때문에 다른 모듈의 기존 테스트 **구성**(가짜 빈 등록 등)이 충돌하면, 그 테스트 구성만 고치는 것은 허용한다. 테스트 본문·단언과 그 모듈의 운영 코드는 바꾸지 않고, 고친 이유를 보고서에 적는다 (HD-12). 멈춰서 묻지 않는다.
-- 다른 도메인 패키지를 고치지 않는다. 공용 파일(`ErrorCode`, `SecurityConfig`, `application.yml`, `build.gradle`)은 꼭 필요한 최소 변경만 하고 보고서에 이유를 적는다. `ErrorCode`는 맨 끝에 추가.
-- 머지된 마이그레이션은 고치지 않는다. 스키마 변경은 새 마이그레이션(`V{YYYYMMDD_HHMM}__drop_*.sql`).
-- 핵심 상태는 트랜잭션 안에서 커밋. PG 호출 중 트랜잭션 금지. Outbox·Kafka 금지.
-- 메트릭 태그에 ID 같은 끝없이 늘어나는 값을 넣지 않는다. 로그에 시크릿·paymentKey를 남기지 않는다.
-- 시각은 주입된 `Clock`. 테스트에서 고정 시계로 JWT를 발급하지 않는다.
-- 정책이 문서에 없으면 멈추지 말고 문서에 가장 가까운 쪽으로 정해 보고서의 "대신 정한 것"에 적는다.
-- 필요 이상의 추상화를 만들지 않는다.
-- 기본값을 바꾸는 설정(예: `restless.drop.queue.required`)을 건드리면, 그 설정에 기대는 기존 테스트를 찾아 필요한 테스트에 값을 명시한다. 다른 단계가 동시에 진행 중이면 보고서에 "다른 단계에 영향 줄 수 있는 기본값 변경"으로 적는다.
+- 공용 파일을 고쳤으면 보고서에 이유를 적는다.
+- 정책이 문서에 없으면 멈추지 말고 문서에 가장 가까운 쪽으로 정해 보고서의 "대신 정한 것"에 `policy.md 절 | 결정 | 근거` 형식으로 적는다. `policy.md`는 직접 고치지 않는다 (Claude가 검증할 때 같은 PR에 `PROPOSED`로 옮긴다).
+- 기본값을 바꾸는 설정을 건드렸고 다른 단계가 동시에 진행 중이면, 보고서에 "다른 단계에 영향 줄 수 있는 기본값 변경"으로 적는다.
 - 가드는 보호 경로에 쓰는 명령을 막는다. 로그는 `> .ai-output/<이름>.log`처럼 보호 경로 밖으로 쓴다. 보호 경로를 `cp`·`python`으로 다루지 않는다.
 
 ### 마무리

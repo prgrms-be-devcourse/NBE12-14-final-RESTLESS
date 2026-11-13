@@ -61,10 +61,11 @@ if [ -n "$CHANGED_PROTECTED" ] && [ "$HARNESS_EDIT" != 1 ]; then
   fi
 fi
 
-# 1b. Versioned harness tooling (tools/harness) changes only in a harness PR.
-CHANGED_TOOLS="$(git diff --name-only "$BASE" -- tools/harness; echo "$UNTRACKED" | grep '^tools/harness/')"
+# 1b. Versioned harness tooling (tools/harness) and the drop agent instructions change only in a harness PR.
+AGENT_DOCS="backend/src/main/java/com/restless/drop/AGENTS.md backend/src/main/java/com/restless/drop/CLAUDE.md"
+CHANGED_TOOLS="$(git diff --name-only "$BASE" -- tools/harness $AGENT_DOCS; echo "$UNTRACKED" | grep -E '^(tools/harness/|backend/src/main/java/com/restless/drop/(AGENTS|CLAUDE)\.md$)')"
 CHANGED_TOOLS="$(echo "$CHANGED_TOOLS" | sed '/^$/d')"
-[ -n "$CHANGED_TOOLS" ] && [ "$HARNESS_EDIT" != 1 ] && fail "하네스 도구(tools/harness) 수정 금지:"$'\n'"$CHANGED_TOOLS"
+[ -n "$CHANGED_TOOLS" ] && [ "$HARNESS_EDIT" != 1 ] && fail "하네스 도구·드롭 지침 수정 금지:"$'\n'"$CHANGED_TOOLS"
 
 # 2. Merged migrations must not change (only new files allowed).
 MIG="$(git diff --name-status "$BASE" -- backend/src/main/resources/db/migration | grep -vE '^A')"
@@ -91,6 +92,14 @@ for f in $(git diff --name-only "$BASE" -- backend/src/test | grep -E '\.java$')
 done
 echo "$ADDED" | grep -E '^\+.*Thread\.sleep' | grep -v '/test/' >/dev/null && warn "운영 코드에 Thread.sleep"
 git diff --check "$BASE" >/dev/null 2>&1 || fail "git diff --check 실패 (공백 오류)"
+
+# 5b. Docs (doc-check.py): broken links and drop docs that may have drifted from the code.
+# Drop docs fail; other owners' docs only warn. Runs the copy next to this script.
+DOC_OUT="$(python3 "$SCRIPT_DIR/doc-check.py" "$REPO" 2>&1)"
+while IFS= read -r l; do
+  case "$l" in "FAIL: "*) fail "문서: ${l#FAIL: }";; "WARN: "*) warn "문서: ${l#WARN: }";; esac
+done <<< "$DOC_OUT"
+echo "$DOC_OUT" | grep -q '^DOC-CHECK: ' || fail "문서 검사(doc-check.py)가 결과를 내지 못함: $(echo "$DOC_OUT" | tail -1)"
 
 # 6. Build + all tests (CI와 같음). SKIP_BUILD=1 skips it (quick rule checks only, never for a final verdict).
 if [ "${SKIP_BUILD:-0}" = 1 ]; then
