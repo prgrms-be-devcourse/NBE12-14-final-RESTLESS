@@ -9,7 +9,7 @@ DRAFT → SCHEDULED → OPEN → CLOSED
 DRAFT / SCHEDULED → CANCELLED
 ```
 
-판매 가능 여부는 `OPEN` 상태와 서버 시각 조건을 함께 검증한다.
+판매 가능 여부는 게시된 상태(`SCHEDULED` 또는 `OPEN`)와 서버 시각 조건(`opensAt <= now < closesAt`)으로 판정한다. `OPEN`, `CLOSED` 전환은 표시용이며 판매 판정에 쓰지 않는다 ([API 계약 D2](../../contracts/api/drop.md), 2026-11-13).
 
 ## 2. 대기열 상태
 
