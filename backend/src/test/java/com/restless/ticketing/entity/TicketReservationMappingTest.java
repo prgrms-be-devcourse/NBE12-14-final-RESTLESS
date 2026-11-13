@@ -212,7 +212,7 @@ class TicketReservationMappingTest {
     private Long createOrderFixture() {
         entityManager.createNativeQuery("""
                 INSERT INTO orders (user_id, order_type, status, total_amount, created_at, updated_at)
-                VALUES (:userId, 'TICKET', 'READY', 100000,
+                VALUES (:userId, 'TICKET', 'PENDING_PAYMENT', 100000,
                         '2026-11-12 01:02:03.123456', '2026-11-12 01:02:03.123456')
                 """).setParameter("userId", userId).executeUpdate();
         return ((Number) entityManager.createNativeQuery("SELECT id FROM orders WHERE user_id = :userId")
