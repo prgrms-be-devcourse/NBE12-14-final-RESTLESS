@@ -27,7 +27,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.*;
 
-@SpringBootTest(properties = {"pg.provider=fake", "spring.docker.compose.enabled=false"})
+// This test covers payment settlement, not queue admission.
+@SpringBootTest(properties = {"pg.provider=fake", "spring.docker.compose.enabled=false",
+        "restless.drop.queue.required=false"})
 @Import({TestcontainersConfiguration.class, DropPaymentLifecycleIntegrationTest.Config.class})
 class DropPaymentLifecycleIntegrationTest {
     @Autowired JdbcTemplate jdbc;
