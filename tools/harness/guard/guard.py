@@ -17,7 +17,8 @@ Rules (same as harness-check.sh checks 1-4, plus tamper protection)
   - Other domains (ticketing, fanmeeting, auction, concert, credit, coupon): no changes, on any branch.
   - Harness tooling (tools/harness) and local state (.ai-output/harness, .codex, .git/hooks, .claude):
     no changes, except stage reports .ai-output/harness/reports/<STAGE><n>-report.md (D3, P72, ...).
-  - Drop agent instructions (drop/AGENTS.md, drop/CLAUDE.md, git-ignored personal files): agents never edit them.
+  - Agent instructions: drop/AGENTS.md, drop/CLAUDE.md (versioned, same as tools/harness) and the
+    personal root AGENTS.md, CLAUDE.md (git-ignored). Agents never edit them.
   - No new .md at the repository root besides README/AGENTS/CLAUDE/CONTRIBUTING/DESIGN/PRODUCT (AGENTS.md 7:
     notes go to .ai-output/, shared docs to docs/). Any branch, agent or commit.
   - No `git commit --no-verify`, no `git push`, no HARNESS_EDIT override, no hooksPath change.
@@ -44,7 +45,8 @@ PROTECTED = (
 )
 MIGRATIONS = "backend/src/main/resources/db/migration/"
 FOREIGN = re.compile(r"^backend/src/main/java/com/restless/(ticketing|fanmeeting|auction|concert|credit|coupon)/")
-AGENT_DOCS = ("backend/src/main/java/com/restless/drop/AGENTS.md", "backend/src/main/java/com/restless/drop/CLAUDE.md")
+AGENT_DOCS = ("backend/src/main/java/com/restless/drop/AGENTS.md", "backend/src/main/java/com/restless/drop/CLAUDE.md",
+              "AGENTS.md", "CLAUDE.md")  # root ones are personal and git-ignored (#89)
 # ---- End of domain settings. ----
 # The only .md files allowed at the root. DESIGN.md / PRODUCT.md: shared design docs the design tool keeps there.
 ROOT_DOCS = ("README.md", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "DESIGN.md", "PRODUCT.md")
@@ -128,7 +130,7 @@ def file_reason(path, op, removed, added, harness_branch, cwd=".", agent=True):
     if path in AGENT_DOCS:
         if harness_branch and not agent:
             return None
-        return f"{path}: 드롭 지침 파일은 하네스 브랜치의 하네스 PR에서만 고칠 수 있음"
+        return f"{path}: 에이전트 지침 파일은 에이전트가 고칠 수 없음 (드롭 지침은 하네스 PR에서만)"
     if op == "add" and "/" not in path and path.endswith(".md") and path not in ROOT_DOCS:
         return f"{path}: 레포 루트에 새 .md 금지. 메모·보고서는 .ai-output/, 팀 문서는 docs/에 둘 것 (AGENTS.md 7절)"
     if path.startswith(TOOLING) or "/.git/hooks/" in path:
