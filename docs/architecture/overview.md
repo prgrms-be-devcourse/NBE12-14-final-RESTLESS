@@ -30,19 +30,20 @@
 backend/src/main/java/com/restless/
 ├── auth/ member/
 ├── fanmeeting/ ticketing/ auction/ credit/
+├── concert/ coupon/
 ├── drop/
-│   ├── api/            # Controller, DTO
-│   ├── application/    # 유스케이스, 트랜잭션 경계
-│   ├── domain/         # 엔티티, 정책, 도메인 이벤트
-│   └── infrastructure/ # Repository, 대기열 구현
-├── order/ payment/ checkout/
+│   ├── api/            # Controller
+│   ├── application/    # 유스케이스, 트랜잭션 경계, 대기열·만료 작업, 결제 Handler, DTO(dto/)
+│   ├── domain/         # 엔티티, 상태 전이
+│   └── infrastructure/ # Repository
+├── order/ payment/
 ├── statistics/
 └── common/
 ```
 
 1. 각 도메인은 자기 비즈니스 규칙과 영속성을 책임진다.
 2. 다른 도메인의 Repository를 직접 참조하지 않는다.
-3. 여러 도메인 상태를 한 DB 트랜잭션에서 바꿔야 하면 공통 Application Coordinator가 조정한다.
+3. 결제와 도메인 상태를 한 DB 트랜잭션에서 바꿀 때는 결제 모듈이 트랜잭션을 열고 도메인의 `PaymentResultHandler`를 동기 호출한다 ([ADR-0003](../decisions/0003-payment-module-boundary.md)). 주문은 도메인이 `OrderService`로 같은 트랜잭션 안에서 만들고 바꾼다. 별도 Coordinator는 두지 않는다.
 4. 대기열은 MySQL 구현으로 시작한다. Redis로 바꿀 때 구매 로직이 유지되도록 경계를 두되, 필요 이상으로 추상화하지 않는다.
 5. 후속 작업 리스너는 그 기능을 소유한 모듈에 둔다.
 6. Lombok은 `@Getter`, `@NoArgsConstructor(access = AccessLevel.PROTECTED)`, `@RequiredArgsConstructor`만 쓴다. `@Setter`, `@Data`는 쓰지 않는다. 상태 변경은 의도가 드러나는 메서드로 한다 (예: `reserve()`, `confirm()`).
