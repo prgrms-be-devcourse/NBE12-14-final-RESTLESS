@@ -55,6 +55,10 @@ public class Payment {
 
     private long amount;
 
+    /** 승인 시작(READY → PROCESSING)을 기록한 서버 시각. Handler에 시도 문맥으로 전달한다. */
+    @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
+    private Instant approvalStartedAt;
+
     @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
     private Instant approvedAt;
 
@@ -101,6 +105,7 @@ public class Payment {
         Objects.requireNonNull(paymentKey);
         transition(PaymentStatus.PROCESSING, now);
         this.paymentKey = paymentKey;
+        this.approvalStartedAt = now;
     }
 
     public void approve(Instant approvedAt, Instant now) {

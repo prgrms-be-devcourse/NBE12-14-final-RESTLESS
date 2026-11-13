@@ -30,6 +30,11 @@ public class PaymentRefund {
 
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(length = 20)
+    private PaymentRefundKind kind;
+
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(length = 30)
     private PaymentRefundStatus status;
 
@@ -59,10 +64,11 @@ public class PaymentRefund {
     @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
     private Instant updatedAt;
 
-    public static PaymentRefund request(Long paymentId, long amount, String idempotencyKey,
+    public static PaymentRefund request(Long paymentId, PaymentRefundKind kind, long amount, String idempotencyKey,
                                         String reason, Instant now) {
         PaymentRefund refund = new PaymentRefund();
         refund.paymentId = Objects.requireNonNull(paymentId);
+        refund.kind = Objects.requireNonNull(kind);
         if (amount <= 0) throw new IllegalArgumentException("refund amount must be positive");
         refund.amount = amount;
         refund.idempotencyKey = Objects.requireNonNull(idempotencyKey);

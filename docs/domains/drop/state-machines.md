@@ -28,15 +28,30 @@ RESERVED
   ├─→ CONFIRMING
   │     ├─→ CONFIRMED
   │     │     └─→ RESTORED
-  │     ├─→ RELEASED
+  │     ├─→ RESERVED        (실패 확정, 예약 기한 전: 재결제 대기)
+  │     ├─→ RELEASED        (실패 확정, 예약 기한 뒤)
+  │     ├─→ COMPENSATING
+  │     │       └─→ RELEASED
   │     └─→ RECONCILING
   │             ├─→ CONFIRMED
-  │             ├─→ RELEASED
+  │             ├─→ RESERVED  (실패 확정, 예약 기한 전)
+  │             ├─→ RELEASED  (실패 확정, 예약 기한 뒤)
   │             └─→ COMPENSATING
   │                     └─→ RELEASED
   ├─→ EXPIRED
   └─→ RELEASED
 ```
+
+| 전이 | 조건 |
+|---|---|
+| CONFIRMING/RECONCILING → RESERVED | 현재 시도(`current_payment_id`)의 실패가 확정되고, 확정 시각이 예약 기한 전. 재고와 구매 슬롯 유지 |
+| CONFIRMING/RECONCILING → RELEASED | 현재 시도의 실패가 기한과 같거나 뒤에 확정됨. 재고 반환 |
+| CONFIRMING/RECONCILING → COMPENSATING | PG는 승인했지만 Handler가 거절함 (현재 시도가 아님, 금액 불일치 등). 결제 모듈이 보상 취소 |
+| COMPENSATING → RELEASED | 보상 취소 완료 (`onRefunded`, `COMPENSATION`) |
+| CONFIRMED → RESTORED | 손님 환불 완료 (`onRefunded`, `CUSTOMER_REFUND`) |
+| RESERVED → EXPIRED | 기한이 지날 때까지 승인을 시작하지 않음. 재결제 대기 중인 예약도 포함 |
+
+CONFIRMING, RECONCILING, COMPENSATING은 일반 만료 작업이 반환하지 않는다. 기한 안에 승인 시작을 받아들인 시도는 승인이 늦게 확인되어도 확정한다.
 
 | 상태 | 의미 |
 |---|---|
@@ -53,12 +68,15 @@ RESERVED
 
 ```text
 PENDING_PAYMENT → PAYMENT_CONFIRMING
-PAYMENT_CONFIRMING → PAID / PAYMENT_REVIEW / CANCELLED
-PAYMENT_REVIEW → PAID / CANCELLED
+PAYMENT_CONFIRMING → PAID / PAYMENT_REVIEW / CANCELLED / PENDING_PAYMENT
+PAYMENT_REVIEW → PAID / CANCELLED / PENDING_PAYMENT
 PAID → REFUND_PENDING → REFUNDED / REFUND_REVIEW
 REFUND_REVIEW → REFUNDED / PAID
 PENDING_PAYMENT → CANCELLED
 ```
+
+`PAYMENT_CONFIRMING`/`PAYMENT_REVIEW` → `PENDING_PAYMENT`: 이번 결제 시도의 실패가 확정됐지만 결제 대상의 기한이 남아 다시 결제할 수 있다 (2026-11-12 추가).
+기한이 지났으면 `CANCELLED`로 간다. 주문을 다시 결제 대기로 돌릴지는 결제 대상 도메인의 정책이 정한다.
 
 ## 5. 공통 Payment 상태 (공통 결제 모듈 소유, [ADR-0003](../../decisions/0003-payment-module-boundary.md))
 

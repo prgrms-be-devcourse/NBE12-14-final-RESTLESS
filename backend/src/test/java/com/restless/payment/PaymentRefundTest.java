@@ -7,7 +7,7 @@ import static org.assertj.core.api.Assertions.*;
 
 class PaymentRefundTest {
     PaymentRefund at(PaymentRefundStatus status) {
-        PaymentRefund r = PaymentRefund.request(1L, 1000L, "key", "reason", NOW);
+        PaymentRefund r = PaymentRefund.request(1L, PaymentRefundKind.CUSTOMER_REFUND, 1000L, "key", "reason", NOW);
         switch (status) {
             case REQUESTED -> { }
             case UNKNOWN -> r.markUnknown(NOW);
@@ -50,6 +50,11 @@ class PaymentRefundTest {
         assertThat(failed.getFailureMessage()).isEqualTo("confirmed");
     }
     @Test void rejectsNonpositiveRefundAmounts() {
-        assertThatIllegalArgumentException().isThrownBy(() -> PaymentRefund.request(1L, 0L, "key", "reason", NOW));
+        assertThatIllegalArgumentException().isThrownBy(() -> PaymentRefund.request(1L, PaymentRefundKind.CUSTOMER_REFUND, 0L, "key", "reason", NOW));
+    }
+    @Test void requiresRefundKind() {
+        assertThat(PaymentRefund.request(1L, PaymentRefundKind.COMPENSATION, 1000L, "key", "reason", NOW).getKind())
+            .isEqualTo(PaymentRefundKind.COMPENSATION);
+        assertThatNullPointerException().isThrownBy(() -> PaymentRefund.request(1L, null, 1000L, "key", "reason", NOW));
     }
 }

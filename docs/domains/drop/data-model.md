@@ -69,9 +69,12 @@ SKU별 재고
 | request_key | 멱등성 키 |
 | status | 예약 상태 |
 | expires_at | 만료 시각 |
+| current_payment_id | 승인 시작을 받아들인 현재 결제 시도 (`payments.id`, Nullable, 물리 FK 없음). **미반영: 드롭 구매 흐름 구현 때 새 마이그레이션으로 추가** |
 | created_at, updated_at | 생성, 변경 시각 |
 
 제약: `UNIQUE(order_id)`, `UNIQUE(drop_id, user_id, request_key)`
+
+`current_payment_id`는 재결제 때 새 시도로 바뀐다. 결제 결과의 `paymentId`와 비교해 다른 시도의 결과를 거른다 (INV-15).
 
 같은 멱등성 키로 다른 요청 내용이 오는 경우를 잡으려면 요청 해시 컬럼을 추가할 수 있다.
 

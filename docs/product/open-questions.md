@@ -12,7 +12,9 @@ AI는 아래 항목을 임의로 확정하지 않는다. 구현에 영향을 주
 | 티켓팅 결제 기한 인정 기준 | DECIDED: 기한 내 서버의 유효 승인 시도 기록·커밋. 늦은 성공 확인도 확정 ([상세](../domains/ticketing/transactions.md)) |
 | 티켓팅 불명확 결제 운영 전환 | DECIDED: 최초 불명확 진입 후 5분이면 운영 확인 등록·알림, 자동 조회와 좌석 보호 지속 ([상세](../domains/ticketing/transactions.md)) |
 | 티켓팅 멱등성 | DEFERRED: 전용 테이블·실행권·접수 작업 자동 인계. 설계는 보존. MVP 선점은 사용자별 키 UNIQUE+요청 해시, checkout은 예약 기준 중복 방지로 확정. 결제 키는 공통 담당자와 조율. PG 불명확 결과 재확인은 유지 ([상세](../domains/ticketing/idempotency.md)) |
-| 티켓팅 결제 시도 식별 | DECIDED: payments.id를 모든 상태 변경 Handler에 전달. DTO·기록 시각·저장 구조는 공통 담당자와 조율 ([상세](../domains/ticketing/payment-handler.md)) |
+| 티켓팅 결제 시도 식별 | DECIDED: payments.id를 모든 상태 변경 Handler에 전달. 공통 계약 반영: `PaymentAttemptContext(paymentId, approvalStartedAt)`, `payments.approval_started_at`, `RefundContext(paymentId, kind)` ([ADR-0003 4절](../decisions/0003-payment-module-boundary.md#4-개정-시도-문맥과-환불-종류-2026-11-12)). 예약 쪽 저장 구조는 티켓팅이 정한다 ([상세](../domains/ticketing/payment-handler.md)) |
+| 팬미팅 결제 시도 ID | 팬미팅 문서의 `attempt_id VARCHAR(64)`, 결제 하나 아래 여러 시도 구조가 ADR-0003(시도마다 `payments` 행, `payments.id` = 시도 ID)과 다르다. 머지된 `fan_meeting_orders.approved_attempt_id VARCHAR(100)` 포함. 팬미팅 담당 확인 필요 |
+| 드롭 결제 실패 후 재결제 | DECIDED (2026-11-12): 예약 기한 안이면 재고를 유지하고 재결제 허용 ([드롭 정책 8절](../domains/drop/policy.md#결제-실패와-재결제-decided-2026-11-12)) |
 | 티켓팅·공통 결제 복구 계약 | 승인 시도 스키마, 전체 잠금 순서, 조회 간격·운영 담당·알림 채널, 미완료 시도 탐지, 안전한 재실행·최종 실패 조건 합의 필요 |
 | Drop과 Concert 연결의 필수 여부 | 팀 확인 |
 | 예약 TTL (초기 제안 5분) | PG UX 고려 후 확정 |
