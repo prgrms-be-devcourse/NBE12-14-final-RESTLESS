@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.restless.TestcontainersConfiguration;
 import com.restless.auth.infrastructure.JwtTokenProvider;
+import com.restless.auth.infrastructure.JwtProperties;
 import com.restless.common.error.*;
 import com.restless.payment.application.*;
 import com.restless.payment.application.payable.*;
@@ -50,11 +51,14 @@ class PaymentFlowTest {
     @Autowired MeterRegistry meters;
     @Autowired PlatformTransactionManager tm;
     @Autowired MockMvc mvc;
-    @Autowired JwtTokenProvider tokens;
+    @Autowired JwtProperties jwtProperties;
+    JwtTokenProvider tokens;
     Long user;
 
     @BeforeEach
     void setup() {
+        // 결제 시나리오는 고정 시계, 실제 JWT 검증을 거치는 API 인증은 현재 시계를 사용한다.
+        tokens = new JwtTokenProvider(jwtProperties, Clock.systemUTC());
         refunds.deleteAllInBatch();
         payments.deleteAllInBatch();
         jdbc.update(
