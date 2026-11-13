@@ -8,7 +8,7 @@
 | Method | Endpoint | 기능 |
 |---|---|---|
 | GET | `/api/concerts/{concertId}/sessions` | 공연 회차 목록 |
-| GET | `/api/concert-sessions/{sessionId}/seats` | 회차별 좌석 상태 (3초 폴링) |
+| GET | `/api/performances/{performanceId}/seats` | 회차별 좌석 상태 (3초 폴링) |
 | POST | `/api/ticket-reservations` | 좌석 선점 (`Idempotency-Key`) |
 | GET | `/api/ticket-reservations/{reservationId}` | 예약 상세 |
 | GET | `/api/ticket-reservations/active` | 활성 예약 조회, 복구 |
@@ -17,28 +17,117 @@
 | POST | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 요청 |
 | GET | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 상태 조회 |
 
+## 회차별 좌석 조회
+
+`GET /api/performances/{performanceId}/seats`는 로그인이 필수이며,
+`Authorization: Bearer <accessToken>` 헤더로 인증한다. 비로그인 요청은 `401 UNAUTHORIZED`로 응답한다.
+공연 상세·회차 목록은 비로그인 조회를 허용하고, 회차를 클릭해 좌석 선택에 진입할 때부터 로그인을 요구한다.
+프론트엔드는 로그인 완료 후 선택한 회차의 좌석 화면으로 복귀하도록 연결한다 (프론트엔드 구현은 별도).
+`performanceId`를 내부 Performance ID로 전달하며, 해당 회차의 판매 좌석만 좌석 ID 오름차순으로 반환한다.
+
+성공 (`200 OK`):
+
+```json
+[
+  {
+    "seatId": 10,
+    "venueSeatId": 101,
+    "sectionLabel": "A",
+    "rowLabel": "1",
+    "seatNumber": "1",
+    "posX": 10.00,
+    "posY": 20.00,
+    "grade": "VIP",
+    "price": 150000,
+    "status": "AVAILABLE"
+  }
+]
+```
+
+`seatId`는 회차별 판매 좌석 ID이며 `venueSeatId`는 물리 좌석 ID다.
+상태는 `AVAILABLE`, `HELD`, `SOLD` 중 하나다. 현재 상태를 조회하며 만료 처리나 선점은 수행하지 않는다.
+회차에 판매 좌석이 없으면 빈 배열을 반환한다. 없는 회차는 `404 NOT_FOUND`,
+Long으로 변환할 수 없는 performanceId는 `400 INVALID_REQUEST`로 응답한다.
+
 ## 좌석 선점
+
+로그인 필수다. 회원 ID는 본문에서 받지 않고 `@LoginMember`로 인증된 토큰에서 추출한다.
+`performanceId`와 `seatIds`는 양수여야 하며 좌석 목록은 비어 있거나 중복될 수 없다.
+`seatIds`는 물리 좌석 ID가 아닌 조회 응답의 판매 좌석 `seatId`다.
+`Idempotency-Key`는 필수이며 공백만 있는 값은 거절하고 최대 100자로 제한한다.
+키의 대소문자·후행 공백은 구분하며, 좌석 ID의 순서 차이는 같은 요청으로 취급한다.
 
 요청:
 
 ```http
 POST /api/ticket-reservations
+Authorization: Bearer <accessToken>
 Idempotency-Key: 7f83a2b1-...
 Content-Type: application/json
 
-{ "sessionId": 100, "seatIds": [10, 11] }
+{ "performanceId": 100, "seatIds": [10, 11] }
 ```
 
-성공:
+성공 (`201 Created`):
 
 ```json
 {
   "reservationId": 5001,
   "status": "HELD",
   "seatIds": [10, 11],
-  "holdExpiresAt": "2026-11-06T11:30:00+09:00"
+  "holdExpiresAt": "2026-11-12T02:30:00Z"
 }
 ```
+
+좌석 ID는 오름차순으로 반환하며, 잠금 획득 후 DB UTC 시각 기준으로 5분간 선점한다.
+예매 시간은 시작 정각부터 마감 직전까지 허용한다. 좌석 하나라도 선점 불가하면 전체 요청을 롤백한다.
+같은 사용자·키·회차·좌석 집합으로 재요청하면 기존 예약의 현재 상태와 최초 기한을 `201`로 반환한다.
+만료·취소된 예약도 재생성하지 않는다. 만료된 결제 전 HELD 예약은 전체 반환 후 RELEASED 상태로 연결한다.
+다른 회차나 좌석으로 같은 키를 재사용하면 `409 IDEMPOTENCY_KEY_CONFLICT`다.
+최초 요청의 5분 기한은 새로고침·재요청으로 연장되지 않는다.
+
+선점 API의 오류 HTTP 상태:
+
+| HTTP | 코드 | 조건 |
+|---|---|---|
+| 400 | `INVALID_REQUEST` | 필수 헤더 누락, 유효하지 않은 본문·키, 중복 좌석 |
+| 401 | `UNAUTHORIZED` | 인증 정보 없음 또는 유효하지 않은 토큰 |
+| 404 | `NOT_FOUND` | 없는 공연 회차 |
+| 409 | `SEAT_UNAVAILABLE` | 없는 판매 좌석, 다른 회차·배치, 판매 제외, 이미 선점·판매된 좌석 |
+| 409 | `ACTIVE_RESERVATION_EXISTS` | 해당 사용자·회차의 활성 예약 존재 |
+| 409 | `TICKET_LIMIT_EXCEEDED` | 확정+선점+신규 수량이 회차 한도 초과 |
+| 409 | `BOOKING_NOT_OPEN`, `BOOKING_CLOSED` | 예매 시간 범위 밖 |
+| 409 | `IDEMPOTENCY_KEY_CONFLICT` | 같은 키로 다른 회차·좌석 요청 |
+| 409 | `SEAT_LOCK_TIMEOUT` | 잠금·생성 경합 등의 최대 3회 시도 소진. 같은 키로 재요청 가능 |
+
+## 선점 취소
+
+`DELETE /api/ticket-reservations/{reservationId}`는 로그인 필수이며 회원 ID는 `@LoginMember`로 받는다.
+요청 본문과 Idempotency-Key는 필요하지 않다. 본인의 결제 전 HELD 예약 전체를 반환하며 일부 좌석만 취소하지 않는다.
+성공은 본문 없는 `204 No Content`다.
+
+```http
+DELETE /api/ticket-reservations/5001
+Authorization: Bearer <accessToken>
+```
+
+- 구매 관리 행 → 예약 → 판매 좌석 ID 오름차순으로 잠그고 소유자·상태·현재 선점 포인터를 재검증한다.
+- 예약과 선점 이력은 RELEASED, 좌석은 AVAILABLE/current_hold_id=NULL로 변경하고 reserved_count를 반환 좌석 수만큼 줄인다. confirmed_count는 변경하지 않는다.
+- 변경은 모두 같은 트랜잭션에서 커밋하거나 롤백하며 이력·최초 기한·요청 키는 보존한다.
+- 본인의 이미 RELEASED인 예약에 반복 요청하면 204로 응답하며 좌석·수량을 다시 변경하지 않는다. 만료 처리와 경합해도 반환은 한 번만 반영한다.
+- 만료 시각이 지난 결제 전 HELD도 취소 가능하다. PAYMENT_PENDING/RECONCILING/CONFIRMED 및 환불 상태는 이 API로 반환하지 않는다.
+- HELD라도 주문 ID·결제 진입 시각·결제 기한이 있으면 취소하지 않는다. 결제·환불 취소 흐름은 별도 구현 대상이다.
+
+| HTTP | 코드 | 조건 |
+|---|---|---|
+| 400 | `INVALID_REQUEST` | 유효하지 않은 예약 ID |
+| 401 | `UNAUTHORIZED` | 인증 실패 |
+| 404 | `NOT_FOUND` | 없는 예약 또는 타인의 예약 |
+| 409 | `RESERVATION_CANNOT_CANCEL` | 결제 전 HELD/반환 완료 RELEASED 이외 상태 또는 결제 관련 필드 존재 |
+| 409 | `SEAT_LOCK_TIMEOUT` | 잠금 경합으로 최대 3회 시도 소진 |
+
+좌석 소유 포인터·이력·카운터가 불일치하면 전체 롤백하며 서버 오류로 남긴다. 다른 소유자의 좌석을 강제로 반환하거나 수량을 임의 보정하지 않는다.
+TicketReservationServiceTest에 본인·타인 취소, 중복 취소의 수량 보존, 결제 진행·결과 확인 중 취소 거절 테스트를 작성했으며 아직 실행하지 않았다.
 
 ## 오류 코드
 
@@ -52,8 +141,9 @@ Content-Type: application/json
 | `BOOKING_CLOSED` | 예매 마감 |
 | `IDEMPOTENCY_KEY_CONFLICT` | 같은 키로 다른 요청 |
 | `SEAT_LOCK_TIMEOUT` | 잠금 대기 초과 |
+| `RESERVATION_CANNOT_CANCEL` | 결제 전 선점 취소 불가 |
 
-아래 멱등성 계약의 202·409 외 오류의 HTTP 상태 코드는 후속 API 설계에서 정한다.
+위 선점 API 외 후속 API의 오류 HTTP 상태 코드는 해당 API 구현 시 정한다.
 
 ## 결제 기한 정책 (DECIDED)
 
@@ -94,5 +184,7 @@ checkout은 예약 잠금·기존 주문 참조로 중복 생성과 기한 연�
 ## 내부 회차 명칭
 
 Java 엔티티·Repository는 Performance/PerformanceRepository, DB 테이블은 performances로 통일한다.
-API 호환성을 위해 /api/concert-sessions 경로와 기존 sessionId 요청 필드는 그대로 유지한다.
-API의 sessionId는 내부 Performance의 ID로 해석한다.
+좌석 조회 API는 /api/performances/{performanceId}/seats로 통일하며 performanceId는 Performance의 ID다.
+좌석 선점 요청 본문도 performanceId를 사용하며, 내부 Performance의 ID로 해석한다.
+기존 concert-sessions 조회 경로와 선점 요청의 sessionId 필드는 제공하지 않는다.
+선점 요청 DTO와 POST API는 위 명칭으로 구현했다. 테스트·동시성 실행 검증은 아직 하지 않았다.

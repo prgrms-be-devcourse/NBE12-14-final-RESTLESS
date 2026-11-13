@@ -1,6 +1,7 @@
 package com.restless.ticketing.entity;
 
 import com.restless.TestcontainersConfiguration;
+import com.restless.ticketing.infrastructure.TicketSeatRepository;
 import com.restless.concert.domain.*;
 import com.restless.member.domain.Member;
 import com.restless.ticketing.domain.SeatHold;
@@ -38,6 +39,9 @@ class TicketSeatMappingTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private TicketSeatRepository ticketSeatRepository;
 
     private Long userId;
     private Long venueId;
@@ -92,9 +96,7 @@ class TicketSeatMappingTest {
         assertThat(other.getGrade()).isEqualTo("R");
         assertThat(other.getPrice()).isZero();
         assertThat(other.getStatus()).isEqualTo(TicketSeatStatus.AVAILABLE);
-        var seats = entityManager.createQuery("""
-                select s from TicketSeat s where s.performanceId = :performanceId
-                """, TicketSeat.class).setParameter("performanceId", performanceId).getResultList();
+        var seats = ticketSeatRepository.findAllByPerformanceId(performanceId);
         assertThat(seats).extracting(TicketSeat::getId).containsExactly(first.getId());
 
         Long holdId = createHoldFixture(first.getId());

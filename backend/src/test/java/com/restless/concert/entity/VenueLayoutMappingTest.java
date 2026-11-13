@@ -1,6 +1,7 @@
 package com.restless.concert.entity;
 
 import com.restless.TestcontainersConfiguration;
+import com.restless.concert.infrastructure.LayoutSeatRepository;
 import com.restless.concert.domain.*;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
@@ -32,6 +33,9 @@ class VenueLayoutMappingTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private LayoutSeatRepository layoutSeatRepository;
 
     @DisplayName("배치 버전별로 같은 실제 좌석을 재사용하고 복합 키·좌표·판매 여부를 조회한다")
     @Test
@@ -74,9 +78,7 @@ class VenueLayoutMappingTest {
         assertThat(other.getId()).isNotEqualTo(firstId);
         assertThat(other.getSectionLabel()).isEqualTo("Blocked A");
         assertThat(other.isSellable()).isFalse();
-        var seats = entityManager.createQuery("""
-                select s from LayoutSeat s where s.id.layoutId = :layoutId
-                """, LayoutSeat.class).setParameter("layoutId", first.getId()).getResultList();
+        var seats = layoutSeatRepository.findAllById_LayoutId(first.getId());
         assertThat(seats).extracting(LayoutSeat::getId).containsExactly(firstId);
     }
 

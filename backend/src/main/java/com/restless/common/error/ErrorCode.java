@@ -5,7 +5,7 @@ import org.springframework.http.HttpStatus;
 
 /**
  * 오류 코드. 응답의 {@code code}는 상수 이름이다.
- * 지금은 공통 코드와 인증에 필요한 코드만 있다. 도메인 코드는 `도메인_상황` 이름으로 추가한다.
+ * 공통·인증·회원·티켓팅·경매·크레딧에서 사용하는 오류를 정의한다.
  */
 @Getter
 public enum ErrorCode {
@@ -27,6 +27,15 @@ public enum ErrorCode {
     MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다."),
     MEMBER_PASSWORD_MISMATCH(HttpStatus.BAD_REQUEST, "비밀번호가 올바르지 않습니다."),
     MEMBER_HAS_ACTIVE_PARTICIPATION(HttpStatus.CONFLICT, "진행 중인 주문이나 참여가 있어 탈퇴할 수 없습니다."),
+
+    // 티켓팅
+    SEAT_UNAVAILABLE(HttpStatus.CONFLICT, "선점할 수 없는 좌석이 포함되어 있습니다."),
+    ACTIVE_RESERVATION_EXISTS(HttpStatus.CONFLICT, "진행 중인 예약이 있습니다."),
+    TICKET_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "회차별 구매 한도를 초과했습니다."),
+    BOOKING_NOT_OPEN(HttpStatus.CONFLICT, "예매 시작 전입니다."),
+    BOOKING_CLOSED(HttpStatus.CONFLICT, "예매가 마감되었습니다."),
+    RESERVATION_CANNOT_CANCEL(HttpStatus.CONFLICT, "결제 전 선점 예약만 취소할 수 있습니다."),
+    SEAT_LOCK_TIMEOUT(HttpStatus.CONFLICT, "좌석 처리 경합이 발생했습니다. 같은 요청 키로 재시도해 주세요."),
 
     // 경매, 크레딧
     AUCTION_NOT_FOUND(HttpStatus.NOT_FOUND, "경매를 찾을 수 없습니다."),

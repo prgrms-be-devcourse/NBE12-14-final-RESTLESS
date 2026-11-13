@@ -39,7 +39,6 @@ public class SecurityConfig implements WebMvcConfigurer {
     /** 로그인 없이 GET으로 볼 수 있는 경로. 팀 API 계약(docs/contracts/api) 기준. */
     static final String[] PUBLIC_GET_PATHS = {
             "/api/concerts", "/api/concerts/**",
-            "/api/concert-sessions/*/seats",
             "/api/drops", "/api/drops/*",
             "/api/auctions", "/api/auctions/*", "/api/auctions/*/bids", "/api/auctions/*/result",
             "/api/fan-meetings/*",
