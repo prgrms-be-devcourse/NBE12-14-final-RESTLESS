@@ -138,10 +138,22 @@ abstract class DropAcceptanceSupport {
     }
 
     /** 등록만 한다 (DRAFT). */
+    /**
+     * 등록 API로 만든다. 이미 끝난 기간은 등록 검증(D1 {@code closesAt > 서버 시각})에 걸리므로,
+     * 그때는 앞으로의 기간으로 등록한 뒤 시각만 옮긴다. 끝난 판매를 검증하는 테스트용이다.
+     */
     Long createDrop(Instant opensAt, Instant closesAt, List<Sku> skus) {
-        Response r = post("/api/admin/drops", admin, dropJson(opensAt, closesAt, skus));
+        boolean ended = !closesAt.isAfter(now());
+        Instant registerOpens = ended ? now().plus(Duration.ofHours(1)) : opensAt;
+        Instant registerCloses = ended ? now().plus(Duration.ofHours(2)) : closesAt;
+        Response r = post("/api/admin/drops", admin, dropJson(registerOpens, registerCloses, skus));
         assertThat(r.status()).as(r.body()).isEqualTo(201);
-        return r.longAt("$.dropId");
+        Long dropId = r.longAt("$.dropId");
+        if (ended) {
+            jdbc.update("UPDATE drops SET opens_at = ?, closes_at = ? WHERE id = ?",
+                    Timestamp.from(opensAt), Timestamp.from(closesAt), dropId);
+        }
+        return dropId;
     }
 
     void publish(Long dropId) {
