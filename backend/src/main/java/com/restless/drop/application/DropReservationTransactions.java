@@ -32,6 +32,7 @@ public class DropReservationTransactions {
     private final OrderService orders;
     private final Clock clock;
     private final DropReservationSettings settings;
+    private final DropQueueEntryRepository queueEntries;
 
     public Result create(Long dropId, Long userId, String key, CreateDropReservationRequest request) {
         var previous = findExisting(dropId, userId, key);
@@ -54,17 +55,31 @@ public class DropReservationTransactions {
         }
         var now = clock.instant();
         requireOnSale(drop, now);
+        DropQueueEntry admission = null;
+        if (settings.queueRequired()) {
+            admission = queueEntries.lockLatest(dropId, userId)
+                    .filter(entry -> entry.validAdmission(clock.instant()))
+                    .orElseThrow(() -> new BusinessException(ErrorCode.DROP_ADMISSION_REQUIRED));
+        }
         // Keep the most contended inventory lock at the end of validation (EXP-01).
         if (inventories.holdOne(variant.getId()) == 0) throw new BusinessException(ErrorCode.DROP_SOLD_OUT);
         // The UPDATE may have waited across closesAt; reject and roll back its decrement in that case.
         now = clock.instant();
         requireOnSale(drop, now);
+        if (admission != null && !admission.validAdmission(now)) {
+            throw new BusinessException(ErrorCode.DROP_ADMISSION_REQUIRED);
+        }
         var orderId = orders.create(new CreateOrderCommand(userId, OrderType.DROP,
                 List.of(new CreateOrderCommand.OrderLine("DROP_VARIANT", variant.getId(), drop.getTitle(),
                         variant.getOptionName(), variant.getPriceAmount(), 1)),
                 new CreateOrderCommand.ShippingAddress(request.recipient(), request.phone(), request.address())));
         var reservation = reservations.saveAndFlush(DropReservation.reserved(dropId, variant.getId(), userId,
                 orderId, key, now.plus(settings.ttl()), now));
+        if (admission != null) {
+            now = clock.instant();
+            if (!admission.validAdmission(now)) throw new BusinessException(ErrorCode.DROP_ADMISSION_REQUIRED);
+            admission.consume(now);
+        }
         slot.occupy(reservation.getId(), now);
         return new Result(created(reservation), false);
     }

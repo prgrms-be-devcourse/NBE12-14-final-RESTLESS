@@ -91,16 +91,18 @@ SKU별 재고
 
 슬롯은 DB 트랜잭션에서 원자적으로 점유, 해제한다.
 
-## 구매 대기열 (OPEN)
+## DROP_QUEUE_ENTRIES (DECIDED, D4)
 
-별도 테이블(예: `drop_queue_entries`)이 필요할 수 있다. 최소 데이터:
-
-- 드롭 ID, 사용자 ID
-- 서버가 정하는 진입 순서
-- 대기, 입장, 소비, 만료 상태
-- 진입 시각, 입장 허가 시각, 구매권 만료 시각
-
-PK, 인덱스, 구매권 저장 방식은 OPEN이다. 여러 Worker가 같은 사용자를 중복 입장시키면 안 된다. `SKIP LOCKED`를 쓴다면 FIFO 보장 여부를 따로 검증한다.
+- `id`: 서버가 발급하는 증가 PK. 대략적인 진입 순서에도 사용한다.
+- `drop_id`, `user_id`: 드롭·회원 FK.
+- `status`: WAITING / ADMITTED / CONSUMED / EXPIRED / CLOSED.
+- `entered_at`, `last_seen_at`: 진입 시각과 마지막 상태 조회 시각.
+- `admitted_at`, `admitted_until`, `consumed_at`: 입장·구매권 만료·소비 시각.
+- `active_user_id`: WAITING 또는 ADMITTED일 때만 user_id인 생성 컬럼.
+- `UNIQUE(drop_id, active_user_id)`: 회원·드롭당 살아 있는 대기는 최대 1건.
+- 입장 인덱스 `(drop_id, status, id)`와 `FOR UPDATE SKIP LOCKED`로 여러 작업의 입장 대상이 겹치지 않게 한다. 엄격한 FIFO는 보장하지 않는다.
+- 회원별 최신 상태는 `(drop_id, user_id, id)`, 전체 대기 Gauge는 `(status, last_seen_at)` 인덱스를 사용한다.
+- 만료·소비 이력은 조회할 수 있으며, 재진입하면 새 행을 추가한다. CLOSED 이력만 있으면 상태 조회는 404다.
 
 ## 공통 테이블 (Drop 소유 아님)
 

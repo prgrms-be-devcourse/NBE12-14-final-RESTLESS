@@ -22,7 +22,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>시간 의존 규칙을 빨리 확인하려고 이 클래스에서만 이탈 판정·구매권 시간을 짧게 둔다.
  */
-@Disabled("D4 구현 전. D4 구현 PR에서 이 줄만 지운다")
 @DisplayName("D4 대기열·구매권")
 @TestPropertySource(properties = {
         "restless.drop.queue.required=true",

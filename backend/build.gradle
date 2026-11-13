@@ -55,6 +55,7 @@ tasks.named('test') {
     systemProperty 'user.timezone', 'UTC'
     // Each cached Spring context retains a MySQL container; bound Docker memory during the full suite.
     systemProperty 'spring.test.context.cache.maxSize', '4'
+    systemProperty 'restless.drop.queue.scheduler.enabled', 'false'
     // 팬미팅 응모 기간 Worker도 같은 이유로 끈다. 워커 테스트는 FanMeetingEntryWorker를 직접 부른다.
     systemProperty 'restless.fanmeeting.worker.enabled', 'false'
 }
