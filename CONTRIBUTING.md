@@ -83,6 +83,8 @@ npm run dev                  # /api 요청은 localhost:8080으로 프록시
 
 ## AI 결과물
 
+루트 `AGENTS.md`, `CLAUDE.md`(에이전트 지침)는 레포에 두지 않는다. 각자 PC에서 만들어 쓰며 `.gitignore`에 들어 있다. 팀이 지켜야 하는 기준은 `docs/`(불변식, 계약, ADR)와 이 문서가 정본이다. 2026-11-14 전까지 레포에 있던 내용은 `git show 0fb7131:AGENTS.md > AGENTS.md`(CLAUDE.md도 같은 방식)로 꺼낼 수 있다.
+
 Claude, Codex, ChatGPT가 만든 계획, 보고서, 분석 메모는 `.ai-output/`에 둔다. 이 폴더는 커밋되지 않는다. 팀이 함께 볼 내용이면 `docs/`로 옮겨 PR로 올린다.
 
 AI 작업에 쓰는 **도구**(검사 스크립트, 가드, 지시서 템플릿)는 결과물이 아니므로 `tools/harness/`에 커밋한다. 지금은 드롭 담당자만 쓰며, hook은 `tools/harness/install.sh`를 직접 실행한 PC에만 설치된다. 실행 기록(로그, 단계 보고서)은 계속 `.ai-output/`에 둔다.
