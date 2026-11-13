@@ -25,7 +25,7 @@
 >
 > - **조회용 인덱스 10개(`KEY idx_...`)가 머지된 파일에 아직 없다.** 다음 마이그레이션(`V<날짜>_<시각>__fanmeeting_add_indexes.sql`)으로 추가한다. Worker 조회와 승격·만료의 `FOR UPDATE`가 인덱스 없이 돌면 훑은 행을 전부 잠그므로, 승격·만료 구현 전에 넣는다.
 > - 제약 이름 규칙(`pk_`/`uk_`/`fk_`/`ck_` + 테이블 이름), 일부 길이(`algorithm_version` 20, `last_error` 500, `approved_attempt_id` 100, selections `status` 20)는 머지된 파일을 따른다.
-> - `organizer_id`, `opens_at_public`은 `V20261113_1000__fanmeeting_add_organizer_and_opens_at_public.sql`로 추가했다.
+> - `organizer_id`, `opens_at_public`은 `V20261113_1600__fanmeeting_add_organizer_and_opens_at_public.sql`로 추가했다.
 
 ```sql
 CREATE TABLE fan_meeting_events (
