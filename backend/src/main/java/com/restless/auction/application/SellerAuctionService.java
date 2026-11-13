@@ -10,6 +10,7 @@ import com.restless.member.domain.MemberRole;
 import java.time.Clock;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +27,7 @@ public class SellerAuctionService {
     private final AuctionRepository auctions;
     private final MemberService memberService;
     private final Clock clock;
+    private final ApplicationEventPublisher events;
 
     @Transactional
     public Long create(Long sellerUserId, Terms terms) {
@@ -37,6 +39,8 @@ public class SellerAuctionService {
         Instant now = clock.instant();
         Auction auction = lockOwned(userId, auctionId);
         auction.update(terms, now);
+        // 시작 전 화면을 보던 회원에게 바뀐 시작가·종료 시각을 보낸다.
+        events.publishEvent(new AuctionChangedEvent(auctionId, auction.getRevision()));
         return auction.getId();
     }
 
@@ -46,6 +50,8 @@ public class SellerAuctionService {
         Auction auction = lockOwned(userId, auctionId);
         auction.requireNotStarted(now);
         auctions.delete(auction);
+        // 실시간 전달 쪽은 경매가 없는 것을 보고 연결을 닫는다.
+        events.publishEvent(new AuctionChangedEvent(auctionId, auction.getRevision()));
     }
 
     /** 경매 행을 잠그고 본인(또는 ADMIN)인지 확인한다. 시작 여부는 잠금 뒤에 호출한 쪽이 확인한다. */

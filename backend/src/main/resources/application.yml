@@ -50,6 +50,11 @@ restless:
       fixed-delay-ms: 1000
       # 한 번에 처리할 경매 수
       batch-size: 100
+    stream:
+      # 경매별로 변경을 모아 최신 상태를 보내는 간격(ms). policy.md 8절
+      flush-interval-ms: 200
+      # SSE 연결 최대 유지 시간(ms). 지나면 서버가 닫고, 클라이언트는 상세를 다시 받은 뒤 재연결한다.
+      timeout-ms: 1800000
   fanmeeting:
     worker:
       # 팬미팅 응모 기간 열기·마감, 추첨 Worker. 테스트에서는 build.gradle이 false로 끈다.
