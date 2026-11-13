@@ -33,7 +33,10 @@ DB 오류 등 기술 실패는 예외로 전체 롤백한다. 업무상 승인 �
 - onApproved의 ApprovedPayment에는 paymentId, approvalStartedAt, PG approvedAt이 있다. 티켓팅은 PG approvedAt으로 기한을 다시 판정하지 않는다.
 - onApprovalStarting은 도메인 잠금 획득 뒤 읽은 DB UTC 현재 시각으로 기한을 검사한다. 전달받은 approvalStartedAt은 잠금 대기 전 값이므로 신규 시도 허용 판정에 쓰지 않는다.
 - onFailed의 자원 반환 여부는 도메인 정책에 따른다. 티켓팅은 기한 내 재시도를 허용하고, 진행 중·불명확 결과를 실패로 간주하지 않는다.
-- onRefunded는 RefundContext(paymentId, kind)를 받으며 CUSTOMER_REFUND와 COMPENSATION을 구분한다.
+- onRefundRequesting/onRefundRejected/onRefunded는 RefundContext(paymentId, kind)를 받는다. 문맥 자체는 PG 취소 확정을 뜻하지 않으며 CUSTOMER_REFUND와 COMPENSATION을 구분한다.
+- onRefundRequesting은 손님 환불 요청 트랜잭션에서 가능 여부를 검사한다. 기본 구현은 REFUND_NOT_SUPPORTED로 거절하며, 도메인이 수락할 경우 환불 대기 전환과 공통 결제·환불 기록을 함께 커밋한다. 좌석은 반환하지 않는다.
+- onRefundRejected는 손님 환불의 PG 최종 거절 시 결제 APPROVED 복귀·환불 FAILED와 같은 트랜잭션에서 호출된다. 기본은 no-op이며, 티켓팅의 환불 상태 처리 연결은 후속이다. 두 콜백은 보상 취소에 호출하지 않는다.
+- 실제 자원 복원은 onRefunded에서만 수행한다. 공통 손님 환불 API가 추가됐어도 티켓팅 환불·Handler가 구현된 것은 아니다.
 - 공통 결제는 payableType/payableId로 식별한다. payments.order_id를 요구하지 않는다.
 - 티켓팅 Handler와 승인 시도 연결은 아직 구현하지 않았다. checkout은 공통 주문 준비까지만 수행하며 payments 생성·PG 호출·예매 확정을 하지 않는다.
 
@@ -49,7 +52,7 @@ DB 오류 등 기술 실패는 예외로 전체 롤백한다. 업무상 승인 �
 ## 승인 시도 식별 (DECIDED, 2026-11-12)
 
 - payments.id를 승인 시도 ID로 사용하며 별도 시도 UUID는 추가하지 않는다.
-- onApprovalStarting/onApproved/onFailed/onUnknown/onRefunded 모두 해당 paymentId를 전달한다.
+- onApprovalStarting/onApproved/onFailed/onUnknown/onRefundRequesting/onRefundRejected/onRefunded 모두 해당 paymentId를 전달한다.
 - type과 load는 상태 변경 Handler가 아니다. load는 결제 생성 전 대상 조회이므로 paymentId를 요구하지 않는다.
 - 같은 시도의 결과 조회·복구는 같은 ID를 사용하고, 최종 실패 후 새 시도는 새 payments 행과 ID를 사용한다.
 - 결제 모듈은 잠근 paymentId와 payableType/payableId 관계를 확인한다. 정상 응답·재조회·운영 복구 모두 같은 ID를 전달한다.
@@ -62,3 +65,9 @@ DB 오류 등 기술 실패는 예외로 전체 롤백한다. 업무상 승인 �
 티켓팅은 승인 시작을 받아들인 paymentId와 시각을 영속화하고 결과가 같은 시도인지 확인해야 한다.
 예약에 current_payment_id와 승인 시작 기록 시각을 저장하는 방안은 제안이며 실제 컬럼·FK는 후속 설계 대상이다.
 승인 전 READY 만료 실패의 approvalStartedAt은 null일 수 있다. 정상 환불과 보상 취소를 구분하고 예매 확정 전 보상 취소에 confirmed_count 감소를 적용하지 않는다.
+
+## 공통 대사와 checkout의 관계
+
+공통 결제는 PaymentReconciler/PaymentReconciliationScheduler로 미완료 승인·취소를 재조회하고 같은 Handler로 결과를 반영한다. 기준과 주기는 [공통 대사 운영 계약](../../operations/failure-handling.md#공통-결제-대사-46)을 따른다.
+checkout은 payments 행을 생성하지 않으므로 공통 대사 후보가 아니다. 주문만 연결된 PAYMENT_PENDING 예약의 결제 기한 만료를 공통 대사가 대신 정리하지 않는다. 티켓팅 Handler·결제 시도 연동과 결제 이후 만료 처리는 여전히 후속 구현이다.
+공통 UNKNOWN 최초 시각·나이 메트릭은 구현됐지만 티켓팅의 불명확 5분 운영 확인 등록·중복 없는 알림은 후속이며 좌석 보호 정책을 바꾸지 않는다.

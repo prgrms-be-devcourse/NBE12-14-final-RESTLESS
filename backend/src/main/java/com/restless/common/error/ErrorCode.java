@@ -60,7 +60,12 @@ public enum ErrorCode {
     PAYMENT_UNDER_REVIEW(HttpStatus.CONFLICT, "결제 결과를 확인 중입니다."),
     PAYMENT_AMOUNT_MISMATCH(HttpStatus.BAD_REQUEST, "결제 금액이 일치하지 않습니다."),
     PAYMENT_FAILED(HttpStatus.CONFLICT, "결제 승인이 실패했습니다."),
-    PAYMENT_REJECTED(HttpStatus.CONFLICT, "구매를 확정할 수 없어 보상 취소합니다.");
+    PAYMENT_REJECTED(HttpStatus.CONFLICT, "구매를 확정할 수 없어 보상 취소합니다."),
+    PAYMENT_NOT_REFUNDABLE(HttpStatus.CONFLICT, "환불할 수 없는 결제입니다."),
+    PAYMENT_REFUND_IN_PROGRESS(HttpStatus.CONFLICT, "환불이 진행 중입니다."),
+    PAYMENT_ALREADY_REFUNDED(HttpStatus.CONFLICT, "이미 환불된 결제입니다."),
+    PAYMENT_REFUND_REJECTED(HttpStatus.CONFLICT, "PG가 환불을 거절했습니다."),
+    PAYMENT_REFUND_KEY_CONFLICT(HttpStatus.CONFLICT, "다른 결제에 사용된 환불 요청 키입니다.");
 
     private final HttpStatus httpStatus;
     private final String message;

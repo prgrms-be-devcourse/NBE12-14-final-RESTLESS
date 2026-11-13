@@ -89,6 +89,39 @@ public interface PaymentResultHandler {
     void onUnknown(Long payableId, PaymentAttemptContext attempt);
 
     /**
+     * 손님 전액 환불을 시작하기 직전, TX-R1에서 결제 행을 잠근 뒤 호출한다.
+     * 결제는 아직 APPROVED이고 환불 요청 행은 아직 생성되지 않았다.
+     * 받아들이면 도메인 행을 잠그고 환불 대기로 바꾼다 (예: 주문 PAID → REFUND_PENDING).
+     * 이 변경과 결제 CANCEL_PENDING·환불 REQUESTED 저장은 함께 커밋된다.
+     *
+     * <p>기본 구현은 REFUND_NOT_SUPPORTED로 거절한다. 보상 취소에는 호출하지 않는다.
+     * 재고·좌석은 반환하지 않으며 실제 PG 취소 확정 후 onRefunded에서만 복원한다.
+     * PG 호출이나 외부 I/O를 하지 않는다. 기술 오류는 예외로 던져 전체 요청을 롤백한다.
+     *
+     * @param refund 결제 ID와 CUSTOMER_REFUND 종류를 담은 문맥
+     * @return accept면 요청을 진행한다. reject면 reason을 응답하고 트랜잭션 전체를 롤백해
+     *         결제/도메인 상태를 유지하며 PG를 호출하지 않는다.
+     */
+    default ApprovalDecision onRefundRequesting(Long payableId, RefundContext refund) {
+        return ApprovalDecision.reject("REFUND_NOT_SUPPORTED");
+    }
+
+    /**
+     * PG가 손님 환불 취소를 최종 거절했을 때, 공통 TX-C/TX-R2에서 호출한다.
+     * 결제 행 → 환불 행 잠금과 상태 재확인 뒤 환불 FAILED·결제 APPROVED 복귀와 같은
+     * 트랜잭션 안에서 실행된다. 대사 취소 재시도의 최종 거절도 같은 경로를 쓴다.
+     * 도메인의 환불 대기는 운영 확인 상태로 바꾼다 (예: REFUND_PENDING → REFUND_REVIEW).
+     *
+     * <p>기본 구현은 아무것도 하지 않는다. CUSTOMER_REFUND에만 호출하고 COMPENSATION에는
+     * 호출하지 않는다. 재고·좌석은 복원하지 않는다. PG/외부 I/O를 하지 않으며 기술 오류는
+     * 예외로 던진다. 예외가 나면 결제·환불·도메인 변경이 함께 롤백되고 대사가 재확인한다.
+     *
+     * @param refund 저장된 결제 ID와 CUSTOMER_REFUND 종류
+     */
+    default void onRefundRejected(Long payableId, RefundContext refund) {
+    }
+
+    /**
      * PG 전액 취소가 확인됨 (드롭 TX5). 정확히 한 번만 반영되어야 한다 (INV-12). 종류에 따라 되돌릴 자원이 다르다.
      * <ul>
      *   <li>{@code CUSTOMER_REFUND}: 확정된 구매를 되돌린다 (예: 예약 RESTORED, 재고 sold -1 available +1, 주문 REFUNDED).</li>

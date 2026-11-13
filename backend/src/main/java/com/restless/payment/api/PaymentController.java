@@ -69,7 +69,8 @@ public class PaymentController {
                 result.amount(),
                 result.approvalStartedAt(),
                 result.approvedAt(),
-                result.failureCode());
+                result.failureCode(),
+                result.refund());
     }
 
     public record PrepareRequest(
@@ -100,5 +101,6 @@ public class PaymentController {
             long amount,
             Instant approvalStartedAt,
             Instant approvedAt,
-            String failureCode) {}
+            String failureCode,
+            PaymentRefundSummary refund) {}
 }
