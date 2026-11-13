@@ -28,6 +28,15 @@ SELECT COUNT(*) FROM (
     WHERE status IN ('RESERVED', 'CONFIRMING', 'RECONCILING', 'COMPENSATING')
     GROUP BY drop_id, user_id HAVING COUNT(*) > 1) t;
 
+-- name: INV-07 no duplicate drop order (every drop order is linked to exactly one stock hold)
+-- A retried purchase request must reuse its order. An order for a drop SKU that no stock hold
+-- points to is an extra order left by a retry. UNIQUE(order_id) already stops two holds sharing one.
+SELECT COUNT(DISTINCT o.id) FROM orders o
+JOIN order_items oi ON oi.order_id = o.id AND oi.item_type = 'DROP_VARIANT'
+JOIN drop_variants v ON v.id = oi.item_ref_id
+WHERE o.order_type = 'DROP'
+  AND NOT EXISTS (SELECT 1 FROM drop_reservations r WHERE r.order_id = o.id);
+
 -- name: INV-04 one drop order has exactly one item with quantity 1
 SELECT COUNT(*) FROM drop_reservations r
 WHERE (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = r.order_id) <> 1
