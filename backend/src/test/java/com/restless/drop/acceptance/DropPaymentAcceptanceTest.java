@@ -29,7 +29,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>결제는 공통 결제 API와 Fake PG로 끝까지 실행한다. 시간 의존 작업은 계약에 정한 빈 이름으로 직접 실행한다.
  */
-@Disabled("D3 구현 전. D3 구현 PR에서 이 줄만 지운다")
 @DisplayName("D3 결제 연결")
 @TestPropertySource(properties = {
         "restless.payment.reconcile.processing-stale-after=1ms",
