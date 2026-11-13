@@ -3,7 +3,9 @@ package com.restless.payment.application;
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
 import com.restless.payment.application.pg.*;
+import com.restless.payment.domain.PaymentRefundKind;
 import com.restless.payment.domain.PaymentStatus;
+import com.restless.payment.infrastructure.PaymentRefundRepository;
 import com.restless.payment.infrastructure.PaymentRepository;
 
 import io.micrometer.core.instrument.MeterRegistry;
@@ -29,6 +31,7 @@ public class PaymentService {
     private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
     private final PaymentTransactions transactions;
     private final PaymentRepository payments;
+    private final PaymentRefundRepository refunds;
     private final PgClient pgClient;
     private final MeterRegistry meters;
 
@@ -80,6 +83,7 @@ public class PaymentService {
         if (step.compensation() == null) return response(step);
         PaymentTransactions.Compensation compensation = step.compensation();
         PgCancelResult cancelResult;
+        Timer.Sample cancelTimer = Timer.start(meters);
         try {
             cancelResult =
                     pgClient.cancel(
@@ -94,6 +98,10 @@ public class PaymentService {
         } catch (RuntimeException error) {
             logFailure("PG compensation call failed", compensation.paymentId(), error);
             cancelResult = new PgCancelResult.Unknown("PG compensation call failed", null);
+        } finally {
+            cancelTimer.stop(
+                    meters.timer(
+                            "payment.pg.cancel", "kind", PaymentRefundKind.COMPENSATION.name()));
         }
         String refund;
         try {
@@ -110,10 +118,18 @@ public class PaymentService {
                 Map.of("reason", compensation.reason(), "refund", refund));
     }
 
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
     public PaymentDetail get(Long paymentId, Long userId) {
         return payments.findById(paymentId)
                 .filter(p -> p.getUserId().equals(userId))
-                .map(PaymentDetail::from)
+                .map(
+                        p ->
+                                PaymentDetail.from(
+                                        p,
+                                        refunds.findFirstByPaymentIdOrderByRequestedAtDescIdDesc(
+                                                        paymentId)
+                                                .map(PaymentRefundSummary::from)
+                                                .orElse(null)))
                 .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
     }
 

@@ -112,9 +112,10 @@ class FanMeetingWithdrawalGuard implements WithdrawalGuard {
 | POST | `/api/payments` | 결제 준비. 새 시도 201, 같은 키 재요청 200 |
 | POST | `/api/payments/confirm` | 토스 승인. 승인 200, 처리 중/불명확 202, 최종 거절 409 |
 | GET | `/api/payments/{paymentId}` | 본인 결제 조회 200 |
-| POST | `/api/orders/{orderId}/refunds` | 손님 전액 환불 (후속 구현, 이 작업에 포함하지 않음) |
+| POST | `/api/payments/{paymentId}/refunds` | 손님 전액 환불. 완료 200, 처리 중/불명확 202, 거절/상태 충돌 409 |
 
 기존 초안의 `/api/payments/orders/{orderId}`는 `/api/payments/{paymentId}`로 변경했다.
+환불 초안 경로 `/api/orders/{orderId}/refunds`는 `/api/payments/{paymentId}/refunds`로 변경했다. 팬미팅처럼 공통 주문 없이도 결제 대상을 식별하기 위해 결제 ID를 기준으로 한다.
 결제 대상은 `(payableType, payableId)`로 식별하며 `orderId`는 승인 요청에서만 우리 `pgOrderId`를 뜻한다.
 모든 결제 API는 Bearer 로그인이 필요하다(토큰 없음/만료/위조는 401 `UNAUTHORIZED`).
 회원 ID는 토큰의 `@LoginMember`에서만 받고 본문에서 받지 않는다.
@@ -190,7 +191,7 @@ FAILED는 409 `PAYMENT_FAILED`, 취소 계열은 409 `PAYMENT_NOT_PAYABLE`이다
 취소 성공은 CANCELLED / 환불 COMPLETED, 불명확은 CANCEL_UNKNOWN / 환불 UNKNOWN,
 취소 확정 거절은 APPROVED / 환불 FAILED로 남아 운영 확인 대상이다.
 취소 결과 반영 기술 오류는 CANCEL_PENDING / 환불 REQUESTED를 유지하고 `refund: UNKNOWN`으로 응답한다.
-재조회·대사 스케줄러와 손님 환불 API는 후속 단계다.
+미완료 승인/취소는 [공통 결제 대사](../../operations/failure-handling.md#공통-결제-대사-46)가 PG 조회로 복구한다. 손님 환불도 같은 취소 확정 경로를 쓴다.
 
 ### 결제 조회
 
@@ -206,11 +207,63 @@ FAILED는 409 `PAYMENT_FAILED`, 취소 계열은 409 `PAYMENT_NOT_PAYABLE`이다
   "amount": 39000,
   "approvalStartedAt": "2026-11-13T01:00:00Z",
   "approvedAt": "2026-11-13T01:00:01Z",
-  "failureCode": null
+  "failureCode": null,
+  "refund": null
 }
 ```
 
 시각과 `failureCode`는 아직 기록되지 않았으면 null이다. paymentKey는 반환하지 않는다.
+`refund`는 가장 최근 요청한 환불 요약이며 없으면 null이다. 요청 시각 내림차순, 같은 시각이면 refundId 내림차순으로 고른다.
+손님 환불과 보상 취소 모두 포함하며 본인 결제에서만 볼 수 있다. 예:
+
+```json
+{
+  "refundId": 10,
+  "kind": "CUSTOMER_REFUND",
+  "status": "COMPLETED",
+  "requestedAt": "2026-11-13T01:01:00Z",
+  "completedAt": "2026-11-13T01:01:01Z"
+}
+```
+
+`kind`: `CUSTOMER_REFUND` / `COMPENSATION`, `status`: `REQUESTED` / `UNKNOWN` / `COMPLETED` / `FAILED`.
+완료 전 `completedAt`은 null이다.
+
+### 손님 전액 환불
+
+`POST /api/payments/{paymentId}/refunds`, 필수 헤더 `Idempotency-Key`: 공백만인 값을 제외한 1~64자.
+요청한 회원의 결제만 환불한다. 금액을 클라이언트에서 받지 않으며 저장된 결제 금액 전액을 취소한다.
+
+```json
+{ "reason": "단순 변심" }
+```
+
+`reason`은 필수이며 공백만인 값을 제외한 1~200자다. 부분 환불은 지원하지 않는다.
+0원 대상은 결제 준비에서 제외되므로 환불 대상이 아니며 환불 금액은 항상 양수다.
+
+| HTTP | 응답/오류 | 의미 |
+|---|---|---|
+| 200 | `{ "refundId": 10, "status": "COMPLETED" }` | PG 전액 취소 확인, 결제 CANCELLED, `onRefunded(CUSTOMER_REFUND)` 커밋 |
+| 202 | `{ "refundId": 10, "status": "UNKNOWN" }` | PG 취소 결과 불명확, 결제 CANCEL_UNKNOWN. 대사가 조회/같은 키 취소 재시도로 확정 |
+| 202 | `{ "refundId": 10, "status": "REQUESTED" }` | 최초 취소 진행 중인 같은 키의 재요청, 또는 결과 반영 기술 오류로 CANCEL_PENDING/REQUESTED 유지 |
+| 409 | `PAYMENT_REFUND_REJECTED`, `details.code` | PG 취소 최종 거절, 환불 FAILED·결제 APPROVED, `onRefundRejected(CUSTOMER_REFUND)` 함께 커밋 |
+
+결제 잠금 후 같은 키의 환불을 먼저 확인한다. 같은 결제·같은 키는 기존 refundId와 현재 결과를 반환하고 PG를 다시 호출하지 않는다.
+FAILED 환불의 같은 키도 409와 저장된 PG 거절 코드를 재현한다. 같은 키의 reason을 달리 보내도 기존 요청을 반환하며 사유를 바꾸지 않는다.
+다른 결제에 사용된 키는 `PAYMENT_REFUND_KEY_CONFLICT`다. 키는 결제별이 아니라 환불 테이블 전체에서 유일하다.
+
+새 키는 APPROVED 결제에서만 허용한다. 도메인 Handler의 `onRefundRequesting(CUSTOMER_REFUND)`이 환불 가능 조건을 판단하고
+환불 대기 상태로 바꾼다. 기본 구현은 `REFUND_NOT_SUPPORTED`로 거절한다. 수락한 도메인은 필요 시 `onRefundRejected`도 구현해
+PG 거절 때 환불 대기를 운영 확인 상태로 바꾼다(예: REFUND_PENDING → REFUND_REVIEW).
+Handler 업무 거절은 요청 트랜잭션 전체를 롤백하므로 결제 APPROVED·환불 행 없음, PG 호출 없음이다.
+
+요청 트랜잭션 커밋 → 트랜잭션 밖 PG 취소 한 번 → 기존 공통 취소 결과 반영 트랜잭션 순서다.
+결제 행 → 환불 행 → 도메인 행 순서로 잠그며, PG 전액 취소가 확인되기 전에는 재고·좌석을 반환하지 않는다.
+결과 반영 Handler의 기술 예외는 결제·환불·도메인 변경을 함께 롤백하고 202로 반환한다. 대사가 같은 저장 키로 복구한다.
+PG의 명시적 거절로 FAILED가 된 경우에는 새 키로 다시 요청할 수 있다. 완료된 환불은 다른 키로 중복 요청할 수 없다.
+
+관측: `payment.refund{result=completed|rejected|unknown|not_refundable}`는 API/서비스 응답 결과를 기록한다(REQUESTED는 unknown 분류).
+`payment.pg.cancel{kind=CUSTOMER_REFUND|COMPENSATION}` Timer는 손님 환불·보상 취소·대사의 실제 PG 취소 호출을 모두 측정한다.
 
 ### 결제 오류
 
@@ -219,7 +272,7 @@ FAILED는 409 `PAYMENT_FAILED`, 취소 계열은 409 `PAYMENT_NOT_PAYABLE`이다
 | 상태 | code | 조건 / details |
 |---|---|---|
 | 400 | `INVALID_REQUEST` | 필수 Idempotency-Key 누락, 길이·본문·타입 검증 실패 |
-| 404 | `PAYMENT_NOT_FOUND` | 없는 결제 또는 타인 결제 조회·승인 |
+| 404 | `PAYMENT_NOT_FOUND` | 없는 결제 또는 타인 결제 조회·승인·환불 |
 | 404 | `PAYMENT_TARGET_NOT_FOUND` | 타인 소유 대상 또는 타인 소유 기존 시도 준비 |
 | 409 | `PAYMENT_NOT_PAYABLE` | Handler load empty/미등록, 이미 승인·취소 진행, 승인 시작 거절 (`details.reason`) |
 | 409 | `PAYMENT_WINDOW_EXPIRED` | 준비 또는 승인 시작 기한 초과. 승인 시도는 FAILED로 커밋 |
@@ -228,6 +281,11 @@ FAILED는 409 `PAYMENT_FAILED`, 취소 계열은 409 `PAYMENT_NOT_PAYABLE`이다
 | 400 | `PAYMENT_AMOUNT_MISMATCH` | 승인 요청 금액과 저장 금액이 다름 |
 | 409 | `PAYMENT_FAILED` | PG 확정 거절 또는 기존 FAILED. `details.code`에 PG/실패 코드 |
 | 409 | `PAYMENT_REJECTED` | 승인 후 도메인 거절. `details.reason`, `details.refund` |
+| 409 | `PAYMENT_NOT_REFUNDABLE` | APPROVED 외 결제 또는 Handler 환불 불가. Handler 거절은 `details.reason` |
+| 409 | `PAYMENT_REFUND_IN_PROGRESS` | 다른 키의 CANCEL_PENDING/CANCEL_UNKNOWN 환불 또는 충돌 복구 중 |
+| 409 | `PAYMENT_ALREADY_REFUNDED` | 새 키로 CANCELLED 결제 환불 요청 |
+| 409 | `PAYMENT_REFUND_REJECTED` | PG 취소 최종 거절 또는 FAILED 키 재요청. `details.code` |
+| 409 | `PAYMENT_REFUND_KEY_CONFLICT` | 같은 멱등 키를 다른 결제의 환불에 사용 |
 
 도메인 구매 확정은 같은 트랜잭션의 Handler가 담당한다([ADR-0003](../../decisions/0003-payment-module-boundary.md)).
 티켓팅의 주문·예매 확정 경계는 [티켓팅 트랜잭션 설계](../../domains/ticketing/transactions.md)를 따른다.

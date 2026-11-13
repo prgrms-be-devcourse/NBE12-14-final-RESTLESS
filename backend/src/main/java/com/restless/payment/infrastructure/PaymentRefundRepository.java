@@ -12,11 +12,15 @@ import org.springframework.data.repository.query.Param;
 import java.util.Optional;
 
 public interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Long> {
+    Optional<PaymentRefund> findByIdempotencyKey(String idempotencyKey);
+
+    Optional<PaymentRefund> findFirstByPaymentIdOrderByRequestedAtDescIdDesc(Long paymentId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query(
             "select r from PaymentRefund r where r.paymentId = :paymentId and r.status in"
-                + " (com.restless.payment.domain.PaymentRefundStatus.REQUESTED,"
-                + " com.restless.payment.domain.PaymentRefundStatus.UNKNOWN)")
+                    + " (com.restless.payment.domain.PaymentRefundStatus.REQUESTED,"
+                    + " com.restless.payment.domain.PaymentRefundStatus.UNKNOWN)")
     Optional<PaymentRefund> findPendingForUpdate(@Param("paymentId") Long paymentId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

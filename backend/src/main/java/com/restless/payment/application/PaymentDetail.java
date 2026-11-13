@@ -15,8 +15,9 @@ public record PaymentDetail(
         long amount,
         Instant approvalStartedAt,
         Instant approvedAt,
-        String failureCode) {
-    static PaymentDetail from(Payment p) {
+        String failureCode,
+        PaymentRefundSummary refund) {
+    static PaymentDetail from(Payment p, PaymentRefundSummary refund) {
         return new PaymentDetail(
                 p.getId(),
                 p.getPayableType(),
@@ -26,6 +27,7 @@ public record PaymentDetail(
                 p.getAmount(),
                 p.getApprovalStartedAt(),
                 p.getApprovedAt(),
-                p.getFailureCode());
+                p.getFailureCode(),
+                refund);
     }
 }

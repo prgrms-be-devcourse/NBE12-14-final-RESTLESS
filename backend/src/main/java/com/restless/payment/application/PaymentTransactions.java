@@ -284,6 +284,81 @@ public class PaymentTransactions {
         }
     }
 
+    /** TX-R1: payment first; callback and refund request commit atomically before any PG call. */
+    RefundStep beginRefund(RefundPaymentCommand command) {
+        return tx.execute(
+                ignored -> {
+                    Payment payment = ownedRefundPayment(command);
+                    var existing = refunds.findByIdempotencyKey(command.idempotencyKey());
+                    if (existing.isPresent()) return refundReplay(payment, existing.get());
+                    requireRefundable(payment);
+                    var context =
+                            new RefundContext(payment.getId(), PaymentRefundKind.CUSTOMER_REFUND);
+                    ApprovalDecision decision =
+                            registry.get(payment.getPayableType())
+                                    .onRefundRequesting(payment.getPayableId(), context);
+                    if (decision.rejected())
+                        throw new BusinessException(
+                                ErrorCode.PAYMENT_NOT_REFUNDABLE,
+                                Map.of("reason", decision.reason()));
+                    Instant now = clock.instant();
+                    payment.requestCancel(now);
+                    var refund =
+                            refunds.saveAndFlush(
+                                    PaymentRefund.request(
+                                            payment.getId(),
+                                            PaymentRefundKind.CUSTOMER_REFUND,
+                                            payment.getAmount(),
+                                            command.idempotencyKey(),
+                                            command.reason(),
+                                            now));
+                    return new RefundStep(refund.getId(), true);
+                });
+    }
+
+    /**
+     * A failed UNIQUE/locking transaction has rolled back. Re-read once; never issue a second PG.
+     */
+    RefundStep resolveRefundConflict(RefundPaymentCommand command) {
+        return tx.execute(
+                ignored -> {
+                    Payment payment = ownedRefundPayment(command);
+                    var existing = refunds.findByIdempotencyKey(command.idempotencyKey());
+                    if (existing.isPresent()) return refundReplay(payment, existing.get());
+                    requireRefundable(payment);
+                    // A transient lock conflict may leave no durable request. The client can retry
+                    // its key.
+                    throw new BusinessException(ErrorCode.PAYMENT_REFUND_IN_PROGRESS);
+                });
+    }
+
+    private Payment ownedRefundPayment(RefundPaymentCommand command) {
+        return payments.findByIdForUpdate(command.paymentId())
+                .filter(p -> p.getUserId().equals(command.userId()))
+                .orElseThrow(() -> new BusinessException(ErrorCode.PAYMENT_NOT_FOUND));
+    }
+
+    private RefundStep refundReplay(Payment payment, PaymentRefund refund) {
+        if (!refund.getPaymentId().equals(payment.getId()))
+            throw new BusinessException(ErrorCode.PAYMENT_REFUND_KEY_CONFLICT);
+        return new RefundStep(refund.getId(), false);
+    }
+
+    private void requireRefundable(Payment payment) {
+        switch (payment.getStatus()) {
+            case APPROVED -> {
+                if (payment.getAmount() <= 0)
+                    throw new BusinessException(ErrorCode.PAYMENT_NOT_REFUNDABLE);
+            }
+            case CANCEL_PENDING, CANCEL_UNKNOWN ->
+                    throw new BusinessException(ErrorCode.PAYMENT_REFUND_IN_PROGRESS);
+            case CANCELLED -> throw new BusinessException(ErrorCode.PAYMENT_ALREADY_REFUNDED);
+            default -> throw new BusinessException(ErrorCode.PAYMENT_NOT_REFUNDABLE);
+        }
+    }
+
+    record RefundStep(Long refundId, boolean created) {}
+
     String applyCancellation(Compensation compensation, PgCancelResult result) {
         return applyCancellation(compensation.paymentId(), compensation.refundId(), result);
     }
@@ -330,12 +405,24 @@ public class PaymentTransactions {
                                     bounded(rejected.message(), 500),
                                     now);
                             payment.revertCancel(now);
+                            if (refund.getKind() == PaymentRefundKind.CUSTOMER_REFUND) {
+                                registry.get(payment.getPayableType())
+                                        .onRefundRejected(
+                                                payment.getPayableId(),
+                                                new RefundContext(
+                                                        payment.getId(), refund.getKind()));
+                            }
                             log.error(
-                                    "Payment cancellation rejected paymentId={} refundId={} kind={}",
+                                    "Payment cancellation rejected paymentId={} refundId={}"
+                                        + " kind={}",
                                     payment.getId(),
                                     refund.getId(),
                                     refund.getKind());
-                            meters.counter("payment.cancel.rejected", "kind", refund.getKind().name()).increment();
+                            meters.counter(
+                                            "payment.cancel.rejected",
+                                            "kind",
+                                            refund.getKind().name())
+                                    .increment();
                             if (refund.getKind() == PaymentRefundKind.COMPENSATION)
                                 meters.counter("payment.compensation.rejected").increment();
                             yield "REJECTED";
@@ -450,7 +537,8 @@ public class PaymentTransactions {
                             r.getId(),
                             payment.getPaymentKey(),
                             r.getReason(),
-                            r.getIdempotencyKey());
+                            r.getIdempotencyKey(),
+                            r.getKind());
                 });
     }
 
@@ -473,7 +561,8 @@ public class PaymentTransactions {
             Long refundId,
             String paymentKey,
             String reason,
-            String idempotencyKey) {
+            String idempotencyKey,
+            PaymentRefundKind kind) {
         PgCancelCommand command() {
             return new PgCancelCommand(paymentKey, reason, idempotencyKey);
         }
