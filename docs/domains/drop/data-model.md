@@ -1,5 +1,9 @@
 # Drop 데이터 모델
 
+> 관련 코드: `backend/src/main/resources/db/migration/V*__drop_*.sql`, `backend/src/main/java/com/restless/drop/domain/`
+>
+> 마지막 확인: 2026-11-13 (#79에서 코드와 대조)
+
 ![Drop ERD](drop-erd.png)
 
 아래는 논리 모델이다. 실제 DDL은 `backend/src/main/resources/db/migration/`의 `V*__drop_*.sql`이 정본이다.
