@@ -43,11 +43,16 @@ restless:
       batch-size: 100
   fanmeeting:
     worker:
-      # 팬미팅 응모 기간 열기·마감 Worker. 테스트에서는 build.gradle이 false로 끈다.
+      # 팬미팅 응모 기간 열기·마감, 추첨 Worker. 테스트에서는 build.gradle이 false로 끈다.
       enabled: ${FANMEETING_WORKER_ENABLED:true}
       fixed-delay-ms: 1000
-      # 한 번에 처리할 행사 수
+      draw-fixed-delay-ms: 5000
+      # 한 번에 처리할 행사·추첨 수
       batch-size: 100
+    eligibility:
+      # 행사 공지 시각 이후 가입한 회원의 응모를 막는다. 기본 꺼짐 (policy.md 7절).
+      joined-at-check:
+        enabled: ${FANMEETING_JOINED_AT_CHECK_ENABLED:false}
 
 logging:
   pattern:

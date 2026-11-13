@@ -3,6 +3,7 @@ package com.restless.fanmeeting.infrastructure;
 import com.restless.fanmeeting.domain.FanMeetingApplication;
 import com.restless.fanmeeting.domain.FanMeetingApplicationStatus;
 import jakarta.persistence.LockModeType;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -26,9 +27,24 @@ public interface FanMeetingApplicationRepository extends JpaRepository<FanMeetin
     @Query("select a from FanMeetingApplication a where a.id = :id")
     Optional<FanMeetingApplication> findByIdForUpdate(@Param("id") Long id);
 
+    /** 추첨 후보: 유효한(APPLIED) 응모를 응모 ID 순서로. 잠그지 않는다(추첨 계산은 트랜잭션 밖). */
+    @Query("""
+            select a.id as applicationId, a.userId as userId from FanMeetingApplication a
+             where a.eventId = :eventId
+               and a.status = com.restless.fanmeeting.domain.FanMeetingApplicationStatus.APPLIED
+             order by a.id
+            """)
+    List<Candidate> findCandidates(@Param("eventId") Long eventId);
+
     interface ApplicationState {
         Long getId();
 
         FanMeetingApplicationStatus getStatus();
+    }
+
+    interface Candidate {
+        Long getApplicationId();
+
+        Long getUserId();
     }
 }

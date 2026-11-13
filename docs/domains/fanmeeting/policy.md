@@ -111,4 +111,4 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 | 일반 트랜잭션 timeout | 5초 |
 | 추첨 최종화 timeout | 30초 |
 | 응모 재시도 | 최대 3회, 10~50ms 무작위 대기 |
-| 가입 시각 검사 `fanmeeting.eligibility.joined-at-check.enabled` | 기본 OFF. 가입 시각은 `users.created_at`(`MemberPort.joinedAt`). 시연·측정에서 켤지는 담당자가 정한다. 테스트 C21·C50은 ON으로 돌린다 |
+| 가입 시각 검사 `restless.fanmeeting.eligibility.joined-at-check.enabled` | 기본 OFF. 가입 시각은 `users.created_at`(`MemberPort.joinedAt`). 시연·측정에서 켤지는 담당자가 정한다. 테스트 C21·C50은 ON으로 돌린다 |

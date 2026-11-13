@@ -36,8 +36,11 @@ public class FanMeetingApplicationRetrier {
     private static final Logger log = LoggerFactory.getLogger(FanMeetingApplicationRetrier.class);
 
     private final FanMeetingApplicationService applicationService;
+    private final FanMeetingApplicationEligibility eligibility;
 
+    /** 가입 시각 검사(트랜잭션 전) 뒤 응모를 시도한다. */
     public FanMeetingApplication apply(Long userId, Long eventId) {
+        eligibility.check(userId, eventId);
         for (int attempt = 1; ; attempt++) {
             try {
                 return applicationService.apply(userId, eventId);
