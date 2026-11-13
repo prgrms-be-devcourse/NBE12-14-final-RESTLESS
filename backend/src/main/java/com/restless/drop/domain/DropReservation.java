@@ -5,6 +5,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import java.time.Instant;
+import java.util.Objects;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -55,5 +56,79 @@ public class DropReservation {
         reservation.createdAt = now;
         reservation.updatedAt = now;
         return reservation;
+    }
+
+    public boolean isCurrentPayment(Long paymentId) {
+        return paymentId != null && paymentId.equals(currentPaymentId);
+    }
+
+    public boolean isApprovalPending() {
+        return status == DropReservationStatus.CONFIRMING || status == DropReservationStatus.RECONCILING;
+    }
+
+    public boolean startApproval(Long paymentId, Instant now) {
+        if (status != DropReservationStatus.RESERVED || !now.isBefore(expiresAt)) return false;
+        currentPaymentId = Objects.requireNonNull(paymentId);
+        changeTo(DropReservationStatus.CONFIRMING, now);
+        return true;
+    }
+
+    public boolean markUnknown(Long paymentId, Instant now) {
+        if (!isCurrentPayment(paymentId) || status != DropReservationStatus.CONFIRMING) return false;
+        changeTo(DropReservationStatus.RECONCILING, now);
+        return true;
+    }
+
+    public boolean confirm(Long paymentId, Instant now) {
+        if (!isCurrentPayment(paymentId) || !isApprovalPending()) return false;
+        changeTo(DropReservationStatus.CONFIRMED, now);
+        return true;
+    }
+
+    public boolean compensate(Long paymentId, Instant now) {
+        if (!isCurrentPayment(paymentId) || !isApprovalPending()) return false;
+        changeTo(DropReservationStatus.COMPENSATING, now);
+        return true;
+    }
+
+    public boolean retryAfterFailure(Long paymentId, Instant now) {
+        if (!isCurrentPayment(paymentId) || !isApprovalPending() || !now.isBefore(expiresAt)) return false;
+        changeTo(DropReservationStatus.RESERVED, now);
+        return true;
+    }
+
+    public boolean releaseAfterFailure(Long paymentId, Instant now) {
+        if (!isCurrentPayment(paymentId) || !isApprovalPending() || now.isBefore(expiresAt)) return false;
+        changeTo(DropReservationStatus.RELEASED, now);
+        return true;
+    }
+
+    public boolean expire(Instant now) {
+        if (status != DropReservationStatus.RESERVED || now.isBefore(expiresAt)) return false;
+        changeTo(DropReservationStatus.EXPIRED, now);
+        return true;
+    }
+
+    public boolean cancel(Instant now) {
+        if (status != DropReservationStatus.RESERVED) return false;
+        changeTo(DropReservationStatus.RELEASED, now);
+        return true;
+    }
+
+    public boolean completeCompensation(Long paymentId, Instant now) {
+        if (!isCurrentPayment(paymentId) || status != DropReservationStatus.COMPENSATING) return false;
+        changeTo(DropReservationStatus.RELEASED, now);
+        return true;
+    }
+
+    public boolean restore(Long paymentId, Instant now) {
+        if (!isCurrentPayment(paymentId) || status != DropReservationStatus.CONFIRMED) return false;
+        changeTo(DropReservationStatus.RESTORED, now);
+        return true;
+    }
+
+    private void changeTo(DropReservationStatus target, Instant now) {
+        status = target;
+        updatedAt = now;
     }
 }

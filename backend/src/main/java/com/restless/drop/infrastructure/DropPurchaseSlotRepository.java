@@ -21,4 +21,12 @@ public interface DropPurchaseSlotRepository extends JpaRepository<DropPurchaseSl
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from DropPurchaseSlot s where s.id = :id")
     DropPurchaseSlot lockById(DropPurchaseSlot.Id id);
+
+    // Never clear a slot that has already been acquired by a later purchase.
+    @Modifying
+    @Query(value = """
+            UPDATE drop_purchase_slots SET active_reservation_id = NULL, updated_at = :now
+            WHERE drop_id = :dropId AND user_id = :userId AND active_reservation_id = :reservationId
+            """, nativeQuery = true)
+    int clearIfOwned(Long dropId, Long userId, Long reservationId, Instant now);
 }

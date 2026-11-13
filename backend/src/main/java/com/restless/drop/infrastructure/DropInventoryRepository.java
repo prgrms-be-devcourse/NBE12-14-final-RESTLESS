@@ -15,4 +15,28 @@ public interface DropInventoryRepository extends JpaRepository<DropInventory, Lo
             WHERE variant_id = :variantId AND available_quantity > 0
             """, nativeQuery = true)
     int holdOne(Long variantId);
+
+    @Modifying
+    @Query(value = """
+            UPDATE drop_inventories SET reserved_quantity = reserved_quantity - 1,
+                available_quantity = available_quantity + 1, version = version + 1
+            WHERE variant_id = :variantId AND reserved_quantity > 0
+            """, nativeQuery = true)
+    int release(Long variantId);
+
+    @Modifying
+    @Query(value = """
+            UPDATE drop_inventories SET reserved_quantity = reserved_quantity - 1,
+                sold_quantity = sold_quantity + 1, version = version + 1
+            WHERE variant_id = :variantId AND reserved_quantity > 0
+            """, nativeQuery = true)
+    int confirm(Long variantId);
+
+    @Modifying
+    @Query(value = """
+            UPDATE drop_inventories SET sold_quantity = sold_quantity - 1,
+                available_quantity = available_quantity + 1, version = version + 1
+            WHERE variant_id = :variantId AND sold_quantity > 0
+            """, nativeQuery = true)
+    int restore(Long variantId);
 }

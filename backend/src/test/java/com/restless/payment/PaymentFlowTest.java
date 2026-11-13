@@ -39,7 +39,8 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-@SpringBootTest(properties = {"pg.provider=fake", "spring.docker.compose.enabled=false"})
+@SpringBootTest(properties = {"pg.provider=fake", "spring.docker.compose.enabled=false",
+        "spring.main.allow-bean-definition-overriding=true"})
 @AutoConfigureMockMvc
 @Import({TestcontainersConfiguration.class, PaymentFlowTest.Config.class})
 class PaymentFlowTest {
@@ -642,7 +643,7 @@ class PaymentFlowTest {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class Config {
-        @Bean
+        @Bean("dropPaymentResultHandler")
         Handler handler(JdbcTemplate jdbc) {
             return new Handler(jdbc);
         }

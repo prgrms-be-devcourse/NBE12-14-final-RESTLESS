@@ -28,7 +28,8 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-@SpringBootTest(properties = {"pg.provider=fake", "spring.docker.compose.enabled=false"})
+@SpringBootTest(properties = {"pg.provider=fake", "spring.docker.compose.enabled=false",
+        "spring.main.allow-bean-definition-overriding=true"})
 @Import({TestcontainersConfiguration.class, PaymentReconciliationTest.Config.class})
 class PaymentReconciliationTest {
     static final Instant NOW = PaymentFlowTest.NOW;
@@ -646,7 +647,7 @@ class PaymentReconciliationTest {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class Config {
-        @Bean
+        @Bean("dropPaymentResultHandler")
         PaymentFlowTest.Handler handler(JdbcTemplate jdbc) {
             return new PaymentFlowTest.Handler(jdbc);
         }
