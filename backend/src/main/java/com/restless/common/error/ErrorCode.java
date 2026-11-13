@@ -63,7 +63,9 @@ public enum ErrorCode {
     PAYMENT_REFUND_IN_PROGRESS(HttpStatus.CONFLICT, "환불이 진행 중입니다."),
     PAYMENT_ALREADY_REFUNDED(HttpStatus.CONFLICT, "이미 환불된 결제입니다."),
     PAYMENT_REFUND_REJECTED(HttpStatus.CONFLICT, "PG가 환불을 거절했습니다."),
-    PAYMENT_REFUND_KEY_CONFLICT(HttpStatus.CONFLICT, "다른 결제에 사용된 환불 요청 키입니다.");
+    PAYMENT_REFUND_KEY_CONFLICT(HttpStatus.CONFLICT, "다른 결제에 사용된 환불 요청 키입니다."),
+
+    DROP_INVALID_STATE(HttpStatus.CONFLICT, "드롭 상태가 올바르지 않습니다.");
 
     private final HttpStatus httpStatus;
     private final String message;
