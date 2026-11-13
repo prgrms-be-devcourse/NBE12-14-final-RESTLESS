@@ -91,7 +91,7 @@ DB 결제 잠금과 상태 재확인으로 최종 Handler 반영은 한 번만 �
 - `payment.reconcile.processed{target=processing|unknown|ready_expired|cancel,result=...}`: 건별 처리 결과.
 - `payment.reconcile.run`: 후보 조회부터 후속 취소까지 실행 시간 Timer.
 - `payment.unknown.count`, `payment.unknown.oldest.age.seconds`: 마지막 실행 시 집계한 UNKNOWN 수와 최초 UNKNOWN 진입부터의 최대 나이. 나이는 현재 Clock으로 계산하며 음수는 0으로 제한한다.
-- `payment.reconcile.cancel.retry{refundId}`: 환불 행별 실제 취소 재시도 수. refundId 태그의 높은 cardinality에 유의한다.
+- `payment.reconcile.cancel.retry`: 실제 취소 재시도 수 (태그 없음). 환불별로 시계열이 늘지 않게 ID는 태그 대신 로그(`paymentId`, `refundId`)로 남긴다.
 - `payment.reconcile.anomaly{reason}`, `payment.amount.mismatch`: 운영 확인이 필요한 데이터/PG 불일치.
 
 티켓팅의 [불명확 5분 운영 확인](../domains/ticketing/transactions.md#9-불명확-결과의-운영-확인-전환-decided-2026-11-12)을 위해

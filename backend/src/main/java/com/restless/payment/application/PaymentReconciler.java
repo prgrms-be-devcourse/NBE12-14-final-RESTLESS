@@ -203,9 +203,14 @@ public class PaymentReconciler {
     }
 
     private void cancel(PaymentTransactions.Cancellation c, PaymentStatus expected, boolean retry) {
-        if (retry)
-            meters.counter("payment.reconcile.cancel.retry", "refundId", c.refundId().toString())
-                    .increment();
+        if (retry) {
+            // No per-refund tag: an id tag creates one time series per refund. The log keeps the id.
+            meters.counter("payment.reconcile.cancel.retry").increment();
+            log.info(
+                    "Retrying PG cancellation paymentId={} refundId={}",
+                    c.paymentId(),
+                    c.refundId());
+        }
         PgCancelResult result;
         try {
             result = pg.cancel(c.command());

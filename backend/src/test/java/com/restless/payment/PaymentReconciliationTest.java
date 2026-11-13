@@ -256,16 +256,14 @@ class PaymentReconciliationTest {
         var p = prepare(1);
         var r = cancellation(p, PaymentRefundKind.CUSTOMER_REFUND, false);
         age(31);
+        var retryCounter = meters.find("payment.reconcile.cancel.retry").counter();
+        double retriesBefore = retryCounter == null ? 0 : retryCounter.count();
         new TransactionTemplate(tm).executeWithoutResult(s -> reconciler.runOnce());
         assertThat(pg.lastCancel.idempotencyKey()).isEqualTo(r.getIdempotencyKey());
         assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.CANCELLED);
         assertThat(pg.txSeen).isFalse();
-        assertThat(
-                        meters.get("payment.reconcile.cancel.retry")
-                                .tag("refundId", r.getId().toString())
-                                .counter()
-                                .count())
-                .isEqualTo(1);
+        assertThat(meters.get("payment.reconcile.cancel.retry").counter().count())
+                .isEqualTo(retriesBefore + 1);
     }
 
     @Test
