@@ -2,6 +2,7 @@ package com.restless.fanmeeting.api;
 
 import com.restless.auth.LoginMember;
 import com.restless.fanmeeting.api.dto.MyApplicationResponse;
+import com.restless.fanmeeting.application.FanMeetingApplicationRetrier;
 import com.restless.fanmeeting.application.FanMeetingApplicationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -20,11 +21,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class FanMeetingApplicationController {
 
     private final FanMeetingApplicationService applicationService;
+    private final FanMeetingApplicationRetrier applicationRetrier;
 
+    /** 응모·재응모. 동시 요청 실패는 재시도 빈이 처리한다. */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public MyApplicationResponse apply(@LoginMember Long userId, @PathVariable Long eventId) {
-        return MyApplicationResponse.from(applicationService.apply(userId, eventId));
+        return MyApplicationResponse.from(applicationRetrier.apply(userId, eventId));
     }
 
     @GetMapping("/me")

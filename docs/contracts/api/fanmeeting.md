@@ -70,6 +70,7 @@
 
 - 응모·취소는 `OPEN`이고 `entry_opens_at <= now < entry_closes_at`일 때만. 아니면 409 `APPLICATION_WINDOW_CLOSED`.
 - 행사가 없으면 세 요청 모두 404 `FAN_MEETING_NOT_FOUND`.
+- 응모가 동시에 몰려 서버가 3번 다시 시도해도 처리하지 못하면 503 `APPLICATION_BUSY`. 같은 회원의 중복 요청은 재시도 뒤 409 `ALREADY_APPLIED`가 된다. 클라이언트는 503이면 잠시 뒤 다시 보내고, 409면 `GET .../applications/me`로 상태를 확인한다.
 
 ## 결제 시작 응답
 

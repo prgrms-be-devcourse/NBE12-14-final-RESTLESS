@@ -136,6 +136,32 @@ public class FanMeetingEvent {
         }
     }
 
+    /** Open Worker: SCHEDULED이고 entry_opens_at <= now < entry_closes_at이면 열 수 있다. */
+    public boolean canOpen(Instant now) {
+        return status == FanMeetingStatus.SCHEDULED && !now.isBefore(entryOpensAt) && now.isBefore(entryClosesAt);
+    }
+
+    /** 서버가 멈췄다 돌아와 마감 시각까지 지났으면 열지 않는다(FANMEETING_OPEN_MISSED). */
+    public boolean isOpenMissed(Instant now) {
+        return status == FanMeetingStatus.SCHEDULED && !now.isBefore(entryClosesAt);
+    }
+
+    public void open(Instant now) {
+        this.status = FanMeetingStatus.OPEN;
+        this.updatedAt = now;
+    }
+
+    /** Close Worker: OPEN이고 entry_closes_at <= now이면 닫을 수 있다. */
+    public boolean canClose(Instant now) {
+        return status == FanMeetingStatus.OPEN && !now.isBefore(entryClosesAt);
+    }
+
+    public void close(Instant now) {
+        this.status = FanMeetingStatus.CLOSED;
+        this.closedAt = now;
+        this.updatedAt = now;
+    }
+
     private static BusinessException invalid(String message) {
         return new BusinessException(ErrorCode.INVALID_FAN_MEETING_SETTINGS, message);
     }
