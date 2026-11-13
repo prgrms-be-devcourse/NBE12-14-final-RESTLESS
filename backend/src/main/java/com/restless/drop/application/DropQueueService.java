@@ -86,7 +86,6 @@ public class DropQueueService {
                 entry.getStatus() == DropQueueStatus.ADMITTED ? entry.getAdmittedUntil() : null);
     }
     private boolean onSale(Drop drop, Instant now) {
-        return (drop.getStatus() == DropStatus.SCHEDULED || drop.getStatus() == DropStatus.OPEN)
-                && !now.isBefore(drop.getOpensAt()) && now.isBefore(drop.getClosesAt());
+        return drop.isOnSale(now);
     }
 }
