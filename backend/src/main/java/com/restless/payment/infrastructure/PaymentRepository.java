@@ -15,6 +15,11 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     Optional<Payment> findByPayableTypeAndPayableIdAndIdempotencyKey(
         PayableType payableType, Long payableId, String idempotencyKey);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Payment p where p.payableType = :type and p.payableId = :payableId "
+        + "and p.status not in (com.restless.payment.domain.PaymentStatus.FAILED, com.restless.payment.domain.PaymentStatus.CANCELLED)")
+    Optional<Payment> findActiveForUpdate(@Param("type") PayableType type, @Param("payableId") Long payableId);
+
     /**
      * Locks the payment row (SELECT ... FOR UPDATE) for the rest of the caller's transaction.
      * Use this before calling entity transition methods: plain loads let two concurrent

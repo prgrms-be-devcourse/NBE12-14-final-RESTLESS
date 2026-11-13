@@ -38,7 +38,18 @@ public enum ErrorCode {
     BID_ALREADY_HIGHEST(HttpStatus.CONFLICT, "이미 현재 최고 입찰자입니다."),
     BID_AMOUNT_TOO_LOW(HttpStatus.CONFLICT, "최소 입찰 가능 금액보다 낮습니다."),
     IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "같은 요청 키로 다른 요청을 보냈습니다."),
-    CREDIT_INSUFFICIENT(HttpStatus.CONFLICT, "사용 가능한 크레딧이 부족합니다.");
+    CREDIT_INSUFFICIENT(HttpStatus.CONFLICT, "사용 가능한 크레딧이 부족합니다."),
+
+    // 결제
+    PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "결제를 찾을 수 없습니다."),
+    PAYMENT_TARGET_NOT_FOUND(HttpStatus.NOT_FOUND, "결제 대상을 찾을 수 없습니다."),
+    PAYMENT_NOT_PAYABLE(HttpStatus.CONFLICT, "결제할 수 없는 상태입니다."),
+    PAYMENT_WINDOW_EXPIRED(HttpStatus.CONFLICT, "결제 기한이 지났습니다."),
+    PAYMENT_ATTEMPT_IN_PROGRESS(HttpStatus.CONFLICT, "결제 승인이 진행 중입니다."),
+    PAYMENT_UNDER_REVIEW(HttpStatus.CONFLICT, "결제 결과를 확인 중입니다."),
+    PAYMENT_AMOUNT_MISMATCH(HttpStatus.BAD_REQUEST, "결제 금액이 일치하지 않습니다."),
+    PAYMENT_FAILED(HttpStatus.CONFLICT, "결제 승인이 실패했습니다."),
+    PAYMENT_REJECTED(HttpStatus.CONFLICT, "구매를 확정할 수 없어 보상 취소합니다.");
 
     private final HttpStatus httpStatus;
     private final String message;

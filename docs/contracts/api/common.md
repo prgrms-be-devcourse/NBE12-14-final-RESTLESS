@@ -105,12 +105,129 @@ class FanMeetingWithdrawalGuard implements WithdrawalGuard {
 
 ## 주문, 결제
 
-| Method | Endpoint | 기능 |
+| Method | Endpoint | 기능 / 응답 |
 |---|---|---|
-| GET | `/api/me/orders` | 내 주문 목록 |
-| GET | `/api/orders/{orderId}` | 주문 상세 |
-| POST | `/api/payments/confirm` | 토스 결제 승인 (paymentKey, orderId, amount) |
-| GET | `/api/payments/orders/{orderId}` | 결제 결과 확인 |
-| POST | `/api/orders/{orderId}/refunds` | 전액 환불 요청 |
+| GET | `/api/me/orders` | 내 주문 목록 (후속 구현) |
+| GET | `/api/orders/{orderId}` | 주문 상세 (후속 구현) |
+| POST | `/api/payments` | 결제 준비. 새 시도 201, 같은 키 재요청 200 |
+| POST | `/api/payments/confirm` | 토스 승인. 승인 200, 처리 중/불명확 202, 최종 거절 409 |
+| GET | `/api/payments/{paymentId}` | 본인 결제 조회 200 |
+| POST | `/api/orders/{orderId}/refunds` | 손님 전액 환불 (후속 구현, 이 작업에 포함하지 않음) |
 
-티켓팅은 공통 주문에 연결한다. 결제·주문·예매 확정 경계는 [티켓팅 트랜잭션 설계](../../domains/ticketing/transactions.md)를 따른다. 주문 유형·요청/응답 등 공통 API 세부 계약은 후속 합의 대상이다.
+기존 초안의 `/api/payments/orders/{orderId}`는 `/api/payments/{paymentId}`로 변경했다.
+결제 대상은 `(payableType, payableId)`로 식별하며 `orderId`는 승인 요청에서만 우리 `pgOrderId`를 뜻한다.
+모든 결제 API는 Bearer 로그인이 필요하다(토큰 없음/만료/위조는 401 `UNAUTHORIZED`).
+회원 ID는 토큰의 `@LoginMember`에서만 받고 본문에서 받지 않는다.
+
+### 결제 준비
+
+`POST /api/payments`, 필수 헤더 `Idempotency-Key`: 공백만인 값을 제외한 1~64자.
+
+```json
+{ "payableType": "DROP", "payableId": 123 }
+```
+
+`payableType`은 `DROP`, `TICKET`, `FAN_MEETING`, `payableId`는 양수다.
+각 도메인의 Handler가 등록되어 있어야 한다(Handler 구현은 도메인 담당 범위).
+금액, 상품명, 기한은 Handler가 읽은 서버 값이며 클라이언트 금액을 받지 않는다.
+0원 대상은 PG로 결제하지 않는다. 409 `PAYMENT_NOT_PAYABLE`, `details.reason = "FREE_ORDER"`. 무료 주문은 도메인이 결제 없이 확정한다.
+Handler를 부르는 결제 트랜잭션은 `READ_COMMITTED`다. Handler는 판정에 쓰는 도메인 행을 잠근 뒤 읽는다.
+
+201 (신규) 또는 200 (같은 대상·키의 기존 시도):
+
+```json
+{
+  "paymentId": 1,
+  "pgOrderId": "PAY-4edccaf24ce44ae2b1d3d22125753385",
+  "amount": 39000,
+  "orderName": "후드티 M",
+  "expiresAt": "2026-11-13T01:05:00Z",
+  "status": "READY",
+  "created": true
+}
+```
+
+기한이 없으면 `expiresAt`은 null이다. 같은 키는 `created: false`와 현재 상태를 반환한다.
+대상 조회·소유자·기한 검증은 기존 시도 반환보다 먼저 수행한다.
+다른 키가 오면 READY 시도는 `FAILED`(`failureCode=SUPERSEDED`)로 닫고 새 READY를 만든다.
+승인 전 시도 교체에는 Handler 결과 콜백을 호출하지 않는다.
+PROCESSING, UNKNOWN, 승인·취소 진행 상태가 있으면 새 시도를 만들지 않는다.
+대상당 진행 중 시도는 DB UNIQUE로 1건이며 충돌 후 한 번 새 트랜잭션에서 재조회한다.
+
+### 결제 승인
+
+`POST /api/payments/confirm` (토스 successUrl 파라미터 이름):
+
+```json
+{ "paymentKey": "payment-key", "orderId": "PAY-4edccaf24ce44ae2b1d3d22125753385", "amount": 39000 }
+```
+
+`paymentKey`는 공백이 아닌 200자 이하, `orderId`는 공백이 아닌 64자 이하, `amount`는 필수 0 이상의 정수다.
+`amount`가 저장 금액과 다르면 READY를 유지하고 PG를 호출하지 않는다.
+승인 시작을 커밋한 뒤 트랜잭션 밖에서 PG를 한 번 호출하며, 결과는 새 트랜잭션에서 Handler와 함께 반영한다.
+동일 시도의 승인 키는 `approve-{paymentId}`로 고정한다. 불명확한 결과를 재승인하지 않는다.
+
+200:
+
+```json
+{ "paymentId": 1, "status": "APPROVED" }
+```
+
+202 (처리 중, 결과 불명확 또는 결과 반영 기술 오류로 PROCESSING 유지):
+
+```json
+{ "paymentId": 1, "status": "PROCESSING" }
+```
+
+PG 결과가 불명확하거나 PG 승인 금액이 저장 금액과 다르면 위 본문의 `status`는 `UNKNOWN`이다.
+READY 외 상태의 중복 요청은 PG를 호출하지 않는다. PROCESSING/UNKNOWN은 202, APPROVED는 200,
+FAILED는 409 `PAYMENT_FAILED`, 취소 계열은 409 `PAYMENT_NOT_PAYABLE`이다.
+
+승인 후 도메인이 거절하면 보상 취소를 요청한다. 결제·환불 요청·도메인 거절 상태를 먼저 함께 커밋하고,
+트랜잭션 밖에서 PG 취소 후 결과를 새 트랜잭션에서 반영한다.
+응답은 409 `PAYMENT_REJECTED`, `details`는 `{ "reason": "도메인 거절 사유", "refund": "COMPLETED" }`이다.
+`refund`는 `COMPLETED`, `UNKNOWN`, `REJECTED` 중 하나다.
+취소 성공은 CANCELLED / 환불 COMPLETED, 불명확은 CANCEL_UNKNOWN / 환불 UNKNOWN,
+취소 확정 거절은 APPROVED / 환불 FAILED로 남아 운영 확인 대상이다.
+취소 결과 반영 기술 오류는 CANCEL_PENDING / 환불 REQUESTED를 유지하고 `refund: UNKNOWN`으로 응답한다.
+재조회·대사 스케줄러와 손님 환불 API는 후속 단계다.
+
+### 결제 조회
+
+`GET /api/payments/{paymentId}` — 본인 결제만 조회한다.
+
+```json
+{
+  "paymentId": 1,
+  "payableType": "DROP",
+  "payableId": 123,
+  "pgOrderId": "PAY-4edccaf24ce44ae2b1d3d22125753385",
+  "status": "APPROVED",
+  "amount": 39000,
+  "approvalStartedAt": "2026-11-13T01:00:00Z",
+  "approvedAt": "2026-11-13T01:00:01Z",
+  "failureCode": null
+}
+```
+
+시각과 `failureCode`는 아직 기록되지 않았으면 null이다. paymentKey는 반환하지 않는다.
+
+### 결제 오류
+
+공통 오류 응답 `{code, message, details, traceId, timestamp}`를 사용한다.
+
+| 상태 | code | 조건 / details |
+|---|---|---|
+| 400 | `INVALID_REQUEST` | 필수 Idempotency-Key 누락, 길이·본문·타입 검증 실패 |
+| 404 | `PAYMENT_NOT_FOUND` | 없는 결제 또는 타인 결제 조회·승인 |
+| 404 | `PAYMENT_TARGET_NOT_FOUND` | 타인 소유 대상 또는 타인 소유 기존 시도 준비 |
+| 409 | `PAYMENT_NOT_PAYABLE` | Handler load empty/미등록, 이미 승인·취소 진행, 승인 시작 거절 (`details.reason`) |
+| 409 | `PAYMENT_WINDOW_EXPIRED` | 준비 또는 승인 시작 기한 초과. 승인 시도는 FAILED로 커밋 |
+| 409 | `PAYMENT_ATTEMPT_IN_PROGRESS` | 다른 PROCESSING 시도 또는 재조회 후에도 준비 충돌 |
+| 409 | `PAYMENT_UNDER_REVIEW` | 다른 UNKNOWN 시도가 있음 |
+| 400 | `PAYMENT_AMOUNT_MISMATCH` | 승인 요청 금액과 저장 금액이 다름 |
+| 409 | `PAYMENT_FAILED` | PG 확정 거절 또는 기존 FAILED. `details.code`에 PG/실패 코드 |
+| 409 | `PAYMENT_REJECTED` | 승인 후 도메인 거절. `details.reason`, `details.refund` |
+
+도메인 구매 확정은 같은 트랜잭션의 Handler가 담당한다([ADR-0003](../../decisions/0003-payment-module-boundary.md)).
+티켓팅의 주문·예매 확정 경계는 [티켓팅 트랜잭션 설계](../../domains/ticketing/transactions.md)를 따른다.
