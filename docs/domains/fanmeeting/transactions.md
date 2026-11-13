@@ -45,6 +45,8 @@ SELECT application_id, status FROM fan_meeting_applications
 COMMIT
 ```
 
+- 응모·취소의 현재 시각은 Event 잠금을 잡은 **뒤에** 읽는다. 잠금을 기다리는 사이 마감 시각이 지나면, 마감 Worker가 아직 돌지 않았어도 `APPLICATION_WINDOW_CLOSED`다.
+
 **실패 처리** (트랜잭션 밖의 별도 빈)
 
 ```text

@@ -65,7 +65,14 @@ public enum ErrorCode {
     PAYMENT_REFUND_REJECTED(HttpStatus.CONFLICT, "PG가 환불을 거절했습니다."),
     PAYMENT_REFUND_KEY_CONFLICT(HttpStatus.CONFLICT, "다른 결제에 사용된 환불 요청 키입니다."),
 
-    DROP_INVALID_STATE(HttpStatus.CONFLICT, "드롭 상태가 올바르지 않습니다.");
+    DROP_INVALID_STATE(HttpStatus.CONFLICT, "드롭 상태가 올바르지 않습니다."),
+
+    // 팬미팅
+    FAN_MEETING_NOT_FOUND(HttpStatus.NOT_FOUND, "팬미팅을 찾을 수 없습니다."),
+    INVALID_FAN_MEETING_SETTINGS(HttpStatus.BAD_REQUEST, "팬미팅 설정이 올바르지 않습니다."),
+    APPLICATION_WINDOW_CLOSED(HttpStatus.CONFLICT, "응모 기간이 아닙니다."),
+    ALREADY_APPLIED(HttpStatus.CONFLICT, "이미 응모했습니다."),
+    APPLICATION_NOT_ACTIVE(HttpStatus.CONFLICT, "취소할 응모가 없습니다.");
 
     private final HttpStatus httpStatus;
     private final String message;
