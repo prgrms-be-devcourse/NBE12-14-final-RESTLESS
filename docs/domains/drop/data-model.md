@@ -2,7 +2,7 @@
 
 ![Drop ERD](drop-erd.png)
 
-아래는 논리 모델이다. 실제 DDL과 FK는 팀 공통 ID 체계와 주문 테이블이 확정된 뒤 작성한다.
+아래는 논리 모델이다. 실제 DDL은 `backend/src/main/resources/db/migration/`의 `V*__drop_*.sql`이 정본이다.
 
 ## DROPS
 
@@ -11,7 +11,7 @@
 | 컬럼 | 의미 |
 |---|---|
 | id | PK |
-| concert_id | 공연 FK. Notion 원본은 필수, NULL 허용 여부는 팀 확인 필요 |
+| concert_id | 공연 FK. 현재 구현은 필수(NOT NULL FK, 등록 API도 필수). NULL 허용으로 바꿀지는 팀 확인 ([열린 결정](../../product/open-questions.md)) |
 | title | 상품명 |
 | description | 설명 |
 | image_url | 대표 이미지 |
@@ -66,13 +66,13 @@ SKU별 재고
 | variant_id | SKU FK |
 | user_id | Member FK |
 | order_id | Order FK |
-| request_key | 멱등성 키 |
+| request_key | 멱등성 키. `utf8mb4_0900_bin`이라 대소문자·악센트를 구분한다 (V20261113_1701) |
 | status | 예약 상태 |
 | expires_at | 만료 시각 |
-| current_payment_id | 승인 시작을 받아들인 현재 결제 시도 (`payments.id`, Nullable, 물리 FK 없음). **미반영: 드롭 구매 흐름 구현 때 새 마이그레이션으로 추가** |
+| current_payment_id | 승인 시작을 받아들인 현재 결제 시도 (`payments.id`, Nullable, 물리 FK 없음). V20261113_1700에서 추가 |
 | created_at, updated_at | 생성, 변경 시각 |
 
-제약: `UNIQUE(order_id)`, `UNIQUE(drop_id, user_id, request_key)`
+제약: `UNIQUE(order_id)`, `UNIQUE(drop_id, user_id, request_key)`. 만료 작업용 인덱스 `ix_drop_reservations_expiry (status, expires_at)`
 
 `current_payment_id`는 재결제 때 새 시도로 바뀐다. 결제 결과의 `paymentId`와 비교해 다른 시도의 결과를 거른다 (INV-15).
 

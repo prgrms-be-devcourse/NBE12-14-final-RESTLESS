@@ -35,7 +35,7 @@
 ```
 
 - 201 `{ "dropId": 1, "status": "DRAFT" }`
-- `opensAt`이 과거여도 등록할 수 있다 (등록 즉시 판매 시작).
+- `opensAt`이 과거여도 등록할 수 있다 (게시하면 바로 판매 시작). 등록 직후 상태는 항상 `DRAFT`다.
 - 각 SKU의 재고는 `total = available = totalQuantity`, `reserved = 0`, `sold = 0`으로 시작한다.
 - 검증 400 `INVALID_REQUEST`: 필수값, `opensAt < closesAt`, SKU 1개 이상, `skuCode` 중복 없음, `priceAmount >= 0`, `totalQuantity >= 1`.
 - 없는 `concertId` 404 `NOT_FOUND`. 로그인 안 함 401, ADMIN 아님 403.
@@ -73,7 +73,7 @@
 
 - 수량 필드는 없다. 주문 하나 = SKU 한 종류, 수량 1 (INV-04).
 - 판매 가능 = 게시됨(`SCHEDULED` 또는 `OPEN`)이고 `opensAt <= 서버 시각 < closesAt`. 상태 전환(OPEN, CLOSED)은 표시용이며 판매 판정은 시각으로 한다.
-- 하나의 트랜잭션: 판매 기간·상태 확인 → 구매 슬롯 점유(INV-05) → SKU 재고 조건부 차감(`available - 1`, `reserved + 1`) → 재고 점유(RESERVED, 기한 = 지금 + TTL) → 공통 주문(PENDING_PAYMENT, 금액 = 서버 가격, 배송지 스냅샷) 생성.
+- 하나의 트랜잭션: 판매 기간·상태 확인 → 구매 슬롯 점유(INV-05) → SKU 재고 조건부 차감(`available - 1`, `reserved + 1`) → 공통 주문(PENDING_PAYMENT, 금액 = 서버 가격, 배송지 스냅샷) 생성 → 재고 점유(RESERVED, 기한 = 지금 + TTL) 저장. 재고 점유가 주문을 NOT NULL FK로 가리켜서 주문을 먼저 만든다.
 - 201
 ```json
 { "reservationId": 5, "orderId": 7, "status": "RESERVED", "amount": 39000, "expiresAt": "..." }
@@ -103,25 +103,26 @@
 ### `POST /api/drops/{dropId}/reservations/{reservationId}/cancel` (본인)
 
 - RESERVED일 때만. 재고 반환, 주문 CANCELLED, 구매 슬롯 해제. 200 `{ "reservationId", "status": "RELEASED" }`.
-- 결제 승인을 시작한 뒤(CONFIRMING 이후)면 409 `DROP_INVALID_STATE`.
+- RESERVED가 아니면 409 `DROP_INVALID_STATE`. 결제 승인을 시작한 뒤(CONFIRMING 이후)뿐 아니라 이미 취소(RELEASED)되거나 만료(EXPIRED)된 재고 점유를 다시 취소해도 409다.
 
 ## D4. 대기열
 
 ### `POST /api/drops/{dropId}/queue/entries` (회원)
 
 - 대기열에 들어간다. 이미 대기 중이면 같은 대기를 돌려준다(1건).
-- 201 신규 / 200 기존 `{ "status": "WAITING", "position": 12 }`
-- 판매 기간이 아니면 409 `DROP_NOT_ON_SALE`.
+- 201 신규 / 200 기존 `{ "status": "WAITING", "position": 12 }`. 이미 입장 허가를 받은 상태면 200 `{ "status": "ADMITTED", "admittedUntil": "..." }`.
+- 진입 재요청은 heartbeat를 늘리지 않는다 (화면 신호는 아래 상태 조회).
+- 없는 드롭 404 `NOT_FOUND`. 판매 기간이 아니거나 게시되지 않은 드롭(DRAFT 등)이면 409 `DROP_NOT_ON_SALE`.
 
 ### `GET /api/drops/{dropId}/queue/me` (회원)
 
 - 200 `{ "status": "WAITING" | "ADMITTED" | "EXPIRED" | "CONSUMED", "position": 3, "admittedUntil": "..." }` (`position`은 WAITING일 때만, `admittedUntil`은 ADMITTED일 때만)
 - 대기 중 상태 조회는 "아직 화면에 있음" 신호다. 조회가 `restless.drop.queue.heartbeat-timeout`보다 오래 끊기면 대기를 닫는다. 다시 들어오면 맨 뒤에서 다시 시작한다.
-- 대기 중이 아니면 404.
+- 대기 기록이 없거나 최신 기록이 CLOSED(이탈·판매 종료)면 404. EXPIRED, CONSUMED는 200으로 그대로 보여 준다.
 
 ### 입장 허가
 
-- 작업 빈 이름 `dropQueueAdmissionJob`, 메서드 `runOnce()`. 설정 `restless.drop.queue.scheduler.enabled=false`는 주기 실행만 멈추고 빈은 남는다. 한 번에 `restless.drop.queue.admit-per-run`명까지 대략적인 진입 순서로 ADMITTED로 바꾼다. 정확한 선착순은 보장하지 않는다(처리 속도 우선).
+- 작업 빈 이름 `dropQueueAdmissionJob`, 메서드 `runOnce()`. 설정 `restless.drop.queue.scheduler.enabled=false`는 주기 실행만 멈추고 빈은 남는다. 한 번 실행에 대기자가 있는 드롭마다 `restless.drop.queue.admit-per-run`명까지 대략적인 진입 순서로 ADMITTED로 바꾼다. 정확한 선착순은 보장하지 않는다(처리 속도 우선).
 - 기본값: `heartbeat-timeout` 30초, `admit-per-run` 100명.
 - 구매권 유효 시간 `restless.drop.queue.admission-ttl` (기본 5분). 재고 점유에 성공하면 CONSUMED.
 - 입장은 재고를 보장하지 않는다. 입장 후에도 품절이면 409 `DROP_SOLD_OUT`.
