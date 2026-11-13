@@ -170,6 +170,68 @@ class ConcertPerformanceMappingTest {
         );
     }
 
+    @Test
+    @DisplayName("비로그인 공연 목록은 생성 시각·ID 최신순이며 기본값·페이지 이동·범위 밖 빈 목록을 반환한다")
+    void listsConcertsNewestFirstWithPaginationWithoutLogin() throws Exception {
+        long existingCount = entityManager.createQuery("select count(c) from Concert c", Long.class).getSingleResult();
+        Instant latest = entityManager.createQuery("select max(c.createdAt) from Concert c", Instant.class)
+                .getSingleResult();
+        Instant base = (latest == null ? CREATED_AT : latest).plusSeconds(3600);
+        Venue venue = persistVenue("List Hall");
+        // 기존 데이터보다 최신으로 만들고 생성 시각 동률의 ID 정렬도 검증한다.
+        Member seller = Member.register("concert-list@example.com", "test-hash", "Host", CREATED_AT);
+        entityManager.persist(seller);
+        Concert first = Concert.create(venue.getId(), seller.getId(), "First", "SCHEDULED", base.plusSeconds(1));
+        entityManager.persist(first);
+        Concert second = Concert.create(venue.getId(), first.getSellerId(), "Second", "SCHEDULED", base.plusSeconds(1));
+        entityManager.persist(second);
+        // 가장 늦게 INSERT한 행이지만 생성 시각은 이전이므로 목록에서 뒤에 와야 한다.
+        Concert older = Concert.create(venue.getId(), first.getSellerId(), "Older", "SCHEDULED", base);
+        entityManager.persist(older);
+        entityManager.flush();
+        entityManager.clear();
+        long total = existingCount + 3;
+        int totalPages = (int) ((total + 1) / 2);
+
+        mockMvc.perform(get("/api/concerts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(total))
+                .andExpect(jsonPath("$.content[0].concertId").value(second.getId()))
+                .andExpect(jsonPath("$.content[1].concertId").value(first.getId()));
+
+        mockMvc.perform(get("/api/concerts").param("page", "0").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].concertId").value(second.getId()))
+                .andExpect(jsonPath("$.content[1].concertId").value(first.getId()))
+                .andExpect(jsonPath("$.totalElements").value(total))
+                .andExpect(jsonPath("$.totalPages").value(totalPages));
+
+        mockMvc.perform(get("/api/concerts").param("page", "1").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.content.length()").value((int) Math.min(2, total - 2)))
+                .andExpect(jsonPath("$.content[0].concertId").value(older.getId()));
+
+        mockMvc.perform(get("/api/concerts").param("page", String.valueOf(totalPages)).param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(0))
+                .andExpect(jsonPath("$.totalElements").value(total))
+                .andExpect(jsonPath("$.totalPages").value(totalPages));
+    }
+
+    @DisplayName("잘못된 공연 목록 페이지·크기와 숫자가 아닌 값은 400 INVALID_REQUEST다")
+    @ParameterizedTest(name = "{displayName} [page={0}, size={1}]")
+    @CsvSource({"-1,20", "0,0", "0,101", "invalid,20", "0,invalid"})
+    void rejectsInvalidConcertPagination(String page, String size) throws Exception {
+        mockMvc.perform(get("/api/concerts").param("page", page).param("size", size))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
     private Venue persistVenue(String name) {
         Venue venue = Venue.create(name, "Seoul", "Asia/Seoul", "ACTIVE", CREATED_AT);
         entityManager.persist(venue);

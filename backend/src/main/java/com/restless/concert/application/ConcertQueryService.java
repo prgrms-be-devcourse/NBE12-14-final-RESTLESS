@@ -3,6 +3,7 @@ package com.restless.concert.application;
 import com.restless.common.error.BusinessException;
 import com.restless.concert.application.dto.BookingPerformance;
 import com.restless.concert.application.dto.ConcertDetail;
+import com.restless.concert.application.dto.ConcertPage;
 import com.restless.concert.application.dto.PerformanceInfo;
 import com.restless.concert.application.dto.PerformanceLayout;
 import com.restless.concert.application.dto.SeatPosition;
@@ -16,6 +17,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,8 +31,23 @@ public class ConcertQueryService {
     private final ConcertRepository concertRepository;
 
     @Transactional(readOnly = true)
+    public ConcertPage getList(int page, int size) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "page는 0 이상, size는 1에서 100 사이여야 합니다.");
+        }
+        var concerts = concertRepository.findAll(PageRequest.of(page, size,
+                Sort.by(Sort.Direction.DESC, "createdAt", "id")));
+        return new ConcertPage(concerts.stream().map(this::toDetail).toList(), concerts.getNumber(), concerts.getSize(),
+                concerts.getTotalElements(), concerts.getTotalPages());
+    }
+
+    @Transactional(readOnly = true)
     public ConcertDetail getDetail(Long concertId) {
         Concert concert = getConcert(concertId);
+        return toDetail(concert);
+    }
+
+    private ConcertDetail toDetail(Concert concert) {
         return new ConcertDetail(concert.getId(), concert.getVenueId(), concert.getTitle(), concert.getStatus(),
                 concert.getCreatedAt());
     }

@@ -143,3 +143,10 @@ WHERE c.layout_id <> p.layout_id;
 - 해당 concertId의 회차만 시작 시각 오름차순으로 조회한다. 상세·회차 결과는 application/dto로 변환하며 엔티티·Repository는 모듈 밖에 노출하지 않는다.
 - 공연·회차의 상태값 집합과 공개 상태 필터는 임의로 정의하지 않는다. 조회는 저장된 상태를 반환하며 데이터·소유권을 변경하지 않는다.
 - ConcertPerformanceMappingTest의 기존 Repository 조회 검증을 비로그인 API 검증으로 교체하고 상세·회차 목록의 없는 공연 404를 추가했다. 테스트는 아직 실행하지 않았다.
+
+## 구현 현황: 공연 목록 조회
+
+- GET /api/concerts는 비로그인 페이지 조회를 제공한다. page 기본 0, size 기본 20·최대 100이며 생성 시각·ID 내림차순으로 정렬한다.
+- ConcertQueryService는 기존 ConcertRepository의 페이지 조회를 사용한다. 응답은 application/dto의 ConcertPage로 만들고 항목은 ConcertDetail을 재사용한다.
+- 공연이 없거나 범위를 벗어난 페이지는 빈 content를 반환한다. 상태별 공개 필터·검색은 이번 범위에 포함하지 않으며 좌석·예약·수량은 변경하지 않는다.
+- 기존 ConcertPerformanceMappingTest의 환경을 재사용해 목록·정렬·페이지 및 잘못된 입력 테스트를 작성했으며 아직 실행하지 않았다.

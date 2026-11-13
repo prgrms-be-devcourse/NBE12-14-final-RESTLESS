@@ -7,6 +7,7 @@
 
 | Method | Endpoint | 기능 |
 |---|---|---|
+| GET | `/api/concerts` | 공연 목록 (페이지 조회) |
 | GET | `/api/concerts/{concertId}` | 공연 상세 |
 | GET | `/api/concerts/{concertId}/performances` | 공연 회차 목록 |
 | GET | `/api/performances/{performanceId}/seats` | 회차별 좌석 상태 (3초 폴링) |
@@ -17,6 +18,37 @@
 | POST | `/api/ticket-reservations/{reservationId}/checkout` | 결제 시작 |
 | POST | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 요청 |
 | GET | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 상태 조회 |
+
+## 공연 목록 조회
+
+`GET /api/concerts?page=0&size=20`는 비로그인으로 공연 목록을 `200 OK`로 조회한다.
+기존 공연 상세 DTO와 같은 필드를 목록 항목으로 사용한다.
+
+```json
+{
+  "content": [
+    {
+      "concertId": 1,
+      "venueId": 10,
+      "title": "RESTLESS 공연",
+      "status": "SCHEDULED",
+      "createdAt": "2026-11-13T01:00:00Z"
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+- page는 0부터 시작하고 기본값은 0이다. size는 기본 20, 허용 범위는 1~100이다.
+- 생성 시각 내림차순으로 정렬하며, 같은 시각은 공연 ID 내림차순으로 정렬한다. 첫 회차 시작 시각순이 아닌 공연 등록 최신순이다.
+- 공연이 없거나 페이지 범위를 벗어나면 content는 빈 배열이다. 전체 개수·페이지 수는 실제 전체 공연 수를 기준으로 반환한다.
+- 음수 page, 범위 밖 size, 정수로 변환할 수 없는 파라미터는 `400 INVALID_REQUEST`다.
+- 검색·상태 필터는 이번 범위에 포함하지 않는다. 상세 조회와 동일하게 저장된 공연을 반환하며 공개 상태별 필터는 정책 확정 후 적용한다.
+- ConcertPage는 서비스 조회 결과이므로 concert/application/dto에 둔다. content는 기존 ConcertDetail을 재사용하며 Spring Data Page나 엔티티를 HTTP 응답에 직접 노출하지 않는다.
+- ConcertPerformanceMappingTest에 비로그인 목록·최신순 및 동률 ID 정렬·페이지 기본값과 이동·범위 밖 빈 결과·잘못된 파라미터 400 검증을 작성했으며 아직 실행하지 않았다.
 
 ## 공연 상세·회차 목록 조회
 
