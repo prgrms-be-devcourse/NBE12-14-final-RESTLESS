@@ -70,11 +70,11 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 | 추첨 | HMAC-SHA256 순위 키 결정적 추첨. 앞에서 `winner_limit`명 WINNER, 다음 `reserve_limit`명 RESERVE. 탈퇴 회원은 계산 시 제외(응모 행은 유지) |
 | 결제 금액 | Order 생성 시점 `fee_amount` 스냅샷. 요청 본문의 금액·회원·기한은 무시 |
 | 결제 기한 | `issued_at + 60분`. `approvedAt <= 기한`이면 기한 안(같으면 기한 안) |
-| 결제 포기 | 결제 시작을 한 번도 요청하지 않은(`attempt_requested_at IS NULL`) `PENDING_PAYMENT` 주문만. 되돌리기 없음 |
-| 결과 모름 | `UNKNOWN`/`PROCESSING`은 실패로 처리하지 않고 보류(`PAYMENT_REVIEW`). 보류 중 자리는 만료되지 않고 넘어가지 않는다 |
-| 만료 | 결제 모듈이 최종(`finalDecision = true`)이라고 답했을 때만. 팬미팅 시계로 최종 여부를 판단하지 않는다 |
+| 결제 포기 | 결제 준비를 한 번도 요청하지 않은(`attempt_requested_at IS NULL`) `PENDING_PAYMENT` 주문만. 되돌리기 없음 |
+| 결과 모름 | `UNKNOWN`은 실패로 처리하지 않고 보류(`PAYMENT_REVIEW`). 보류 중 자리는 만료되지 않고 넘어가지 않는다. 최종 결과는 결제 모듈이 같은 시도로 다시 알려 준다 |
+| 만료 | 진행 중인 결제 시도가 없을 때만. 시도가 있으면 결제 모듈이 알려 주는 최종 실패(`onFailed`) 때 기한을 보고 만료한다. 결제 중인 주문을 팬미팅 시계만으로 만료하지 않는다 |
 | 보류 장기화 | 30분 경과 시 경고 로그 1회(보류 회차당). 자동 확정·탈락 없음. 수동 처리는 P1 |
-| 늦은 승인·금액 불일치 | 확정하지 않고 `REFUND_PENDING` 표시. 실제 환불 명령은 보내지 않는다 |
+| 늦은 승인·금액 불일치 | 확정하지 않고 승인을 거절한다(`REFUND_PENDING`). 결제 모듈이 보상 취소하면 `REFUNDED` |
 | 승격 | 빈자리만큼 예비 순번대로. 야간(23:00~09:00 Asia/Seoul) 금지, `now + 60분 <= promotion_closes_at`일 때만 |
 | 승격 마감 기본값 | `meeting_at - 24시간` |
 | 모집 완료 | 보류 0건이고 ① 확정 인원 `>= winner_limit` ② 예비·결제 대기 모두 0 ③ 승격 마감이 지났고 결제 대기 0 중 하나. 남은 예비는 `NOT_NEEDED`. 야간에도 판정한다. `REFUND_PENDING`은 완료를 막지 않는다 |

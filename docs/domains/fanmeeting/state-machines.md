@@ -43,25 +43,25 @@ P0에서 끝 상태(더 바뀌지 않음): `CONFIRMED`, `EXPIRED`, `DECLINED`, `
 | 현재 | 조건 | 다음 | Selection | `approved_attempt_id` |
 |---|---|---|---|---|
 | (생성) | 추첨 최종화(WINNER) 또는 승격 | `PENDING_PAYMENT` | `PAYMENT_PENDING` | NULL |
-| `PENDING_PAYMENT` / `PAYMENT_REVIEW` | 승인, 금액 일치, `approvedAt <= 기한` | `PAID` | `CONFIRMED` | 그 시도 |
-| `PENDING_PAYMENT` / `PAYMENT_REVIEW` | 승인, `approvedAt > 기한` | `REFUND_PENDING` | `EXPIRED` | 그 시도 |
-| `PENDING_PAYMENT` / `PAYMENT_REVIEW` | 승인, 금액 불일치 | `REFUND_PENDING` | `EXPIRED` | 그 시도 |
-| `PENDING_PAYMENT` | 시도 실패, 기한 남음 | 유지 | 유지 | — |
-| `PENDING_PAYMENT` | 결과 UNKNOWN/PROCESSING | `PAYMENT_REVIEW` | 유지 | — |
-| `PENDING_PAYMENT` | 기한 경과 + `NOT_STARTED`/`NOT_APPROVED_FINAL` | `EXPIRED` | `EXPIRED` | — |
-| `PENDING_PAYMENT` | 기한 경과 + `PROCESSING`/`UNKNOWN` | `PAYMENT_REVIEW` | 유지 | — |
-| `PENDING_PAYMENT` | 결제 시도 요청 전 포기 | `CANCELLED` | `DECLINED` | — |
-| `PAYMENT_REVIEW` | UNKNOWN/PROCESSING 재도착 | 유지(아무것도 안 바꿈) | 유지 | — |
-| `PAYMENT_REVIEW` | 최종 미승인, 기한 남음 | `PENDING_PAYMENT` | 유지 | — |
-| `PAYMENT_REVIEW` | 최종 미승인, 기한 지남 | `EXPIRED` | `EXPIRED` | — |
-| `EXPIRED` | 승인 도착 (**결제 모듈 계약 위반**) | `REFUND_PENDING` | `EXPIRED` 유지(자리 반환 없음) | 그 시도 |
-| `PAID`, `REFUND_PENDING` | 승인 도착, 시도 ID = `approved_attempt_id` | 유지(무시) | 유지 | 유지 |
-| `PAID`, `REFUND_PENDING` | 승인 도착, 다른 시도 ID (이중 결제) | 유지 + 환불 대상 기록 | 유지 | 유지 |
-| `CANCELLED` | 승인 도착 | 유지 + 오류·환불 대상 기록 | 유지 | 유지 |
+| `PENDING_PAYMENT` / `PAYMENT_REVIEW` | 현재 시도 승인, 금액 일치, `approvedAt <= 기한` | `PAID` | `CONFIRMED` | 그 시도 |
+| `PENDING_PAYMENT` / `PAYMENT_REVIEW` | 현재 시도 승인, `approvedAt > 기한` | `REFUND_PENDING` (거절 → 보상 취소) | `EXPIRED` | 그 시도 |
+| `PENDING_PAYMENT` / `PAYMENT_REVIEW` | 현재 시도 승인, 금액 불일치 | `REFUND_PENDING` (거절 → 보상 취소) | `EXPIRED` | 그 시도 |
+| `PENDING_PAYMENT` / `PAYMENT_REVIEW` | 현재 시도가 아닌 승인 | 유지 (거절 → 보상 취소) | 유지 | — |
+| `PENDING_PAYMENT` / `PAYMENT_REVIEW` | 현재 시도 실패, 기한 남음 | `PENDING_PAYMENT` | 유지 | — |
+| `PENDING_PAYMENT` / `PAYMENT_REVIEW` | 현재 시도 실패, 기한 지남 | `EXPIRED` | `EXPIRED` | — |
+| `PENDING_PAYMENT` | 승인 시작 전에 시도가 닫힘(결제창만 열고 기한 지남) | `EXPIRED` | `EXPIRED` | — |
+| `PENDING_PAYMENT` | 결과 모름(UNKNOWN) | `PAYMENT_REVIEW` | 유지 | — |
+| `PENDING_PAYMENT` | 기한 경과 + 진행 중인 시도 없음 (만료 Worker) | `EXPIRED` | `EXPIRED` | — |
+| `PENDING_PAYMENT` | 결제 준비 요청 전 포기 | `CANCELLED` | `DECLINED` | — |
+| `PAYMENT_REVIEW` | 결과 모름 재도착 | 유지(아무것도 안 바꿈) | 유지 | — |
+| `REFUND_PENDING` | 보상 취소 완료 | `REFUNDED` | 유지 | 유지 |
+| `PAID` | 같은 시도의 승인 재도착 | 유지(받아들임) | 유지 | 유지 |
+| `PAID`, `REFUND_PENDING`, `REFUNDED`, `EXPIRED`, `CANCELLED` | 그 밖의 승인 도착 (이중 결제, **만료 뒤 승인은 결제 모듈 계약 위반**) | 유지 (거절 → 보상 취소, 자리 반환 없음) | 유지 | 유지 |
 
+- **현재 시도:** 승인 시작을 받아들인 시도(`payment_id`). 시도가 실패로 끝나면 비운다.
 - **보류 시각:** 다른 상태에서 `PAYMENT_REVIEW`로 **바뀔 때만** `review_started_at = now`. 보류에서 나갈 때 `review_started_at`, `review_warned_at`을 NULL. 그래서 30분 경고는 보류 회차당 1회다.
-- 환불은 표시만 한다(`REFUND_PENDING`). 실제 환불 명령은 보내지 않는다.
-- P0에서 끝 상태: `PAID`, `EXPIRED`, `CANCELLED`, `REFUND_PENDING`(P1에서 `REFUNDED`로 이어짐). 끝 상태에 결과가 와도 위 표의 마지막 네 줄만 적용한다.
+- 거절한 승인의 환불은 결제 모듈이 보상 취소로 실제로 한다. 팬미팅은 환불 명령을 보내지 않는다.
+- P0에서 끝 상태: `PAID`, `EXPIRED`, `CANCELLED`, `REFUNDED`. `REFUND_PENDING`은 보상 취소가 끝나면 `REFUNDED`가 된다.
 
 ## 5. Selection–Order 짝
 
@@ -72,7 +72,7 @@ P0에서 끝 상태(더 바뀌지 않음): `CONFIRMED`, `EXPIRED`, `DECLINED`, `
 | `WAITING`, `NOT_NEEDED` | 없음 |
 | `PAYMENT_PENDING` | `PENDING_PAYMENT`, `PAYMENT_REVIEW` |
 | `CONFIRMED` | `PAID` |
-| `EXPIRED` | `EXPIRED`, `REFUND_PENDING` |
+| `EXPIRED` | `EXPIRED`, `REFUND_PENDING`, `REFUNDED` |
 | `DECLINED` | `CANCELLED` |
 
 ## 6. DrawRun

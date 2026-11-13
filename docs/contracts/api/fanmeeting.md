@@ -13,13 +13,12 @@
 | GET | `/api/fan-meetings/{eventId}/applications/me` | 내 응모 상태 | 회원 |
 | GET | `/api/fan-meetings/{eventId}/result/me` | 내 당첨·예비 결과 + `paymentDeadline` | 회원 |
 | GET | `/api/fan-meetings/{eventId}/orders/me` | 내 주문·결제 상태 + `paymentDeadline` | 회원 |
-| POST | `/api/fan-meetings/{eventId}/orders/{orderId}/payment-attempts` | 결제 시작. 헤더 `Idempotency-Key` 필수 | 회원 |
 | POST | `/api/fan-meetings/{eventId}/orders/{orderId}/decline` | 결제 포기 | 회원 |
 | GET | `/api/admin/fan-meetings/{eventId}/summary` | 상태, 응모 수, Selection·Order 상태별 인원, 정원 점유, 승격된 예비 최대 순번, `promotion_closes_at`, 보류 목록(경과 시간), `REFUND_PENDING` 목록, 계약 위반 승인 목록 | ADMIN |
 
 주최자 API(`/api/organizer/**`)는 `role = ORGANIZER` 또는 `ADMIN`, 관리자 API(`/api/admin/**`)는 `role = ADMIN`만 호출할 수 있다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`([공통 API](common.md)).
 
-응모는 `UNIQUE(event_id, user_id)`로 중복을 막으므로 `Idempotency-Key`를 쓰지 않는다. 결제 시작만 `Idempotency-Key`를 받는다.
+응모는 `UNIQUE(event_id, user_id)`로 중복을 막으므로 `Idempotency-Key`를 쓰지 않는다.
 
 ## 행사 생성 `POST /api/organizer/fan-meetings`
 
@@ -72,30 +71,19 @@
 - 행사가 없으면 세 요청 모두 404 `FAN_MEETING_NOT_FOUND`.
 - 응모가 동시에 몰려 서버가 3번 다시 시도해도 처리하지 못하면 503 `APPLICATION_BUSY`. 같은 회원의 중복 요청은 재시도 뒤 409 `ALREADY_APPLIED`가 된다. 클라이언트는 503이면 잠시 뒤 다시 보내고, 409면 `GET .../applications/me`로 상태를 확인한다.
 
-## 결제 시작 응답
+## 결제 (공통 결제 API)
 
-주문 상태 확인이 먼저다. 주문이 `PENDING_PAYMENT`가 아니면 결제 모듈을 부르지 않는다.
+팬미팅은 결제 API를 따로 두지 않는다. 손님은 공통 결제 API를 쓴다([공통 API](common.md)). 처리 흐름은 [transactions.md 6·7절](../../domains/fanmeeting/transactions.md#6-결제-시작-공통-결제-api).
 
-| 주문 상태 | 같은 키·새 키 모두 |
-|---|---|
-| `PAID` | 409 `ORDER_NOT_PAYABLE` (클라이언트는 `/orders/me`로 확정을 확인) |
-| `PAYMENT_REVIEW` | 409 `PAYMENT_UNDER_REVIEW` |
-| `EXPIRED`, `CANCELLED`, `REFUND_PENDING` | 409 `ORDER_NOT_PAYABLE` |
-| `PENDING_PAYMENT` | 결제 모듈 호출, 아래 표대로 |
-
-| 결제 모듈 결과 | HTTP | 본문 |
+| 단계 | 호출 | 팬미팅 값 |
 |---|---|---|
-| 새 시도 생성(READY) | 201 | `attemptId`, `status = READY`, `checkoutUrl`, `paymentDeadline` |
-| 같은 키 재요청 (주문이 아직 `PENDING_PAYMENT`) | 200 | 그 시도의 **현재 상태**. READY면 `checkoutUrl` 포함, 그 외는 없음 |
-| 다른 키, READY 시도 있음 | 409 | `PAYMENT_ATTEMPT_IN_PROGRESS`. 새 시도를 만들지 않는다 |
-| 다른 키, UNKNOWN 시도 있음 | 409 | `PAYMENT_UNDER_REVIEW` |
-| 다른 키, 이미 APPROVED 시도 있음(결과 전달 전) | 409 | `ORDER_NOT_PAYABLE` |
-| 이전 시도가 모두 FAILED | 201 | 새 시도 |
-| 결제 모듈이 기한 지남으로 거절 | 409 | `PAYMENT_WINDOW_EXPIRED` |
-| 호출 실패·타임아웃 | 503 | `PAYMENT_UNAVAILABLE`. `attempt_requested_at`은 그대로 |
+| 결제 준비 | `POST /api/payments` + 헤더 `Idempotency-Key` | `payableType = FAN_MEETING`, `payableId = orderId` |
+| 승인 | `POST /api/payments/confirm` | 결제창 결과(`paymentKey`, `orderId` = 결제 모듈의 `pgOrderId`, `amount`) |
+| 결제 상태 | `GET /api/payments/{paymentId}` | — |
 
-- "같은 키 재요청 = 200"은 주문이 아직 `PENDING_PAYMENT`일 때만이다. 결제 모듈 수준의 멱등(같은 키 → 같은 시도)은 그대로 유지되고, API 응답은 주문 상태가 우선한다.
-- `FAILED` 상태를 받은 클라이언트는 **새 키**로 다시 결제를 시작한다.
+- 금액은 주문 금액(참가비), 결제 기한은 `발급 + 60분`이다. 요청 본문의 금액·기한은 쓰지 않는다.
+- 결제 대기(`PENDING_PAYMENT`) 주문이 아니거나 행사가 결제 진행 중(`PAYMENT_IN_PROGRESS`)이 아니면 409 `PAYMENT_NOT_PAYABLE`, 다른 회원 주문이면 404 `PAYMENT_TARGET_NOT_FOUND`, 기한이 지났으면 409 `PAYMENT_WINDOW_EXPIRED`다(공통 결제 오류 코드).
+- 시도가 실패하면 **새 키**로 다시 결제를 준비한다.
 
 ## 오류 코드
 
@@ -112,13 +100,11 @@
 | 응모 재시도 모두 실패 | 503 | `APPLICATION_BUSY` |
 | 취소할 응모 없음 | 409 | `APPLICATION_NOT_ACTIVE` |
 | 주문 없음·다른 행사·다른 회원 | 404 | `ORDER_NOT_FOUND` |
-| 결제 기한 지남 | 409 | `PAYMENT_WINDOW_EXPIRED` |
-| 보류 중 결제 시도 | 409 | `PAYMENT_UNDER_REVIEW` |
-| 처리 중인 결제 시도 있음 | 409 | `PAYMENT_ATTEMPT_IN_PROGRESS` |
-| 결제 모듈 호출 실패 | 503 | `PAYMENT_UNAVAILABLE` |
-| 모집 완료 | 409 | `FAN_MEETING_NOT_PAYABLE` |
 | 결제 가능 상태 아님 | 409 | `ORDER_NOT_PAYABLE` |
-| 결제를 시작한 주문의 포기 | 409 | `DECLINE_NOT_ALLOWED` |
+| 결제 기한 지난 주문의 포기 | 409 | `PAYMENT_WINDOW_EXPIRED` |
+| 결제를 준비한 주문의 포기 | 409 | `DECLINE_NOT_ALLOWED` |
+
+결제 준비·승인 오류는 공통 결제 오류 코드를 쓴다([공통 API](common.md)).
 
 오류 코드 일부(`APPLICATION_*`, `ORDER_*`, `PAYMENT_*`)는 [공통 규칙 4번](README.md#공통-규칙-proposed)의 `도메인_상황` 형식과 달리 도메인 접두어가 없다. 명세 동결로 이름을 그대로 둔다.
 

@@ -27,14 +27,14 @@
 | C11 | UNKNOWN으로 기한 경과 | REVIEW 유지, 그 자리 승격 없음, 다른 빈자리 승격은 진행 |
 | C12 | `approvedAt == 기한` | PAID |
 | C13 | `approvedAt == 기한 + 1ms` | REFUND_PENDING, EXPIRED |
-| C14 | 승인 기록(`recordResult`)·반영과 만료 Worker 동시 (latch, 기한 경계) | 한 결과로 수렴. 승인이 먼저면 PAID, 만료 판정이 먼저면 시도가 닫혀 승인 거절. **EXPIRED인데 승인된 시도 0건** (INV-FM-10) |
+| C14 | 승인 반영(Handler)과 만료 Worker 동시 (latch, 기한 경계) | 한 결과로 수렴. 승인이 먼저면 PAID, 만료 판정이 먼저면 시도가 닫혀 승인 거절. **EXPIRED인데 승인된 시도 0건** (INV-FM-10) |
 | C15 | 승격 Worker 2개 동시 | 승격 합계 = vacancy |
 | C21 | 가입 시각 검사 ON, 가입 기준 시각 이후 가입 회원 응모 | 403 `APPLICATION_NOT_ELIGIBLE` |
 | C22 | 승격된 예비 일부 재만료 | 다음 순위 승격, 정원 유지 |
 | C23 | 승격과 결제 승인 동시 (latch) | INV-FM-07 유지 |
 | C25 | 다른 행사의 `event_id` 또는 다른 회원의 `user_id`로 Selection/Order 저장 | 복합 FK 위반, 롤백. 물리 FK가 없으면 [정합성 SQL](data-model.md#4-정합성-sql) 0건 |
 | C26 | 다른 회원 orderId로 결제 시작·포기 | 404, 상태 변화 없음 |
-| C27 | 요청 금액 변조 / 승인 금액 불일치 | 서버 금액 사용 / REFUND_PENDING, EXPIRED |
+| C27 | 요청 금액 변조 / 승인 금액 불일치 | 서버 금액 사용 / 거절 → 보상 취소, REFUNDED, EXPIRED |
 | C28 | 결제 시작 전 포기 | CANCELLED, DECLINED, 다음 회차에 예비 1명 승격 |
 | C29 | 포기와 결제 시작 동시 (latch) | 하나만 성공, 다른 쪽 409, INV-FM-17 |
 | C30 | 결제 시작 후 포기 (시도 FAILED여도) | 409 `DECLINE_NOT_ALLOWED` |
@@ -44,19 +44,19 @@
 | C34 | 보류 30분 경과 | 경고 1회(다음 회차에 다시 안 남음), 자동 확정·탈락 없음 |
 | C36 | 알림 요청 | 최종화 시 당첨자 수만큼 기록, 롤백되면 기록 0 |
 | C41 | 일반 회원이 주최자 API(생성)·관리자 API(summary) 호출 | 403 `FORBIDDEN`, 상태 변화 없음 |
-| C42 | 다른 행사의 eventId + 내 orderId로 결제 시작·포기 | 404 `ORDER_NOT_FOUND`, 어느 Event도 상태 변화 없음 |
-| C43 | 같은 주문에 서로 다른 Idempotency-Key로 결제 시작 동시 2건 (latch) | 시도 1개 생성(201), 다른 쪽 409 `PAYMENT_ATTEMPT_IN_PROGRESS` |
-| C44 | ① READY 시도가 있는 주문에 새 키 ② 주문 `PENDING_PAYMENT`에서 같은 키 재요청(시도 READY·FAILED) ③ 주문 `PAID`·`PAYMENT_REVIEW`에서 같은 키 재요청 ④ 이전 시도 FAILED 뒤 새 키 ⑤ 키 A 시도가 FAILED가 된 뒤 키 A 재요청 | ① 409 `PAYMENT_ATTEMPT_IN_PROGRESS`, 시도 수 그대로 ② 그 시도의 현재 상태(READY만 URL, 200) ③ 409 `ORDER_NOT_PAYABLE` / 409 `PAYMENT_UNDER_REVIEW`, 결제 모듈 호출 없음 ④ 새 시도(201) ⑤ 같은 FAILED 시도(200), 새 시도 안 생김 |
+| C42 | 다른 행사의 eventId + 내 orderId로 포기 (결제는 공통 API라 eventId가 없다) | 404 `ORDER_NOT_FOUND`, 어느 Event도 상태 변화 없음 |
+| C43 | 같은 주문에 서로 다른 Idempotency-Key로 결제 준비 동시 2건 (latch) | 결제 모듈 규칙(공통 결제 테스트): 진행 중인 시도는 1개 |
+| C44 | 결제 준비 멱등·READY 교체 | 결제 모듈 규칙(공통 결제 테스트): 같은 키 → 같은 시도, 다른 키 → 이전 READY를 `SUPERSEDED`로 닫고 새 시도, UNKNOWN이면 409 `PAYMENT_UNDER_REVIEW`. 팬미팅은 주문이 `PENDING_PAYMENT`가 아니면 `load`가 거절 |
 | C45 | 같은 회원 첫 응모 2건·10건 동시 | Application 1개, 나머지 `ALREADY_APPLIED`, 5xx 0 |
 | C46 | 서로 다른 회원 1,000명 첫 응모 동시 (`-Pstress`) | **최종 정합성:** Application 정확히 1,000건, 회원당 1건, 성공 응답 수 = 커밋 수. **재시도:** 1062·1213·1205가 나도 재시도로 성공해 `APPLICATION_BUSY` 0건(0이 아니면 건수와 원인 기록). 교착·잠금 시간 초과 발생 수는 **지표로 기록**(실패 조건 아님) |
-| C47 | `REFUND_PENDING` 주문에 같은 승인 2회 / 다른 시도의 승인 | 상태·`approved_attempt_id` 변화 없음 / 이중 결제 기록, 상태 유지 |
+| C47 | 결제 완료·환불 대기 주문에 같은 승인 2회 / 다른 시도의 승인 | 상태·`approved_attempt_id` 변화 없음 / 거절 → 보상 취소, 상태 유지 |
 | C48 | `PAYMENT_REVIEW` 상태에서 UNKNOWN 반복, 30분 경과 | `review_started_at` 그대로, 30분에 경고 1회 |
-| C49 | `EXPIRED` 뒤 기한 안 `approvedAt`을 가진 승인 도착 | `REFUND_PENDING`, Selection `EXPIRED`, `FANMEETING_APPROVAL_AFTER_FINAL` 로그, 정원 변화 없음 |
+| C49 | `EXPIRED` 뒤 기한 안 `approvedAt`을 가진 승인 도착 | 거절 → 보상 취소, Order·Selection `EXPIRED` 유지, `FANMEETING_APPROVAL_NOT_CURRENT` 로그, 정원 변화 없음 |
 | C50 | 가입 시각 검사 ON + MemberPort 조회 예외 | 503 `MEMBER_LOOKUP_FAILED`, Application 0 |
-| C51 | `deliver` 중 Handler 예외 → `deliver` 재호출 | 시도 기록 유지, 재호출로 한 번만 반영 |
+| C51 | Handler 기술 예외 | 결제 모듈 트랜잭션 전체 롤백, 결제는 PROCESSING/UNKNOWN으로 남아 대사가 재시도, 한 번만 반영 |
 | C52 | 응모 재시도 3회 모두 잠금 시간 초과(강제) | 503 `APPLICATION_BUSY`, Application 0, 트랜잭션 남은 것 없음 |
 | C55 | 같은 DrawRun에 최종화 두 번 (완료 뒤 같은 token으로 재시도, 다른 Worker의 늦은 최종화) | 두 번째는 저장 0, 예외 없이 종료, Selection·Order 수 변화 없음 |
-| C56 | 운영 마이그레이션 검증: 운영 설정의 `spring.flyway.locations`(가짜 폴더 제외)로 빈 MySQL에 migrate 후, 가짜 엔티티를 뺀 JPA `validate` (Testcontainers, 슬라이스 테스트) | migrate 성공, `fake_*` 테이블 없음, validate 통과. **전체 앱 기동은 검증하지 않는다**: P0에는 운영용 `PaymentPort` 구현이 없어 운영 프로필 전체 기동은 실패하는 게 정상이다 |
+| C56 | (삭제) 가짜 결제 테이블을 만들지 않아 운영 마이그레이션 분리 검증이 필요 없다 | — |
 
 번호: C24는 B안(P1), C37~C40은 잔여석(P1)이 쓴다. C35·C53·C54·C57·C58·C59는 수동 처리·실제 결제 수준 경합이라 P1로 넘겼다. 새 테스트는 C60부터.
 

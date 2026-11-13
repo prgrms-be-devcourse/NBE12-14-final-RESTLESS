@@ -8,7 +8,7 @@
 - 회원 참조는 `user_id`(= `users.id`, BIGINT). 결제 참조는 `payment_id`(= `payments.id`, BIGINT).
 - 팬미팅 테이블끼리는 물리 FK(복합 FK 포함). `users`, `payments`로는 물리 FK 없이 ID만 저장한다(논리 참조, 모듈 경계).
 
-**[팀 미확정]** `attempt_id` 타입(결제 모듈을 따름, `VARCHAR(64)` 가정).
+`payment_id`는 승인이 진행 중인 결제 시도(`payments.id`), `approved_attempt_id`는 승인을 처음 반영한 시도(`payments.id`를 문자열로 저장)다.
 
 공통:
 
@@ -141,56 +141,20 @@ CREATE TABLE fan_meeting_orders (
 );
 ```
 
-가짜 결제 테이블 (별도 마이그레이션 폴더 `db/migration-fake`, `local`/`test` 프로필에만 적용. 3절):
-
-```sql
-CREATE TABLE fake_payments (
-  payment_id   BIGINT      NOT NULL AUTO_INCREMENT,
-  payable_type VARCHAR(40) NOT NULL,
-  payable_id   BIGINT      NOT NULL,
-  created_at   DATETIME(6) NOT NULL,
-  PRIMARY KEY (payment_id),
-  UNIQUE KEY uq_fake_payable (payable_type, payable_id)
-);
-
-CREATE TABLE fake_payment_attempts (
-  attempt_id      VARCHAR(64)  NOT NULL,
-  payment_id      BIGINT       NOT NULL,
-  idempotency_key VARCHAR(100) NOT NULL,
-  amount          BIGINT       NOT NULL,
-  expires_at      DATETIME(6)  NOT NULL,
-  result          VARCHAR(20)  NOT NULL,   -- READY / UNKNOWN / APPROVED / FAILED (P0 가짜는 PROCESSING을 쓰지 않음)
-  checkout_url    VARCHAR(500) NOT NULL,
-  approved_at     DATETIME(6)  NULL,
-  approved_amount BIGINT       NULL,
-  created_at      DATETIME(6)  NOT NULL,
-  updated_at      DATETIME(6)  NOT NULL,
-  PRIMARY KEY (attempt_id),
-  UNIQUE KEY uq_fake_attempt_key (payment_id, idempotency_key),
-  KEY idx_fake_attempt_payment_result (payment_id, result),
-  CONSTRAINT fk_fake_attempt_payment FOREIGN KEY (payment_id) REFERENCES fake_payments (payment_id)
-);
-```
-
 - `event_id`, `user_id`는 Selection·Order에 중복 저장한 값이다. **복합 FK가 부모와 같은 값인지 DB에서 막는다**(INV-FM-14).
 - Worker 스캔용 인덱스(`idx_events_status_*`, `idx_draw_status_lease`)는 EXPLAIN으로 확인 후 확정한다.
 
-## 3. 마이그레이션 분리 (가짜 결제 테이블)
+## 3. 마이그레이션
 
-| 위치 | 내용 | 적용 프로필 |
-|---|---|---|
-| `src/main/resources/db/migration/V20261111_1020__fanmeeting_create_tables.sql` (머지됨) | `fan_meeting_*` 5개 테이블 | 모든 프로필 |
-| `src/main/resources/db/migration/V<날짜>_<시각>__fanmeeting_add_indexes.sql` (추가 예정) | 조회용 인덱스 10개 | 모든 프로필 |
-| `src/main/resources/db/migration-fake/V<날짜>_<시각>__fanmeeting_create_fake_payment_tables.sql` (4일차에 만듦) | `fake_payments`, `fake_payment_attempts` | `local`, `test`만 |
+| 위치 | 내용 |
+|---|---|
+| `src/main/resources/db/migration/V20261111_1020__fanmeeting_create_tables.sql` (머지됨) | `fan_meeting_*` 5개 테이블 |
+| `src/main/resources/db/migration/V20261112_*__fanmeeting_add_indexes.sql` (머지됨) | 조회용 인덱스 |
 
 파일 이름은 팀 규칙([CONTRIBUTING.md](../../../CONTRIBUTING.md))을 따른다: `V<날짜>_<시각>__<도메인>_<내용>.sql`. 날짜·시각은 **파일을 만드는 시점**으로 적는다. 팀 설정이 `out-of-order: true`라서, 다른 사람 파일과 머지 순서가 달라도 빠진 파일을 적용한다.
 
-- `application-local.yml`, `application-test.yml`에서만 `spring.flyway.locations: classpath:db/migration,classpath:db/migration-fake`. 그 밖의 프로필은 기본값 `classpath:db/migration`만 쓴다.
-- **두 폴더는 버전(날짜·시각) 순서를 하나로 공유한다.** 가짜 테이블 파일도 만드는 시점의 날짜·시각을 쓴다. 미래 날짜를 미리 적지 않는다.
-- 운영 프로필은 가짜 폴더를 아예 읽지 않으므로 버전 사이가 비어도 문제없다.
 - 한 번 개발 브랜치(`dev`)에 머지된 파일은 고치지 않는다. 바꿀 내용은 새 파일로 추가한다.
-- 가짜 Adapter 빈과 가짜 테이블 엔티티는 `@Profile({"local", "test"})`로 감싸고, 엔티티는 별도 패키지에 둔다. 그 외 프로필에서 이 엔티티가 스캔되면 `ddl-auto: validate`가 "테이블 없음"으로 실패하므로 스캔 범위에서도 뺀다.
-- 실제 결제 모듈을 연결하면 `db/migration-fake`와 가짜 Adapter를 통째로 지운다. 본 마이그레이션은 바꾸지 않는다.
+- 결제는 공통 결제 모듈의 `payments` 테이블을 쓴다. 팬미팅용 가짜 결제 테이블은 만들지 않는다.
 
 ## 4. 정합성 SQL
 

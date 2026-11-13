@@ -1,8 +1,11 @@
 package com.restless.fanmeeting.infrastructure;
 
 import com.restless.fanmeeting.domain.FanMeetingOrder;
+import jakarta.persistence.LockModeType;
 import java.time.Instant;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -19,4 +22,12 @@ public interface FanMeetingOrderRepository extends JpaRepository<FanMeetingOrder
                     or (o.status = com.restless.fanmeeting.domain.FanMeetingOrderStatus.PAID and e.meetingAt > :now))
             """)
     boolean existsActiveParticipation(@Param("userId") Long userId, @Param("now") Instant now);
+
+    /** 잠그기 전에 행사를 찾는다(일반 조회, 엔티티를 읽지 않음). event_id는 바뀌지 않는다. */
+    @Query("select o.eventId from FanMeetingOrder o where o.id = :id")
+    Optional<Long> findEventIdById(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from FanMeetingOrder o where o.id = :id")
+    Optional<FanMeetingOrder> findByIdForUpdate(@Param("id") Long id);
 }

@@ -15,6 +15,9 @@ public enum FanMeetingOrderStatus {
     /** 결제 시도 전 포기. */
     CANCELLED,
 
-    /** 늦은 승인·금액 불일치 등으로 환불이 필요함(P0는 표시만). */
-    REFUND_PENDING
+    /** 늦은 승인·금액 불일치 등으로 승인을 거절함. 결제 모듈이 보상 취소(환불)를 진행 중. */
+    REFUND_PENDING,
+
+    /** 보상 취소(환불)가 끝남. */
+    REFUNDED
 }

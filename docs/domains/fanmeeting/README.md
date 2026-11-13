@@ -15,8 +15,8 @@
 | [invariants.md](invariants.md) | INV-FM-01 ~ INV-FM-17 |
 | [state-machines.md](state-machines.md) | Event, Selection, Order 상태와 Selection–Order 짝 |
 | [transactions.md](transactions.md) | 잠금 규칙과 처리별 트랜잭션 |
-| [data-model.md](data-model.md) | Flyway DDL, 가짜 결제 마이그레이션 분리, 정합성 SQL |
-| [ports.md](ports.md) | PaymentPort·MemberPort·NotificationRequestPort, 결제 모듈 계약, 가짜 Adapter |
+| [data-model.md](data-model.md) | Flyway DDL, 마이그레이션, 정합성 SQL |
+| [ports.md](ports.md) | MemberPort·NotificationRequestPort, 결제 모듈 연결(`PaymentResultHandler`) |
 | [test-scenarios.md](test-scenarios.md) | C01 ~ C56 테스트 시나리오, 추첨 재현성 |
 
 관련: [API 계약](../../contracts/api/fanmeeting.md), [이벤트 계약](../../contracts/events/fanmeeting.md), [통합 ERD](../../architecture/erd.md)
@@ -28,7 +28,7 @@
 | 1 (11/11) | DDL(Flyway), Event 생성·조회, 주최자·관리자 권한, 응모·취소·재응모 | 수동 호출, C41 |
 | 2 (11/12) | 응모 재시도·실패 처리, Open/Close Worker | C01~C03, C45, C52 |
 | 3 (11/13) | 추첨(바이트 규칙), MemberPort 가짜, 알림 기록 | C05, C07, C08, C25, C33(추첨), C36, C55, 재현성 고정 정답 |
-| 4 (11/14) | 가짜 결제(마이그레이션 분리), 결제 시작, 결과 반영, 포기 | C09~C13, C26~C30, C42~C44, C47, C49, C51, C56 |
+| 4 (11/14) | 결제 Handler(공통 결제 모듈), 결과 반영, 포기 | C09~C13, C26~C30, C42~C44, C47, C49, C51, C56 |
 | 5 (11/15) | 만료, 승격·모집 완료, summary | C14, C15, C22, C23, C31, C32, C33(승격), C48 |
 | 6 (11/16) | 보류 30분 경고, `hasActiveParticipation`, 처음부터 끝까지 관통 | C21, C33, C34, C50, 불변식 SQL |
 | 7 (11/17) | S1 측정 | C46 (`-Pstress`) |
@@ -38,7 +38,7 @@
 ## 구현 후 꼭 사람이 줄 단위로 읽을 곳
 
 1. 응모 트랜잭션: 잠금 없는 조회 → INSERT, 실패 시 롤백·재시도 ([transactions.md 응모](transactions.md#3-응모))
-2. `PaymentSettlement` 판정 순서와 `approved_attempt_id` ([결제 결과 반영](transactions.md#7-결제-결과-반영-paymentresulthandler))
-3. 만료 Worker의 "조회는 밖, 반영은 안" ([만료 Worker](transactions.md#8-만료-worker-1분))
+2. Handler 판정 순서와 현재 시도(`payment_id`)·`approved_attempt_id` ([결제 결과 반영](transactions.md#7-결제-결과-반영-fanmeetingpaymentresulthandler))
+3. 만료 Worker가 결제 중인 주문을 건드리지 않는지 ([만료 Worker](transactions.md#8-만료-worker-1분))
 4. 승격의 "잠그고 다시 센다" ([승격](transactions.md#10-승격-worker-30초--모집-완료))
-5. 결제 시작과 포기의 경합 ([결제 시작](transactions.md#6-결제-시작), [결제 포기](transactions.md#9-결제-포기))
+5. 결제 준비와 포기의 경합 ([결제 시작](transactions.md#6-결제-시작-공통-결제-api), [결제 포기](transactions.md#9-결제-포기))

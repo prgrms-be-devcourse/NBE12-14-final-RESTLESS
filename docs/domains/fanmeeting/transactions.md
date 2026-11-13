@@ -4,13 +4,13 @@ HTTP 응답·오류 코드는 [API 계약](../../contracts/api/fanmeeting.md)에
 
 ## 1. 잠금 규칙 (반드시 지킨다)
 
-1. **격리 수준은 `REPEATABLE READ`**(MySQL 기본)다.
-2. **항상 Event를 먼저 잠근다.** 그다음 Application → DrawRun → Order → Selection 순서.
-3. **Event를 읽고 붙잡기만 하면 `FOR SHARE`:** 응모, 응모 취소, 결제 시작, 결제 결과 반영, 만료, 결제 포기.
+1. **격리 수준은 `REPEATABLE READ`**(MySQL 기본)다. 단, 결제 모듈이 부르는 Handler(6·7절)는 결제 모듈이 연 `READ_COMMITTED` 트랜잭션에서 실행된다. 그래서 Handler는 판정에 쓰는 행을 **먼저 잠근 뒤 읽는다**(잠그지 않은 조회는 바뀌지 않는 `event_id`만).
+2. **팬미팅 행 중에서는 항상 Event를 먼저 잠근다.** 그다음 Application → DrawRun → Order → Selection 순서. 결제 모듈이 부르는 Handler(6·7절)는 결제 모듈이 결제 행을 먼저 잠근 상태라 `결제 행 → Event → Order → Selection`이 된다. **팬미팅 Worker와 API는 결제 행을 잠그지 않는다**(잠그면 Handler와 거꾸로 잠가 교착할 수 있다).
+3. **Event를 읽고 붙잡기만 하면 `FOR SHARE`:** 응모, 응모 취소, 결제 준비·결과 반영(Handler), 만료, 결제 포기.
 4. **Event를 고치거나 "세고 만드는" 일이면 `FOR UPDATE`:** 마감, 추첨 Claim·최종화, 승격(모집 완료 판정 포함).
 5. **`FOR SHARE`로 잡은 트랜잭션은 Event 행을 고치지 않는다.** 공유 잠금에서 배타 잠금으로 올리면 서로 교착한다.
 6. **Order로 시작하는 내부 처리**(결과 반영, 만료)는 잠그기 전에 `SELECT event_id FROM fan_meeting_orders WHERE order_id = ?`(일반 조회)로 행사를 얻고 2번 순서로 잠근다. `event_id`는 바뀌지 않는 값이다.
-7. **잠금을 쥔 채 외부 호출(결제 모듈, Auth 조회)을 하지 않는다.** 외부 호출은 트랜잭션 전이나 커밋 후에 한다.
+7. **잠금을 쥔 채 외부 호출(PG, Auth 조회)을 하지 않는다.** 외부 호출은 트랜잭션 전이나 커밋 후에 한다. Handler도 PG를 부르지 않는다(PG 호출은 결제 모듈이 트랜잭션 밖에서 한다).
 8. **없는 행을 `FOR UPDATE`로 조회하지 않는다.** RR에서 빈 자리 잠금이 걸려 다른 행의 INSERT까지 막는다(3절).
 9. **잠금 시간 초과(1205)·교착(1213)은 트랜잭션 전체를 롤백한다.** MySQL은 1205 때 문장만 롤백하므로 예외를 잡고 계속하지 않는다. 예외를 `@Transactional` 밖으로 던진다.
 10. Spring: 같은 클래스 안에서 `@Transactional` 메서드를 호출하면 트랜잭션이 걸리지 않는다. 트랜잭션 경계와 재시도는 별도 빈으로 나눈다.
@@ -120,76 +120,83 @@ COMMIT
 - Draw Worker는 추첨마다 따로 처리하고, 실패는 `FANMEETING_DRAW_FAILED` 로그와 `fanmeeting.worker.failure{action=draw}`로 남긴다. 실패한 추첨은 lease(2분)가 끝난 뒤 다시 가져간다. 설정 `restless.fanmeeting.worker.draw-fixed-delay-ms`(5000).
 - **재현성:** 탈퇴 여부는 계산 시점에 조회한다. lease 만료 뒤 재계산은 다른 후보 집합이 될 수 있지만, 최종화는 한 번만 커밋되므로 결과는 하나다. INV-FM-05는 "같은 후보 집합이면 같은 결과"다.
 
-## 6. 결제 시작
+## 6. 결제 시작 (공통 결제 API)
 
-`POST /api/fan-meetings/{eventId}/orders/{orderId}/payment-attempts`. 헤더 `Idempotency-Key`(필수). 본문의 금액·회원·기한은 무시한다.
+팬미팅은 결제 시작 API를 따로 두지 않는다. 손님은 **공통 결제 API**를 부르고([공통 API](../../contracts/api/common.md)), 결제 모듈이 팬미팅 Handler(`FanMeetingPaymentResultHandler`, `PayableType.FAN_MEETING`)를 부른다.
 
 ```text
-[트랜잭션 1]
-  Event FOR SHARE (없으면 404 FAN_MEETING_NOT_FOUND)
-  SELECT * FROM fan_meeting_orders WHERE order_id = ? AND event_id = ? FOR UPDATE
-     0건 → 404 ORDER_NOT_FOUND
-  Order.user_id != 로그인 회원 → 404 ORDER_NOT_FOUND (403 아님)
-  Event 모집 완료 → 409 FAN_MEETING_NOT_PAYABLE
-  Order PAYMENT_REVIEW → 409 PAYMENT_UNDER_REVIEW
-  Order PENDING_PAYMENT 아님 (PAID 포함) → 409 ORDER_NOT_PAYABLE
-  now >= paymentDeadline() → 409 PAYMENT_WINDOW_EXPIRED
+POST /api/payments {payableType: FAN_MEETING, payableId: orderId}, 헤더 Idempotency-Key
+[결제 모듈 트랜잭션] 결제 행 잠금 → Handler.load(orderId)
+  SELECT event_id (일반 조회) → Event FOR SHARE → Order FOR UPDATE → Selection FOR UPDATE
+  Event PAYMENT_IN_PROGRESS 아님, 또는 Order PENDING_PAYMENT 아님 → empty (결제 모듈이 409 PAYMENT_NOT_PAYABLE)
   attempt_requested_at이 NULL이면 now로 기록        ← 한 번 기록하면 지우지 않는다
-COMMIT
+  반환: 주문 회원, Order.amount, 행사 제목, paymentDeadline()
+  → 결제 모듈이 회원(다르면 404 PAYMENT_TARGET_NOT_FOUND)·기한(지났으면 409 PAYMENT_WINDOW_EXPIRED)을 확인하고 시도(READY)를 만든다
+COMMIT (결제 행과 주문이 함께 커밋되거나 함께 롤백)
 
-[트랜잭션 밖]
-  result = PaymentPort.startAttempt(FAN_MEETING_ORDER, orderId, userId, Order.amount, paymentDeadline(), idempotencyKey)
-
-[트랜잭션 2] Event FOR SHARE → Order FOR UPDATE (order_id AND event_id)
-  Order.payment_id가 NULL이면 result.paymentId 저장 (다른 값이 있으면 오류 로그)
+POST /api/payments/confirm
+[결제 모듈 트랜잭션] 결제 행 잠금 → Handler.onApprovalStarting(orderId, 시도)
+  같은 순서로 잠금. 잠근 뒤 읽은 now < paymentDeadline() 이고 Order PENDING_PAYMENT면
+  payment_id = 이 시도, 받아들임. 아니면 거절 → 결제 모듈이 PG를 부르지 않는다
 COMMIT
+[트랜잭션 밖] 결제 모듈이 PG 승인 호출 → 결과를 7절 Handler로 알려 준다
 ```
 
-- **주문 상태 확인이 먼저다(P0 정책).** 같은 키든 새 키든, 트랜잭션 1에서 주문이 `PENDING_PAYMENT`가 아니면 결제 모듈을 부르지 않고 409를 낸다. 결제 모듈 결과별 응답은 [API 계약](../../contracts/api/fanmeeting.md#결제-시작-응답)에 있다.
-- `FAILED` 상태를 받은 클라이언트는 **새 키**로 다시 결제를 시작한다.
-- `attempt_requested_at`은 결제 모듈 결과와 관계없이 지우지 않는다. 그래서 결제 시작을 한 번이라도 누른 주문은 포기할 수 없다(9절).
+- 금액·기한은 요청 값이 아니라 `load()`가 돌려준 서버 값이다(INV-08).
+- 같은 대상에 READY 시도가 있는데 다른 키로 오면 결제 모듈이 이전 READY를 닫고(`SUPERSEDED`) 새 시도를 만든다. 승인 중(PROCESSING)이면 409 `PAYMENT_ATTEMPT_IN_PROGRESS`, 결과 모름(UNKNOWN)이면 409 `PAYMENT_UNDER_REVIEW`다. 공통 규칙을 그대로 따른다.
+- 시도가 실패하면 클라이언트는 **새 키**로 다시 결제를 준비한다.
+- `attempt_requested_at`은 결제 결과와 관계없이 지우지 않는다. 그래서 결제 준비를 한 번이라도 요청한 주문은 포기할 수 없다(9절).
+- 참가비 0원 주문은 결제 모듈이 `FREE_ORDER`로 거절한다. 무료 주문 확정은 결제 없이 팬미팅이 처리한다(다음 작업).
 
-## 7. 결제 결과 반영 (`PaymentResultHandler`)
+## 7. 결제 결과 반영 (`FanMeetingPaymentResultHandler`)
 
-가짜 Adapter의 `deliver`가 호출한다([ports.md](ports.md)). 같은 결과가 두 번 와도 된다. Handler는 별도 빈이고 자기 트랜잭션이다.
+결제 모듈이 결제 상태를 바꾸는 **같은 트랜잭션 안에서** 부른다. Handler는 `@Transactional(propagation = MANDATORY)`다. 새 트랜잭션을 열면 결제와 주문이 따로 커밋돼 원자성이 깨진다.
 
 ```text
+[결제 모듈] 결제 행 잠금
 [잠그기 전] SELECT event_id FROM fan_meeting_orders WHERE order_id = ?
 Event FOR SHARE → Order FOR UPDATE → Selection FOR UPDATE
-Order 전이표대로 판정 (순서: 상태 → 시도 ID → 금액 → 기한)
-COMMIT
+판정(현재 시각은 잠근 뒤에 읽는다)
+COMMIT (결제 모듈)
 ```
 
-- **처음 반영하는 승인**(`approved_attempt_id`가 NULL)이면 결과(`PAID` 또는 `REFUND_PENDING`)와 함께 그 시도 ID를 기록한다.
-- **이미 기록된 주문**에 승인이 오면: 같은 시도 ID면 무시, 다른 시도 ID면 이중 결제로 환불 대상 기록(상태 유지).
-- **만료(`EXPIRED`) 뒤 승인:** 결제 모듈이 `NOT_APPROVED_FINAL`이라고 답한 뒤 승인이 온 것이므로 **결제 모듈의 계약 위반**이다. `approvedAt`이 기한 안이어도 자리는 되돌리지 않는다(정원 초과 방지). `REFUND_PENDING`, 시도 ID 기록, 오류 로그 `FANMEETING_APPROVAL_AFTER_FINAL`, summary 확인 목록에 올린다.
-- 기한 판정: `approvedAt <= paymentDeadline()`이면 기한 안(같으면 기한 안).
-- 실패(`FAILED`)는 이번 시도만 실패다. 기한이 남으면 `PENDING_PAYMENT` 유지.
-- UNKNOWN/PROCESSING: `PENDING_PAYMENT`면 `PAYMENT_REVIEW`로 바꾸고 `review_started_at = now`. 이미 `PAYMENT_REVIEW`면 아무것도 바꾸지 않는다.
-- 판정 코드는 한 곳(`PaymentSettlement`)에 두고 결과 반영·만료가 같이 쓴다.
+| 호출 | 판정 | 결과 |
+|---|---|---|
+| `onApproved` | `PAID`이고 같은 시도 | 받아들임(중복, 변화 없음) |
+| | Order가 `PENDING_PAYMENT`·`PAYMENT_REVIEW` 아님, 또는 현재 시도(`payment_id`) 아님 | 거절, 상태 변화 없음. 결제 모듈이 보상 취소 |
+| | 승인 금액 ≠ 주문 금액 | `REFUND_PENDING`, Selection `EXPIRED`, 거절 → 보상 취소 |
+| | `approvedAt > 기한` | `REFUND_PENDING`, Selection `EXPIRED`, 거절 → 보상 취소 |
+| | 그 외 (`approvedAt <= 기한`, 같으면 기한 안) | `PAID`(`paid_at = approvedAt`), Selection `CONFIRMED` |
+| `onFailed` (승인 시작한 시도) | 현재 시도이고 `PENDING_PAYMENT`·`PAYMENT_REVIEW` | `payment_id` 비움, 보류 시각 비움. 기한 남음 → `PENDING_PAYMENT`(다시 결제 가능), 지남 → Order·Selection `EXPIRED` |
+| `onFailed` (승인 시작 전에 닫힌 시도) | `PENDING_PAYMENT`이고 진행 중인 시도 없음 | 위와 같은 기한 판정 |
+| `onUnknown` | 현재 시도이고 `PENDING_PAYMENT` | `PAYMENT_REVIEW`, `review_started_at = now`. 이미 보류면 변화 없음 |
+| `onRefunded` (보상 취소) | `REFUND_PENDING`이고 그 시도 | `REFUNDED` |
+| | 그 외(현재 시도가 아니어서 거절한 승인의 환불) | 변화 없음, 로그 |
+
+- 처음 반영하는 승인은 결과(`PAID` 또는 `REFUND_PENDING`)와 함께 `approved_attempt_id`에 그 시도를 기록한다.
+- 결과 모름은 실패로 처리하지 않는다. 최종 결과는 결제 모듈의 대사 작업이 **같은 시도로** `onApproved` 또는 `onFailed`로 다시 알려 준다.
+- **만료(`EXPIRED`) 뒤 승인:** 결제 모듈은 실패로 닫힌 시도를 승인하지 않으므로 계약 위반이다. 거절해 보상 취소하고 주문·선발은 `EXPIRED`로 둔다(정원 초과 방지, 자리를 되돌리지 않는다). 로그 `FANMEETING_APPROVAL_NOT_CURRENT`.
+- 손님 환불(`onRefundRequesting`)은 P0 범위 밖이라 기본 구현(거절)을 쓴다.
+- 거절 사유: `FANMEETING_NOT_PAYABLE`, `FANMEETING_ORDER_NOT_FOUND`, `FANMEETING_STALE_ATTEMPT`, `FANMEETING_AMOUNT_MISMATCH`, `FANMEETING_LATE_APPROVAL`.
 
 ## 8. 만료 Worker (1분)
 
-대상: ① `PENDING_PAYMENT` + 기한 경과, ② `PAYMENT_REVIEW` 전부.
+결제를 준비한 시도의 결과(승인·실패·결제창만 열고 기한 지남)는 결제 모듈이 Handler로 알려 준다(7절). 만료 Worker는 **결제 모듈이 알려 줄 수 없는 주문**만 맡는다.
+
+대상: ① `PENDING_PAYMENT` + 기한 경과 + 진행 중인 시도 없음(`payment_id IS NULL`: 결제를 준비하지 않았거나, 실패 뒤 다시 결제하지 않음), ② `PAYMENT_REVIEW` 30분 경고.
 
 ```text
 주문마다:
-  [트랜잭션 밖] result = PaymentPort.resolve(FAN_MEETING_ORDER, orderId)
   [트랜잭션]
     SELECT event_id (일반 조회) → Event FOR SHARE → Order FOR UPDATE → Selection FOR UPDATE
-    Order가 PENDING_PAYMENT·PAYMENT_REVIEW가 아니면 승인만 7절로 처리하고 나머지는 무시
-    APPROVED                    → 7절과 같은 판정
-    NOT_STARTED / NOT_APPROVED_FINAL
-       result.finalDecision = true  → Order EXPIRED, Selection EXPIRED
-       result.finalDecision = false → REVIEW였으면 PENDING_PAYMENT(보류 시각 NULL), 아니면 변경 없음
-    PROCESSING / UNKNOWN        → PENDING_PAYMENT면 PAYMENT_REVIEW 진입(보류 시각 기록), 이미 보류면 유지
-    PAYMENT_REVIEW + review_started_at + 30분 <= now + review_warned_at NULL
+    ① 다시 확인(PENDING_PAYMENT, 기한 경과, payment_id NULL) → Order EXPIRED, Selection EXPIRED
+    ② PAYMENT_REVIEW + review_started_at + 30분 <= now + review_warned_at NULL
        → 경고 로그 FANMEETING_PAYMENT_REVIEW_STALE(orderId, 경과), review_warned_at = now
   COMMIT
 ```
 
-- **만료는 결제 모듈이 "최종"이라고 답했을 때만 한다(`finalDecision = true`).** 팬미팅 시계로 최종 여부를 판단하지 않는다. 최종 여부는 결제 모듈이 자기 잠금 안에서 정한다([ports.md](ports.md)).
-- 보류는 시간이 지나도 자동으로 확정·탈락시키지 않는다. P0에서는 30분 경고까지만 하고, 운영자 수동 처리는 P1이다. 테스트에서는 가짜 결제의 결과를 확정(`recordResult`)해서 보류를 푼다.
+- 결제 행은 잠그지 않는다(1절 2번). 남은 READY 시도는 승인 시작 때 Handler가 Order를 잠그고 기한을 다시 보므로, 만료된 주문은 승인되지 않는다.
+- 보류는 시간이 지나도 자동으로 확정·탈락시키지 않는다. P0에서는 30분 경고까지만 하고, 운영자 수동 처리는 P1이다.
 
 ## 9. 결제 포기
 
@@ -208,7 +215,7 @@ COMMIT
 ```
 
 - 되돌리기 없음. 빈자리는 다음 승격 회차가 채운다.
-- 결제 시작(6절 트랜잭션 1)과 같은 Order 잠금으로 직렬화되므로 동시에 와도 하나만 성공한다.
+- 결제 준비(6절 `load`)와 같은 Order 잠금으로 직렬화되므로 동시에 와도 하나만 성공한다.
 
 보류 수동 처리는 P1이다. P0에서는 만들지 않고, 보류가 30분을 넘으면 8절의 경고 로그만 남긴다. 운영자 수동 처리(결제 모듈과 함께 확정하는 방식)는 실제 결제 연동과 같이 P1에서 만든다.
 
