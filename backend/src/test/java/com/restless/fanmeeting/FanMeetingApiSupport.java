@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.jayway.jsonpath.JsonPath;
 import com.restless.TestcontainersConfiguration;
 import com.restless.auth.infrastructure.JwtTokenProvider;
+import com.restless.fanmeeting.application.FanMeetingEntryWorker;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
@@ -43,6 +44,7 @@ abstract class FanMeetingApiSupport {
     @Autowired MockMvc mockMvc;
     @Autowired JwtTokenProvider tokenProvider;
     @Autowired JdbcTemplate jdbc;
+    @Autowired FanMeetingEntryWorker entryWorker;
 
     String token(String role) {
         String email = "fan-meeting-" + UUID.randomUUID() + "@example.com";
@@ -59,14 +61,19 @@ abstract class FanMeetingApiSupport {
         return Long.valueOf(tokenProvider.decoder().decode(bearer.substring("Bearer ".length())).getSubject());
     }
 
-    /** 주최자 API로 행사를 만든다. 오픈은 1시간 뒤, 팬미팅은 3일 뒤. */
+    /** 주최자 API로 행사를 만든다. 오픈은 1시간 뒤, 팬미팅은 3일 뒤. 당첨 300명, 예비 100명. */
     Long createEvent(boolean opensAtPublic) throws Exception {
+        return createEvent(opensAtPublic, 300, 100);
+    }
+
+    Long createEvent(boolean opensAtPublic, int winnerLimit, int reserveLimit) throws Exception {
         Instant opensAt = Instant.now().plus(Duration.ofHours(1)).truncatedTo(ChronoUnit.SECONDS);
         String body = """
                 {"title":"연말 팬미팅","entryOpensAt":"%s","firstNoticeScheduledAt":"%s",
-                 "winnerLimit":300,"reserveLimit":100,"feeAmount":50000,
+                 "winnerLimit":%d,"reserveLimit":%d,"feeAmount":50000,
                  "meetingAt":"%s","opensAtPublic":%s}
-                """.formatted(opensAt, opensAt, opensAt.plus(Duration.ofDays(3)), opensAtPublic);
+                """.formatted(opensAt, opensAt, winnerLimit, reserveLimit, opensAt.plus(Duration.ofDays(3)),
+                opensAtPublic);
         String res = mockMvc.perform(post("/api/organizer/fan-meetings")
                         .header(HttpHeaders.AUTHORIZATION, token("ORGANIZER"))
                         .contentType(MediaType.APPLICATION_JSON).content(body))
@@ -89,6 +96,21 @@ abstract class FanMeetingApiSupport {
 
     static LocalDateTime utc(Instant instant) {
         return LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
+    }
+
+    /** 응모를 받은 뒤 마감 Worker로 닫는다. 마감이 PENDING 추첨 실행을 만든다. */
+    Long closedEventWithApplicants(int winnerLimit, int reserveLimit, int applicants) throws Exception {
+        Long eventId = createEvent(true, winnerLimit, reserveLimit);
+        open(eventId);
+        for (int i = 0; i < applicants; i++) {
+            apply(token("USER"), eventId).andExpect(status().isCreated());
+        }
+        Instant now = Instant.now();
+        setWindow(eventId, "OPEN", now.minus(Duration.ofMinutes(10)), now.minusSeconds(1));
+        entryWorker.closeDue();
+        assertThat(jdbc.queryForObject("SELECT status FROM fan_meeting_events WHERE event_id = ?", String.class,
+                eventId)).isEqualTo("CLOSED");
+        return eventId;
     }
 
     /** 응모(재응모 포함). */

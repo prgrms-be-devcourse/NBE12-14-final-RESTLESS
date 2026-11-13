@@ -81,9 +81,9 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 | 알림 | 실제 발송 없음. 추첨 최종화·승격 커밋 뒤 `NotificationRequestPort`에 기록만 |
 | 개인 정보 | `random_seed`, `lease_token`, 다른 회원 정보는 응답·로그에 내보내지 않는다 |
 
-## 5. 탈퇴 확인 `hasActiveParticipation(userId)` (FanMeeting Facade)
+## 5. 탈퇴 확인 `hasActiveParticipation(userId)` (`WithdrawalGuard`)
 
-그 회원의 Order가 `PENDING_PAYMENT`, `PAYMENT_REVIEW`, `REFUND_PENDING`이거나, `PAID`이면서 해당 Event의 `meeting_at`이 아직 안 지났으면 `true`. 인증 모듈 연결은 하지 않는다(메서드만 제공).
+그 회원의 Order가 `PENDING_PAYMENT`, `PAYMENT_REVIEW`, `REFUND_PENDING`이거나, `PAID`이면서 해당 Event의 `meeting_at`이 아직 안 지났으면 `true`. 회원 모듈의 `WithdrawalGuard`로 구현해(`FanMeetingWithdrawalGuard`), 회원 탈퇴 때 `true`면 409 `MEMBER_HAS_ACTIVE_PARTICIPATION`으로 막는다.
 
 알려진 틈: 탈퇴 확인(`false`)과 승격·추첨 최종화가 동시에 일어나면 탈퇴한 사람에게 주문이 생길 수 있다. 결제를 못 하므로 기한 뒤 만료 → 승격으로 처리된다(정원·자격 정합성 문제 없음, 자리만 늦게 참).
 
@@ -111,4 +111,4 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 | 일반 트랜잭션 timeout | 5초 |
 | 추첨 최종화 timeout | 30초 |
 | 응모 재시도 | 최대 3회, 10~50ms 무작위 대기 |
-| 가입 시각 검사 `fanmeeting.eligibility.joined-at-check.enabled` | 기본 OFF. 가입 시각은 `users.created_at`(`MemberPort.joinedAt`). 시연·측정에서 켤지는 담당자가 정한다. 테스트 C21·C50은 ON으로 돌린다 |
+| 가입 시각 검사 `restless.fanmeeting.eligibility.joined-at-check.enabled` | 기본 OFF. 가입 시각은 `users.created_at`(`MemberPort.joinedAt`). 시연·측정에서 켤지는 담당자가 정한다. 테스트 C21·C50은 ON으로 돌린다 |

@@ -59,6 +59,8 @@ deliver(attemptId)                                            ← 테스트 전�
 - 계약 위반(만료 뒤 승인, C49)은 테스트에서 가짜 결과 반영기를 거치지 않고 `PaymentResultHandler`를 직접 호출해 만든다.
 - 테이블과 마이그레이션 분리는 [data-model.md](data-model.md)에 있다.
 
-## 4. 가짜 Member Adapter
+## 4. Member Adapter와 알림 기록
 
-기본 전원 활성. 테스트에서 탈퇴 회원 ID, 가입 시각, 조회 예외를 지정한다.
+- `MemberPort`는 회원 모듈의 `MemberService.joinedAt`, `MemberService.activeMemberIds`로 구현한다(`MemberServiceMemberAdapter`). 회원 Repository를 직접 쓰지 않는다.
+- 테스트는 가짜 대신 실제 회원 행을 쓴다(탈퇴는 `users.status = WITHDRAWN`, 가입 시각은 `users.created_at`). 조회 예외(C50)만 `@MockitoSpyBean`으로 만든다.
+- `NotificationRequestPort`는 구조화 로그 `FANMEETING_NOTIFICATION type=… eventId=… orderId=… paymentDeadline=…`로 구현한다. 회원 정보는 넣지 않는다.

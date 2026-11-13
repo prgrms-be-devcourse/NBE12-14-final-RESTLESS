@@ -29,7 +29,7 @@ HTTP 응답·오류 코드는 [API 계약](../../contracts/api/fanmeeting.md)에
 
 ## 3. 응모
 
-**가입 시각 검사** (트랜잭션 전): 설정 `fanmeeting.eligibility.joined-at-check.enabled`가 ON이면 `MemberPort.joinedAt(userId)`를 부른다.
+**가입 시각 검사** (트랜잭션 전): 설정 `restless.fanmeeting.eligibility.joined-at-check.enabled`가 ON이면 `MemberPort.joinedAt(userId)`를 부른다.
 
 - 조회 예외 → 503 `MEMBER_LOOKUP_FAILED` (저장하지 않음)
 - 가입 시각 `>= first_notice_scheduled_at` → 403 `APPLICATION_NOT_ELIGIBLE`
@@ -116,6 +116,8 @@ COMMIT
 - **최종화는 멱등이다.** 같은 DrawRun에 최종화가 두 번 와도(재시도, 늦게 살아난 Worker) 먼저 `COMPLETED`를 확인하고 아무것도 저장하지 않는다. 그다음 `lease_token`을 확인한다. 순서가 바뀌면 이미 완료된 추첨에 같은 token을 가진 재시도가 Selection을 또 넣으려다 UNIQUE 위반으로 실패한다.
 - 저장 중 오류가 나면 전체 롤백(일부만 남지 않음).
 - seed와 `lease_token`은 응답·로그에 내보내지 않는다.
+- 최종화의 token 확인은 "DrawRun이 RUNNING이고 token이 같은가"로 한다. 그래서 완료된 추첨은 token 확인에서도 막히지만, 완료 확인을 먼저 두어 로그를 나눈다(`FANMEETING_DRAW_ALREADY_FINALIZED`, `FANMEETING_DRAW_LEASE_LOST`).
+- Draw Worker는 추첨마다 따로 처리하고, 실패는 `FANMEETING_DRAW_FAILED` 로그와 `fanmeeting.worker.failure{action=draw}`로 남긴다. 실패한 추첨은 lease(2분)가 끝난 뒤 다시 가져간다. 설정 `restless.fanmeeting.worker.draw-fixed-delay-ms`(5000).
 - **재현성:** 탈퇴 여부는 계산 시점에 조회한다. lease 만료 뒤 재계산은 다른 후보 집합이 될 수 있지만, 최종화는 한 번만 커밋되므로 결과는 하나다. INV-FM-05는 "같은 후보 집합이면 같은 결과"다.
 
 ## 6. 결제 시작

@@ -162,6 +162,20 @@ public class FanMeetingEvent {
         this.updatedAt = now;
     }
 
+    /** 추첨 Claim: CLOSED면 DRAWING. 이미 DRAWING이면(lease 만료 뒤 재Claim) 그대로. */
+    public void startDrawing(Instant now) {
+        if (status == FanMeetingStatus.CLOSED) {
+            this.status = FanMeetingStatus.DRAWING;
+            this.updatedAt = now;
+        }
+    }
+
+    /** 추첨 최종화: 후보가 있으면 결제 진행, 없으면 바로 모집 완료. */
+    public void finishDraw(boolean hasCandidates, Instant now) {
+        this.status = hasCandidates ? FanMeetingStatus.PAYMENT_IN_PROGRESS : FanMeetingStatus.RECRUITMENT_COMPLETED;
+        this.updatedAt = now;
+    }
+
     private static BusinessException invalid(String message) {
         return new BusinessException(ErrorCode.INVALID_FAN_MEETING_SETTINGS, message);
     }
