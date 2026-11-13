@@ -4,6 +4,8 @@ import com.restless.order.domain.Order;
 import com.restless.order.domain.OrderItem;
 import com.restless.order.domain.OrderShippingSnapshot;
 import com.restless.order.domain.OrderStatus;
+import com.restless.order.domain.OrderType;
+import java.util.Collection;
 import com.restless.order.infrastructure.OrderItemRepository;
 import com.restless.order.infrastructure.OrderRepository;
 import com.restless.order.infrastructure.OrderShippingSnapshotRepository;
@@ -66,6 +68,13 @@ public class OrderService {
     @Transactional(readOnly = true)
     public Optional<OrderView> find(Long orderId) {
         return orders.findById(orderId).map(OrderView::from);
+    }
+
+    /** 지정한 회원·도메인에 해당 상태의 주문이 있는지 조회한다. */
+    @Transactional(readOnly = true)
+    public boolean existsByUserAndTypeAndStatuses(Long userId,
+            OrderType orderType, Collection<OrderStatus> statuses) {
+        return orders.existsByUserIdAndOrderTypeAndStatusIn(userId, orderType, statuses);
     }
 
     /**
