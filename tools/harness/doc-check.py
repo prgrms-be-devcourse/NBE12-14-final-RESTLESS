@@ -146,7 +146,12 @@ def main(argv):
                             subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
                                            text=True).stdout.strip() or ".")
     fails, warns, foreign = [], [], {}
-    for doc in doc_files(root):
+    docs = doc_files(root)
+    if not docs:  # wrong or deleted folder: nothing checked must not read as PASS
+        print(f"FAIL: 검사할 문서가 없음 ({root})")
+        print("DOC-CHECK: FAIL (fails 1, warnings 0)")
+        return 1
+    for doc in docs:
         bad = broken_links(root, doc)
         if bad and owned(doc):
             fails += [f"{doc}: 깨진 링크 {b}" for b in bad]

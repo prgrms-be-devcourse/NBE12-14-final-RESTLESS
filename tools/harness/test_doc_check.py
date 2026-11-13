@@ -72,5 +72,12 @@ for name, files, commits, want_code, want_text in cases:
     ok = code == want_code and want_text in out
     bad += not ok
     print(("OK  " if ok else "BAD ") + name + ("" if ok else f"\n    exit={code} want={want_code}\n    " + out.replace("\n", "\n    ")))
+with tempfile.TemporaryDirectory() as empty:  # deleted or wrong folder must not pass
+    for name, path in (("empty folder fails", empty), ("missing folder fails", os.path.join(empty, "gone"))):
+        r = subprocess.run(["python3", DC, path], capture_output=True, text=True)
+        ok = r.returncode == 1 and "검사할 문서가 없음" in r.stdout
+        bad += not ok
+        cases.append(name)
+        print(("OK  " if ok else "BAD ") + name)
 print(f"cases={len(cases)} failures={bad}")
 sys.exit(1 if bad else 0)
