@@ -22,7 +22,8 @@
 ├── CONTRIBUTING.md  # 브랜치, PR, 커밋 규칙, 로컬 실행
 ├── backend/         # Java 21, Spring Boot 4.1, Gradle, MySQL 8
 ├── frontend/        # React, Vite, TypeScript
-└── docs/            # 설계 문서. 시작은 docs/README.md
+├── docs/            # 설계 문서. 시작은 docs/README.md
+└── tools/harness/   # AI 구현·검증 하네스 도구 (드롭). 설명은 tools/harness/README.md
 ```
 
 ## 기술 스택

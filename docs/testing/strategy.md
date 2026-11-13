@@ -12,6 +12,8 @@
 | 프론트엔드 빌드 (CI와 동일) | `npm run build` |
 | 아키텍처 검사 (모듈 경계) | `./gradlew test --tests 'com.restless.architecture.*'` |
 | 드롭 수용 테스트 (블랙박스) | `./gradlew test --tests 'com.restless.drop.acceptance.*'` |
+| 드롭 하네스 판정 (저장소 루트에서) | `bash tools/harness/harness-check.sh` |
+| 수용 테스트 힘 검사 (저장소 루트에서) | `python3 tools/harness/test-strength.py red <클래스>` / `mutants` |
 | 동시성 테스트 (드롭·결제) | `./gradlew test --tests 'com.restless.drop.*' --tests 'com.restless.payment.*'` (재고 1개에 100명, 같은 키 동시 요청, 입장 작업 동시 실행, 승인 동시 요청 등) |
 | 부하 테스트 | TBD |
 
@@ -51,6 +53,7 @@ JUnit 5, Spring Boot Test, MySQL Testcontainers, Mockito, k6. 필요하면 Redis
 - 매 테스트가 끝나면 `backend/src/test/resources/harness/drop-invariants.sql`의 불변식(초과 판매, 재고 합계, 중복 주문 등)을 전부 검사한다. 위반이 1건이라도 있으면 실패다.
 - 시간에 따라 도는 작업(만료, 입장)은 빈 이름으로 직접 실행한다: `dropReservationExpiryJob.runOnce()`, `dropQueueAdmissionJob.runOnce()`.
 - 테스트가 계약과 다르면 테스트를 고치지 말고 계약과 테스트를 함께 바꾸는 PR을 따로 연다.
+- AI 구현·검증에 쓰는 도구와 작업 순서는 [tools/harness/README.md](../../tools/harness/README.md)에 있다.
 
 ## 6. 테스트 실행 환경
 
