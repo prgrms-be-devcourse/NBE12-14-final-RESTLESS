@@ -14,6 +14,15 @@ spring:
     out-of-order: true
 
 restless:
+  payment:
+    reconcile:
+      enabled: ${PAYMENT_RECONCILE_ENABLED:true}
+      fixed-delay-ms: 5000
+      batch-size: 100
+      processing-stale-after: 30s
+      unknown-retry-after: 10s
+      cancel-stale-after: 30s
+      not-found-final-after: 15m
   auth:
     jwt:
       # HS256 서명 키, 32바이트 이상. dev는 application-dev.yml에 기본값이 있고, prod는 환경변수로만 넣는다.

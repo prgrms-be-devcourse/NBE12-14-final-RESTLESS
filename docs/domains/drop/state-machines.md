@@ -91,9 +91,9 @@ CANCEL_UNKNOWN → CANCELLED / APPROVED
 | 전이 | 쓰는 경우 |
 |---|---|
 | READY → FAILED | 승인을 시작하지 않은 채 기한(`expires_at`)이 지난 시도를 닫는다. 닫힌 시도는 승인되지 않는다 (팬미팅 `resolve`의 최종 판정) |
-| UNKNOWN → FAILED | PG 재조회로 미승인이 **확정**된 경우에만 쓴다 |
+| UNKNOWN → FAILED | PG 재조회가 최종 NotApproved이거나, 승인 시작 후 15분 이상 지난 명시적 NotFound일 때만 쓴다. Unknown/통신 오류/처리 중은 실패로 추측하지 않는다 ([대사 규칙](../../operations/failure-handling.md#공통-결제-대사-46)) |
 | CANCEL_PENDING → APPROVED | PG가 취소를 거절했다고 확정 응답한 경우. 결제는 승인 상태로 돌아간다 |
-| CANCEL_UNKNOWN → APPROVED | PG 재조회로 취소되지 않았음이 확인된 경우 |
+| CANCEL_UNKNOWN → APPROVED | 같은 멱등성 키의 취소 재시도가 명시적 Rejected를 돌려준 경우. 조회 Approved만으로 되돌리지 않고 동일 취소를 재시도한다 |
 
 - UNKNOWN은 FAILED가 아니다.
 - 상태를 바꾸는 트랜잭션은 결제 행을 `SELECT ... FOR UPDATE`로 먼저 잠근 뒤 전이한다. 같은 결제의 동시 승인, 중복 결과 처리에서 한쪽만 반영된다.

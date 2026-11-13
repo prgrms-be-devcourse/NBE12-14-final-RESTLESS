@@ -198,90 +198,115 @@ public class PaymentTransactions {
         return tx.execute(
                 ignored -> {
                     Payment payment = payments.findByIdForUpdate(paymentId).orElseThrow();
-                    if (payment.getStatus() != PaymentStatus.PROCESSING) return current(payment);
-                    PaymentResultHandler handler = registry.get(payment.getPayableType());
-                    PaymentAttemptContext attempt =
-                            new PaymentAttemptContext(
-                                    payment.getId(), payment.getApprovalStartedAt());
-                    Instant now = clock.instant();
-                    return switch (result) {
-                        case PgApprovalResult.Approved approved -> {
-                            if (approved.approvedAmount() != payment.getAmount()) {
-                                payment.markUnknown(now);
-                                handler.onUnknown(payment.getPayableId(), attempt);
-                                log.error(
-                                        "PG approval amount mismatch paymentId={} expected={}"
-                                            + " actual={}",
-                                        paymentId,
-                                        payment.getAmount(),
-                                        approved.approvedAmount());
-                                meters.counter("payment.amount.mismatch").increment();
-                                yield current(payment);
-                            }
-                            payment.approve(approved.approvedAt(), now);
-                            ApprovalDecision decision =
-                                    handler.onApproved(
-                                            payment.getPayableId(),
-                                            new ApprovedPayment(
-                                                    paymentId,
-                                                    payment.getPgOrderId(),
-                                                    payment.getPaymentKey(),
-                                                    payment.getAmount(),
-                                                    payment.getApprovalStartedAt(),
-                                                    approved.approvedAt()));
-                            if (decision.accepted()) yield current(payment);
-                            payment.requestCancel(now);
-                            PaymentRefund refund =
-                                    refunds.saveAndFlush(
-                                            PaymentRefund.request(
-                                                    paymentId,
-                                                    PaymentRefundKind.COMPENSATION,
-                                                    payment.getAmount(),
-                                                    "compensation-" + paymentId,
-                                                    bounded(decision.reason(), 200),
-                                                    now));
-                            yield new Step(
-                                    paymentId,
-                                    payment.getStatus(),
-                                    null,
-                                    null,
-                                    null,
-                                    new Compensation(
-                                            paymentId,
-                                            refund.getId(),
-                                            payment.getPaymentKey(),
-                                            decision.reason(),
-                                            refund.getIdempotencyKey()));
-                        }
-                        case PgApprovalResult.Rejected rejected -> {
-                            payment.fail(
-                                    bounded(rejected.code(), 100),
-                                    bounded(rejected.message(), 500),
-                                    now);
-                            handler.onFailed(payment.getPayableId(), attempt);
-                            yield Step.error(
-                                    payment, ErrorCode.PAYMENT_FAILED, pgCode(rejected.code()));
-                        }
-                        case PgApprovalResult.Unknown unknown -> {
-                            payment.markUnknown(now);
-                            handler.onUnknown(payment.getPayableId(), attempt);
-                            yield current(payment);
-                        }
-                    };
+                    if (!approvalPending(payment)) return current(payment);
+                    return applyApprovalLocked(payment, result);
                 });
     }
 
+    private Step applyApprovalLocked(Payment payment, PgApprovalResult result) {
+        Long paymentId = payment.getId();
+        PaymentResultHandler handler = registry.get(payment.getPayableType());
+        PaymentAttemptContext attempt =
+                new PaymentAttemptContext(payment.getId(), payment.getApprovalStartedAt());
+        Instant now = clock.instant();
+        return switch (result) {
+            case PgApprovalResult.Approved approved -> {
+                if (approved.approvedAmount() != payment.getAmount()) {
+                    markUnknown(payment, handler, attempt, now);
+                    log.error(
+                            "PG approval amount mismatch paymentId={} expected={}" + " actual={}",
+                            paymentId,
+                            payment.getAmount(),
+                            approved.approvedAmount());
+                    meters.counter("payment.amount.mismatch").increment();
+                    yield current(payment);
+                }
+                payment.approve(approved.approvedAt(), now);
+                ApprovalDecision decision =
+                        handler.onApproved(
+                                payment.getPayableId(),
+                                new ApprovedPayment(
+                                        paymentId,
+                                        payment.getPgOrderId(),
+                                        payment.getPaymentKey(),
+                                        payment.getAmount(),
+                                        payment.getApprovalStartedAt(),
+                                        approved.approvedAt()));
+                if (decision.accepted()) yield current(payment);
+                payment.requestCancel(now);
+                PaymentRefund refund =
+                        refunds.saveAndFlush(
+                                PaymentRefund.request(
+                                        paymentId,
+                                        PaymentRefundKind.COMPENSATION,
+                                        payment.getAmount(),
+                                        "compensation-" + paymentId,
+                                        bounded(decision.reason(), 200),
+                                        now));
+                yield new Step(
+                        paymentId,
+                        payment.getStatus(),
+                        null,
+                        null,
+                        null,
+                        new Compensation(
+                                paymentId,
+                                refund.getId(),
+                                payment.getPaymentKey(),
+                                decision.reason(),
+                                refund.getIdempotencyKey()));
+            }
+            case PgApprovalResult.Rejected rejected -> {
+                payment.fail(bounded(rejected.code(), 100), bounded(rejected.message(), 500), now);
+                handler.onFailed(payment.getPayableId(), attempt);
+                yield Step.error(payment, ErrorCode.PAYMENT_FAILED, pgCode(rejected.code()));
+            }
+            case PgApprovalResult.Unknown unknown -> {
+                markUnknown(payment, handler, attempt, now);
+                yield current(payment);
+            }
+        };
+    }
+
+    private boolean approvalPending(Payment payment) {
+        return payment.getStatus() == PaymentStatus.PROCESSING
+                || payment.getStatus() == PaymentStatus.UNKNOWN;
+    }
+
+    private void markUnknown(
+            Payment payment,
+            PaymentResultHandler handler,
+            PaymentAttemptContext attempt,
+            Instant now) {
+        if (payment.getStatus() == PaymentStatus.PROCESSING) {
+            payment.markUnknown(now);
+            handler.onUnknown(payment.getPayableId(), attempt);
+        }
+    }
+
     String applyCancellation(Compensation compensation, PgCancelResult result) {
+        return applyCancellation(compensation.paymentId(), compensation.refundId(), result);
+    }
+
+    /** Shared TX-C for compensation, reconciliation and customer refunds. Kind is always stored. */
+    public String applyCancellation(Long paymentId, Long refundId, PgCancelResult result) {
+        return applyCancellation(paymentId, refundId, null, result);
+    }
+
+    String applyCancellation(
+            Long paymentId, Long refundId, PaymentStatus expected, PgCancelResult result) {
         return tx.execute(
                 ignored -> {
                     // Always payment first, refund second; only the expected pair can invoke a
                     // Handler.
-                    Payment payment =
-                            payments.findByIdForUpdate(compensation.paymentId()).orElseThrow();
-                    PaymentRefund refund =
-                            refunds.findByIdForUpdate(compensation.refundId()).orElseThrow();
-                    if (payment.getStatus() != PaymentStatus.CANCEL_PENDING
-                            || refund.getStatus() != PaymentRefundStatus.REQUESTED) {
+                    Payment payment = payments.findByIdForUpdate(paymentId).orElseThrow();
+                    PaymentRefund refund = refunds.findByIdForUpdate(refundId).orElseThrow();
+                    if (!refund.getPaymentId().equals(paymentId))
+                        throw new IllegalArgumentException("Refund does not belong to payment");
+                    if ((expected != null && payment.getStatus() != expected)
+                            || !cancelPending(payment)
+                            || (refund.getStatus() != PaymentRefundStatus.REQUESTED
+                                    && refund.getStatus() != PaymentRefundStatus.UNKNOWN)) {
                         return switch (refund.getStatus()) {
                             case COMPLETED -> "COMPLETED";
                             case FAILED -> "REJECTED";
@@ -296,9 +321,7 @@ public class PaymentTransactions {
                             registry.get(payment.getPayableType())
                                     .onRefunded(
                                             payment.getPayableId(),
-                                            new RefundContext(
-                                                    payment.getId(),
-                                                    PaymentRefundKind.COMPENSATION));
+                                            new RefundContext(payment.getId(), refund.getKind()));
                             yield "COMPLETED";
                         }
                         case PgCancelResult.Rejected rejected -> {
@@ -308,19 +331,152 @@ public class PaymentTransactions {
                                     now);
                             payment.revertCancel(now);
                             log.error(
-                                    "Payment compensation rejected paymentId={} refundId={}",
+                                    "Payment cancellation rejected paymentId={} refundId={} kind={}",
                                     payment.getId(),
-                                    refund.getId());
-                            meters.counter("payment.compensation.rejected").increment();
+                                    refund.getId(),
+                                    refund.getKind());
+                            meters.counter("payment.cancel.rejected", "kind", refund.getKind().name()).increment();
+                            if (refund.getKind() == PaymentRefundKind.COMPENSATION)
+                                meters.counter("payment.compensation.rejected").increment();
                             yield "REJECTED";
                         }
                         case PgCancelResult.Unknown unknown -> {
-                            refund.markUnknown(now);
-                            payment.markCancelUnknown(now);
+                            if (refund.getStatus() == PaymentRefundStatus.REQUESTED)
+                                refund.markUnknown(now);
+                            if (payment.getStatus() == PaymentStatus.CANCEL_PENDING)
+                                payment.markCancelUnknown(now);
+                            payment.recordReconciliationCheck(now);
                             yield "UNKNOWN";
                         }
                     };
                 });
+    }
+
+    private boolean cancelPending(Payment payment) {
+        return payment.getStatus() == PaymentStatus.CANCEL_PENDING
+                || payment.getStatus() == PaymentStatus.CANCEL_UNKNOWN;
+    }
+
+    Step reconcileApproval(
+            Long paymentId,
+            PaymentStatus expected,
+            PgQueryResult result,
+            java.time.Duration notFoundFinalAfter) {
+        return tx.execute(
+                ignored -> {
+                    Payment payment = payments.findByIdForUpdate(paymentId).orElseThrow();
+                    if (payment.getStatus() != expected || !approvalPending(payment))
+                        return current(payment);
+                    Instant now = clock.instant();
+                    payment.recordReconciliationCheck(now);
+                    return switch (result) {
+                        // Single conversion point: both confirm and reconciliation use the same
+                        // TX-B.
+                        case PgQueryResult.Approved approved ->
+                                applyApprovalLocked(
+                                        payment,
+                                        new PgApprovalResult.Approved(
+                                                approved.paymentKey(),
+                                                approved.pgOrderId(),
+                                                approved.approvedAmount(),
+                                                approved.approvedAt()));
+                        case PgQueryResult.NotApproved rejected ->
+                                applyApprovalLocked(
+                                        payment,
+                                        new PgApprovalResult.Rejected(
+                                                rejected.code(), rejected.message()));
+                        case PgQueryResult.NotFound ignoredResult -> {
+                            if (payment.getApprovalStartedAt() != null
+                                    && !now.isBefore(
+                                            payment.getApprovalStartedAt()
+                                                    .plus(notFoundFinalAfter))) {
+                                yield applyApprovalLocked(
+                                        payment,
+                                        new PgApprovalResult.Rejected(
+                                                "PG_NOT_FOUND",
+                                                "PG payment absent beyond final approval window"));
+                            }
+                            yield applyApprovalLocked(
+                                    payment,
+                                    new PgApprovalResult.Unknown("PG payment not found yet", null));
+                        }
+                        case PgQueryResult.Unknown unknown ->
+                                applyApprovalLocked(
+                                        payment,
+                                        new PgApprovalResult.Unknown("PG query unresolved", null));
+                        case PgQueryResult.Cancelled cancelled -> {
+                            anomaly(paymentId, "unexpected_cancelled");
+                            yield applyApprovalLocked(
+                                    payment,
+                                    new PgApprovalResult.Unknown(
+                                            "Unexpected external cancellation", null));
+                        }
+                        case PgQueryResult.InProgress progress -> current(payment);
+                    };
+                });
+    }
+
+    boolean expireReady(Long paymentId) {
+        return tx.execute(
+                ignored -> {
+                    Payment payment = payments.findByIdForUpdate(paymentId).orElseThrow();
+                    Instant now = clock.instant();
+                    if (payment.getStatus() != PaymentStatus.READY
+                            || payment.getExpiresAt() == null
+                            || !payment.getExpiresAt().isBefore(now)) return false;
+                    payment.fail("EXPIRED", "Payment approval deadline has passed", now);
+                    registry.get(payment.getPayableType())
+                            .onFailed(
+                                    payment.getPayableId(),
+                                    PaymentAttemptContext.notStarted(paymentId));
+                    return true;
+                });
+    }
+
+    /** Short locked read, committed before querying the PG; payment -> refund lock order. */
+    Cancellation cancellation(Long paymentId, PaymentStatus expected) {
+        return tx.execute(
+                ignored -> {
+                    Payment payment = payments.findByIdForUpdate(paymentId).orElseThrow();
+                    if (payment.getStatus() != expected || !cancelPending(payment)) return null;
+                    var refund = refunds.findPendingForUpdate(paymentId);
+                    if (refund.isEmpty()) {
+                        anomaly(paymentId, "missing_refund");
+                        return null;
+                    }
+                    var r = refund.get();
+                    return new Cancellation(
+                            paymentId,
+                            r.getId(),
+                            payment.getPaymentKey(),
+                            r.getReason(),
+                            r.getIdempotencyKey());
+                });
+    }
+
+    void recordCancelCheck(Long paymentId, PaymentStatus expected) {
+        tx.executeWithoutResult(
+                ignored -> {
+                    Payment payment = payments.findByIdForUpdate(paymentId).orElseThrow();
+                    if (payment.getStatus() == expected && cancelPending(payment))
+                        payment.recordReconciliationCheck(clock.instant());
+                });
+    }
+
+    private void anomaly(Long paymentId, String reason) {
+        log.error("Payment reconciliation anomaly paymentId={} reason={}", paymentId, reason);
+        meters.counter("payment.reconcile.anomaly", "reason", reason).increment();
+    }
+
+    record Cancellation(
+            Long paymentId,
+            Long refundId,
+            String paymentKey,
+            String reason,
+            String idempotencyKey) {
+        PgCancelCommand command() {
+            return new PgCancelCommand(paymentKey, reason, idempotencyKey);
+        }
     }
 
     private static Map<String, Object> pgCode(String code) {
