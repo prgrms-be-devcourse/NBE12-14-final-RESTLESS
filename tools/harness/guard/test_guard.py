@@ -54,6 +54,11 @@ cases = [
  ("HARNESS_EDIT", {"tool_name": "shell", "tool_input": {"command": "HARNESS_EDIT=1 bash .ai-output/harness/harness-check.sh"}}, (B, B, B)),
  ("hooksPath", {"tool_name": "shell", "tool_input": {"command": "git config core.hooksPath /tmp/x"}}, (B, B, B)),
  ("rm pre-commit hook", {"tool_name": "shell", "tool_input": {"command": "rm .git/hooks/pre-commit"}}, (B, B, B)),
+ ("edit drop agent instructions", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: backend/src/main/java/com/restless/drop/AGENTS.md\n@@\n-a\n+b")}}, (B, B, B)),
+ ("drop CLAUDE.md via shell", {"tool_name": "shell", "tool_input": {"command": "echo x > backend/src/main/java/com/restless/drop/CLAUDE.md"}}, (B, B, B)),
+ ("new memo at repo root", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Add File: readyToX.md\n+# memo")}}, (B, B, B)),
+ ("edit root README", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: README.md\n@@\n-a\n+b")}}, (0, 0, 0)),
+ ("new doc under docs", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Add File: docs/reports/EXP-01.md\n+# r")}}, (0, 0, 0)),
  ("outside repo", {"cwd": "/tmp", "tool_name": "shell", "tool_input": {"command": "git push"}}, (0, 0, 0)),
 ]
 idx = {"drop": 0, "harness": 1, "other": 2}[kind]

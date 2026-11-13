@@ -17,10 +17,13 @@ Rules (same as harness-check.sh checks 1-4, plus tamper protection)
   - Other domains (ticketing, fanmeeting, auction, concert, credit, coupon): no changes, on any branch.
   - Harness tooling (tools/harness) and local state (.ai-output/harness, .codex, .git/hooks, .claude):
     no changes, except stage reports .ai-output/harness/reports/<STAGE><n>-report.md (D3, P72, ...).
+  - Drop agent instructions (drop/AGENTS.md, drop/CLAUDE.md): same as tools/harness.
+  - No new .md at the repository root besides README/AGENTS/CLAUDE/CONTRIBUTING (AGENTS.md 7:
+    notes go to .ai-output/, shared docs to docs/). Any branch, agent or commit.
   - No `git commit --no-verify`, no `git push`, no HARNESS_EDIT override, no hooksPath change.
 
-Harness branches (chore/drop-*-harness) may change harness files, and may commit tools/harness.
-The Codex hook never lets an agent edit tools/harness, on any branch.
+Harness branches (chore/drop-*-harness) may change harness files, and may commit tools/harness
+and the drop agent instructions. The Codex hook never lets an agent edit those, on any branch.
 Every block is appended to .ai-output/harness/guard-blocks.log in the main checkout.
 """
 import datetime
@@ -41,7 +44,9 @@ PROTECTED = (
 )
 MIGRATIONS = "backend/src/main/resources/db/migration/"
 FOREIGN = re.compile(r"^backend/src/main/java/com/restless/(ticketing|fanmeeting|auction|concert|credit|coupon)/")
+AGENT_DOCS = ("backend/src/main/java/com/restless/drop/AGENTS.md", "backend/src/main/java/com/restless/drop/CLAUDE.md")
 # ---- End of domain settings. ----
+ROOT_DOCS = ("README.md", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md")  # the only .md files at the root
 HARNESS_TOOLS = "tools/harness/"  # versioned tooling: harness branches may commit it
 TOOLING = (HARNESS_TOOLS, ".ai-output/harness/", ".codex/", ".git/hooks/", ".claude/")
 # Codex writes its stage report here (codex-stage-spec.md step 3).
@@ -66,6 +71,7 @@ GUARDED_FRAGMENTS = (
     "tools/harness", ".ai-output/harness", ".codex/", ".git/hooks", "hooksPath",
     "restless/ticketing", "restless/fanmeeting", "restless/auction",
     "restless/concert", "restless/credit", "restless/coupon",
+    "drop/AGENTS.md", "drop/CLAUDE.md",
 )
 # Signs that a shell command writes files. Harmless redirects are stripped first.
 WRITES = re.compile(
@@ -118,6 +124,12 @@ def file_reason(path, op, removed, added, harness_branch, cwd=".", agent=True):
         return None
     if path.startswith(HARNESS_TOOLS) and harness_branch and not agent:
         return None
+    if path in AGENT_DOCS:
+        if harness_branch and not agent:
+            return None
+        return f"{path}: 드롭 지침 파일은 하네스 브랜치의 하네스 PR에서만 고칠 수 있음"
+    if op == "add" and "/" not in path and path.endswith(".md") and path not in ROOT_DOCS:
+        return f"{path}: 레포 루트에 새 .md 금지. 메모·보고서는 .ai-output/, 팀 문서는 docs/에 둘 것 (AGENTS.md 7절)"
     if path.startswith(TOOLING) or "/.git/hooks/" in path:
         return f"{path}: 하네스 도구·가드 파일은 수정할 수 없음"
     if FOREIGN.match(path):
