@@ -15,6 +15,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -87,6 +88,9 @@ class TicketReservationMappingTest {
         assertThat(loaded.getOrderId()).isNull();
         assertThat(loaded.getCheckoutStartedAt()).isNull();
         assertThat(loaded.getPaymentExpiresAt()).isNull();
+        assertThat(loaded.getCurrentPaymentId()).isNull();
+        assertThat(loaded.getApprovalStartedAt()).isNull();
+        assertThat(loaded.isPaymentResultPending()).isFalse();
         var reservations = entityManager.createQuery("""
                 select r from TicketReservation r
                 where r.userId = :userId and r.requestKey = :requestKey
@@ -181,6 +185,58 @@ class TicketReservationMappingTest {
                 .hasStackTraceContaining("fk_ticket_reservations_order");
     }
 
+    @Test
+    @DisplayName("수락한 결제 시도 ID·원래 UTC 시작 시각·미확정 여부를 다시 조회한다")
+    void reloadsAcceptedPaymentAttempt() {
+        TicketReservation reservation = persistReservation(userId, performanceId, "approval-attempt");
+        Long orderId = createOrderFixture();
+        reservation.startCheckout(orderId, NOW.plusSeconds(60), NOW.plusSeconds(360));
+        Instant attemptAt = NOW.plusSeconds(120);
+        assertThat(reservation.startApproval(9001L, attemptAt, attemptAt.plusSeconds(1))).isTrue();
+        entityManager.flush();
+        entityManager.clear();
+
+        TicketReservation loaded = entityManager.find(TicketReservation.class, reservation.getId());
+        assertThat(loaded.matchesPaymentAttempt(9001L, attemptAt)).isTrue();
+        assertThat(loaded.isPaymentResultPending()).isTrue();
+        assertThat(loaded.getStatus()).isEqualTo(TicketReservationStatus.PAYMENT_PENDING);
+        assertThat(loaded.getCheckoutStartedAt()).isEqualTo(NOW.plusSeconds(60));
+        assertThat(loaded.getPaymentExpiresAt()).isEqualTo(NOW.plusSeconds(360));
+    }
+
+    @Test
+    @DisplayName("같은 결제 시도를 두 예약에 현재 시도로 중복 연결할 수 없다")
+    void rejectsPaymentAttemptOwnedByAnotherReservation() {
+        TicketReservation first = persistReservation(userId, performanceId, "approval-first");
+        TicketReservation second = persistReservation(userId, performanceId, "approval-second");
+        first.startCheckout(createOrderFixture(), NOW.plusSeconds(60), NOW.plusSeconds(360));
+        second.startCheckout(createOrderFixture(), NOW.plusSeconds(60), NOW.plusSeconds(360));
+        first.startApproval(9001L, NOW.plusSeconds(120), NOW.plusSeconds(121));
+        entityManager.flush();
+        second.startApproval(9001L, NOW.plusSeconds(120), NOW.plusSeconds(121));
+        assertThatThrownBy(entityManager::flush).isInstanceOf(PersistenceException.class)
+                .hasStackTraceContaining("uk_ticket_reservations_current_payment");
+    }
+
+    @ParameterizedTest(name = "{displayName} [{index}] {arguments}")
+    @ValueSource(strings = {
+            "current_payment_id = 9001",
+            "approval_started_at = '2026-11-12 01:04:03.123456'",
+            "payment_result_pending = 1",
+            "current_payment_id = 9001, approval_started_at = '2026-11-12 01:08:03.123456'"
+    })
+    @DisplayName("DB는 시도 필드의 부분 저장과 최초 결제 기한 정각의 시도 기록을 거절한다")
+    void rejectsInconsistentPaymentAttempt(String fields) {
+        TicketReservation reservation = persistReservation(userId, performanceId, "invalid-attempt");
+        reservation.startCheckout(createOrderFixture(), NOW.plusSeconds(60), NOW.plusSeconds(360));
+        entityManager.flush();
+        assertThatThrownBy(() -> entityManager.createNativeQuery(
+                "UPDATE ticket_reservations SET " + fields + " WHERE id = :id")
+                .setParameter("id", reservation.getId()).executeUpdate())
+                .isInstanceOf(PersistenceException.class)
+                .hasStackTraceContaining("ck_ticket_reservations_payment_attempt");
+    }
+
     private Long persistMember(String email) {
         Member member = Member.register(email, "test-hash", "User", NOW);
         entityManager.persist(member);
@@ -208,15 +264,14 @@ class TicketReservationMappingTest {
         return hash;
     }
 
-    // 주문 생성·checkout 상태 전이는 아직 미구현이다. 읽기 검증용 상태만 SQL로 준비한다.
+    // 공통 주문 fixture만 SQL로 준비하고 예약 전이는 검증 목적에 따라 엔티티 메서드 또는 SQL을 사용한다.
     private Long createOrderFixture() {
         entityManager.createNativeQuery("""
                 INSERT INTO orders (user_id, order_type, status, total_amount, created_at, updated_at)
                 VALUES (:userId, 'TICKET', 'PENDING_PAYMENT', 100000,
                         '2026-11-12 01:02:03.123456', '2026-11-12 01:02:03.123456')
                 """).setParameter("userId", userId).executeUpdate();
-        return ((Number) entityManager.createNativeQuery("SELECT id FROM orders WHERE user_id = :userId")
-                .setParameter("userId", userId).getSingleResult()).longValue();
+        return ((Number) entityManager.createNativeQuery("SELECT LAST_INSERT_ID()").getSingleResult()).longValue();
     }
 
     private void setCheckoutFixture(Long reservationId, Long orderId, TicketReservationStatus status) {

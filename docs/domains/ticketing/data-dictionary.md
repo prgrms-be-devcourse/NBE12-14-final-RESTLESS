@@ -172,6 +172,9 @@
 | `hold_expires_at` | 최초 선점 기한 | 선점부터 5분. 결제 진입 이후 이 값만으로 반환 판단 금지 |
 | `checkout_started_at` | 최초 결제 진입 시각 | NULL 가능. 중복 진입으로 갱신하지 않음 |
 | `payment_expires_at` | 별도 결제 기한 | NULL 가능. 최초 결제 진입부터 5분, 승인 시도 기록의 기한 |
+| `current_payment_id` | 예약이 승인 시작을 받아들인 마지막 결제 시도 ID | NULL 허용 UNIQUE, payments.id 스칼라 문맥. 물리 FK 없음. 종료 후에도 대조용 보존 |
+| `approval_started_at` | 수락한 시도의 공통 승인 시작 시각 | NULL 가능. PaymentAttemptContext 원래 시각 보존, checkout 이상·결제 기한 미만 |
+| `payment_result_pending` | 수락한 시도 결과·필요한 보상 취소 미확정 여부 | NOT NULL, 기본 false. 아직 승인 시작을 수락하지 않았다면 false |
 | `created_at` | 예약 생성 시각 | 최초 선점 성공 시 기록 |
 
 ## 10. seat_holds — 좌석별 선점 이력
@@ -185,7 +188,7 @@
 | `performance_id` | 회차 ID | 예약·판매 좌석의 회차와 같아야 함 |
 | `performance_seat_id` | 선점한 판매 좌석 ID | performance_seats.id |
 | `price_amount` | 선점 당시 좌석 가격 | 원 단위 스냅샷, 0 이상 |
-| `expires_at` | 선점 기록의 만료 시각 | 예약·승인 상태와 함께 판단. 결제 진입 후 이 값의 갱신/동기화 세부는 후속 구현에서 명시 |
+| `expires_at` | 선점 기록의 만료 시각 | 예약·승인 상태와 함께 판단. checkout에서 변경하지 않음. 결제 진입 후 별도 payment_expires_at으로 판단 |
 | `status` | 선점 이력 상태 | HELD, CONFIRMED, RELEASED |
 | `created_at` | 선점 기록 생성 시각 | 이력 추적 |
 | `released_at` | 선점 해제 시각 | NULL 가능. 환불 후 CONFIRMED 이력은 보존 |
@@ -202,7 +205,7 @@
 | `performance_seat_id` | 티켓의 판매 좌석 ID | performance_seats.id |
 | `ticket_no` | 사용자에게 제공하는 고유 티켓번호 | UUID v4 문자열로 발급하는 정책. VARCHAR(50), UNIQUE. 내부 PK와 다름 |
 | `price_amount` | 티켓에 기록한 좌석 금액 | 원 단위, 0 이상. 할인·결제 금액 배분 방식은 후속 조율 |
-| `status` | 티켓 상태 | 발급·사용·취소 등의 허용 상태값과 전이는 후속 정의 |
+| `status` | 티켓 상태 | 발급 직후 ISSUED 확정(2026-11-13). 입장 사용·취소의 상태 전이는 후속 정의 |
 | `issued_at` | 티켓 발급 시각 | 예매 확정 트랜잭션에서 기록 |
 | `used_at` | 티켓 사용 처리 시각 | NULL 가능. 입장 처리 기능은 별도 설계 |
 | `cancelled_at` | 티켓 취소 시각 | NULL 가능. 환불 확정 후 취소 반영 |
@@ -246,3 +249,5 @@
 - [현재 좌석 소유권](seat-ownership.md), [구매 제한·수량](purchase-limit.md)
 - [결제 트랜잭션](transactions.md), [PaymentResultHandler](payment-handler.md), [만료](expiration.md)
 - [티켓 발급](ticket-issuance.md), [MVP 중복 요청 방지와 후속 멱등성 설계](idempotency.md)
+
+승인 시도 저장 기반은 `V20261113_1500__ticketing_record_accepted_payment_attempt.sql`로 추가했다. Handler·승인 결과·결제 이후 만료 연결은 아직 다음 단계다. 상세는 [결제 Handler 문서](payment-handler.md)를 따른다.
