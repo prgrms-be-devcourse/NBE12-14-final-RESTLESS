@@ -8,7 +8,7 @@ CODE = "backend/src/main/java/com/restless/drop/domain/Drop.java"
 HEAD = "# T\n\n> 관련 코드: `backend/src/main/java/com/restless/drop/domain/`\n>\n> 마지막 확인: 2026-11-13\n\n"
 
 
-def run(files, commits=()):
+def run(files, commits=(), extra=()):
     """files: {path: text} committed on 2026-11-13. commits: [(date, {path: text})] after it."""
     with tempfile.TemporaryDirectory() as d:
         def commit(date, fs):
@@ -23,7 +23,7 @@ def run(files, commits=()):
         commit("2026-11-13", {CODE: "class Drop {}", **files})
         for date, fs in commits:
             commit(date, fs)
-        r = subprocess.run(["python3", DC, d], capture_output=True, text=True)
+        r = subprocess.run(["python3", DC, d, *extra], capture_output=True, text=True)
         return r.returncode, r.stdout
 
 
@@ -37,8 +37,10 @@ cases = [
      {"docs/domains/drop/a.md": HEAD + "`backend/src/main/java/com/restless/drop/Gone.java`"}, (), 1, "Gone.java"),
     ("notion attachment in owned doc fails",
      {"docs/domains/drop/a.md": HEAD + "![e](attachment:abc:x.png)"}, (), 1, "노션 첨부"),
-    ("other owner's broken link only warns",
-     {"docs/domains/ticketing/a.md": "# T\n[x](missing.md)"}, (), 0, "다른 담당 문서의 깨진 링크 1건"),
+    ("other owner's broken link is ignored by default",
+     {"docs/domains/drop/a.md": HEAD, "docs/domains/ticketing/a.md": "# T\n[x](missing.md)"}, (), 0, "warnings 0"),
+    ("--all lists other owner's broken link as a warning",
+     {"docs/domains/drop/a.md": HEAD, "docs/domains/ticketing/a.md": "# T\n[x](missing.md)"}, (), 0, "다른 담당 문서의 깨진 링크 1건", ["--all"]),
     ("fenced code block is not checked",
      {"docs/domains/drop/a.md": HEAD + "```\n[x](missing.md) `docs/nope.md`\n```\n"}, (), 0, "DOC-CHECK: PASS"),
     ("placeholders and globs in code paths are skipped",
@@ -67,8 +69,8 @@ cases = [
       ("2026-11-21", {"backend/src/main/resources/db/migration/V2__ticketing_a.sql": "y"})], 0, "2026-11-20에 바뀜"),
 ]
 bad = 0
-for name, files, commits, want_code, want_text in cases:
-    code, out = run(files, commits)
+for name, files, commits, want_code, want_text, *extra in cases:
+    code, out = run(files, commits, extra[0] if extra else ())
     ok = code == want_code and want_text in out
     bad += not ok
     print(("OK  " if ok else "BAD ") + name + ("" if ok else f"\n    exit={code} want={want_code}\n    " + out.replace("\n", "\n    ")))

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Doc check: finds documents that no longer match the repository.
 
-Usage: python3 tools/harness/doc-check.py [repo-root] [--verbose]
+Usage: python3 tools/harness/doc-check.py [repo-root] [--all]
 Prints FAIL:/WARN: lines, then "DOC-CHECK: PASS|FAIL". Exit 1 when anything fails.
 harness-check.sh runs it and turns the lines into its own FAIL/WARN.
 
@@ -17,8 +17,9 @@ Checks
      When git shows a commit touching a related path after that date, it warns: compare the doc
      with the code, fix what differs, and move the date.
 
-Owned docs fail; everyone else's docs only warn, summarized in one line. A teammate's broken
-link must not fail a drop stage, and the drop owner should not edit other owners' docs.
+Only owned (drop) docs are checked, and their problems fail. Other owners' docs are not the
+harness's business: a teammate's broken link must not fail or clutter a drop stage. --all also
+lists their broken links as warnings, for an occasional look.
 """
 import glob
 import os
@@ -140,7 +141,7 @@ def freshness(root, doc):
 
 
 def main(argv):
-    verbose = "--verbose" in argv
+    show_all = "--all" in argv
     args = [a for a in argv if not a.startswith("--")]
     root = os.path.realpath(args[0] if args else
                             subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
@@ -152,6 +153,8 @@ def main(argv):
         print("DOC-CHECK: FAIL (fails 1, warnings 0)")
         return 1
     for doc in docs:
+        if not owned(doc) and not show_all:
+            continue
         bad = broken_links(root, doc)
         if bad and owned(doc):
             fails += [f"{doc}: 깨진 링크 {b}" for b in bad]
@@ -164,9 +167,8 @@ def main(argv):
     if foreign:
         total = sum(len(v) for v in foreign.values())
         where = ", ".join(f"{d}({len(v)})" for d, v in foreign.items())
-        warns.append(f"다른 담당 문서의 깨진 링크 {total}건: {where} (목록: doc-check.py --verbose)")
-        if verbose:
-            warns += [f"  {d}: {b}" for d, v in foreign.items() for b in v]
+        warns.append(f"다른 담당 문서의 깨진 링크 {total}건: {where}")
+        warns += [f"  {d}: {b}" for d, v in foreign.items() for b in v]
     for w in warns:
         print(f"WARN: {w}")
     for f in fails:

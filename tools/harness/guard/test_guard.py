@@ -57,6 +57,7 @@ cases = [
  ("edit drop agent instructions", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: backend/src/main/java/com/restless/drop/AGENTS.md\n@@\n-a\n+b")}}, (B, B, B)),
  ("drop CLAUDE.md via shell", {"tool_name": "shell", "tool_input": {"command": "echo x > backend/src/main/java/com/restless/drop/CLAUDE.md"}}, (B, B, B)),
  ("new memo at repo root", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Add File: readyToX.md\n+# memo")}}, (B, B, B)),
+ ("design doc at repo root", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Add File: DESIGN.md\n+# d")}}, (0, 0, 0)),
  ("edit root README", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: README.md\n@@\n-a\n+b")}}, (0, 0, 0)),
  ("new doc under docs", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Add File: docs/reports/EXP-01.md\n+# r")}}, (0, 0, 0)),
  ("outside repo", {"cwd": "/tmp", "tool_name": "shell", "tool_input": {"command": "git push"}}, (0, 0, 0)),

@@ -17,8 +17,8 @@ Rules (same as harness-check.sh checks 1-4, plus tamper protection)
   - Other domains (ticketing, fanmeeting, auction, concert, credit, coupon): no changes, on any branch.
   - Harness tooling (tools/harness) and local state (.ai-output/harness, .codex, .git/hooks, .claude):
     no changes, except stage reports .ai-output/harness/reports/<STAGE><n>-report.md (D3, P72, ...).
-  - Drop agent instructions (drop/AGENTS.md, drop/CLAUDE.md): same as tools/harness.
-  - No new .md at the repository root besides README/AGENTS/CLAUDE/CONTRIBUTING (AGENTS.md 7:
+  - Drop agent instructions (drop/AGENTS.md, drop/CLAUDE.md, git-ignored personal files): agents never edit them.
+  - No new .md at the repository root besides README/AGENTS/CLAUDE/CONTRIBUTING/DESIGN/PRODUCT (AGENTS.md 7:
     notes go to .ai-output/, shared docs to docs/). Any branch, agent or commit.
   - No `git commit --no-verify`, no `git push`, no HARNESS_EDIT override, no hooksPath change.
 
@@ -46,7 +46,8 @@ MIGRATIONS = "backend/src/main/resources/db/migration/"
 FOREIGN = re.compile(r"^backend/src/main/java/com/restless/(ticketing|fanmeeting|auction|concert|credit|coupon)/")
 AGENT_DOCS = ("backend/src/main/java/com/restless/drop/AGENTS.md", "backend/src/main/java/com/restless/drop/CLAUDE.md")
 # ---- End of domain settings. ----
-ROOT_DOCS = ("README.md", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md")  # the only .md files at the root
+# The only .md files allowed at the root. DESIGN.md / PRODUCT.md: shared design docs the design tool keeps there.
+ROOT_DOCS = ("README.md", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "DESIGN.md", "PRODUCT.md")
 HARNESS_TOOLS = "tools/harness/"  # versioned tooling: harness branches may commit it
 TOOLING = (HARNESS_TOOLS, ".ai-output/harness/", ".codex/", ".git/hooks/", ".claude/")
 # Codex writes its stage report here (codex-stage-spec.md step 3).
