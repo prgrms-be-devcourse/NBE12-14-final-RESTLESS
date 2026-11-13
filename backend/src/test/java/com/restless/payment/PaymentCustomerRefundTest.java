@@ -131,7 +131,7 @@ class PaymentCustomerRefundTest {
         assertThat(handler.refunded)
                 .containsExactly(
                         new RefundContext(p.paymentId(), PaymentRefundKind.CUSTOMER_REFUND));
-        assertThat(pg.lastCancel.idempotencyKey()).isEqualTo("one");
+        assertThat(pg.lastCancel.idempotencyKey()).isEqualTo(row().getIdempotencyKey());
         assertThat(pg.lastCancel.reason()).isEqualTo("단순 변심");
         assertThat(pg.txSeen).isFalse();
         assertThat(count("payment.refund", "completed")).isEqualTo(before + 1);
@@ -143,7 +143,7 @@ class PaymentCustomerRefundTest {
     void requestingHandlerRejectsWithoutPgOrRefundRow() {
         var p = approved(1);
         handler.refundDecision = ApprovalDecision.reject("AFTER_CONCERT");
-        double before = count("payment.refund", "not_refundable");
+        double before = count("payment.refund.request", "not_refundable");
         assertThatThrownBy(() -> refund(p, "one"))
                 .isInstanceOfSatisfying(
                         BusinessException.class,
@@ -159,7 +159,7 @@ class PaymentCustomerRefundTest {
                         jdbc.queryForObject(
                                 "SELECT COUNT(*) FROM test_refund_handler_effects", Long.class))
                 .isZero();
-        assertThat(count("payment.refund", "not_refundable")).isEqualTo(before + 1);
+        assertThat(count("payment.refund.request", "not_refundable")).isEqualTo(before + 1);
     }
 
     @Test
@@ -221,7 +221,7 @@ class PaymentCustomerRefundTest {
         reconciler.runOnce();
         assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.CANCELLED);
         assertThat(row().getStatus()).isEqualTo(PaymentRefundStatus.COMPLETED);
-        assertThat(pg.lastCancel.idempotencyKey()).isEqualTo("one");
+        assertThat(pg.lastCancel.idempotencyKey()).isEqualTo(row().getIdempotencyKey());
         assertThat(handler.refunded).hasSize(1);
         assertThat(handler.refunded.getFirst().kind()).isEqualTo(PaymentRefundKind.CUSTOMER_REFUND);
     }
@@ -240,7 +240,7 @@ class PaymentCustomerRefundTest {
         pg.cancelMode = "REJECTED";
         clock.now = NOW.plusSeconds(31);
         reconciler.runOnce();
-        assertThat(pg.lastCancel.idempotencyKey()).isEqualTo("one");
+        assertThat(pg.lastCancel.idempotencyKey()).isEqualTo(row().getIdempotencyKey());
         assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.APPROVED);
         assertThat(row().getStatus()).isEqualTo(PaymentRefundStatus.FAILED);
         assertThat(handler.rejected)
@@ -251,9 +251,13 @@ class PaymentCustomerRefundTest {
     @Test
     void sameKeyReplaysSameRefundWithoutPg() {
         var p = approved(1);
+        double requested = count("payment.refund", "requested");
+        double completed = count("payment.refund", "completed");
         var first = refund(p, "one");
         var second = refund(p, "one");
         assertThat(second).isEqualTo(first);
+        assertThat(count("payment.refund", "requested")).isEqualTo(requested + 1);
+        assertThat(count("payment.refund", "completed")).isEqualTo(completed + 1);
         assertThat(pg.cancels.get()).isEqualTo(1);
         assertThat(handler.events).containsExactly("requesting", "refunded");
     }
@@ -313,33 +317,58 @@ class PaymentCustomerRefundTest {
     }
 
     @Test
-    void globalKeyConflictAcrossPaymentsRollsBackLosingRequest() throws Exception {
+    void sameClientKeyAcrossPaymentsIsIndependentEvenConcurrently() throws Exception {
         var p = approved(1);
         var other = approved(2);
-        var codes =
-                parallel(
-                        2,
-                        i -> {
-                            try {
-                                refund(i == 0 ? p : other, "global");
-                                return "OK";
-                            } catch (BusinessException e) {
-                                return e.getErrorCode().name();
-                            }
-                        });
-        assertThat(codes).containsExactlyInAnyOrder("OK", "PAYMENT_REFUND_KEY_CONFLICT");
-        assertThat(refunds.count()).isEqualTo(1);
-        assertThat(pg.cancels.get()).isEqualTo(1);
-        assertThat(
-                        jdbc.queryForObject(
-                                "SELECT COUNT(*) FROM test_refund_handler_effects WHERE"
-                                        + " stage='requesting'",
-                                Long.class))
-                .isEqualTo(1);
+        var results = parallel(2, i -> refund(i == 0 ? p : other, "shared"));
+        assertThat(results)
+                .extracting(RefundPaymentResult::status)
+                .containsOnly(PaymentRefundStatus.COMPLETED);
+        assertThat(results).extracting(RefundPaymentResult::refundId).doesNotHaveDuplicates();
+        assertThat(refunds.count()).isEqualTo(2);
+        assertThat(pg.cancels.get()).isEqualTo(2);
+        assertThat(refunds.findAll())
+                .extracting(PaymentRefund::getIdempotencyKey)
+                .doesNotHaveDuplicates()
+                .doesNotContain("shared");
     }
 
     @Test
-    void statesOwnershipAndGlobalKeyAreChecked() {
+    void anotherOwnersClientKeyAndCompensationFormatDoNotConflict() {
+        var p = approved(1);
+        var rejected = ready(3);
+        var collision = "compensation-" + rejected.paymentId();
+        refund(p, collision);
+        var other = approved(2);
+        jdbc.update(
+                "INSERT INTO users (email,password_hash,nickname,role,status,created_at,updated_at)"
+                    + " VALUES (?,'hash','other','USER','ACTIVE',?,?)",
+                UUID.randomUUID() + "@refund.test",
+                java.sql.Timestamp.from(NOW),
+                java.sql.Timestamp.from(NOW));
+        Long otherUser = jdbc.queryForObject("SELECT MAX(id) FROM users", Long.class);
+        jdbc.update("UPDATE payments SET user_id=? WHERE id=?", otherUser, other.paymentId());
+        assertThat(
+                        service.refund(
+                                        new RefundPaymentCommand(
+                                                otherUser, other.paymentId(), collision, "reason"))
+                                .status())
+                .isEqualTo(PaymentRefundStatus.COMPLETED);
+        // A real compensation is still able to reserve the exact key the customer supplied.
+        handler.approvedDecision = ApprovalDecision.reject("cannot fulfill");
+        error(
+                () ->
+                        paymentsService.confirm(
+                                new ConfirmPaymentCommand(
+                                        user, "comp-key", rejected.pgOrderId(), 39000)),
+                ErrorCode.PAYMENT_REJECTED);
+        assertThat(refunds.findAll())
+                .filteredOn(r -> r.getKind() == PaymentRefundKind.CUSTOMER_REFUND)
+                .allSatisfy(r -> assertThat(r.getIdempotencyKey()).startsWith("refund-"));
+    }
+
+    @Test
+    void statesAndOwnershipAreChecked() {
         var p = ready(1);
         error(() -> refund(p, "one"), ErrorCode.PAYMENT_NOT_REFUNDABLE);
         new TransactionTemplate(tm)
@@ -353,7 +382,6 @@ class PaymentCustomerRefundTest {
         refund(paid, "used");
         error(() -> refund(paid, "new"), ErrorCode.PAYMENT_ALREADY_REFUNDED);
         var other = approved(3);
-        error(() -> refund(other, "used"), ErrorCode.PAYMENT_REFUND_KEY_CONFLICT);
         error(
                 () ->
                         service.refund(
@@ -576,13 +604,54 @@ class PaymentCustomerRefundTest {
                 assertThat(second.get(15, TimeUnit.SECONDS).status())
                         .isEqualTo(PaymentRefundStatus.COMPLETED);
                 assertThat(pg.cancels.get()).isEqualTo(2);
-                assertThat(pg.lastCancel.idempotencyKey()).isEqualTo("new");
+                assertThat(pg.lastCancel.idempotencyKey()).isEqualTo(row().getIdempotencyKey());
                 assertThat(handler.refunded).hasSize(1);
             } finally {
                 releaseFirst.countDown();
                 releaseSecond.countDown();
             }
         }
+    }
+
+    @Test
+    void unknownAndReconciledCompletionCountOncePerCommittedTransition() {
+        var p = approved(1);
+        double requested = count("payment.refund", "requested"),
+                unknown = count("payment.refund", "unknown"),
+                completed = count("payment.refund", "completed");
+        pg.cancelMode = "UNKNOWN";
+        refund(p, "metric");
+        refund(p, "metric");
+        assertThat(count("payment.refund", "requested")).isEqualTo(requested + 1);
+        assertThat(count("payment.refund", "unknown")).isEqualTo(unknown + 1);
+        clock.now = NOW.plusSeconds(11);
+        reconciler.runOnce();
+        assertThat(count("payment.refund", "unknown")).isEqualTo(unknown + 1);
+        pg.cancelMode = "COMPLETED";
+        clock.now = NOW.plusSeconds(22);
+        reconciler.runOnce();
+        refund(p, "metric");
+        assertThat(count("payment.refund", "completed")).isEqualTo(completed + 1);
+        assertThat(count("payment.refund", "requested")).isEqualTo(requested + 1);
+    }
+
+    @Test
+    void rolledBackCompletionAndRejectedReplaysDoNotInflateCounts() {
+        var p = approved(1);
+        double completed = count("payment.refund", "completed"),
+                rejected = count("payment.refund", "rejected");
+        handler.throwRefunded = true;
+        refund(p, "rollback");
+        assertThat(count("payment.refund", "completed")).isEqualTo(completed);
+        handler.throwRefunded = false;
+        clock.now = NOW.plusSeconds(31);
+        reconciler.runOnce();
+        assertThat(count("payment.refund", "completed")).isEqualTo(completed + 1);
+        var other = approved(2);
+        pg.cancelMode = "REJECTED";
+        error(() -> refund(other, "reject"), ErrorCode.PAYMENT_REFUND_REJECTED);
+        error(() -> refund(other, "reject"), ErrorCode.PAYMENT_REFUND_REJECTED);
+        assertThat(count("payment.refund", "rejected")).isEqualTo(rejected + 1);
     }
 
     String url(PreparePaymentResult p) {

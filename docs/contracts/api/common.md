@@ -250,7 +250,9 @@ FAILED는 409 `PAYMENT_FAILED`, 취소 계열은 409 `PAYMENT_NOT_PAYABLE`이다
 
 결제 잠금 후 같은 키의 환불을 먼저 확인한다. 같은 결제·같은 키는 기존 refundId와 현재 결과를 반환하고 PG를 다시 호출하지 않는다.
 FAILED 환불의 같은 키도 409와 저장된 PG 거절 코드를 재현한다. 같은 키의 reason을 달리 보내도 기존 요청을 반환하며 사유를 바꾸지 않는다.
-다른 결제에 사용된 키는 `PAYMENT_REFUND_KEY_CONFLICT`다. 키는 결제별이 아니라 환불 테이블 전체에서 유일하다.
+클라이언트 키의 범위는 **결제별 손님 환불**이다. 다른 결제나 다른 회원이 같은 키를 사용해도 서로 영향을 주지 않고 기존 키의 존재를 노출하지 않는다.
+클라이언트 키는 `client_key`에 저장한다. PG 취소에는 별도로 서버가 생성한 `refund-{UUID}` 키를 저장해 사용하며 보상 취소의 `compensation-{paymentId}` 키와 구분한다.
+기존 환불의 PG 키는 변경하지 않고 새 `client_key`에 기존 값을 복사하므로 기존 요청 재현과 진행 중 취소 재시도도 유지된다.
 
 새 키는 APPROVED 결제에서만 허용한다. 도메인 Handler의 `onRefundRequesting(CUSTOMER_REFUND)`이 환불 가능 조건을 판단하고
 환불 대기 상태로 바꾼다. 기본 구현은 `REFUND_NOT_SUPPORTED`로 거절한다. 수락한 도메인은 필요 시 `onRefundRejected`도 구현해
@@ -262,7 +264,11 @@ Handler 업무 거절은 요청 트랜잭션 전체를 롤백하므로 결제 AP
 결과 반영 Handler의 기술 예외는 결제·환불·도메인 변경을 함께 롤백하고 202로 반환한다. 대사가 같은 저장 키로 복구한다.
 PG의 명시적 거절로 FAILED가 된 경우에는 새 키로 다시 요청할 수 있다. 완료된 환불은 다른 키로 중복 요청할 수 없다.
 
-관측: `payment.refund{result=completed|rejected|unknown|not_refundable}`는 API/서비스 응답 결과를 기록한다(REQUESTED는 unknown 분류).
+관측: `payment.refund{result=requested|completed|rejected|unknown}`는 **커밋된 손님 환불 상태 전이**를 센다.
+신규 환불 건수는 `result=requested`, 완료 건수는 `result=completed`로 조회한다. 같은 키 재요청·중복 결과는 늘리지 않는다.
+`unknown`은 REQUESTED → UNKNOWN 최초 전이만 세며, 대사 완료/거절도 동일하게 집계한다. 롤백은 집계하지 않는다.
+API 응답 횟수(멱등 재요청 포함)는 `payment.refund.request{result=completed|rejected|unknown|not_refundable}`로 분리했다(REQUESTED 응답은 unknown 분류).
+프로세스 재시작·메트릭 전송 장애로 카운터가 유실될 수 있으므로 회계상 정본은 DB이며 상태별 카운터를 합산해 환불 총수로 쓰지 않는다.
 `payment.pg.cancel{kind=CUSTOMER_REFUND|COMPENSATION}` Timer는 손님 환불·보상 취소·대사의 실제 PG 취소 호출을 모두 측정한다.
 
 ### 결제 오류
@@ -285,7 +291,6 @@ PG의 명시적 거절로 FAILED가 된 경우에는 새 키로 다시 요청할
 | 409 | `PAYMENT_REFUND_IN_PROGRESS` | 다른 키의 CANCEL_PENDING/CANCEL_UNKNOWN 환불 또는 충돌 복구 중 |
 | 409 | `PAYMENT_ALREADY_REFUNDED` | 새 키로 CANCELLED 결제 환불 요청 |
 | 409 | `PAYMENT_REFUND_REJECTED` | PG 취소 최종 거절 또는 FAILED 키 재요청. `details.code` |
-| 409 | `PAYMENT_REFUND_KEY_CONFLICT` | 같은 멱등 키를 다른 결제의 환불에 사용 |
 
 도메인 구매 확정은 같은 트랜잭션의 Handler가 담당한다([ADR-0003](../../decisions/0003-payment-module-boundary.md)).
 티켓팅의 주문·예매 확정 경계는 [티켓팅 트랜잭션 설계](../../domains/ticketing/transactions.md)를 따른다.

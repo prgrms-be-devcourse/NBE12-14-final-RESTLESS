@@ -8,14 +8,17 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 
 @Entity
 @Table(name = "payment_refunds")
@@ -43,6 +46,10 @@ public class PaymentRefund {
     @Column(length = 64)
     private String idempotencyKey;
 
+    /** Client replay scope is payment + kind. This value is never sent to the PG. */
+    @Column(length = 64)
+    private String clientKey;
+
     @Column(length = 64)
     private String cancelTransactionKey;
 
@@ -64,18 +71,40 @@ public class PaymentRefund {
     @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
     private Instant updatedAt;
 
-    public static PaymentRefund request(Long paymentId, PaymentRefundKind kind, long amount, String idempotencyKey,
-                                        String reason, Instant now) {
+    public static PaymentRefund request(
+            Long paymentId,
+            PaymentRefundKind kind,
+            long amount,
+            String idempotencyKey,
+            String reason,
+            Instant now) {
         PaymentRefund refund = new PaymentRefund();
         refund.paymentId = Objects.requireNonNull(paymentId);
         refund.kind = Objects.requireNonNull(kind);
         if (amount <= 0) throw new IllegalArgumentException("refund amount must be positive");
         refund.amount = amount;
         refund.idempotencyKey = Objects.requireNonNull(idempotencyKey);
+        // Compatibility for existing callers/rows: their stored PG key was the client key.
+        refund.clientKey = kind == PaymentRefundKind.CUSTOMER_REFUND ? idempotencyKey : null;
         refund.reason = Objects.requireNonNull(reason);
         refund.status = PaymentRefundStatus.REQUESTED;
         refund.requestedAt = Objects.requireNonNull(now);
         refund.updatedAt = now;
+        return refund;
+    }
+
+    /** Customer replay key and globally unique, immutable provider key have separate namespaces. */
+    public static PaymentRefund requestCustomer(
+            Long paymentId, long amount, String clientKey, String reason, Instant now) {
+        PaymentRefund refund =
+                request(
+                        paymentId,
+                        PaymentRefundKind.CUSTOMER_REFUND,
+                        amount,
+                        "refund-" + UUID.randomUUID().toString().replace("-", ""),
+                        reason,
+                        now);
+        refund.clientKey = Objects.requireNonNull(clientKey);
         return refund;
     }
 
@@ -86,7 +115,9 @@ public class PaymentRefund {
         completedAt = now;
     }
 
-    public void markUnknown(Instant now) { transition(PaymentRefundStatus.UNKNOWN, now); }
+    public void markUnknown(Instant now) {
+        transition(PaymentRefundStatus.UNKNOWN, now);
+    }
 
     /** Call only after the PG confirms cancellation failure. */
     public void fail(String code, String message, Instant now) {
@@ -98,7 +129,8 @@ public class PaymentRefund {
     private void transition(PaymentRefundStatus target, Instant now) {
         Objects.requireNonNull(now);
         if (!status.canTransitionTo(target)) {
-            throw new IllegalStateException("Invalid refund transition: " + status + " -> " + target);
+            throw new IllegalStateException(
+                    "Invalid refund transition: " + status + " -> " + target);
         }
         status = target;
         updatedAt = now;

@@ -82,7 +82,7 @@ public class PaymentRefundService {
             return response(step.refundId());
         } catch (BusinessException error) {
             if (error.getErrorCode() == ErrorCode.PAYMENT_NOT_REFUNDABLE)
-                meters.counter("payment.refund", "result", "not_refundable").increment();
+                meters.counter("payment.refund.request", "result", "not_refundable").increment();
             throw error;
         }
     }
@@ -91,11 +91,11 @@ public class PaymentRefundService {
         var refund = refunds.findById(refundId).orElseThrow();
         return switch (refund.getStatus()) {
             case COMPLETED -> {
-                meters.counter("payment.refund", "result", "completed").increment();
+                meters.counter("payment.refund.request", "result", "completed").increment();
                 yield new RefundPaymentResult(refundId, refund.getStatus());
             }
             case FAILED -> {
-                meters.counter("payment.refund", "result", "rejected").increment();
+                meters.counter("payment.refund.request", "result", "rejected").increment();
                 throw new BusinessException(
                         ErrorCode.PAYMENT_REFUND_REJECTED,
                         refund.getFailureCode() == null
@@ -103,7 +103,7 @@ public class PaymentRefundService {
                                 : Map.of("code", refund.getFailureCode()));
             }
             case REQUESTED, UNKNOWN -> {
-                meters.counter("payment.refund", "result", "unknown").increment();
+                meters.counter("payment.refund.request", "result", "unknown").increment();
                 yield new RefundPaymentResult(refundId, refund.getStatus());
             }
         };

@@ -15,6 +15,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
@@ -106,9 +108,8 @@ public class PaymentTransactions {
                         switch (old.getStatus()) {
                             case READY -> {
                                 old.fail("SUPERSEDED", "Replaced by a new payment attempt", now);
-                                payments
-                                        .flush(); // Release generated-column UNIQUE before the
-                                                  // IDENTITY insert.
+                                payments.flush(); // Release generated-column UNIQUE before the
+                                // IDENTITY insert.
                             }
                             case PROCESSING ->
                                     throw new BusinessException(
@@ -289,7 +290,11 @@ public class PaymentTransactions {
         return tx.execute(
                 ignored -> {
                     Payment payment = ownedRefundPayment(command);
-                    var existing = refunds.findByIdempotencyKey(command.idempotencyKey());
+                    var existing =
+                            refunds.findByPaymentIdAndKindAndClientKey(
+                                    payment.getId(),
+                                    PaymentRefundKind.CUSTOMER_REFUND,
+                                    command.idempotencyKey());
                     if (existing.isPresent()) return refundReplay(payment, existing.get());
                     requireRefundable(payment);
                     var context =
@@ -305,13 +310,13 @@ public class PaymentTransactions {
                     payment.requestCancel(now);
                     var refund =
                             refunds.saveAndFlush(
-                                    PaymentRefund.request(
+                                    PaymentRefund.requestCustomer(
                                             payment.getId(),
-                                            PaymentRefundKind.CUSTOMER_REFUND,
                                             payment.getAmount(),
                                             command.idempotencyKey(),
                                             command.reason(),
                                             now));
+                    refundMetricAfterCommit(refund, "requested");
                     return new RefundStep(refund.getId(), true);
                 });
     }
@@ -323,7 +328,11 @@ public class PaymentTransactions {
         return tx.execute(
                 ignored -> {
                     Payment payment = ownedRefundPayment(command);
-                    var existing = refunds.findByIdempotencyKey(command.idempotencyKey());
+                    var existing =
+                            refunds.findByPaymentIdAndKindAndClientKey(
+                                    payment.getId(),
+                                    PaymentRefundKind.CUSTOMER_REFUND,
+                                    command.idempotencyKey());
                     if (existing.isPresent()) return refundReplay(payment, existing.get());
                     requireRefundable(payment);
                     // A transient lock conflict may leave no durable request. The client can retry
@@ -339,8 +348,6 @@ public class PaymentTransactions {
     }
 
     private RefundStep refundReplay(Payment payment, PaymentRefund refund) {
-        if (!refund.getPaymentId().equals(payment.getId()))
-            throw new BusinessException(ErrorCode.PAYMENT_REFUND_KEY_CONFLICT);
         return new RefundStep(refund.getId(), false);
     }
 
@@ -397,6 +404,7 @@ public class PaymentTransactions {
                                     .onRefunded(
                                             payment.getPayableId(),
                                             new RefundContext(payment.getId(), refund.getKind()));
+                            refundMetricAfterCommit(refund, "completed");
                             yield "COMPLETED";
                         }
                         case PgCancelResult.Rejected rejected -> {
@@ -414,7 +422,7 @@ public class PaymentTransactions {
                             }
                             log.error(
                                     "Payment cancellation rejected paymentId={} refundId={}"
-                                        + " kind={}",
+                                            + " kind={}",
                                     payment.getId(),
                                     refund.getId(),
                                     refund.getKind());
@@ -425,17 +433,43 @@ public class PaymentTransactions {
                                     .increment();
                             if (refund.getKind() == PaymentRefundKind.COMPENSATION)
                                 meters.counter("payment.compensation.rejected").increment();
+                            refundMetricAfterCommit(refund, "rejected");
                             yield "REJECTED";
                         }
                         case PgCancelResult.Unknown unknown -> {
-                            if (refund.getStatus() == PaymentRefundStatus.REQUESTED)
+                            if (refund.getStatus() == PaymentRefundStatus.REQUESTED) {
                                 refund.markUnknown(now);
+                                refundMetricAfterCommit(refund, "unknown");
+                            }
                             if (payment.getStatus() == PaymentStatus.CANCEL_PENDING)
                                 payment.markCancelUnknown(now);
                             payment.recordReconciliationCheck(now);
                             yield "UNKNOWN";
                         }
                     };
+                });
+    }
+
+    /**
+     * Count committed customer state transitions, including reconciler recovery, never HTTP replay.
+     */
+    private void refundMetricAfterCommit(PaymentRefund refund, String result) {
+        if (refund.getKind() != PaymentRefundKind.CUSTOMER_REFUND) return;
+        TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        try {
+                            meters.counter("payment.refund", "result", result).increment();
+                        } catch (RuntimeException error) {
+                            log.error(
+                                    "Refund metric failed refundId={} result={} errorType={}",
+                                    refund.getId(),
+                                    result,
+                                    error.getClass().getName());
+                            meters.counter("payment.refund.metric.failure").increment();
+                        }
+                    }
                 });
     }
 

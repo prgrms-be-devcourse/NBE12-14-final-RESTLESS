@@ -1,6 +1,7 @@
 package com.restless.payment.infrastructure;
 
 import com.restless.payment.domain.PaymentRefund;
+import com.restless.payment.domain.PaymentRefundKind;
 
 import jakarta.persistence.LockModeType;
 
@@ -12,7 +13,8 @@ import org.springframework.data.repository.query.Param;
 import java.util.Optional;
 
 public interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Long> {
-    Optional<PaymentRefund> findByIdempotencyKey(String idempotencyKey);
+    Optional<PaymentRefund> findByPaymentIdAndKindAndClientKey(
+            Long paymentId, PaymentRefundKind kind, String clientKey);
 
     Optional<PaymentRefund> findFirstByPaymentIdOrderByRequestedAtDescIdDesc(Long paymentId);
 
