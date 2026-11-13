@@ -65,7 +65,7 @@
 
 ### 설정과 후보 조회
 
-`restless.payment.reconcile` 아래 설정이다. 테스트는 Gradle systemProperty로 enabled=false를 주고 `runOnce()`를 직접 실행한다.
+`restless.payment.reconcile` 아래 설정이다. 테스트는 Gradle systemProperty로 enabled=false를 주고 `runOnce()`를 직접 실행한다. 수동 대사를 검증하는 PaymentReconciliationTest는 @SpringBootTest에도 enabled=false를 명시해 IntelliJ JUnit 직접 실행에서도 같은 조건을 보장한다.
 
 | 설정 | 기본값 | 의미 |
 |---|---|---|
