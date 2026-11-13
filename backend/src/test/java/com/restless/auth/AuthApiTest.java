@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.UUID;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -191,10 +192,12 @@ class AuthApiTest {
     }
 
     @Test
+    @DisplayName("공연 목록과 상태 확인은 토큰 없이 정상 조회할 수 있다")
     void 공개_조회_경로는_토큰_없이_인가를_통과한다() throws Exception {
-        // 공연 컨트롤러는 아직 없으므로 401이 아니라 404면 인가를 통과한 것이다.
+        // 공연 목록은 비로그인 공개 API이므로 인증 없이 정상 응답해야 한다.
         mockMvc.perform(get("/api/concerts"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray());
         mockMvc.perform(get("/actuator/health"))
                 .andExpect(status().isOk());
     }
