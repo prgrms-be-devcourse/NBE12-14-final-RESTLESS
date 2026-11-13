@@ -14,18 +14,18 @@ class FanMeetingEventTest {
 
     static final Instant NOW = Instant.parse("2026-11-12T00:00:00Z");
 
+    /** 오픈 NOW+1시간, 마감 오픈+10분, 팬미팅 마감+48시간(허용 경계)을 기준으로 값을 바꿔 본다. */
+    static final Instant OPENS = NOW.plus(Duration.ofHours(1));
+    static final Instant CLOSES = OPENS.plus(Duration.ofMinutes(10));
+    static final Instant MEETING = CLOSES.plus(Duration.ofHours(48));
+
     @Test
     void 정상_값이면_SCHEDULED로_만들어지고_응모_마감은_오픈_10분_뒤() {
-        Instant opensAt = NOW.plus(Duration.ofHours(1));
-        Instant meetingAt = opensAt.plus(Duration.ofDays(3));
-
-        FanMeetingEvent event = FanMeetingEvent.create(
-                new FanMeetingSettings("팬미팅", opensAt, opensAt, 300, 100, 50_000L, meetingAt, null, true),
-                7L, NOW);
+        FanMeetingEvent event = FanMeetingEvent.create(settings(OPENS, 300, 100, 50_000L, MEETING, null), 7L, NOW);
 
         assertThat(event.getStatus()).isEqualTo(FanMeetingStatus.SCHEDULED);
-        assertThat(event.getEntryClosesAt()).isEqualTo(opensAt.plus(Duration.ofMinutes(10)));
-        assertThat(event.getPromotionClosesAt()).isEqualTo(meetingAt.minus(Duration.ofHours(24)));
+        assertThat(event.getEntryClosesAt()).isEqualTo(OPENS.plus(Duration.ofMinutes(10)));
+        assertThat(event.getPromotionClosesAt()).isEqualTo(MEETING.minus(Duration.ofHours(24)));
         assertThat(event.getOrganizerId()).isEqualTo(7L);
     }
 
@@ -78,11 +78,6 @@ class FanMeetingEventTest {
 
         assertValid(settings(OPENS, 300, 100, 50_000L, MEETING, latest));
     }
-
-    /** 오픈 NOW+1시간, 마감 오픈+10분, 팬미팅 마감+48시간(허용 경계)을 기준으로 값을 바꿔 본다. */
-    static final Instant OPENS = NOW.plus(Duration.ofHours(1));
-    static final Instant CLOSES = OPENS.plus(Duration.ofMinutes(10));
-    static final Instant MEETING = CLOSES.plus(Duration.ofHours(48));
 
     private static FanMeetingSettings settings(Instant noticeAt, int winnerLimit, int reserveLimit, long feeAmount,
                                                Instant meetingAt, Instant promotionClosesAt) {

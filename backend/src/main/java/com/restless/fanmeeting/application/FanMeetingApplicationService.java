@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 응모, 응모 취소, 내 응모 상태 (transactions.md 3·4절).
  * 잠금 순서: Event FOR SHARE → Application. Event 행은 고치지 않는다.
+ * 현재 시각은 Event 잠금을 잡은 뒤에 읽는다. 잠금을 기다리는 사이 마감 시각이 지나면 거절한다.
  */
 @Service
 @RequiredArgsConstructor
@@ -30,8 +31,9 @@ public class FanMeetingApplicationService {
     /** 응모 1회 시도 = 트랜잭션 1개. 없으면 INSERT, 취소 상태면 같은 행을 다시 APPLIED로. */
     @Transactional(timeout = 5)
     public FanMeetingApplication apply(Long userId, Long eventId) {
+        FanMeetingEvent event = lockEventForShare(eventId);
         Instant now = clock.instant();
-        lockEventForShare(eventId).requireApplicationWindow(now);
+        event.requireApplicationWindow(now);
 
         Optional<ApplicationState> state = applications.findStateByEventIdAndUserId(eventId, userId);
         if (state.isEmpty()) {
@@ -51,8 +53,9 @@ public class FanMeetingApplicationService {
     /** 응모 취소. APPLIED만 WITHDRAWN으로 바꾼다. */
     @Transactional(timeout = 5)
     public void cancel(Long userId, Long eventId) {
+        FanMeetingEvent event = lockEventForShare(eventId);
         Instant now = clock.instant();
-        lockEventForShare(eventId).requireApplicationWindow(now);
+        event.requireApplicationWindow(now);
 
         ApplicationState state = applications.findStateByEventIdAndUserId(eventId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.APPLICATION_NOT_ACTIVE));

@@ -1,5 +1,6 @@
 package com.restless.fanmeeting;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -13,6 +14,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -21,8 +24,10 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
 
-/** 팬미팅 API 테스트 공통: 회원 토큰, 행사 만들기, 행사 상태·시각 바꾸기. */
+/** 팬미팅 API 테스트 공통: 회원 토큰, 행사 만들기, 행사 상태·시각 바꾸기, 응모·취소. */
 @SpringBootTest(properties = "spring.docker.compose.enabled=false")
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
@@ -77,5 +82,40 @@ abstract class FanMeetingApiSupport {
 
     static LocalDateTime utc(Instant instant) {
         return LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
+    }
+
+    /** 응모(재응모 포함). */
+    ResultActions apply(String bearer, Long eventId) throws Exception {
+        return mockMvc.perform(post("/api/fan-meetings/{eventId}/applications", eventId)
+                .header(HttpHeaders.AUTHORIZATION, bearer));
+    }
+
+    /** 응모 취소. */
+    ResultActions cancel(String bearer, Long eventId) throws Exception {
+        return mockMvc.perform(delete("/api/fan-meetings/{eventId}/applications/me", eventId)
+                .header(HttpHeaders.AUTHORIZATION, bearer));
+    }
+
+    int countApplications(Long eventId) {
+        Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM fan_meeting_applications WHERE event_id = ?",
+                Integer.class, eventId);
+        return n == null ? 0 : n;
+    }
+
+    static String contentOf(MvcResult result) {
+        try {
+            return result.getResponse().getContentAsString();
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** 다른 스레드가 신호를 줄 때까지(최대 60초) 기다린다. 잠금을 쥔 트랜잭션을 붙잡아 둘 때 쓴다. */
+    static void await(CountDownLatch latch) {
+        try {
+            latch.await(60, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
