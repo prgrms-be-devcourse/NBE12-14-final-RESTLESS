@@ -50,4 +50,9 @@ tasks.named('test') {
     // 스케줄러를 검증하는 테스트만 @SpringBootTest(properties)로 다시 켠다.
     systemProperty 'restless.auction.scheduler.enabled', 'false'
     systemProperty 'restless.payment.reconcile.enabled', 'false'
+    systemProperty 'restless.drop.expiry.enabled', 'false'
+    // JDBC Timestamp fixtures and JPA TIMESTAMP_UTC must use the same time zone on every host.
+    systemProperty 'user.timezone', 'UTC'
+    // Each cached Spring context retains a MySQL container; bound Docker memory during the full suite.
+    systemProperty 'spring.test.context.cache.maxSize', '4'
 }
