@@ -15,11 +15,18 @@ import com.restless.common.error.ErrorCode;
 import com.restless.concert.domain.*;
 import com.restless.member.domain.Member;
 import com.restless.order.application.OrderService;
+import com.restless.order.domain.OrderStatus;
+import com.restless.payment.application.payable.ApprovalDecision;
+import com.restless.payment.application.payable.PayableSnapshot;
+import com.restless.payment.application.payable.PaymentAttemptContext;
 import com.restless.ticketing.application.dto.TicketCheckoutInfo;
 import com.restless.ticketing.application.dto.TicketReservationInfo;
 import com.restless.ticketing.domain.TicketSeat;
+import com.restless.ticketing.domain.TicketReservation;
 import com.restless.ticketing.infrastructure.SeatHoldRepository;
 import com.restless.ticketing.infrastructure.TicketPurchaseLimitRepository;
+import com.restless.ticketing.infrastructure.TicketReservationRepository;
+import com.restless.ticketing.infrastructure.TicketSeatRepository;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -30,9 +37,11 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.IntStream;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -48,14 +57,20 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.util.AopTestUtils;
 import org.mockito.invocation.InvocationOnMock;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.IllegalTransactionStateException;
+import org.springframework.transaction.support.DefaultTransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-@DisplayName("티켓팅 checkout 통합 테스트")
+@DisplayName("티켓팅 결제 준비 통합 테스트")
 @SpringBootTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "spring.docker.compose.enabled=false"})
 @Import(TestcontainersConfiguration.class)
 @AutoConfigureMockMvc
 class TicketCheckoutServiceTest {
     @Autowired TicketCheckoutService checkout;
+    @Autowired TicketPaymentService paymentService;
+    @Autowired TicketReservationRepository reservations;
+    @Autowired TicketSeatRepository seats;
     @Autowired TicketReservationService service;
     @Autowired EntityManager entityManager;
     @Autowired JdbcTemplate jdbc;
@@ -312,6 +327,239 @@ class TicketCheckoutServiceTest {
         assertNoCheckout(reservation);
     }
 
+    // 같은 공연·예약 fixture를 재사용하고 기존 checkout 검증은 반복하지 않는다.
+    @Nested
+    @DisplayName("결제 대상 조회와 승인 시작")
+    class ApprovalPreparation {
+        @Test
+        @DisplayName("도메인·주문이 쓰기 잠금 중이어도 snapshot 조회는 완료되며 상태를 바꾸지 않는다")
+        void snapshotReadDoesNotBlockOnWriteLocks() throws Exception {
+            var reservation = reserve();
+            var prepared = checkout(reservation);
+            var pool = Executors.newSingleThreadExecutor();
+            try {
+                var blocker = transactionManager.getTransaction(new DefaultTransactionDefinition());
+                PayableSnapshot snapshot;
+                try {
+                    limits.findByUserIdAndPerformanceId(fixture.firstUserId(), fixture.performanceId()).orElseThrow();
+                    reservations.findLockedById(reservation.reservationId()).orElseThrow();
+                    for (Long seatId : reservation.seatIds()) {
+                        seats.findLockedById(seatId).orElseThrow();
+                    }
+                    lockOrderFixture(prepared.orderId());
+                    snapshot = pool.submit(() -> paymentTransaction(() ->
+                            paymentService.load(reservation.reservationId()).orElseThrow()))
+                            .get(5, TimeUnit.SECONDS);
+                } finally {
+                    transactionManager.rollback(blocker);
+                }
+                assertThat(snapshot).isEqualTo(new PayableSnapshot(fixture.firstUserId(), prepared.totalAmount(),
+                        "공연 회차 " + fixture.performanceId() + " 예매", prepared.paymentExpiresAt()));
+                assertApprovalUnstarted(reservation, prepared);
+            } finally {
+                pool.shutdownNow();
+                assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+            }
+        }
+
+        @Test
+        @DisplayName("서로 다른 동시 승인 시도 중 하나만 수락하고 같은 시도 재수신은 원래 기록을 유지한다")
+        void competingAttemptsSerializeAndAcceptedReplayIsStable() throws Exception {
+            var reservation = reserve();
+            var prepared = checkout(reservation);
+            Instant startedAt = databaseNow();
+            var attempts = List.of(new PaymentAttemptContext(9001L, startedAt),
+                    new PaymentAttemptContext(9002L, startedAt));
+            var ready = new CountDownLatch(2);
+            var start = new CountDownLatch(1);
+            var pool = Executors.newFixedThreadPool(2);
+            try {
+                var futures = attempts.stream().map(attempt -> pool.submit(() -> {
+                    ready.countDown();
+                    await(start);
+                    return paymentTransaction(() -> paymentService.onApprovalStarting(reservation.reservationId(), attempt));
+                })).toList();
+                await(ready);
+                start.countDown();
+                List<ApprovalDecision> decisions = List.of(futures.get(0).get(15, TimeUnit.SECONDS),
+                        futures.get(1).get(15, TimeUnit.SECONDS));
+                assertThat(decisions).filteredOn(ApprovalDecision::accepted).hasSize(1);
+                assertThat(decisions).filteredOn(ApprovalDecision::rejected)
+                        .extracting(ApprovalDecision::reason).containsExactly("TICKET_PAYMENT_ATTEMPT_IN_PROGRESS");
+                var acceptedAttempt = attempts.get(decisions.getFirst().accepted() ? 0 : 1);
+                assertThat(paymentTransaction(() -> paymentService.onApprovalStarting(
+                        reservation.reservationId(), acceptedAttempt))).isEqualTo(ApprovalDecision.accept());
+                assertThat(jdbc.queryForObject("SELECT current_payment_id FROM ticket_reservations WHERE id = ?",
+                        Long.class, reservation.reservationId())).isEqualTo(acceptedAttempt.paymentId());
+                assertThat(instantColumn("approval_started_at", reservation.reservationId())).isEqualTo(startedAt);
+                assertThat(jdbc.queryForObject("SELECT payment_result_pending FROM ticket_reservations WHERE id = ?",
+                        Boolean.class, reservation.reservationId())).isTrue();
+                assertThat(orders.find(prepared.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.PAYMENT_CONFIRMING);
+                assertThat(instantColumn("payment_expires_at", reservation.reservationId())).isEqualTo(prepared.paymentExpiresAt());
+                assertThat(paymentTransaction(() -> paymentService.load(reservation.reservationId()))).isPresent();
+                assertHeldSeats(reservation);
+            } finally {
+                start.countDown();
+                pool.shutdownNow();
+                assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+            }
+        }
+
+        @ParameterizedTest(name = "{displayName} [{0}]")
+        @EnumSource(ChangedAfterSnapshot.class)
+        @DisplayName("snapshot 조회 후 소유권·주문 금액/소유자·수량이 바뀌면 승인 시작에서 다시 검증한다")
+        void revalidatesChangesAfterSnapshot(ChangedAfterSnapshot change) {
+            var reservation = reserve();
+            var prepared = checkout(reservation);
+            assertThat(paymentTransaction(() -> paymentService.load(reservation.reservationId()))).isPresent();
+            switch (change) {
+                case SEAT_OWNER -> jdbc.update("UPDATE performance_seats SET status = 'AVAILABLE', current_hold_id = NULL WHERE id = ?",
+                        reservation.seatIds().getFirst());
+                case ORDER_AMOUNT -> jdbc.update("UPDATE orders SET total_amount = total_amount + 1 WHERE id = ?", prepared.orderId());
+                case ORDER_OWNER -> jdbc.update("UPDATE orders SET user_id = ? WHERE id = ?", fixture.secondUserId(), prepared.orderId());
+                case RESERVED_COUNT -> jdbc.update("UPDATE ticket_purchase_limits SET reserved_count = 1 WHERE user_id = ? AND performance_id = ?",
+                        fixture.firstUserId(), fixture.performanceId());
+            }
+            var attempt = new PaymentAttemptContext(9001L, databaseNow());
+            if (change == ChangedAfterSnapshot.SEAT_OWNER) {
+                assertThat(paymentTransaction(() -> paymentService.onApprovalStarting(reservation.reservationId(), attempt)))
+                        .isEqualTo(ApprovalDecision.reject("TICKET_SEAT_OWNERSHIP_LOST"));
+            } else {
+                assertThatThrownBy(() -> paymentTransaction(() ->
+                        paymentService.onApprovalStarting(reservation.reservationId(), attempt)))
+                        .isInstanceOf(IllegalStateException.class);
+            }
+            assertNoAcceptedAttempt(reservation.reservationId());
+            assertThat(orders.find(prepared.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.PENDING_PAYMENT);
+            // 검증 실패를 이유로 기존 불일치 수량을 임의 보정하지 않는다.
+            if (change == ChangedAfterSnapshot.RESERVED_COUNT) {
+                assertThat(reservedCount()).isEqualTo(1);
+            } else {
+                assertThat(reservedCount()).isEqualTo(2);
+            }
+        }
+
+        @ParameterizedTest(name = "{displayName} [대기 지점={0}]")
+        @EnumSource(ApprovalWaitPoint.class)
+        @DisplayName("티켓팅 잠금 대기 중 기한 종료는 거절하고 기한 내 기록 후 주문 잠금 대기는 인정한다")
+        void deadlineUsesRecordingTimeUnderTicketingLocks(ApprovalWaitPoint waitPoint) throws Exception {
+            var reservation = reserve();
+            var prepared = checkout(reservation);
+            Instant deadline = databaseNow().plusSeconds(3);
+            jdbc.update("UPDATE ticket_reservations SET payment_expires_at = ? WHERE id = ?",
+                    LocalDateTime.ofInstant(deadline, ZoneOffset.UTC), reservation.reservationId());
+            var attempt = new PaymentAttemptContext(9001L, databaseNow());
+            var reachedWaitPoint = new CountDownLatch(1);
+            var pool = Executors.newSingleThreadExecutor();
+            try {
+                Future<ApprovalDecision> future;
+                var blocker = transactionManager.getTransaction(new DefaultTransactionDefinition());
+                try {
+                    if (waitPoint == ApprovalWaitPoint.ORDER) {
+                        lockOrderFixture(prepared.orderId());
+                        doAnswer(invocation -> {
+                            // 주문 잠금에 진입하기 전에 예약이 기한 내 시도를 받아들였음을 확인한다.
+                            TicketReservation accepted = entityManager.find(TicketReservation.class, reservation.reservationId());
+                            assertThat(accepted.matchesPaymentAttempt(attempt.paymentId(), attempt.approvalStartedAt())).isTrue();
+                            assertThat(accepted.isPaymentResultPending()).isTrue();
+                            assertThat(databaseNow()).isBefore(deadline);
+                            reachedWaitPoint.countDown();
+                            return callOriginal(invocation);
+                        }).when(orderTarget()).changeStatus(prepared.orderId(), OrderStatus.PAYMENT_CONFIRMING);
+                    } else {
+                        reservations.findLockedById(reservation.reservationId()).orElseThrow();
+                        doAnswer(invocation -> {
+                            Object limit = callOriginal(invocation);
+                            assertThat(databaseNow()).isBefore(deadline);
+                            reachedWaitPoint.countDown();
+                            return limit;
+                        }).when(limits).findByUserIdAndPerformanceId(fixture.firstUserId(), fixture.performanceId());
+                    }
+                    future = pool.submit(() -> paymentTransaction(() ->
+                            paymentService.onApprovalStarting(reservation.reservationId(), attempt)));
+                    await(reachedWaitPoint);
+                    // DB 시각이 실제 기한에 도달한 뒤 잠금을 풀어 두 경계의 동작 차이를 검증한다.
+                    long waitLimit = System.nanoTime() + TimeUnit.SECONDS.toNanos(8);
+                    while (databaseNow().isBefore(deadline) && System.nanoTime() < waitLimit) {
+                        TimeUnit.MILLISECONDS.sleep(10);
+                    }
+                    assertThat(databaseNow()).isAfterOrEqualTo(deadline);
+                    assertThat(future.isDone()).isFalse();
+                } finally {
+                    transactionManager.rollback(blocker);
+                }
+                ApprovalDecision decision = future.get(10, TimeUnit.SECONDS);
+                if (waitPoint == ApprovalWaitPoint.ORDER) {
+                    assertThat(decision).isEqualTo(ApprovalDecision.accept());
+                    assertThat(jdbc.queryForObject("SELECT current_payment_id FROM ticket_reservations WHERE id = ?",
+                            Long.class, reservation.reservationId())).isEqualTo(attempt.paymentId());
+                    assertThat(instantColumn("approval_started_at", reservation.reservationId())).isEqualTo(attempt.approvalStartedAt());
+                    assertThat(jdbc.queryForObject("SELECT payment_result_pending FROM ticket_reservations WHERE id = ?",
+                            Boolean.class, reservation.reservationId())).isTrue();
+                    assertThat(orders.find(prepared.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.PAYMENT_CONFIRMING);
+                } else {
+                    assertThat(decision).isEqualTo(ApprovalDecision.reject("TICKET_PAYMENT_EXPIRED"));
+                    assertNoAcceptedAttempt(reservation.reservationId());
+                    assertThat(orders.find(prepared.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.PENDING_PAYMENT);
+                }
+                assertThat(instantColumn("payment_expires_at", reservation.reservationId())).isEqualTo(deadline);
+                assertHeldSeats(reservation);
+            } finally {
+                pool.shutdownNow();
+                assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+            }
+        }
+
+        @Test
+        @DisplayName("호출자 트랜잭션이 실패하면 flush된 승인 수락과 주문 상태 변경도 함께 롤백한다")
+        void callerRollbackRevertsAcceptedAttemptAndOrder() {
+            var reservation = reserve();
+            var prepared = checkout(reservation);
+            var attempt = new PaymentAttemptContext(9001L, databaseNow());
+            assertThatThrownBy(() -> paymentTransaction(() -> {
+                assertThat(paymentService.onApprovalStarting(reservation.reservationId(), attempt)).isEqualTo(ApprovalDecision.accept());
+                entityManager.flush();
+                assertThat(jdbc.queryForObject("SELECT current_payment_id FROM ticket_reservations WHERE id = ?",
+                        Long.class, reservation.reservationId())).isEqualTo(attempt.paymentId());
+                assertThat(orders.find(prepared.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.PAYMENT_CONFIRMING);
+                throw new InjectedFailure();
+            })).isInstanceOf(InjectedFailure.class);
+            assertApprovalUnstarted(reservation, prepared);
+        }
+
+        @Test
+        @DisplayName("공통 트랜잭션 없이 대상 조회나 승인 시작을 호출하면 독립 커밋을 허용하지 않는다")
+        void requiresCallerTransaction() {
+            assertThatThrownBy(() -> paymentService.load(1L)).isInstanceOf(IllegalTransactionStateException.class);
+            assertThatThrownBy(() -> paymentService.onApprovalStarting(1L, new PaymentAttemptContext(9001L, databaseNow())))
+                    .isInstanceOf(IllegalTransactionStateException.class);
+        }
+
+        /** 경쟁 트랜잭션 재현용 SQL이다. 운영 코드는 기존 OrderService API만 사용한다. */
+        private void lockOrderFixture(Long orderId) {
+            jdbc.queryForObject("SELECT id FROM orders WHERE id = ? FOR UPDATE", Long.class, orderId);
+        }
+
+        private void assertNoAcceptedAttempt(Long id) {
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ticket_reservations WHERE id = ? AND current_payment_id IS NULL AND approval_started_at IS NULL AND payment_result_pending = false",
+                    Integer.class, id)).isEqualTo(1);
+        }
+
+        private void assertApprovalUnstarted(TicketReservationInfo reservation, TicketCheckoutInfo prepared) {
+            assertNoAcceptedAttempt(reservation.reservationId());
+            assertThat(orders.find(prepared.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.PENDING_PAYMENT);
+            assertThat(instantColumn("checkout_started_at", reservation.reservationId())).isEqualTo(prepared.checkoutStartedAt());
+            assertThat(instantColumn("payment_expires_at", reservation.reservationId())).isEqualTo(prepared.paymentExpiresAt());
+            assertHeldSeats(reservation);
+        }
+    }
+
+    private <T> T paymentTransaction(Supplier<T> action) {
+        var transaction = new TransactionTemplate(transactionManager);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        return transaction.execute(status -> action.get());
+    }
+
     /** 잠금을 가진 선행 작업을 멈춘 뒤 후행 작업이 관리 행 잠금에 진입하도록 순서를 고정한다. */
     private List<Outcome> orderedRace(TicketReservationInfo reservation, boolean checkoutFirst,
                                       Callable<TicketCheckoutInfo> releaseAction) throws Exception {
@@ -472,6 +720,8 @@ class TicketCheckoutServiceTest {
         assertThat(latch.await(10, TimeUnit.SECONDS)).as("동시 실행 단계 도달").isTrue();
     }
 
+    private enum ApprovalWaitPoint { RESERVATION, ORDER }
+    private enum ChangedAfterSnapshot { SEAT_OWNER, ORDER_AMOUNT, ORDER_OWNER, RESERVED_COUNT }
     private enum RejectedReservation { EXPIRED, CANCELLED, LOST_OWNERSHIP }
     private enum ReleaseOperation { CANCEL, EXPIRE }
     private enum FailurePoint { AFTER_ORDER, AFTER_RESERVATION_FLUSH }

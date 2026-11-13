@@ -34,11 +34,11 @@ Drop 문서([../drop/](../drop/))처럼 policy, invariants, state-machines, tran
 | ConcertPerformanceMappingTest | 8 | 공연·회차 조회와 소속, 예매 기간·구매 한도 방향/경계 |
 | TicketSeatMappingTest | 10 | 회차별 가격·소유자 상태 조회, 좌석·배치·포인터·가격 제약 |
 | TicketPurchaseLimitMappingTest | 6 | 수량과 사용자/회차 범위 조회, UNIQUE·음수·참조 제약 |
-| TicketReservationMappingTest | 7 | 해시 방어적 복사·NULL·checkout 필드, 키 범위/대소문자·주문 제약 |
+| TicketReservationMappingTest | 13 | 해시·NULL·checkout 필드, 키/주문 제약, 승인 시도 저장·부분 필드/기한/시도 중복 제약 |
 | SeatHoldMappingTest | 4 | 선점 이력·해제 시각·새 소유자, 회차와 가격 제약 |
 | TicketMappingTest | 6 | UUID·사용/취소 이력·새 예약 발급, 중복 번호/발급·회차·가격 제약 |
 
-합계 50개 실행 사례(기존 66개), 테스트 선언 37개(기존 50개)다.
+현재 합계 56개 실행 사례, 테스트 선언 40개다. 기존 정리 당시에는 66개에서 50개 실행 사례, 50개에서 37개 선언으로 줄였으며, 이후 승인 시도 매핑 6개 실행 사례·3개 선언을 추가했다.
 독립적인 제약은 파라미터화로 공통 준비·검증 코드를 공유하고, 상태 문자열만 바꿔 같은 필드를 읽던 별도 실행은 대표 조회에 합쳤다.
 기존 문서의 단계별 실행 건수는 최초 구현 시의 이력이며 현재 구성은 위 표를 따른다.
 실제 선점·만료·결제 동작/동시성은 해당 서비스 구현 단계에서 검증한다.
@@ -50,3 +50,11 @@ Drop 문서([../drop/](../drop/))처럼 policy, invariants, state-machines, tran
 ## 구현 현황: checkout 주문 준비
 
 POST /api/ticket-reservations/{reservationId}/checkout을 구현했다. 본인 예약과 현재 소유권·선점 기한을 잠금 아래 확인하고, 최초 진입에서만 공통 주문과 별도 5분 기한을 같은 트랜잭션에 저장한다. 재요청은 기존 주문·최초 기한을 반환한다. 상세는 [API 계약](../../contracts/api/ticketing.md)과 [트랜잭션 설계](transactions.md)를 따른다. PG 승인·결제 시도 생성·티켓팅 Handler·결제 이후 만료는 후속이다. TicketCheckoutServiceTest의 MySQL Testcontainers 테스트 13개가 통과했다. 상세 실행 범위는 [checkout 테스트 검증](transactions.md#checkout-테스트-검증-2026-11-13)을 따른다.
+
+## 단계별 구현: 승인 시도 저장 기반
+
+공통 결제 대상은 `(TICKET, 예약 ID)`로 확정했다. 예약에 수락한 시도 ID·공통 시작 시각·결과 미확정 여부를 저장하고, 기한 내 승인 시작 수락 및 동일 시도 대조 메서드를 추가했다. Handler·실제 승인/발급/실패/불명확/결제 이후 만료/보상 연결은 다음 단계다. 검증 범위는 [Handler 문서](payment-handler.md#단계별-구현-승인-시도-기록-기반-2026-11-13)를 따른다.
+
+## 단계별 구현: 결제 대상 조회·승인 시작 검증
+
+TicketPaymentService가 공통 트랜잭션 안에서 예약 ID 기준 PayableSnapshot 조회와 잠금 후 승인 시작 검증을 수행하도록 구현했다. 수락 시 승인 시도 기록과 주문 PAYMENT_CONFIRMING을 함께 저장한다. Handler 등록과 실제 결과 처리는 다음 단계다. 대상 조회·승인 시작 필수 통합 검증은 기존 checkout fixture 안에서 현재 10개다. 티켓팅 잠금 후 기록 시점으로 기한을 판정하며 기존 OrderService.find/changeStatus만 사용한다. 기록 후 주문 잠금 대기와 기록 전 티켓팅 잠금 대기를 구분한다. 상세는 [Handler 문서](payment-handler.md#단계별-구현-대상-조회승인-시작-검증-2026-11-13)를 따른다.

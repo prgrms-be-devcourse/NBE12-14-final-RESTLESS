@@ -172,6 +172,9 @@
 | `hold_expires_at` | 최초 선점 기한 | 선점부터 5분. 결제 진입 이후 이 값만으로 반환 판단 금지 |
 | `checkout_started_at` | 최초 결제 진입 시각 | NULL 가능. 중복 진입으로 갱신하지 않음 |
 | `payment_expires_at` | 별도 결제 기한 | NULL 가능. 최초 결제 진입부터 5분, 승인 시도 기록의 기한 |
+| `current_payment_id` | 예약이 승인 시작을 받아들인 마지막 결제 시도 ID | NULL 허용 UNIQUE, payments.id 스칼라 문맥. 물리 FK 없음. 종료 후에도 대조용 보존 |
+| `approval_started_at` | 수락한 시도의 공통 승인 시작 시각 | NULL 가능. PaymentAttemptContext 원래 시각 보존, checkout 이상·결제 기한 미만 |
+| `payment_result_pending` | 수락한 시도 결과·필요한 보상 취소 미확정 여부 | NOT NULL, 기본 false. 아직 승인 시작을 수락하지 않았다면 false |
 | `created_at` | 예약 생성 시각 | 최초 선점 성공 시 기록 |
 
 ## 10. seat_holds — 좌석별 선점 이력
@@ -246,3 +249,5 @@
 - [현재 좌석 소유권](seat-ownership.md), [구매 제한·수량](purchase-limit.md)
 - [결제 트랜잭션](transactions.md), [PaymentResultHandler](payment-handler.md), [만료](expiration.md)
 - [티켓 발급](ticket-issuance.md), [MVP 중복 요청 방지와 후속 멱등성 설계](idempotency.md)
+
+승인 시도 저장 기반은 `V20261113_1500__ticketing_record_accepted_payment_attempt.sql`로 추가했다. Handler·승인 결과·결제 이후 만료 연결은 아직 다음 단계다. 상세는 [결제 Handler 문서](payment-handler.md)를 따른다.
