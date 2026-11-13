@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @SpringBootTest(properties = {
     "pg.provider=fake",
     "spring.docker.compose.enabled=false",
+    "spring.main.allow-bean-definition-overriding=true",
     // 수동 대사를 검증하므로 IntelliJ JUnit 직접 실행에서도 자동 실행을 끈다.
     "restless.payment.reconcile.enabled=false"
 })
@@ -651,7 +652,7 @@ class PaymentReconciliationTest {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class Config {
-        @Bean
+        @Bean("dropPaymentResultHandler")
         PaymentFlowTest.Handler handler(JdbcTemplate jdbc) {
             return new PaymentFlowTest.Handler(jdbc);
         }

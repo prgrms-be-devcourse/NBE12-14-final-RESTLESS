@@ -50,10 +50,10 @@ public interface PaymentResultHandler {
 
 정상 승인(TX3) 흐름:
 
-1. 조건부 전이 `UPDATE payments SET status = 'APPROVED' WHERE id = ? AND status IN ('PROCESSING', 'UNKNOWN')`. 바뀐 행이 0개면 이미 처리된 결과이므로 아무것도 하지 않는다.
+1. 결제 행을 `SELECT ... FOR UPDATE`로 잠그고 상태가 `PROCESSING`/`UNKNOWN`일 때만 `APPROVED`로 바꾼다. 이미 처리된 결과면 아무것도 하지 않는다 (구현은 잠금 후 엔티티 전이. 조건부 UPDATE와 결과가 같다).
 2. 같은 트랜잭션에서 `handler.onApproved(...)`를 호출한다.
 3. 커밋한다.
-4. 커밋 후 `PaymentApprovedEvent`를 발행한다. 알림 같은 후속 작업에만 쓴다 (ADR-0001).
+4. 커밋 후 `PaymentApprovedEvent`를 발행한다. 알림 같은 후속 작업에만 쓴다 (ADR-0001). **미구현 (2026-11-13)**: 아직 구독하는 후속 기능이 없어 이벤트 클래스와 발행 코드가 없다. 알림 기능을 붙일 때 추가한다.
 
 대사 스케줄러가 UNKNOWN, PROCESSING 건을 PG에 다시 조회해 확정할 때도 같은 Handler를 호출한다.
 
@@ -62,9 +62,10 @@ public interface PaymentResultHandler {
 | 규칙 | 이유 |
 |---|---|
 | 업무상 받을 수 없는 승인(기한 초과 등)은 `REJECT`를 반환한다. 결제 모듈이 보상 취소(COMPENSATING)를 진행한다 | 승인된 돈을 방치하지 않는다 |
-| 기술 오류는 예외로 던진다. 전체가 롤백되고 결제는 PROCESSING/UNKNOWN으로 남아 대사가 재시도한다 | UNKNOWN을 실패로 확정하지 않는다 (INV-10) |
+| 기술 오류는 예외로 던진다. 전체가 롤백되고 결제는 PROCESSING/UNKNOWN으로 남아 대사가 재시도한다. 단 `onApprovalStarting`의 예외는 승인 시작 트랜잭션이 롤백돼 결제가 READY로 남고 응답은 500이다 (PG를 호출하지 않음) | UNKNOWN을 실패로 확정하지 않는다 (INV-10) |
 | Handler 안에서 PG 호출이나 외부 I/O를 하지 않는다 | 트랜잭션과 잠금 시간을 짧게 유지한다 |
 | 잠금 순서: 결제 행을 먼저, 도메인 행을 나중에 잠근다 | 데드락 방지 (FAIL-DR-11) |
+| 결제 준비도 활성 결제 행을 먼저 잠근 뒤 `load`를 부른다 | 새 키 준비와 기존 시도 승인 시작 사이의 잠금 순환 방지 |
 | 도메인 쪽 상태 변경도 조건부 전이로 멱등하게 만든다 | 중복 확정, 이중 반환 방지 (INV-11) |
 | 의존 방향은 도메인 → 결제 한 방향이다. 결제 모듈은 도메인 패키지를 import하지 않고, 등록된 Handler 빈을 `type()`으로 찾는다 | 순환 의존 방지, 모듈 경계 유지 |
 
@@ -77,7 +78,7 @@ public interface PaymentResultHandler {
 | 결정 | 내용 |
 |---|---|
 | 시도 식별 | `payments` 행 하나가 시도 하나다. `payments.id`를 시도 ID로 쓰고 별도 시도 ID를 두지 않는다. 최종 실패 후 다시 결제하면 새 행과 새 ID가 생긴다 |
-| 시도 문맥 | 상태 변경 메서드는 모두 `PaymentAttemptContext(paymentId, approvalStartedAt)` 또는 그 값을 담은 `ApprovedPayment`를 받는다. 도메인은 승인 시작을 받아들인 시도가 아닌 결과로 자원을 바꾸지 않는다 |
+| 시도 문맥 | 승인·실패·불명확 메서드는 `PaymentAttemptContext(paymentId, approvalStartedAt)` 또는 그 값을 담은 `ApprovedPayment`를, 환불 메서드 3개는 `RefundContext(paymentId, kind)`를 받는다. 도메인은 승인 시작을 받아들인 시도가 아닌 결과로 자원을 바꾸지 않는다 |
 | 승인 시작 시각 | `payments.approval_started_at`에 READY → PROCESSING 전환 시각을 저장한다. PG 승인 시각(`approved_at`)과 다르다. 승인 전에 닫힌 시도는 null |
 | 기한 판정 | 기준은 도메인 정책이 정한다. 결제 모듈은 두 시각을 모두 전달한다. 드롭·티켓팅은 기한 안에 승인 시작을 받아들인 시도라면 늦게 확인된 승인도 확정한다. 팬미팅은 `approvedAt <= 기한`으로 판정한다 |
 | `onApprovalStarting` 기한 판정 | 도메인 행을 잠근 뒤 읽은 현재 시각으로 한다. `approvalStartedAt`은 잠금 대기 전 값이라 쓰지 않는다 |
@@ -86,7 +87,7 @@ public interface PaymentResultHandler {
 | 손님 환불 요청·거절 (2026-11-13, #47) | 기본 메서드 `onRefundRequesting(payableId, RefundContext)`는 요청 트랜잭션에서 도메인의 환불 가능 여부를 판단하고 수락 시 환불 대기로 바꾼다. 기본은 `REFUND_NOT_SUPPORTED` 거절. `onRefundRejected(payableId, RefundContext)`는 PG 최종 취소 거절 시 결제 APPROVED 복귀·환불 FAILED와 같은 트랜잭션에서 환불 대기를 운영 확인 상태로 바꾼다(기본 no-op). 둘 다 CUSTOMER_REFUND 전용이며 COMPENSATION에는 호출하지 않는다. `onRefunded`만 자원을 복원한다 |
 | 손님 환불 멱등성 (#47 보정) | 클라이언트 키는 `(payment_id, kind, client_key)` 범위 UNIQUE로 재현한다. 별도 전역 UNIQUE `idempotency_key`는 PG 재시도용 서버 생성 키이며 보상 취소와 이름 공간을 구분한다. 기존 PG 키는 보존·백필해 진행 중 취소를 끊지 않는다. 환불 메트릭은 커밋된 전이를 한 번만 세고 API 재요청 횟수와 분리한다 |
 
-중복 결과를 거르는 1차 방어선은 결제 모듈이다. 결제 행을 잠그고 조건부로 전이하며, 진행 중인 시도는 대상당 1건(UNIQUE)이다.
+중복 결과를 거르는 1차 방어선은 결제 모듈이다. 결제 행을 잠그고 조건부로 전이하며, FAILED·CANCELLED가 아닌 시도(승인·취소 진행 중 포함)는 대상당 1건(UNIQUE)이다.
 도메인의 `paymentId` 확인은 2차 방어선이다. 이 확인은 승인을 확정한 시도를 기록하는 데도 쓴다.
 
 마이그레이션: `V20261112_1900__common_add_payment_attempt_context.sql`.
@@ -108,7 +109,7 @@ public interface PaymentResultHandler {
 ## 영향
 
 - 새 마이그레이션: `payments`에 `payable_type`, `payable_id`, `pg_order_id`, `idempotency_key`, 실패 사유, `created_at`, `updated_at` 컬럼과 status CHECK를 추가한다. "대상당 진행 중인 시도 1건" 생성 컬럼 UNIQUE를 추가한다. `order_id`와 FK는 제거하고, `payment_key`는 NULL을 허용한다. `payment_refunds`에 중복 환불 방지 제약과 PG 취소 거래 키를 추가한다.
-- 팬미팅 `PaymentPort`(`startAttempt`, `resolve`)는 결제 모듈이 이 구조 위에서 제공한다. 팬미팅의 `PaymentResultHandler`는 위 인터페이스에 맞춘다.
+- 팬미팅 `PaymentPort`(`startAttempt`, `resolve`)는 결제 모듈이 이 구조 위에서 제공한다. 팬미팅의 `PaymentResultHandler`는 위 인터페이스에 맞춘다. **미구현 (2026-11-13)**: 공통 결제에는 `PaymentService.prepare/confirm`만 있고 `resolve` 조회는 없다. READY 만료는 대사가 `onFailed(notStarted)`로 알린다. 팬미팅 연결 때 필요한 API를 팬미팅 담당과 정한다.
 - 드롭 TX2·TX3·TX4·TX5의 도메인 쪽 단계는 Handler 구현 안에서 수행한다.
 
 ## 재검토 조건

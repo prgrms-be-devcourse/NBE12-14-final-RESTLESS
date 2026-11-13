@@ -31,7 +31,8 @@ import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
 
-@SpringBootTest(properties = {"pg.provider=fake", "spring.docker.compose.enabled=false"})
+@SpringBootTest(properties = {"pg.provider=fake", "spring.docker.compose.enabled=false",
+        "spring.main.allow-bean-definition-overriding=true"})
 @AutoConfigureMockMvc
 @Import({TestcontainersConfiguration.class, PaymentCustomerRefundTest.Config.class})
 class PaymentCustomerRefundTest {
@@ -688,7 +689,7 @@ class PaymentCustomerRefundTest {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class Config {
-        @Bean
+        @Bean("dropPaymentResultHandler")
         Handler handler(JdbcTemplate jdbc) {
             return new Handler(jdbc);
         }

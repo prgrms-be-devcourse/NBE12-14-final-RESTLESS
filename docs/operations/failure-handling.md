@@ -1,6 +1,6 @@
 # 장애 처리 설계
 
-테스트 계획과 별도로, 장애마다 아래 항목을 정의한다. 아직 채우지 않은 항목은 TBD로 둔다.
+테스트 계획과 별도로, 장애마다 아래 항목을 정의한다. 아직 채우지 않은 항목은 TBD로 둔다. 아래 표의 "테스트"는 그 장애를 재현해 검증하는 테스트다. 작성 틀의 상세 항목은 아직 채우지 않았다.
 
 ## 작성 틀
 
@@ -19,17 +19,17 @@
 
 | ID | 장애 | 상태 |
 |---|---|---|
-| F-01 | 재고 예약 후 Order 생성 실패 | TBD |
-| F-02 | MySQL Deadlock, Lock Timeout | TBD |
-| F-03 | PG 승인 거절 | TBD |
-| F-04 | PG 승인 타임아웃 | TBD |
-| F-05 | PG 승인 성공 후 응답 유실 | TBD |
-| F-06 | PG 승인 직후 서버 종료 | TBD |
-| F-07 | PG 승인 후 DB 구매 확정 실패 | TBD |
-| F-08 | 중복 승인 결과 처리 | TBD |
-| F-09 | PG 환불 취소 결과 불명확 | TBD |
-| F-10 | PG 취소 성공 후 서버 종료 | TBD |
-| F-11 | 예약 만료 Worker 중복 실행 | TBD |
+| F-01 | 재고 예약 후 Order 생성 실패 | 테스트: `DropReservationIntegrationTest.inv01AndInv07OrderFailureRollsBackInventorySlotAndOrderThenSameKeyCanRetry` (전체 롤백) |
+| F-02 | MySQL Deadlock, Lock Timeout | 일부: 결제 준비·승인 시작 잠금 순환은 `PaymentFlowTest.prepareAndApprovalStartOverlapWithoutDeadlockOr500` (#73). 일반 Lock Timeout은 TBD |
+| F-03 | PG 승인 거절 | 테스트: `DropPaymentAcceptanceTest.failureBeforeDeadlineKeepsHoldForRetry`, `failureAfterDeadlineReleasesStock`, `PaymentFlowTest.pgRejectedCommitsFailureAndAttemptContext` |
+| F-04 | PG 승인 타임아웃 | 테스트: `PaymentFlowTest.inv10_timeoutAndLostResponseRemainUnknown`, `DropPaymentAcceptanceTest.unknownResultProtectsStockUntilReconciled` |
+| F-05 | PG 승인 성공 후 응답 유실 | 테스트: `PaymentReconciliationTest.lostResponseRecoversActualApprovalWithoutApprovingAgain` |
+| F-06 | PG 승인 직후 서버 종료 | 대사가 PROCESSING을 재조회한다. 테스트: `PaymentReconciliationTest.staleProcessingApprovedUsesStoredAttemptOnce` |
+| F-07 | PG 승인 후 DB 구매 확정 실패 | 테스트: `PaymentFlowTest.technicalFailureRollsBackResultAndReturnsProcessing`, `PaymentReconciliationTest.handlerExceptionRollsBackAndDoesNotBlockNextPayment` |
+| F-08 | 중복 승인 결과 처리 | 테스트: `DropPaymentAcceptanceTest.duplicateConfirmationsApplyOnce`, `PaymentReconciliationTest.reconciliationRacesUserConfirmButApprovesOnce` |
+| F-09 | PG 환불 취소 결과 불명확 | 테스트: `PaymentReconciliationTest.cancelUnknownCompletesWithStoredKind`, `cancellationUnknownCanBeRetriedRepeatedlyWithoutInvalidSelfTransition` |
+| F-10 | PG 취소 성공 후 서버 종료 | 대사가 같은 키로 취소를 다시 보낸다. 테스트: `PaymentReconciliationTest.staleCancelPendingRetriesSameKeyOutsideTx` |
+| F-11 | 예약 만료 Worker 중복 실행 | 테스트: `DropPaymentLifecycleIntegrationTest.twoExpiryWorkersReleaseOnceAndDisabledSchedulerLeavesRunnableJob`, `DropPaymentAcceptanceTest.approvalStartRacesExpiryWithOneOutcome` |
 | F-12 | 구매 대기열 저장소 장애 | TBD |
 | F-13 | 구매 확정 커밋 후 리스너 실행 전 서버 종료 (이벤트 유실) | [ADR-0001](../decisions/0001-event-handling.md) 관측 방법 참고 |
 
@@ -97,3 +97,13 @@ DB 결제 잠금과 상태 재확인으로 최종 Handler 반영은 한 번만 �
 티켓팅의 [불명확 5분 운영 확인](../domains/ticketing/transactions.md#9-불명확-결과의-운영-확인-전환-decided-2026-11-12)을 위해
 UNKNOWN 나이를 제공한다. **운영 확인 등록 여부 저장, 중복 없는 알림 및 실제 알림 채널은 이번 구현에 포함하지 않는다.**
 운영 확인이 필요해도 결제와 자원을 시간만으로 해제하지 않으며 대사를 계속한다.
+
+## PG 설정
+
+| 설정 | 기본값 | 내용 |
+|---|---|---|
+| `pg.provider` | 없으면 `toss`. dev 프로필은 `${PG_PROVIDER:fake}` | `fake`면 실제 PG를 부르지 않는 Fake PG를 쓴다. 부하 테스트는 반드시 `fake` |
+| `toss.secret-key` (환경 변수 `TOSS_SECRET_KEY`) | 없음 | `toss`일 때 필수. 비어 있으면 기동이 실패한다 (모든 결제가 401로 UNKNOWN에 쌓이는 것을 막음). 서버에서만 읽는다 |
+| `toss.base-url` | `https://api.tosspayments.com` | 결제 승인·조회·취소 호출 대상 |
+| `toss.connect-timeout`, `toss.read-timeout` | 3초, 30초 | 읽기 타임아웃이면 결과를 UNKNOWN으로 두고 대사가 확인한다 |
+| `pg.fake.*` | | Fake PG 응답 설정 (테스트·부하 테스트용) |

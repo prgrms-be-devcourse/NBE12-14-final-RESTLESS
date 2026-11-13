@@ -2,6 +2,7 @@
 
 - 담당: 홍승연 (인증, 회원, 공통 오류)
 - 상태: PROPOSED. 드롭과 다른 도메인이 기대하는 기능을 모은 초안이다. 인증은 JWT로 정했다(아래 "인증 규칙").
+- 주문·결제 절(담당 이태호)은 구현 기준이다 (#44, #45~#47, #73). 코드와 다르면 코드를 기준으로 이 문서를 고친다.
 
 ## 인증, 회원
 
@@ -72,6 +73,7 @@ class FanMeetingWithdrawalGuard implements WithdrawalGuard {
 - **로그인 필요**: 아래 공개 경로를 뺀 모든 API. 토큰이 없거나 만료·위조면 401 `UNAUTHORIZED`.
 - **공개 경로**: 가입·로그인·재발급·로그아웃, 공연·회차 좌석·드롭·경매·팬미팅 상세 조회(GET), `/actuator/health`. 로그인 없이 볼 조회 API를 만들면 `SecurityConfig.PUBLIC_GET_PATHS`에 추가한다.
 - **관리자**: `/api/admin/**`는 `role = ADMIN`만. 아니면 403 `FORBIDDEN`. 관리자 기능은 이 경로 아래로 만든다(컨트롤러에서 권한을 다시 검사하지 않는다). 가입하면 USER이고, ADMIN은 DB에서 지정한다.
+- **주최자**: `/api/organizer/**`는 `role = ORGANIZER` 또는 `ADMIN`만. 아니면 403 `FORBIDDEN`. 주최자 기능은 이 경로 아래로 만든다. 보안 설정은 역할만 보므로, 본인 것인지(예: 자기 행사)는 각 도메인 서비스가 확인한다. ORGANIZER도 DB에서 지정한다.
 - **로그인 회원 ID**: 컨트롤러 파라미터에 `@LoginMember Long userId`를 쓴다. 요청 본문으로 회원 ID를 받지 않는다.
 - **현재 시각**: `Instant.now()` 대신 `Clock`을 주입받아 `clock.instant()`로 읽는다(`common/config/ClockConfig`). 테스트에서 시각을 바꿀 수 있다.
 
@@ -260,7 +262,7 @@ PG 거절 때 환불 대기를 운영 확인 상태로 바꾼다(예: REFUND_PEN
 Handler 업무 거절은 요청 트랜잭션 전체를 롤백하므로 결제 APPROVED·환불 행 없음, PG 호출 없음이다.
 
 요청 트랜잭션 커밋 → 트랜잭션 밖 PG 취소 한 번 → 기존 공통 취소 결과 반영 트랜잭션 순서다.
-결제 행 → 환불 행 → 도메인 행 순서로 잠그며, PG 전액 취소가 확인되기 전에는 재고·좌석을 반환하지 않는다.
+요청 트랜잭션은 결제 행을 잠근 뒤 Handler(도메인 행)를 호출하고 환불 행을 새로 만든다. 결과 반영 트랜잭션은 결제 행 → 환불 행 → 도메인 행 순서로 잠근다. PG 전액 취소가 확인되기 전에는 재고·좌석을 반환하지 않는다.
 결과 반영 Handler의 기술 예외는 결제·환불·도메인 변경을 함께 롤백하고 202로 반환한다. 대사가 같은 저장 키로 복구한다.
 PG의 명시적 거절로 FAILED가 된 경우에는 새 키로 다시 요청할 수 있다. 완료된 환불은 다른 키로 중복 요청할 수 없다.
 
@@ -280,7 +282,7 @@ API 응답 횟수(멱등 재요청 포함)는 `payment.refund.request{result=com
 | 400 | `INVALID_REQUEST` | 필수 Idempotency-Key 누락, 길이·본문·타입 검증 실패 |
 | 404 | `PAYMENT_NOT_FOUND` | 없는 결제 또는 타인 결제 조회·승인·환불 |
 | 404 | `PAYMENT_TARGET_NOT_FOUND` | 타인 소유 대상 또는 타인 소유 기존 시도 준비 |
-| 409 | `PAYMENT_NOT_PAYABLE` | Handler load empty/미등록, 이미 승인·취소 진행, 승인 시작 거절 (`details.reason`) |
+| 409 | `PAYMENT_NOT_PAYABLE` | Handler load empty/미등록, 이미 승인·취소 진행, 승인 시작 거절 (`details.reason`). 승인 시작 거절이면 그 시도는 FAILED(`APPROVAL_REJECTED`)로 커밋되고 Handler `onFailed`는 부르지 않는다. 다시 결제하려면 새 키로 준비한다 |
 | 409 | `PAYMENT_WINDOW_EXPIRED` | 준비 또는 승인 시작 기한 초과. 승인 시도는 FAILED로 커밋 |
 | 409 | `PAYMENT_ATTEMPT_IN_PROGRESS` | 다른 PROCESSING 시도 또는 재조회 후에도 준비 충돌 |
 | 409 | `PAYMENT_UNDER_REVIEW` | 다른 UNKNOWN 시도가 있음 |

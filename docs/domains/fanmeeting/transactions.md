@@ -21,11 +21,15 @@ HTTP 응답·오류 코드는 [API 계약](../../contracts/api/fanmeeting.md)에
 
 - Open: `SCHEDULED` + `entry_opens_at <= now` → `Event FOR UPDATE` 후 상태 재확인 → `OPEN`.
   - 서버가 멈춰 있다가 돌아와 보니 `entry_closes_at`까지 이미 지났으면 **OPEN하지 않는다.** `SCHEDULED`로 두고 오류 로그 `FANMEETING_OPEN_MISSED`를 남긴다(운영자 처리. `MANUAL_REVIEW` 상태는 P0 범위 밖). 늦게라도 마감 전이면 OPEN한다.
+  - 열 행사 조회는 `entry_opens_at <= now < entry_closes_at`만 찾고, 놓친 행사는 따로 찾는다. 놓친 행사가 한 번에 처리할 건수를 차지해 열어야 할 행사가 밀리지 않게 하기 위해서다.
+  - `FANMEETING_OPEN_MISSED`는 서버마다 행사당 한 번만 남긴다(1초마다 같은 로그가 쌓이지 않게). 서버를 재시작하면 한 번 더 남는다.
+- 행사마다 트랜잭션을 따로 쓴다. 하나가 실패해도 나머지는 계속하고, 실패는 오류 로그와 `fanmeeting.worker.failure` 메트릭으로 남긴다.
+- 설정 `restless.fanmeeting.worker.enabled`(기본 켜짐, 테스트에서는 끔), `fixed-delay-ms`(1000), `batch-size`(100).
 - Close: `OPEN` + `entry_closes_at <= now` → 한 트랜잭션에서 `Event FOR UPDATE` → `CLOSED`, `closed_at`, DrawRun(`PENDING`, 새 `random_seed`(5절), `HMAC_SHA256_RANK_V1`) 생성.
 
 ## 3. 응모
 
-**가입 시각 검사** (트랜잭션 전): 설정 `fanmeeting.eligibility.joined-at-check.enabled`가 ON이면 `MemberPort.joinedAt(userId)`를 부른다.
+**가입 시각 검사** (트랜잭션 전): 설정 `restless.fanmeeting.eligibility.joined-at-check.enabled`가 ON이면 `MemberPort.joinedAt(userId)`를 부른다.
 
 - 조회 예외 → 503 `MEMBER_LOOKUP_FAILED` (저장하지 않음)
 - 가입 시각 `>= first_notice_scheduled_at` → 403 `APPLICATION_NOT_ELIGIBLE`
@@ -45,16 +49,22 @@ SELECT application_id, status FROM fan_meeting_applications
 COMMIT
 ```
 
+- 응모·취소의 현재 시각은 Event 잠금을 잡은 **뒤에** 읽는다. 잠금을 기다리는 사이 마감 시각이 지나면, 마감 Worker가 아직 돌지 않았어도 `APPLICATION_WINDOW_CLOSED`다.
+
 **실패 처리** (트랜잭션 밖의 별도 빈)
 
 ```text
-1062 중복 키 / 1213 교착 / 1205 잠금 시간 초과
+1062 중복 키 / 1213 교착 / 1205 잠금 시간 초과 / 쿼리 시간 초과
   → 그 트랜잭션은 전체 롤백된 상태 (1절 9번)
   → 새 트랜잭션에서 Application 재조회
        APPLIED            → 409 ALREADY_APPLIED
        없음 또는 WITHDRAWN → 응모 시도를 다시 한다 (Event 잠금·시각 확인부터)
   → 최대 3회 (10~50ms 무작위 대기). 모두 실패하면 503 APPLICATION_BUSY
 ```
+
+- **쿼리 시간 초과도 재시도한다.** 트랜잭션 timeout(5초, 1절 12번)이 MySQL `innodb_lock_wait_timeout`(기본 50초)보다 짧아서, 잠금을 오래 기다리면 1205보다 쿼리 시간 초과(`MySQLTimeoutException`)가 먼저 난다. DB 설정은 팀 공용이라 바꾸지 않는다. 최악이면 5초씩 3회, 약 15초 뒤 503이다. 잠금을 받은 직후 다음 쿼리 전에 5초가 이미 지난 경우(Spring `TransactionTimedOutException`)도 같은 이유로 재시도한다.
+- 재시도는 이전 시도의 결과를 따로 재조회하지 않고 응모 시도를 처음부터 다시 한다. 응모 시도가 Event 잠금·시각 확인 뒤 내 응모를 다시 읽으므로 위 흐름(APPLIED면 409)과 같다.
+- 재시도와 최종 실패는 로그 `FANMEETING_APPLY_RETRY`, `FANMEETING_APPLY_BUSY`에 이유(오류 번호 또는 `QUERY_TIMEOUT`)를 남긴다. 측정(C46)에서 건수를 센다.
 
 - **마감 판정은 커밋 기준.** 커밋돼야 성공 응답. 서버 도착 시각으로 소급하지 않는다. 정확히는 "공유 잠금 안에서 확인한 `now < entry_closes_at`이고, 마감 Worker의 CLOSED 전환보다 먼저 커밋된 응모"다. 시각 확인 뒤 잠금 대기로 커밋이 마감 시각을 조금 넘겨도, 공유 잠금 때문에 마감 Worker가 그 커밋을 기다리므로 성공이고 추첨 후보다.
 - 재시도 사이에 마감 시각이 지나면 재시도는 `APPLICATION_WINDOW_CLOSED`다(커밋 기준 마감과 같다).
@@ -106,6 +116,8 @@ COMMIT
 - **최종화는 멱등이다.** 같은 DrawRun에 최종화가 두 번 와도(재시도, 늦게 살아난 Worker) 먼저 `COMPLETED`를 확인하고 아무것도 저장하지 않는다. 그다음 `lease_token`을 확인한다. 순서가 바뀌면 이미 완료된 추첨에 같은 token을 가진 재시도가 Selection을 또 넣으려다 UNIQUE 위반으로 실패한다.
 - 저장 중 오류가 나면 전체 롤백(일부만 남지 않음).
 - seed와 `lease_token`은 응답·로그에 내보내지 않는다.
+- 최종화의 token 확인은 "DrawRun이 RUNNING이고 token이 같은가"로 한다. 그래서 완료된 추첨은 token 확인에서도 막히지만, 완료 확인을 먼저 두어 로그를 나눈다(`FANMEETING_DRAW_ALREADY_FINALIZED`, `FANMEETING_DRAW_LEASE_LOST`).
+- Draw Worker는 추첨마다 따로 처리하고, 실패는 `FANMEETING_DRAW_FAILED` 로그와 `fanmeeting.worker.failure{action=draw}`로 남긴다. 실패한 추첨은 lease(2분)가 끝난 뒤 다시 가져간다. 설정 `restless.fanmeeting.worker.draw-fixed-delay-ms`(5000).
 - **재현성:** 탈퇴 여부는 계산 시점에 조회한다. lease 만료 뒤 재계산은 다른 후보 집합이 될 수 있지만, 최종화는 한 번만 커밋되므로 결과는 하나다. INV-FM-05는 "같은 후보 집합이면 같은 결과"다.
 
 ## 6. 결제 시작

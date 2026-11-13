@@ -61,6 +61,11 @@ public class PaymentTransactions {
                 ignored -> {
                     if (!registry.supports(command.payableType()))
                         throw new BusinessException(ErrorCode.PAYMENT_NOT_PAYABLE);
+                    // Match approval/result callbacks: payment first, then the Handler's domain
+                    // row. load() may acquire a domain row lock too.
+                    var active =
+                            payments.findActiveForUpdate(
+                                    command.payableType(), command.payableId());
                     PayableSnapshot snapshot =
                             registry.get(command.payableType())
                                     .load(command.payableId())
@@ -79,21 +84,9 @@ public class PaymentTransactions {
                     if (snapshot.expiresAt() != null && now.isAfter(snapshot.expiresAt())) {
                         throw new BusinessException(ErrorCode.PAYMENT_WINDOW_EXPIRED);
                     }
-                    var replay =
-                            payments.findByPayableTypeAndPayableIdAndIdempotencyKey(
-                                    command.payableType(),
-                                    command.payableId(),
-                                    command.idempotencyKey());
-                    if (replay.isPresent())
-                        return prepared(
-                                replay.get(), command.userId(), snapshot.orderName(), false);
-
-                    var active =
-                            payments.findActiveForUpdate(
-                                    command.payableType(), command.payableId());
                     // Another preparation may have committed this same key while this transaction
-                    // waited for its lock.
-                    replay =
+                    // waited for either lock. Validate the snapshot before replaying as usual.
+                    var replay =
                             payments.findByPayableTypeAndPayableIdAndIdempotencyKey(
                                     command.payableType(),
                                     command.payableId(),

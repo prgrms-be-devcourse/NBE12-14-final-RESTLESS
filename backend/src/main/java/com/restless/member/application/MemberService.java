@@ -5,9 +5,11 @@ import com.restless.common.error.ErrorCode;
 import com.restless.member.domain.Member;
 import com.restless.member.infrastructure.MemberRepository;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
@@ -57,6 +59,29 @@ public class MemberService {
         }
         return memberRepository.findAllById(memberIds).stream()
                 .collect(Collectors.toMap(Member::getId, Member::getNickname));
+    }
+
+    /**
+     * 이 중 탈퇴하지 않은 회원 ID. 다른 도메인이 탈퇴 회원을 빼고 처리할 때 쓴다 (예: 팬미팅 추첨).
+     * 없는 ID는 결과에 없다.
+     */
+    @Transactional(readOnly = true)
+    public Set<Long> activeMemberIds(Collection<Long> memberIds) {
+        if (memberIds.isEmpty()) {
+            return Set.of();
+        }
+        return memberRepository.findAllById(memberIds).stream()
+                .filter(Member::isActive)
+                .map(Member::getId)
+                .collect(Collectors.toSet());
+    }
+
+    /** 가입 시각. 탈퇴 회원도 돌려준다. 없는 회원이면 MEMBER_NOT_FOUND. */
+    @Transactional(readOnly = true)
+    public Instant joinedAt(Long memberId) {
+        return memberRepository.findById(memberId)
+                .map(Member::getCreatedAt)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
     }
 
     @Transactional(readOnly = true)

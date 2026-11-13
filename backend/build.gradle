@@ -39,6 +39,8 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-mysql'
+    // 모듈 경계 규칙 테스트 (결제·주문·드롭 패키지에만 적용, architecture/OwnedModuleBoundaryTest)
+    testImplementation 'com.tngtech.archunit:archunit-junit5:1.4.1'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -48,4 +50,12 @@ tasks.named('test') {
     // 스케줄러를 검증하는 테스트만 @SpringBootTest(properties)로 다시 켠다.
     systemProperty 'restless.auction.scheduler.enabled', 'false'
     systemProperty 'restless.payment.reconcile.enabled', 'false'
+    systemProperty 'restless.drop.expiry.enabled', 'false'
+    // JDBC Timestamp fixtures and JPA TIMESTAMP_UTC must use the same time zone on every host.
+    systemProperty 'user.timezone', 'UTC'
+    // Each cached Spring context retains a MySQL container; bound Docker memory during the full suite.
+    systemProperty 'spring.test.context.cache.maxSize', '4'
+    systemProperty 'restless.drop.queue.scheduler.enabled', 'false'
+    // 팬미팅 응모 기간 Worker도 같은 이유로 끈다. 워커 테스트는 FanMeetingEntryWorker를 직접 부른다.
+    systemProperty 'restless.fanmeeting.worker.enabled', 'false'
 }

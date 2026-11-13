@@ -7,6 +7,7 @@
 ## 경계
 
 결제 모듈이 결제 행을 먼저 잠근 뒤 동일 DB 트랜잭션 안에서 티켓팅 Handler를 호출한다.
+결제 준비도 활성 결제 행을 먼저 잠근 뒤 load를 호출한다 (#73). 활성 행이 없는 최초 준비에서는 기존 결제 행 잠금 없이 load로 진행할 수 있다.
 티켓팅 내부 잠금은 구매 관리 → 예약 → 좌석 ID 오름차순이다. Handler에서 결제 행을 다시 잠그거나 PG를 호출하지 않는다.
 주문 변경은 주문 Application Service로 처리한다. 결제·주문·예약·좌석·카운터·티켓은 함께 커밋/롤백한다.
 알림은 AFTER_COMMIT 후속 작업이다.
@@ -38,12 +39,12 @@ DB 오류 등 기술 실패는 예외로 전체 롤백한다. 업무상 승인 �
 - onRefundRejected는 손님 환불의 PG 최종 거절 시 결제 APPROVED 복귀·환불 FAILED와 같은 트랜잭션에서 호출된다. 기본은 no-op이며, 티켓팅의 환불 상태 처리 연결은 후속이다. 두 콜백은 보상 취소에 호출하지 않는다.
 - 실제 자원 복원은 onRefunded에서만 수행한다. 공통 손님 환불 API가 추가됐어도 티켓팅 환불·Handler가 구현된 것은 아니다.
 - 공통 결제는 payableType/payableId로 식별한다. payments.order_id를 요구하지 않는다.
-- 티켓팅 Handler와 승인 시도 연결은 아직 구현하지 않았다. checkout은 공통 주문 준비까지만 수행하며 payments 생성·PG 호출·예매 확정을 하지 않는다.
+- 티켓팅 내부 서비스의 대상 조회·승인 시작 검증·시도 저장·성공 확정/발급은 구현했다. PaymentResultHandler 빈 등록과 실제 공통 결제 API 연결은 후속이다. checkout 자체는 공통 주문 준비까지만 수행하며 payments 생성·PG 호출·예매 확정을 하지 않는다.
 
-## 검증 계획 (미실행)
+## 검증 범위와 후속 계획
 
-- 승인 시작 시 예약 상태 유지, 기한/소유권 불일치 REJECT, PG 호출 금지.
-- 기한 내 유효 시도의 늦은 성공 확정, 티켓/카운터 한 번만 반영.
+- 검증 완료: 승인 시작 시 예약 상태 유지, 기한/소유권 불일치 REJECT. 내부 서비스는 PG를 호출하지 않는다.
+- 검증 완료: 기한 내 유효 시도의 늦은 성공 확정, 티켓/카운터 한 번만 반영. 나머지 항목은 후속 결과 처리 구현 시 검증한다.
 - 최종 실패의 기한 전/정각/이후 분기와 재시도 가능 상태.
 - 불명확 결과 중복 처리: 최초 시각 유지, 자원 반환 없음.
 - 이전 시도의 늦은 실패·불명확 결과가 새 시도·확정 예약을 변경하지 않음.
@@ -92,7 +93,7 @@ TicketPaymentService에 아래 두 메서드를 구현했다. 아직 PaymentResu
 
 ### load(예약 ID)
 
-- 공통 결제의 준비 트랜잭션에 MANDATORY로 참여하는 읽기 전용 조회다. 결제 행을 잠그기 전 호출되므로 도메인 쓰기 잠금을 획득하지 않는다.
+- 공통 결제의 준비 트랜잭션에 MANDATORY로 참여하는 읽기 전용 조회다. 공통 결제는 활성 결제 행을 먼저 잠근 뒤 호출한다. 현재 load는 도메인 쓰기 잠금 없이 snapshot만 조회하며 승인 시작에서 잠금 후 재검증한다. 계약상 도메인 잠금은 허용되지만 현재 구현에서 추가하지 않는다.
 - checkout 완료된 PAYMENT_PENDING/RECONCILING 예약과 연결된 TICKET 주문을 조회한다. 소유자·종류·주문 존재 불일치는 데이터 오류다.
 - 주문 상태가 PENDING_PAYMENT/PAYMENT_CONFIRMING/PAYMENT_REVIEW이고 DB UTC 현재 시각이 최초 결제 기한 미만이면 PayableSnapshot(소유자, 주문 총액, 서버 회차 ID 기반 상품명, 최초 기한)을 반환한다. 없는/종료된/기한 지난 대상은 empty다.
 - 진행 중·불명확 대상도 조건을 만족하면 정보를 반환해 공통 결제가 활성 시도의 PROCESSING/UNKNOWN 중복 방지 규칙을 적용할 수 있게 한다. snapshot은 승인 허가가 아니다.
@@ -107,7 +108,7 @@ TicketPaymentService에 아래 두 메서드를 구현했다. 아직 PaymentResu
 - 업무상 불가면 ApprovalDecision.reject(reason)을 반환한다. 이유는 TICKET_RESERVATION_NOT_FOUND, TICKET_NOT_PAYABLE, TICKET_PAYMENT_ATTEMPT_IN_PROGRESS, TICKET_PAYMENT_EXPIRED, TICKET_ORDER_NOT_PAYABLE, TICKET_SEAT_OWNERSHIP_LOST, TICKET_INVALID_PAYMENT_ATTEMPT, FREE_ORDER다.
 - 참조·회차·금액·수량 불일치와 DB 오류는 예외로 전체 롤백한다. 미확정 시도를 다른 ID로 덮어쓰거나 주문·좌석·카운터를 임의 보정하지 않는다.
 - 수락 시 기존 startApproval로 원래 시도 문맥을 저장하고 OrderService.changeStatus로 PAYMENT_CONFIRMING을 반영한다. 예약 PAYMENT_PENDING·좌석 HELD·현재 소유 포인터·카운터·최초 기한은 유지한다. 같은 시도의 반복 수락은 시각을 갱신하지 않는다.
-- PG 호출·실패/불명확/성공·티켓 발급·결제 이후 만료·보상 취소는 아직 연결하지 않았다. 이 서비스 내부에서 잠금 실패 재시도를 하지 않고 공통 결제의 트랜잭션 경계를 따른다.
+- 내부 성공 확정·티켓 발급은 아래 단계에서 구현했다. 실제 PG·Handler 연결과 실패/불명확·결제 이후 만료·보상 취소는 후속이다. 이 서비스 내부에서 잠금 실패 재시도를 하지 않고 공통 결제의 트랜잭션 경계를 따른다.
 
 대상 조회·승인 시작 서비스의 최초 구현 때는 사용자 요청으로 컴파일만 확인했다. 이후 요청에 따라 필요한 통합 테스트를 추가했으며 아래 검증 기록을 따른다. 앞선 439개 통과 기록은 승인 시도 저장 기반 단계의 결과다.
 

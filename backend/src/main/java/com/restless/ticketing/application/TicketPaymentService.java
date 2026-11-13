@@ -50,7 +50,8 @@ public class TicketPaymentService {
     private final JdbcTemplate jdbc;
 
     /**
-     * 결제 대상은 예약 ID다. 결제 행 잠금에 앞선 조회이므로 도메인 쓰기 잠금을 잡지 않는다.
+     * 결제 대상은 예약 ID다. 공통 결제는 활성 결제 행을 먼저 잠근 뒤 이 조회를 호출한다.
+     * 이 메서드는 도메인 쓰기 잠금 없이 snapshot을 조회한다.
      * 반환한 정보는 승인 허가가 아니며, 실제 승인은 onApprovalStarting에서 다시 검증한다.
      */
     @Transactional(readOnly = true, propagation = Propagation.MANDATORY)
