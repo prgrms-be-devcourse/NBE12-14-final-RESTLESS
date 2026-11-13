@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.restless.fanmeeting.application.FanMeetingDrawTransitions;
 import com.restless.fanmeeting.application.FanMeetingDrawTransitions.DrawClaim;
+import com.restless.fanmeeting.application.FanMeetingDrawTransitions.DrawPlan;
+import com.restless.fanmeeting.infrastructure.FanMeetingApplicationRepository.Candidate;
 import com.restless.fanmeeting.application.FanMeetingDrawWorker;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -118,6 +120,22 @@ class FanMeetingDrawWorkerTest extends FanMeetingApiSupport {
         assertThat(countSelections(eventId)).isEqualTo(3);
     }
 
+    /** test-scenarios 3절 "재시작 후 동일": 계산 중 Worker가 멈추고 lease가 끝나 다른 Worker가 다시 계산해도 결과가 같다. */
+    @Test
+    void Worker가_멈춰_다른_Worker가_다시_계산해도_당첨과_예비가_같다() throws Exception {
+        Long eventId = closedEventWithApplicants(3, 2, 10);
+        Long runId = drawRunId(eventId);
+        DrawClaim stopped = draws.claim(runId).orElseThrow();
+        expireLease(runId);
+        DrawClaim restarted = draws.claim(runId).orElseThrow();
+
+        DrawPlan before = draws.compute(stopped);
+        DrawPlan after = draws.compute(restarted);
+
+        assertThat(applicationIds(after.winners())).hasSize(3).isEqualTo(applicationIds(before.winners()));
+        assertThat(applicationIds(after.reserves())).hasSize(2).isEqualTo(applicationIds(before.reserves()));
+    }
+
     @Test
     void 같은_추첨을_두_번_최종화해도_두_번째는_저장하지_않고_예외도_없다_C55() throws Exception {
         Long eventId = closedEventWithApplicants(2, 1, 3);
@@ -171,6 +189,10 @@ class FanMeetingDrawWorkerTest extends FanMeetingApiSupport {
                 VALUES (?, ?, ?, ?, 'WINNER', 1, 'PAYMENT_PENDING', ?, ?)
                 """, eventId, runId, applicationId, otherUser, utc(Instant.now()), utc(Instant.now())))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    static List<Long> applicationIds(List<Candidate> candidates) {
+        return candidates.stream().map(Candidate::getApplicationId).toList();
     }
 
     void expireLease(Long runId) {
