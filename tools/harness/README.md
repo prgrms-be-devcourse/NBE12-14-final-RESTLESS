@@ -8,7 +8,8 @@ AI가 드롭 기능을 구현하고(Codex) 다른 AI가 검증할 때(Claude) �
 
 | 무엇 | 위치 | 성격 |
 |---|---|---|
-| 무엇이 맞는가 (계약, 불변식, 정책, 테스트 전략) | `docs/contracts/api/drop.md`, `docs/domains/drop/`, `docs/testing/strategy.md` | 사람이 합의하는 기준 |
+| 무엇이 맞는가 (계약, 불변식, 정책, 테스트 전략) | `docs/contracts/api/drop.md`, `docs/domains/drop/`, `docs/testing/strategy.md` | 사람이 합의하는 기준. 드롭 문서 머리에 `관련 코드`와 `마지막 확인` 날짜 |
+| 드롭 전용 에이전트 지침 | `backend/src/main/java/com/restless/drop/AGENTS.md` (+ `CLAUDE.md`는 `@AGENTS.md` 한 줄) | 용어, 읽을 문서, 모듈 경계, 검증 명령. 지시서는 이 파일을 가리키기만 한다 |
 | 자동 채점 (수용 테스트, 불변식 SQL, 모듈 경계) | `backend/src/test/java/com/restless/drop/acceptance/`, `backend/src/test/resources/harness/`, `backend/src/test/java/com/restless/architecture/` | CI가 실행. 구현 단계에서는 `@Disabled` 줄 삭제만 허용 |
 | 작업 도구 (이 폴더) | `tools/harness/` | 검사 스크립트, 가드, 지시서 템플릿, 테스트 힘 검사 |
 | 실행 기록 | `.ai-output/harness/` (git-ignore, 개인 PC) | 진행표, 단계 보고서, 차단 기록, 빌드 로그, 대신 정한 정책 |
@@ -17,7 +18,9 @@ AI가 드롭 기능을 구현하고(Codex) 다른 AI가 검증할 때(Claude) �
 
 | 파일 | 하는 일 |
 |---|---|
-| `harness-check.sh` | 최종 판정. 규칙 검사 + 최신 dev와 합친 결과로 전체 빌드·테스트 |
+| `harness-check.sh` | 최종 판정. 규칙 검사 + 문서 검사 + 최신 dev와 합친 결과로 전체 빌드·테스트 |
+| `doc-check.py` | 문서 검사. 깨진 링크·없는 코드 경로, 드롭 문서의 `관련 코드` / `마지막 확인`, 마지막 확인 뒤 바뀐 코드 |
+| `test_doc_check.py` | 문서 검사 자체 테스트 (임시 git 저장소로) |
 | `guard/guard.py` | 구현 중 조기 차단 (Codex 편집 hook, git pre-commit) |
 | `guard/test_guard.py` | 가드 자체 테스트 |
 | `test-strength.py` | 수용 테스트가 실제로 실패할 수 있는지 검사 (red, mutants) |
@@ -39,12 +42,15 @@ AI가 드롭 기능을 구현하고(Codex) 다른 AI가 검증할 때(Claude) �
    - 작은 단위로 커밋하고(push 금지) `.ai-output/harness/reports/<단계>-report.md`를 마지막에 쓴다.
 4. **검증** (Claude)
    - 보고서가 생기면 검사를 다시 돌린다. 이때 단계 브랜치에 들어 있는 사본이 아니라 **dev 쪽 `tools/harness/` 사본으로** 돌린다.
-   - 코드를 리뷰하고, 문제가 있으면 수정 지시서를 보낸다 (최대 3번). 통과하면 push하고 PR을 만든다.
+   - 코드를 리뷰하고, 문제가 있으면 수정 지시서를 보낸다 (최대 3번).
+   - 보고서의 "대신 정한 것"은 **같은 PR에서** `docs/domains/drop/policy.md`의 해당 절에 `PROPOSED`로 옮기고, PR 본문 "What changed and why"에 "대신 정한 정책" 목록으로 적는다. 내 PC에만 남은 결정은 팀에게는 조용히 바뀐 정책과 같다 (AGENTS.md 2절).
+   - 문서 검사가 "관련 코드가 마지막 확인 뒤 바뀜"을 경고하면 그 문서를 코드와 대조해 고치고 날짜를 갱신한다.
+   - 통과하면 push하고 PR을 만든다.
 5. **머지** (사람)
    - 머지 뒤 `python3 tools/harness/test-strength.py mutants`로 수용 테스트가 알려진 버그를 잡는지 확인한다. 기준점이 사라진 버그(STALE)는 `mutants/drop.json`을 갱신한다.
 6. **기록** (Claude)
    - `.ai-output/harness/progress.md`에 평가 한 줄을 남긴다 (아래 5절).
-   - 정책을 대신 정했으면 `.ai-output/harness/decisions-to-review.md`에 남긴다. 멈추지 않고 문서에 가장 가까운 쪽으로 정하고, 나중에 사람이 검토한다.
+   - 정책을 대신 정했으면 `.ai-output/harness/decisions-to-review.md`에도 PR 번호와 함께 남긴다. 이 파일은 사람이 검토할 목록일 뿐이고, 정본은 4번에서 옮긴 `policy.md`다. 사람이 확정하면 `PROPOSED`를 `DECIDED`로 바꾼다.
 
 ## 3. 검사는 세 겹이다
 
@@ -52,13 +58,15 @@ AI가 드롭 기능을 구현하고(Codex) 다른 AI가 검증할 때(Claude) �
 |---|---|---|
 | ① Codex 편집 hook (`guard.py codex-hook`) | 명령을 실행하기 직전 | 파일 패치는 정확하게 본다. 셸 명령은 경로 글자를 찾는 방식이라 돌려 쓴 명령(예: `cd` 뒤 상대 경로)은 놓친다. 조기 경고 역할 |
 | ② git pre-commit (`guard.py pre-commit`) | 커밋 직전 | 실제로 바뀐 파일을 본다 |
-| ③ `harness-check.sh` | 단계를 끝낼 때 | 기준 커밋과의 diff + 전체 빌드. **최종 판정** |
+| ③ `harness-check.sh` | 단계를 끝낼 때 | 기준 커밋과의 diff + 문서 검사 + 전체 빌드. **최종 판정** |
 
 막는 것은 다음과 같습니다.
 - 하네스 파일 수정 (`@Disabled` 줄과 그 import 삭제만 허용)
 - dev에 머지된 마이그레이션 수정
 - 다른 도메인(ticketing, fanmeeting, auction, concert, credit, coupon) 코드 수정. 브랜치 이름과 관계없이 적용
-- `tools/harness/`, `.ai-output/harness/`, `.codex/`, `.git/hooks/`, `.claude/` 수정
+- `tools/harness/`, `.ai-output/harness/`, `.codex/`, `.git/hooks/`, `.claude/`, 드롭 지침(`drop/AGENTS.md`, `drop/CLAUDE.md`) 수정
+- 레포 루트에 새 `.md` 추가 (`README`, `AGENTS`, `CLAUDE`, `CONTRIBUTING` 외). 메모는 `.ai-output/`, 팀 문서는 `docs/`
+- 드롭 문서의 깨진 링크, `관련 코드` / `마지막 확인` 누락 (③에서 FAIL. 다른 담당 문서는 경고만)
 - `git commit --no-verify`, `git push`, `HARNESS_EDIT`, hook 경로 변경
 
 ## 4. 명령
@@ -73,6 +81,8 @@ AI가 드롭 기능을 구현하고(Codex) 다른 AI가 검증할 때(Claude) �
 | 구현 전 실패 확인 | `python3 tools/harness/test-strength.py red DropXxxAcceptanceTest [--ref <커밋>]` |
 | 넣은 버그를 잡는지 | `python3 tools/harness/test-strength.py mutants [--only M1,M2]` |
 | 가드 테스트 | `python3 tools/harness/guard/test_guard.py <worktree>` (드롭·하네스·일반 브랜치에서 각각) |
+| 문서 검사만 | `python3 tools/harness/doc-check.py [--verbose]` (`--verbose`는 다른 담당 문서의 깨진 링크 목록까지) |
+| 문서 검사 테스트 | `python3 tools/harness/test_doc_check.py` |
 | 가드 설치 | `bash tools/harness/install.sh` |
 
 `harness-check.sh`는 브랜치가 최신 `origin/dev`보다 뒤처져 있으면 임시 폴더에서 "브랜치 + dev"를 합쳐 빌드합니다. CI와 같은 방식입니다. 충돌이 나면 빌드하지 않고 FAIL을 냅니다.
@@ -108,11 +118,14 @@ AI가 드롭 기능을 구현하고(Codex) 다른 AI가 검증할 때(Claude) �
 - 셸 명령 검사(①)는 패턴 검사라 우회될 수 있다. 판정은 ②와 ③이 한다.
 - 버그 목록(`mutants/drop.json`)은 사람이 고른 8개뿐이다. 전부 잡는다고 테스트가 완전하다는 뜻은 아니다.
 - 서버 여러 대 상황과 대량 트래픽은 수용 테스트 범위 밖이다. 트래픽 테스트(D5)에서 다룬다.
-- 드롭 전용 설정(보호 경로, 다른 도메인 목록)은 `guard.py` 맨 위, `harness-check.sh`, `test-strength.py`에 있다. 다른 도메인이 이 하네스를 쓰려면 그 부분을 바꾼다.
+- 문서 검사는 링크·경로가 있는지와 날짜만 본다. 문서 내용이 코드와 맞는지는 판단하지 못한다. 경고가 나오면 사람이나 Claude가 대조한다. 관련 코드를 폴더 단위로 적은 문서는 그 폴더의 어떤 변경에도 경고한다.
+- 레포 루트에 셸 명령(`cat > memo.md`)으로 만든 `.md`는 ①이 보지 못한다. 커밋할 때 ②가 막는다. 커밋하지 않은 메모는 막지 않는다.
+- 레포 루트에서 실행한 Codex는 하위 폴더 `AGENTS.md`를 자동으로 읽지 않는다 (2026-11-14, codex-cli 0.167.2로 확인). 그 폴더에서 실행하면 읽는다. 그래서 지시서가 드롭 지침을 직접 가리킨다.
+- 드롭 전용 설정(보호 경로, 다른 도메인 목록, 문서 검사 대상)은 `guard.py` 맨 위, `harness-check.sh`, `test-strength.py`, `doc-check.py` 맨 위에 있다. 다른 도메인이 이 하네스를 쓰려면 그 부분을 바꾼다.
 
 ## 7. 하네스를 바꾸려면
 
 1. `chore/drop-<이슈>-harness` 브랜치를 만든다. 이 브랜치에서만 `tools/harness/`와 하네스 테스트를 커밋할 수 있다. Codex 편집 hook은 어느 브랜치에서도 이 폴더를 막는다.
-2. 가드를 바꿨으면 `test_guard.py`를 드롭·하네스·일반 브랜치에서 각각 돌린다.
+2. 가드를 바꿨으면 `test_guard.py`를 드롭·하네스·일반 브랜치에서 각각 돌린다. 문서 검사를 바꿨으면 `test_doc_check.py`를 돌린다.
 3. `HARNESS_EDIT=1 bash tools/harness/harness-check.sh`로 검사하고 PR을 연다.
 4. 아직 머지되지 않은 하네스 브랜치 위에 단계를 쌓으면, `harness-check.sh`가 그 하네스 커밋을 기준으로 삼는다 (`HARNESS_BRANCH` 환경 변수로 브랜치 이름을 바꿀 수 있다).
