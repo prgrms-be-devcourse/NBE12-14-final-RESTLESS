@@ -65,7 +65,11 @@ public enum ErrorCode {
     PAYMENT_REFUND_REJECTED(HttpStatus.CONFLICT, "PG가 환불을 거절했습니다."),
     PAYMENT_REFUND_KEY_CONFLICT(HttpStatus.CONFLICT, "다른 결제에 사용된 환불 요청 키입니다."),
 
-    DROP_INVALID_STATE(HttpStatus.CONFLICT, "드롭 상태가 올바르지 않습니다.");
+    DROP_INVALID_STATE(HttpStatus.CONFLICT, "드롭 상태가 올바르지 않습니다."),
+    DROP_NOT_ON_SALE(HttpStatus.CONFLICT, "드롭 판매 기간이 아닙니다."),
+    DROP_SOLD_OUT(HttpStatus.CONFLICT, "드롭 재고가 소진되었습니다."),
+    DROP_ACTIVE_PURCHASE_EXISTS(HttpStatus.CONFLICT, "진행 중인 드롭 구매가 있습니다."),
+    DROP_ADMISSION_REQUIRED(HttpStatus.FORBIDDEN, "드롭 구매권이 필요합니다.");
 
     private final HttpStatus httpStatus;
     private final String message;
