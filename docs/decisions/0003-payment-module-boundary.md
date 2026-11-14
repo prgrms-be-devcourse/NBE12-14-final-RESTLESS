@@ -3,6 +3,7 @@
 - 상태: Accepted
 - 날짜: 2026-11-12
 - 개정: 2026-11-12, Handler 상태 변경 메서드에 결제 시도 문맥과 환불 종류 전달 ([4절](#4-개정-시도-문맥과-환불-종류-2026-11-12))
+- 개정: 2026-11-14, 주문 상세가 `PaymentLookup`으로 최근 결제를 읽음 ([5절](#5-개정-주문-상세의-결제-읽기-2026-11-14))
 - 관련: 공통 Payment, Drop TX2·TX3·TX5, 티켓팅 결제, 팬미팅 `PaymentPort` (`domains/fanmeeting/ports.md`)
 
 ## 배경
@@ -91,6 +92,16 @@ public interface PaymentResultHandler {
 도메인의 `paymentId` 확인은 2차 방어선이다. 이 확인은 승인을 확정한 시도를 기록하는 데도 쓴다.
 
 마이그레이션: `V20261112_1900__common_add_payment_attempt_context.sql`.
+
+### 5. 개정: 주문 상세의 결제 읽기 (2026-11-14)
+
+배경: 주문 상세(#109)는 재결제와 환불을 위해 주문의 결제 대상과 최근 결제를 보여 줘야 한다.
+3항의 의존 방향만으로는 주문 모듈이 결제를 읽을 수 없다.
+
+- 주문 모듈은 결제 모듈의 `PaymentLookup` 하나만 쓴다. 읽기 전용이고 결제 상태를 바꾸지 않는다.
+- 결제 모듈은 여전히 주문 모듈을 모른다.
+- 결제 대상은 주문 모듈이 모르므로, 도메인이 `order.application.OrderPayableResolver`를 구현해 알려 준다. 드롭 구현은 `DropOrderPayableResolver`다.
+- `OwnedModuleBoundaryTest`가 이 허용 범위를 검사한다 (#114).
 
 ## 검토한 대안
 
