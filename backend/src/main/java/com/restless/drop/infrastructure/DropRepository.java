@@ -12,8 +12,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.domain.Sort;
 
 public interface DropRepository extends JpaRepository<Drop, Long> {
-    List<Drop> findAllByStatusInOrderByOpensAtAscIdAsc(Collection<DropStatus> statuses);
-
     @Query("select d from Drop d where d.status in :statuses and lower(d.title) like lower(:pattern) escape '!'")
     List<Drop> searchPublishedTitles(Collection<DropStatus> statuses, String pattern, Sort sort);
 
