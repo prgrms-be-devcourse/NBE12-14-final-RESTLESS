@@ -92,6 +92,16 @@ public interface PaymentResultHandler {
 
 마이그레이션: `V20261112_1900__common_add_payment_attempt_context.sql`.
 
+### 5. 개정: 주문 상세의 결제 읽기 (2026-11-14)
+
+배경: 주문 상세(#109)는 재결제와 환불을 위해 주문의 결제 대상과 최근 결제를 보여 줘야 한다.
+3항의 의존 방향만으로는 주문 모듈이 결제를 읽을 수 없다.
+
+- 주문 모듈은 결제 모듈의 `PaymentLookup` 하나만 쓴다. 읽기 전용이고 결제 상태를 바꾸지 않는다.
+- 결제 모듈은 여전히 주문 모듈을 모른다.
+- 결제 대상은 주문 모듈이 모르므로, 도메인이 `order.application.OrderPayableResolver`를 구현해 알려 준다. 드롭 구현은 `DropOrderPayableResolver`다.
+- `OwnedModuleBoundaryTest`가 이 허용 범위를 검사한다 (#114).
+
 ## 검토한 대안
 
 | 대안 | 기각 이유 |
