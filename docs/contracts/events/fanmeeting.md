@@ -2,7 +2,7 @@
 
 - 상태: PROPOSED. 이벤트 전달 방식은 팀 협의 후 결정한다.
 - 처리 방식: [ADR-0001](../../decisions/0001-event-handling.md)
-- P0는 가짜 결제 Adapter로 개발하고, 공통 결제 모듈이 준비되면 Adapter만 바꾼다.
+- 결제는 공통 결제 모듈을 쓴다. 팬미팅은 `PaymentResultHandler`(`FAN_MEETING`)를 구현한다.
 
 ```mermaid
 flowchart LR
@@ -33,12 +33,11 @@ flowchart LR
 | `FanMeetingParticipationConfirmed` | 참가 확정 | 알림, 참여 내역 |
 | `FanMeetingParticipationCancelled` | 포기·만료·환불 | 참여 내역 |
 
-## 3. 결제 모듈 직접 호출
+## 3. 결제 모듈 연결
 
-결제 결과 조회는 이벤트가 아니라 직접 호출한다.
+결제 결과는 이벤트가 아니라 결제 모듈이 Handler를 직접 부른다(같은 트랜잭션, ADR-0003).
 
 ```text
-PaymentResolutionResult resolve(payableType = "FAN_MEETING_ORDER", payableId)
-  → NOT_STARTED | APPROVED | NOT_APPROVED_FINAL | PROCESSING | UNKNOWN
-    + approvedAt, attemptId, approvedAmount
+PaymentResultHandler (payableType = FAN_MEETING, payableId = orderId)
+  load · onApprovalStarting · onApproved · onFailed · onUnknown · onRefunded
 ```

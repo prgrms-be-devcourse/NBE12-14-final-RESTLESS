@@ -81,4 +81,16 @@ public class FanMeetingSelection {
         selection.updatedAt = now;
         return selection;
     }
+
+    /** 기한 안 결제 완료. */
+    public void confirm(Instant now) {
+        status = FanMeetingSelectionStatus.CONFIRMED;
+        updatedAt = now;
+    }
+
+    /** 자리를 잃음(기한 경과, 늦은 승인, 금액 불일치). */
+    public void expire(Instant now) {
+        status = FanMeetingSelectionStatus.EXPIRED;
+        updatedAt = now;
+    }
 }
