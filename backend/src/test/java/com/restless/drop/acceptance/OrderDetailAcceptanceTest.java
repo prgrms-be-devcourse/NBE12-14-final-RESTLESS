@@ -16,6 +16,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * 주문 상세 수용 테스트 (#109). 기준: {@code docs/contracts/api/common.md} "주문 상세".
@@ -56,9 +57,10 @@ class OrderDetailAcceptanceTest extends DropAcceptanceSupport {
         assertThat(before.string("$.shipping.address")).isEqualTo("서울시 강남구 1");
         assertThat(before.string("$.payable.payableType")).isEqualTo("DROP");
         assertThat(number(before, "$.payable.payableId")).isEqualTo(reservationId);
-        // DB는 마이크로초까지 저장한다. 점유 응답은 저장 전 시각이라 시계에 따라 나노초가 붙는다 (Linux CI).
-        assertThat(Instant.parse(before.string("$.payableExpiresAt")).truncatedTo(ChronoUnit.MICROS))
-                .isEqualTo(Instant.parse(hold.string("$.expiresAt")).truncatedTo(ChronoUnit.MICROS));
+        // 점유 응답은 저장 전 시각이라 Linux CI에서는 나노초가 붙는다. MySQL은 이를 마이크로초로 반올림해 저장한다.
+        // 버림으로 맞추면 7번째 자리가 5 이상일 때 1마이크로초 차이가 나므로 1마이크로초 오차 안에서 비교한다.
+        assertThat(Instant.parse(before.string("$.payableExpiresAt")))
+                .isCloseTo(Instant.parse(hold.string("$.expiresAt")), within(1, ChronoUnit.MICROS));
         assertThat(before.<Object>read("$.payment")).isNull();
 
         // 상세가 준 결제 대상 그대로 결제를 준비한다. 첫 시도는 카드사 거절로 실패한다.
