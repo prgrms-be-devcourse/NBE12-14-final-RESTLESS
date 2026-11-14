@@ -114,7 +114,7 @@ class FanMeetingWithdrawalGuard implements WithdrawalGuard {
 
 | Method | Endpoint | 기능 / 응답 |
 |---|---|---|
-| GET | `/api/me/orders` | 내 주문 목록 (후속 구현) |
+| GET | `/api/me/orders` | 내 주문 목록. 200 페이지 (#101) |
 | GET | `/api/orders/{orderId}` | 주문 상세 (후속 구현) |
 | POST | `/api/payments` | 결제 준비. 새 시도 201, 같은 키 재요청 200 |
 | POST | `/api/payments/confirm` | 토스 승인. 승인 200, 처리 중/불명확 202, 최종 거절 409 |
@@ -126,6 +126,37 @@ class FanMeetingWithdrawalGuard implements WithdrawalGuard {
 결제 대상은 `(payableType, payableId)`로 식별하며 `orderId`는 승인 요청에서만 우리 `pgOrderId`를 뜻한다.
 모든 결제 API는 Bearer 로그인이 필요하다(토큰 없음/만료/위조는 401 `UNAUTHORIZED`).
 회원 ID는 토큰의 `@LoginMember`에서만 받고 본문에서 받지 않는다.
+
+### 내 주문 목록
+
+`GET /api/me/orders?page=0&size=20` — 로그인한 회원의 공통 주문을 최신순으로 준다 (#101).
+
+```json
+{
+  "items": [
+    {
+      "orderId": 7,
+      "orderType": "DROP",
+      "status": "PAID",
+      "totalAmount": 39000,
+      "createdAt": "2026-11-14T01:00:00Z",
+      "lines": [
+        { "itemType": "DROP_VARIANT", "itemName": "투어 후드", "optionName": "M", "unitPrice": 39000, "quantity": 1 }
+      ]
+    }
+  ],
+  "page": 0, "size": 20, "totalElements": 1, "totalPages": 1
+}
+```
+
+- 본인 주문만 준다. 공통 주문인 `DROP`, `TICKET`만 나온다. 팬미팅은 자체 주문을 쓰므로 나오지 않는다.
+- 모든 상태를 준다. 결제 전, 취소, 환불 주문도 나온다. `status`는 주문의 지금 상태다.
+- `lines`의 이름, 옵션, 가격은 주문할 때 복사해 둔 값이다. 상품 정보가 나중에 바뀌어도 그대로다. 옵션이 없으면 `optionName`은 빈 문자열이다.
+- 정렬은 주문 시각 내림차순이다. 시각이 같으면 `orderId` 내림차순이다.
+- `page`는 0부터, 기본 0이다. `size`는 1~100, 기본 20이다. 음수 `page`, 범위 밖 `size`, 숫자가 아닌 값은 400 `INVALID_REQUEST`다.
+- 주문이 없거나 범위 밖 페이지면 `items`는 빈 배열이다. `totalElements`, `totalPages`는 실제 전체 주문 기준이다.
+- 토큰이 없으면 401 `UNAUTHORIZED`다. 탈퇴한 회원은 토큰이 남아 있어도 404 `MEMBER_NOT_FOUND`다. 탈퇴 안내대로 탈퇴 뒤에는 주문을 볼 수 없다.
+- 배송지와 결제 ID는 주지 않는다. 결제 연결은 주문 상세에서 다룬다.
 
 ### 결제 준비
 
