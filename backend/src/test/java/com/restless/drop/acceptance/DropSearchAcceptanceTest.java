@@ -1,6 +1,5 @@
 package com.restless.drop.acceptance;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -18,7 +17,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 다른 테스트의 드롭과 섞이지 않게, 테스트마다 고유한 글자를 제목에 넣고 그 글자로 검색한다.
  * <b>하네스 파일이다.</b> #105 구현 PR에서 아래 {@code @Disabled} 한 줄만 지운다. 테스트 내용은 바꾸지 않는다.
  */
-@Disabled("#105 구현 PR에서 이 줄만 지운다")
 @DisplayName("드롭 목록 검색·정렬")
 class DropSearchAcceptanceTest extends DropAcceptanceSupport {
 
