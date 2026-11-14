@@ -2,7 +2,6 @@ package com.restless.drop.acceptance;
 
 import com.restless.payment.infrastructure.fake.FakePgClient;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,7 +21,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 상세가 주는 결제 대상과 최근 결제만으로 재결제와 환불을 끝까지 할 수 있는지 본다. 결제는 Fake PG로 실행한다.
  * <b>하네스 파일이다.</b> #109 구현 PR에서 아래 {@code @Disabled} 한 줄만 지운다. 테스트 내용은 바꾸지 않는다.
  */
-@Disabled("#109 구현 PR에서 이 줄만 지운다")
 @DisplayName("주문 상세")
 class OrderDetailAcceptanceTest extends DropAcceptanceSupport {
 
