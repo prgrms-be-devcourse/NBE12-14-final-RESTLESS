@@ -12,6 +12,7 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -55,8 +56,9 @@ class OrderDetailAcceptanceTest extends DropAcceptanceSupport {
         assertThat(before.string("$.shipping.address")).isEqualTo("서울시 강남구 1");
         assertThat(before.string("$.payable.payableType")).isEqualTo("DROP");
         assertThat(number(before, "$.payable.payableId")).isEqualTo(reservationId);
-        assertThat(Instant.parse(before.string("$.payableExpiresAt")))
-                .isEqualTo(Instant.parse(hold.string("$.expiresAt")));
+        // DB는 마이크로초까지 저장한다. 점유 응답은 저장 전 시각이라 시계에 따라 나노초가 붙는다 (Linux CI).
+        assertThat(Instant.parse(before.string("$.payableExpiresAt")).truncatedTo(ChronoUnit.MICROS))
+                .isEqualTo(Instant.parse(hold.string("$.expiresAt")).truncatedTo(ChronoUnit.MICROS));
         assertThat(before.<Object>read("$.payment")).isNull();
 
         // 상세가 준 결제 대상 그대로 결제를 준비한다. 첫 시도는 카드사 거절로 실패한다.
