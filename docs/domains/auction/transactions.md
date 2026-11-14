@@ -12,7 +12,7 @@
 
 하나의 트랜잭션에서:
 
-1. 회원의 지갑을 찾는다. 없으면 만든다. 동시에 만들어 `UNIQUE(user_id)`에 걸리면 다시 조회한다.
+1. 회원의 지갑이 없으면 만든다. `INSERT ... ON DUPLICATE KEY UPDATE`라서 동시에 만들어도 오류 없이 `UNIQUE(user_id)`에 따라 한 행만 생긴다.
 2. 지갑 행 `FOR UPDATE`
 3. `balance_amount += 10,000`
 4. `credit_transactions` `GRANT` 기록 (`operation_key`는 서버가 만든 UUID)
@@ -30,21 +30,23 @@
 4. **입찰자 확인:** 판매자 본인이면 `BID_BY_SELLER`. 현재 최고 입찰자면 `BID_ALREADY_HIGHEST`
 5. **금액 확인:** 입찰이 없으면 시작가 이상, 있으면 최고가 + 최소 인상액 이상. 아니면 `BID_AMOUNT_TOO_LOW`(최소 입찰 가능 금액 포함)
 6. **지갑 잠금:** 새 입찰자와 이전 최고 입찰자의 지갑을 ID 오름차순으로 `FOR UPDATE`
-7. **크레딧 확인:** 새 입찰자의 `balance − reserved >= 입찰 금액`. 아니면 `CREDIT_INSUFFICIENT`. 지갑이 없으면 0으로 본다. 4번에서 현재 최고 입찰자를 거절했으므로 새 입찰자와 이전 최고 입찰자는 항상 다른 사람이다. 따라서 10번의 이전 확보 해제는 새 입찰자의 사용 가능액에 영향이 없고, 해제 전에 확인해도 결과가 같다
-8. **입찰 저장:** `bid_sequence = 이전 최대 + 1`, `accepted_at = 지금`
-9. **새 확보:** `credit_holds` `HELD`, 지갑 `reserved += 금액`, 내역 `HOLD`
-10. **이전 확보 해제:** 이전 최고 입찰의 확보를 `RELEASED`, 그 지갑 `reserved −= 금액`, 내역 `RELEASE`
-11. **경매 갱신:** `ends_at = max(ends_at, 지금 + 연장 시간)`, `revision += 1`
-12. 커밋 → `AuctionChangedEvent` 발행
+7. **입찰 저장:** `bid_sequence = 이전 최대 + 1`, `accepted_at = 지금`. `UNIQUE(bidder_user_id, request_key)` 위반은 `IDEMPOTENCY_KEY_CONFLICT`
+8. **크레딧 확인과 새 확보:** 새 입찰자의 `balance − reserved >= 입찰 금액`이어야 한다. 아니면 `CREDIT_INSUFFICIENT`. 지갑이 없으면 0으로 본다. 통과하면 `credit_holds` `HELD`, 지갑 `reserved += 금액`, 내역 `HOLD`
+9. **이전 확보 해제:** 이전 최고 입찰의 확보를 `RELEASED`, 그 지갑 `reserved −= 금액`, 내역 `RELEASE`
+10. **경매 갱신:** `ends_at = max(ends_at, 지금 + 연장 시간)`, `revision += 1`
+11. 커밋 → `AuctionChangedEvent` 발행
 
-8~11 중 하나라도 실패하면 전체를 롤백한다. 일부만 반영된 상태는 남지 않는다.
+7~10 중 하나라도 실패하면 전체를 롤백한다. 일부만 반영된 상태는 남지 않는다.
+
+- 크레딧 확인은 입찰을 저장한 뒤 8번에서 한다. 확보 행이 입찰 ID를 가리키기 때문이다. 부족하면 7번에서 저장한 입찰도 함께 롤백되므로 결과는 "아무것도 저장하지 않음"이다. 다만 MySQL AUTO_INCREMENT 번호는 돌려받지 않아 입찰 ID에 빈 번호가 생긴다.
+- 4번에서 현재 최고 입찰자를 거절했으므로 새 입찰자와 이전 최고 입찰자는 항상 다른 사람이다. 따라서 9번의 이전 확보 해제는 새 입찰자의 사용 가능액에 영향이 없고, 해제 전에 확인해도 결과가 같다.
 
 `operation_key`는 `HOLD:<입찰 ID>`, `RELEASE:<확보 ID>`처럼 대상 ID로 만든다. 같은 작업이 두 번 기록되면 UNIQUE에서 실패한다.
 
 **중복 요청 경합:**
 
 - 같은 키가 **같은 경매**로 동시에 오면 1번 잠금에서 한 줄로 서므로, 두 번째 요청은 2번에서 첫 입찰을 찾는다.
-- 같은 키가 **다른 경매**로 동시에 오면 서로 다른 경매 행을 잠그므로 잠금이 막지 못한다. 이때는 8번 INSERT가 `UNIQUE(bidder_user_id, request_key)`에 걸리고, 이 위반을 `IDEMPOTENCY_KEY_CONFLICT`로 응답한다.
+- 같은 키가 **다른 경매**로 동시에 오면 서로 다른 경매 행을 잠그므로 잠금이 막지 못한다. 이때는 7번 INSERT가 `UNIQUE(bidder_user_id, request_key)`에 걸리고, 이 위반을 `IDEMPOTENCY_KEY_CONFLICT`로 응답한다.
 - 거절된 요청은 저장되지 않으므로, 같은 키로 재시도하면 처음부터 다시 판단한다.
 
 ## TX-AU-3. 경매 시작 (스케줄러)

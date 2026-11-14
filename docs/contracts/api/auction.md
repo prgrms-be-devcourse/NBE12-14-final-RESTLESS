@@ -76,6 +76,7 @@ Content-Type: application/json
 - `extensionDurationSeconds`는 생략하면 60이고, 30 ~ 300만 받는다.
 - 응답: 201 `{ "auctionId": 12 }`
 - 수정(PATCH)은 같은 필드를 **모두** 다시 받는다 (부분 수정 아님). 응답은 200과 상세 형식.
+  `extensionDurationSeconds`를 빼면 기존 값을 유지하지 않고 60으로 바뀐다. 기존 값을 지키려면 함께 보낸다.
 - 삭제(DELETE)는 204, 본문 없음.
 
 ## 목록
@@ -143,6 +144,7 @@ Content-Type: application/json
 ```
 
 - 같은 회원이 같은 `Idempotency-Key`로 같은 경매, 같은 금액을 다시 보내면 **처음 수락된 입찰을 현재 상태와 함께** 201로 돌려준다. `bidId`, `amount`, `acceptedAt`은 처음과 같고, `status`와 `endsAt`은 지금 값이다 (그사이 추월당했으면 `OUTBID`). 입찰, 크레딧 확보, 연장은 다시 하지 않는다.
+- `Idempotency-Key`는 1 ~ 100자다. 없거나 비었거나 100자를 넘으면 400 `INVALID_REQUEST`.
 - 같은 키로 다른 경매나 다른 금액을 보내면 409 `IDEMPOTENCY_KEY_CONFLICT`.
 - 거절된 요청은 저장하지 않는다. 같은 키로 재시도하면 새 요청으로 다시 판단한다.
 
