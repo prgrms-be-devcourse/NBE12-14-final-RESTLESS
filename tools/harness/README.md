@@ -48,6 +48,8 @@ AI가 드롭 기능을 구현하고(Codex) 다른 AI가 검증할 때(Claude) �
    - 통과하면 push하고 PR을 만든다.
 5. **머지** (사람)
    - 머지 뒤 `python3 tools/harness/test-strength.py mutants`로 수용 테스트가 알려진 버그를 잡는지 확인한다. 기준점이 사라진 버그(STALE)는 `mutants/drop.json`을 갱신한다.
+   - 메인 폴더에서 dev를 받은 뒤 `bash tools/harness/harness-check.sh`를 돌려 "아직 꺼진 수용 테스트"에 머지한 단계의 테스트가 남아 있지 않은지 본다. 남아 있으면 머지에서 `@Disabled` 삭제가 빠진 것이다 (HD-18).
+   - 구현 브랜치는 하네스 PR이 머지된 뒤 최신 dev에서 판다. 머지되지 않은 브랜치 위에 쌓고 squash merge하면 변경이 빠질 수 있다 (HD-18).
 6. **기록** (Claude)
    - `.ai-output/harness/progress.md`에 평가 한 줄을 남긴다 (아래 5절).
    - 정책을 대신 정했으면 `.ai-output/harness/decisions-to-review.md`에도 PR 번호와 함께 남긴다. 이 파일은 사람이 검토할 목록일 뿐이고, 정본은 4번에서 옮긴 `policy.md`다. 사람이 확정하면 `PROPOSED`를 `DECIDED`로 바꾼다.
