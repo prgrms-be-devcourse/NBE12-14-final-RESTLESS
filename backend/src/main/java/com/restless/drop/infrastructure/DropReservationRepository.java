@@ -1,6 +1,8 @@
 package com.restless.drop.infrastructure;
 
 import com.restless.drop.domain.DropReservation;
+import com.restless.drop.domain.DropReservationStatus;
+import java.util.Collection;
 import java.util.Optional;
 import java.time.Instant;
 import java.util.List;
@@ -11,6 +13,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface DropReservationRepository extends JpaRepository<DropReservation, Long> {
+    boolean existsByUserIdAndStatusIn(Long userId, Collection<DropReservationStatus> statuses);
+
     Optional<DropReservation> findByDropIdAndUserIdAndRequestKey(Long dropId, Long userId, String requestKey);
     Optional<DropReservation> findByIdAndDropIdAndUserId(Long id, Long dropId, Long userId);
 
