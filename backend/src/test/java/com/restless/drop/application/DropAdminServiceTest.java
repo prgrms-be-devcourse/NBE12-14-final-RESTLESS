@@ -22,6 +22,23 @@ import static org.mockito.Mockito.*;
 
 class DropAdminServiceTest {
     @Test
+    void registrationRejectsCloseAtOrBeforeInjectedClockWithoutWriting() {
+        var drops = mock(DropRepository.class);
+        var variants = mock(DropVariantRepository.class);
+        var inventories = mock(DropInventoryRepository.class);
+        var concerts = mock(ConcertQueryService.class);
+        var now = Instant.parse("2040-01-01T00:00:00Z");
+        var service = new DropAdminService(drops, variants, inventories, concerts, Clock.fixed(now, ZoneOffset.UTC));
+        for (Instant close : new Instant[] {now.minusNanos(1), now}) {
+            var request = new CreateDropRequest(1L, "상품", "설명", "url", now.minusSeconds(60), close,
+                    List.of(new CreateDropRequest.Variant("A", "M", 1L, 1)));
+            assertThatThrownBy(() -> service.create(request)).isInstanceOfSatisfying(BusinessException.class,
+                    e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+        }
+        verifyNoInteractions(drops, variants, inventories, concerts);
+    }
+
+    @Test
     void databaseCollationDuplicateIsAlsoInvalidRequest() {
         var drops = mock(DropRepository.class);
         var variants = mock(DropVariantRepository.class);

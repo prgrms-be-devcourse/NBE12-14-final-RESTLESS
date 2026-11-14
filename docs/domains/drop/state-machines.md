@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/domain/`, `backend/src/main/java/com/restless/order/domain/`, `backend/src/main/java/com/restless/payment/domain/`
 >
-> 마지막 확인: 2026-11-13 (#79에서 코드와 대조)
+> 마지막 확인: 2026-11-14 (#92 등록 검증·판매 상태 구현과 대조)
 
 Order, Payment, Reservation 상태는 따로 저장하고, 조합 간 정합성을 검증한다.
 
@@ -13,9 +13,9 @@ DRAFT → SCHEDULED → OPEN → CLOSED
 DRAFT / SCHEDULED → CANCELLED
 ```
 
-판매 가능 여부는 게시된 상태(`SCHEDULED` 또는 `OPEN`)와 서버 시각 조건(`opensAt <= now < closesAt`)으로 판정한다. `OPEN`, `CLOSED` 전환은 표시용이며 판매 판정에 쓰지 않는다 ([API 계약 D2](../../contracts/api/drop.md), 2026-11-13).
+판매 가능 여부는 게시된 상태(`SCHEDULED` 또는 `OPEN`)와 서버 시각 조건(`opensAt <= now < closesAt`)으로 판정한다. `OPEN` 전환은 판정에 영향이 없고, 판매 가능 상태가 아니면(`CLOSED`, `CANCELLED` 등) 시각과 관계없이 판매하지 않는다 (#92) ([API 계약 D2](../../contracts/api/drop.md), 2026-11-13).
 
-현재 구현된 전환은 게시(`DRAFT → SCHEDULED`) 하나다. `OPEN`, `CLOSED`, `CANCELLED`로 바꾸는 기능은 아직 없다. 응답의 `saleStatus`는 상태가 아니라 서버 시각으로 계산한다.
+현재 구현된 전환은 게시(`DRAFT → SCHEDULED`) 하나다. `OPEN`, `CLOSED`, `CANCELLED`로 바꾸는 기능은 아직 없다. 응답의 `saleStatus`는 판매 판정과 같은 기준(`Drop.saleStatus`)으로 계산한다. 판매 가능 상태가 아니면 `ENDED`, 그 밖에는 서버 시각으로 정한다 (#92).
 
 ## 2. 대기열 상태
 

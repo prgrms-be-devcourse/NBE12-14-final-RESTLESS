@@ -108,8 +108,7 @@ public class DropReservationTransactions {
     }
 
     private void requireOnSale(Drop drop, Instant now) {
-        if ((drop.getStatus() != DropStatus.SCHEDULED && drop.getStatus() != DropStatus.OPEN)
-                || now.isBefore(drop.getOpensAt()) || !now.isBefore(drop.getClosesAt())) {
+        if (!drop.isOnSale(now)) {
             throw new BusinessException(ErrorCode.DROP_NOT_ON_SALE);
         }
     }

@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/resources/db/migration/V*__drop_*.sql`, `backend/src/main/java/com/restless/drop/domain/`
 >
-> 마지막 확인: 2026-11-13 (#79에서 코드와 대조)
+> 마지막 확인: 2026-11-14 (#92 등록 검증·판매 상태 구현과 대조)
 
 ![Drop ERD](drop-erd.png)
 
@@ -39,7 +39,7 @@ SKU, 옵션
 | price_amount | 원 단위 정수 가격 |
 | is_active | 옵션 활성 여부 |
 
-제약: `UNIQUE(drop_id, sku_code)`, `CHECK(price_amount >= 0)`
+제약: `UNIQUE(drop_id, sku_code)`, `CHECK(price_amount >= 0)`. 등록 API는 1원 이상만 받는다(#92). DB 제약은 이미 있는 행 때문에 그대로 둔다
 
 - `is_active`가 false면 재고가 있어도 신규 예약할 수 없다.
 - 판매 시작 후 가격, 옵션 변경은 제한한다.

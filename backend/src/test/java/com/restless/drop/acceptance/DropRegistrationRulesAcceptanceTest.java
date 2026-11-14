@@ -1,6 +1,5 @@
 package com.restless.drop.acceptance;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -15,7 +14,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * D1 등록 검증 보강과 판매 상태 표시 수용 테스트 (#92). 기준: {@code docs/contracts/api/drop.md} D1.
  * <b>하네스 파일이다.</b> #92 구현 PR에서 아래 {@code @Disabled} 한 줄만 지운다. 테스트 내용은 바꾸지 않는다.
  */
-@Disabled("#92 드롭 등록 검증 보강 구현 전")
 @DisplayName("D1 등록 검증 보강과 판매 상태")
 class DropRegistrationRulesAcceptanceTest extends DropAcceptanceSupport {
 
