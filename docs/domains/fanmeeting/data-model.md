@@ -23,7 +23,7 @@
 
 > **실제 스키마의 정본은 마이그레이션 파일**(`backend/src/main/resources/db/migration/V20261111_1020__fanmeeting_create_tables.sql`)이다. 아래는 설계 의도를 보여 주는 DDL이고, 머지된 파일과 다음이 다르다.
 >
-> - **조회용 인덱스 10개(`KEY idx_...`)가 머지된 파일에 아직 없다.** 다음 마이그레이션(`V<날짜>_<시각>__fanmeeting_add_indexes.sql`)으로 추가한다. Worker 조회와 승격·만료의 `FOR UPDATE`가 인덱스 없이 돌면 훑은 행을 전부 잠그므로, 승격·만료 구현 전에 넣는다.
+> - 조회용 인덱스(`KEY idx_...`)는 첫 파일에 없고 `V20261111_2200__fanmeeting_add_indexes.sql`로 추가했다. Worker 조회와 승격·만료의 `FOR UPDATE`가 인덱스 없이 돌면 훑은 행을 전부 잠그기 때문이다.
 > - 제약 이름 규칙(`pk_`/`uk_`/`fk_`/`ck_` + 테이블 이름), 일부 길이(`algorithm_version` 20, `last_error` 500, `approved_attempt_id` 100, selections `status` 20)는 머지된 파일을 따른다.
 > - `organizer_id`, `opens_at_public`은 `V20261113_1600__fanmeeting_add_organizer_and_opens_at_public.sql`로 추가했다.
 
@@ -149,7 +149,7 @@ CREATE TABLE fan_meeting_orders (
 | 위치 | 내용 |
 |---|---|
 | `src/main/resources/db/migration/V20261111_1020__fanmeeting_create_tables.sql` (머지됨) | `fan_meeting_*` 5개 테이블 |
-| `src/main/resources/db/migration/V20261112_*__fanmeeting_add_indexes.sql` (머지됨) | 조회용 인덱스 |
+| `src/main/resources/db/migration/V20261111_2200__fanmeeting_add_indexes.sql` (머지됨) | 조회용 인덱스 |
 
 파일 이름은 팀 규칙([CONTRIBUTING.md](../../../CONTRIBUTING.md))을 따른다: `V<날짜>_<시각>__<도메인>_<내용>.sql`. 날짜·시각은 **파일을 만드는 시점**으로 적는다. 팀 설정이 `out-of-order: true`라서, 다른 사람 파일과 머지 순서가 달라도 빠진 파일을 적용한다.
 
