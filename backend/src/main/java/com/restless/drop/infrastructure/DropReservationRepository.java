@@ -13,6 +13,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface DropReservationRepository extends JpaRepository<DropReservation, Long> {
+    Optional<DropReservation> findByOrderId(Long orderId);
+
     boolean existsByUserIdAndStatusIn(Long userId, Collection<DropReservationStatus> statuses);
 
     Optional<DropReservation> findByDropIdAndUserIdAndRequestKey(Long dropId, Long userId, String requestKey);
