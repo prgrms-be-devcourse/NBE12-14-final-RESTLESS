@@ -107,7 +107,8 @@ class MemberWithdrawApiTest {
 
         mockMvc.perform(get("/api/me/profile").header(HttpHeaders.AUTHORIZATION, "Bearer " + login.accessToken()))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("MEMBER_NOT_FOUND"));
+                .andExpect(jsonPath("$.code").value("MEMBER_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("탈퇴한 회원입니다."));
         withdraw(login.accessToken(), PASSWORD).andExpect(status().isNotFound());
     }
 
