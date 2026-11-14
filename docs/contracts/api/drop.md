@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/api/`, `backend/src/main/java/com/restless/drop/application/dto/`, `backend/src/test/java/com/restless/drop/acceptance/`
 >
-> 마지막 확인: 2026-11-14 (#92 등록 검증·판매 상태 구현과 대조. 탈퇴 제한은 #41, 탈퇴 동의는 #97, 검색·정렬은 #105)
+> 마지막 확인: 2026-11-14 (#92 등록 검증·판매 상태 구현과 대조. 탈퇴 제한은 #41, 탈퇴 동의는 #97, 검색·정렬은 #105, 주문 상세 결제 대상은 #109)
 
 - 상태: v1 DECIDED (2026-11-13). 수용 테스트(`backend/src/test/java/com/restless/drop/acceptance/`)가 이 계약을 기준으로 판정한다.
 - Base URL: `/api` ([ADR-0002](../../decisions/0002-common-conventions.md)). 오류는 공통 형식 `{code, message, details, traceId, timestamp}` ([common.md](common.md)).
@@ -105,6 +105,7 @@
 ## D3. 결제 연결
 
 - 결제 준비: `POST /api/payments` `{ "payableType": "DROP", "payableId": <reservationId> }` ([common.md](common.md)).
+- 주문 상세 `GET /api/orders/{orderId}`의 `payable`과 `payableExpiresAt`은 드롭이 알려 준다. 결제 대상은 그 주문의 재고 점유이고, 기한은 점유 만료 시각이다 (`DropOrderPayableResolver`, #109).
 - 드롭 `PaymentResultHandler`는 [transactions.md](../../domains/drop/transactions.md) TX2~TX5와 [policy.md](../../domains/drop/policy.md) 8·10절을 따른다 (재결제 허용, 환불 종류별 재고 처리). 환불 요청은 받아들인다(전액 환불 지원).
 - 결제창에 보이는 주문명은 드롭 제목이다. 100자를 넘으면 100자로 자른다. 금액은 주문 스냅샷 금액이다.
 - 만료 작업 빈 이름 `dropReservationExpiryJob`, 메서드 `runOnce()`. RESERVED이고 기한이 지난 재고 점유를 EXPIRED로 닫는다. 설정 `restless.drop.expiry.enabled=false`는 **주기 실행만 멈추고 빈은 남는다** (수용 테스트가 직접 호출).

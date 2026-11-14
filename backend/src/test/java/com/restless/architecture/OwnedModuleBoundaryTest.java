@@ -1,7 +1,9 @@
 package com.restless.architecture;
 
+import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.Dependency;
 import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.properties.HasName;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
@@ -42,11 +44,15 @@ class OwnedModuleBoundaryTest {
             .should().dependOnClassesThat().resideInAPackage("com.restless.order..")
             .because("결제 대상은 (payableType, payableId)로 식별한다. 결제가 주문을 직접 알 필요가 없다 (ADR-0003)");
 
+    /** 주문 모듈이 결제 모듈에서 쓸 수 있는 유일한 타입. 결제 대상의 최근 시도를 읽기만 한다 (#113). */
+    private static final String PAYMENT_LOOKUP = "com\\.restless\\.payment\\.application\\.PaymentLookup(\\$.*)?";
+
     @ArchTest
     static final ArchRule orderDoesNotKnowPayment = noClasses()
             .that().resideInAPackage("com.restless.order..")
-            .should().dependOnClassesThat().resideInAPackage("com.restless.payment..")
-            .because("주문 상태 변경은 도메인 Handler가 OrderService로 한다");
+            .should().dependOnClassesThat(JavaClass.Predicates.resideInAPackage("com.restless.payment..")
+                    .and(DescribedPredicate.not(HasName.Predicates.nameMatching(PAYMENT_LOOKUP))))
+            .because("주문 상태 변경은 도메인 Handler가 OrderService로 한다. 주문 상세는 PaymentLookup으로 최근 결제를 읽기만 한다");
 
     @ArchTest
     static final ArchRule dropUsesNoForeignRepositories = noClasses()

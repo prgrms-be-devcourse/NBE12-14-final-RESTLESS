@@ -52,6 +52,7 @@ public enum ErrorCode {
     CREDIT_INSUFFICIENT(HttpStatus.CONFLICT, "사용 가능한 크레딧이 부족합니다."),
 
     // 결제
+    ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."),
     PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "결제를 찾을 수 없습니다."),
     PAYMENT_TARGET_NOT_FOUND(HttpStatus.NOT_FOUND, "결제 대상을 찾을 수 없습니다."),
     PAYMENT_NOT_PAYABLE(HttpStatus.CONFLICT, "결제할 수 없는 상태입니다."),
