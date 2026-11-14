@@ -100,6 +100,18 @@ public class FanMeetingSelection {
         updatedAt = now;
     }
 
+    /** 예비 승격: 빈자리를 받아 결제 대기가 된다. */
+    public void promote(Instant now) {
+        status = FanMeetingSelectionStatus.PAYMENT_PENDING;
+        updatedAt = now;
+    }
+
+    /** 승격되지 않고 끝남(모집 완료, 또는 승격 차례에 탈퇴 확인). */
+    public void markNotNeeded(Instant now) {
+        status = FanMeetingSelectionStatus.NOT_NEEDED;
+        updatedAt = now;
+    }
+
     /** 예비로 뽑혔는지(승격된 뒤에도 예비다). */
     public boolean isReserve() {
         return selectionType == FanMeetingSelectionType.RESERVE;

@@ -48,4 +48,9 @@ public interface FanMeetingEventRepository extends JpaRepository<FanMeetingEvent
              order by e.entryClosesAt
             """)
     List<Long> findIdsToClose(@Param("status") FanMeetingStatus status, @Param("now") Instant now, Pageable limit);
+
+    /** 승격·모집 완료를 볼 행사: 결제 진행 중. afterId 다음부터 id 순서로 이어서 읽는다. */
+    @Query("select e.id from FanMeetingEvent e where e.status = :status and e.id > :afterId order by e.id")
+    List<Long> findIdsByStatusAfter(@Param("status") FanMeetingStatus status, @Param("afterId") Long afterId,
+                                    Pageable limit);
 }

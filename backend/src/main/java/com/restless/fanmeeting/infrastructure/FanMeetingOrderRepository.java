@@ -1,6 +1,7 @@
 package com.restless.fanmeeting.infrastructure;
 
 import com.restless.fanmeeting.domain.FanMeetingOrder;
+import com.restless.fanmeeting.domain.FanMeetingOrderStatus;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.List;
@@ -62,4 +63,21 @@ public interface FanMeetingOrderRepository extends JpaRepository<FanMeetingOrder
              order by o.reviewStartedAt
             """)
     List<Long> findIdsToWarnReview(@Param("startedBefore") Instant startedBefore, Pageable limit);
+
+    long countByEventIdAndStatus(Long eventId, FanMeetingOrderStatus status);
+
+    /** 상태별 주문 수. */
+    interface StatusCount {
+        FanMeetingOrderStatus getStatus();
+
+        long getCount();
+    }
+
+    @Query("""
+            select o.status as status, count(o) as count from FanMeetingOrder o
+             where o.eventId = :eventId group by o.status
+            """)
+    List<StatusCount> countByStatus(@Param("eventId") Long eventId);
+
+    List<FanMeetingOrder> findByEventIdAndStatusOrderById(Long eventId, FanMeetingOrderStatus status);
 }

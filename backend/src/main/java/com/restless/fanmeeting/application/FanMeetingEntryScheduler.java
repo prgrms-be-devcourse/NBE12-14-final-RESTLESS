@@ -19,6 +19,7 @@ public class FanMeetingEntryScheduler {
     private final FanMeetingEntryWorker worker;
     private final FanMeetingDrawWorker drawWorker;
     private final FanMeetingExpiryWorker expiryWorker;
+    private final FanMeetingPromotionWorker promotionWorker;
 
     @Scheduled(fixedDelayString = "${restless.fanmeeting.worker.fixed-delay-ms:1000}")
     public void run() {
@@ -35,5 +36,10 @@ public class FanMeetingEntryScheduler {
     public void expire() {
         expiryWorker.expireDue();
         expiryWorker.warnStaleReviews();
+    }
+
+    @Scheduled(fixedDelayString = "${restless.fanmeeting.worker.promotion-fixed-delay-ms:30000}")
+    public void promote() {
+        promotionWorker.promoteDue();
     }
 }

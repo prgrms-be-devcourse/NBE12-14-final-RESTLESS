@@ -12,6 +12,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -24,6 +26,11 @@ import org.hibernate.type.SqlTypes;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class FanMeetingEvent {
+
+    /** 야간 승격 중지 (policy.md 7절): Asia/Seoul 23:00부터 09:00 전까지. */
+    private static final ZoneId PROMOTION_ZONE = ZoneId.of("Asia/Seoul");
+    private static final LocalTime NIGHT_STARTS = LocalTime.of(23, 0);
+    private static final LocalTime NIGHT_ENDS = LocalTime.of(9, 0);
 
     static final Duration ENTRY_PERIOD = Duration.ofMinutes(10);
     static final Duration DEFAULT_PROMOTION_CLOSE_BEFORE_MEETING = Duration.ofHours(24);
@@ -177,6 +184,44 @@ public class FanMeetingEvent {
 
     public boolean isPaymentInProgress() {
         return status == FanMeetingStatus.PAYMENT_IN_PROGRESS;
+    }
+
+    /** 정원 점유 현황. 결제 대기에는 보류 중인 자리도 들어 있다(보류 중에도 선발은 결제 대기다). */
+    public record Occupancy(long confirmed, long paymentPending, long waiting, long review) {
+    }
+
+    /**
+     * 지금 예비를 승격해도 되는지. 야간(Asia/Seoul 23:00부터 09:00 전까지)이 아니고,
+     * 새 주문의 기한(now + 60분)이 승격 마감을 넘지 않을 때만 된다. 기한이 마감과 같으면 된다.
+     */
+    public boolean isPromotionAllowed(Instant now) {
+        LocalTime time = now.atZone(PROMOTION_ZONE).toLocalTime();
+        boolean night = !time.isBefore(NIGHT_STARTS) || time.isBefore(NIGHT_ENDS);
+        return !night && !now.plus(FanMeetingOrder.PAYMENT_WINDOW).isAfter(promotionClosesAt);
+    }
+
+    /** 빈자리 = 정원 − (확정 + 결제 대기). */
+    public long vacancy(long occupied) {
+        return Math.max(0, winnerLimit - occupied);
+    }
+
+    /**
+     * 모집을 끝낼 때인지. 보류가 0건이고 ① 확정이 정원 이상 ② 예비·결제 대기 모두 0 ③ 승격 마감이 지났고
+     * 결제 대기 0 중 하나. 승격 마감과 같은 시각은 지난 것으로 본다.
+     */
+    public boolean isRecruitmentDone(Occupancy counts, Instant now) {
+        if (counts.review() > 0) {
+            return false;
+        }
+        boolean full = counts.confirmed() >= winnerLimit;
+        boolean nobodyLeft = counts.waiting() == 0 && counts.paymentPending() == 0;
+        boolean promotionClosed = !now.isBefore(promotionClosesAt) && counts.paymentPending() == 0;
+        return full || nobodyLeft || promotionClosed;
+    }
+
+    public void completeRecruitment(Instant now) {
+        this.status = FanMeetingStatus.RECRUITMENT_COMPLETED;
+        this.updatedAt = now;
     }
 
     /** 추첨 최종화: 후보가 있으면 결제 진행, 없으면 바로 모집 완료. */
