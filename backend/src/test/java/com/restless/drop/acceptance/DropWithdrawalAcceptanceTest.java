@@ -98,7 +98,7 @@ class DropWithdrawalAcceptanceTest extends DropAcceptanceSupport {
     }
 
     private Response withdraw(Long user) {
-        return post("/api/me/withdraw", user, "{\"password\":\"" + PASSWORD + "\"}");
+        return post("/api/me/withdraw", user, "{\"password\":\"" + PASSWORD + "\",\"paidOrderNoticeAgreed\":true}");
     }
 
     private void assertBlocked(Long user, String situation) {
