@@ -15,7 +15,7 @@ AI는 아래 항목을 임의로 확정하지 않는다. 구현에 영향을 주
 | 티켓팅 결제 시도 식별 | DECIDED: payments.id를 모든 상태 변경 Handler에 전달. 공통 계약 반영: `PaymentAttemptContext(paymentId, approvalStartedAt)`, `payments.approval_started_at`, `RefundContext(paymentId, kind)` ([ADR-0003 4절](../decisions/0003-payment-module-boundary.md#4-개정-시도-문맥과-환불-종류-2026-11-12)). 예약 쪽 저장 구조는 티켓팅이 정한다 ([상세](../domains/ticketing/payment-handler.md)) |
 | 팬미팅 결제 시도 ID | 팬미팅 문서의 `attempt_id VARCHAR(64)`, 결제 하나 아래 여러 시도 구조가 ADR-0003(시도마다 `payments` 행, `payments.id` = 시도 ID)과 다르다. 머지된 `fan_meeting_orders.approved_attempt_id VARCHAR(100)` 포함. 팬미팅 담당 확인 필요 |
 | 드롭 결제 실패 후 재결제 | DECIDED (2026-11-12): 예약 기한 안이면 재고를 유지하고 재결제 허용 ([드롭 정책 8절](../domains/drop/policy.md#결제-실패와-재결제-decided-2026-11-12)) |
-| 드롭 탈퇴 제한의 `PAID` 처리 (#41) | 제안: 실제 배송이 없으므로 `PAID` 주문은 탈퇴를 막지 않는다. 진행 중 거래(재고 점유·승인 중·결과 확인 중·보상 취소 중·환불 진행·환불 검토)만 막는다. 탈퇴 후 환불 경로 필요 여부 확인 ([드롭 정책 11절](../domains/drop/policy.md#11-탈퇴-제한-proposed-미구현)) |
+| 드롭 탈퇴 제한의 `PAID` 처리 (#41) | DECIDED (2026-11-14): `PAID` 주문은 탈퇴를 막지 않는다. 진행 중 거래만 막는다. 탈퇴 요청에 결제 완료 주문 안내 동의를 받고, 탈퇴 회원의 환불 요청 경로는 만들지 않는다 (#97, [드롭 정책 11절](../domains/drop/policy.md#11-탈퇴-제한-decided-2026-11-14)) |
 | 티켓팅·공통 결제 복구 계약 | 승인 시도 스키마, 전체 잠금 순서(결제 쪽은 결정: 결제 준비를 포함해 결제 행 → 도메인 행, [ADR-0003](../decisions/0003-payment-module-boundary.md), #73), 조회 간격·운영 담당·알림 채널, 미완료 시도 탐지, 안전한 재실행·최종 실패 조건 합의 필요. 공통 결제 쪽 조회 간격·미완료 시도 탐지·최종 실패 기준(NotFound 15분)은 #46에서 결정 ([대사 규칙](../operations/failure-handling.md#공통-결제-대사-46)). 남은 것은 티켓팅 쪽 항목 |
 | Drop과 Concert 연결의 필수 여부 | 팀 확인. 현재 구현은 필수 (`drops.concert_id` NOT NULL FK, 등록 API 필수). 선택으로 바꾸려면 새 마이그레이션과 계약 변경 |
 | 예약 TTL (초기 제안 5분) | PG UX 고려 후 확정 |

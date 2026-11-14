@@ -14,7 +14,7 @@
 | POST | `/api/auth/logout` | 이 기기의 Refresh 폐기, 쿠키 삭제 → 204 | 구현 |
 | GET | `/api/me/profile` | 내 프로필, 기본 배송지 → 200 프로필 | 구현 |
 | PATCH | `/api/me/profile` | 닉네임, 기본 배송지 수정 → 200 바뀐 프로필 | 구현 |
-| POST | `/api/me/withdraw` | 탈퇴 `{password}` → 204 | 구현 |
+| POST | `/api/me/withdraw` | 탈퇴 `{password, paidOrderNoticeAgreed}` → 204 | 구현 |
 
 ### 프로필
 
@@ -49,10 +49,15 @@
 ### 탈퇴
 
 - 비밀번호를 다시 받는다. 틀리면 400 `MEMBER_PASSWORD_MISMATCH`.
+- 결제 완료 주문 안내에 동의를 받는다 (#97). `paidOrderNoticeAgreed`가 `true`가 아니면 400 `INVALID_REQUEST`이고 `details.fields.paidOrderNoticeAgreed`가 붙는다. 필드를 빼도 같다.
+- 동의를 받는 이유: 결제 완료 주문은 탈퇴를 막지 않는다. 탈퇴하면 그 주문을 조회하거나 환불 요청할 수 없다. 프론트는 탈퇴 화면에 아래 안내와 체크 상자를 둔다.
+
+  > 탈퇴하면 결제 완료 주문을 더 이상 조회하거나 환불 요청할 수 없습니다. 이 내용을 확인했습니다.
+
 - 행은 지우지 않는다(`status = WITHDRAWN`, `deleted_at`). 주문, 결제, 응모 같은 다른 도메인 기록은 그대로 남는다.
 - 모든 기기의 Refresh Token을 폐기한다. 다시 로그인할 수 없고, 같은 이메일로 다시 가입할 수도 없다(`uk_users_email`).
 - Access Token은 만료(최대 1시간)까지 남는다. 회원 API는 404를 주지만 다른 도메인 API는 통과할 수 있으니, 결제·응모처럼 중요한 처리는 서비스에서 `memberService.getActive(userId)`로 한 번 더 확인한다.
-- **진행 중인 거래가 있으면 막는다 (`WithdrawalGuard`).** 도메인은 `member.application.WithdrawalGuard`를 구현한 `@Component`를 자기 패키지에 두면 된다. 하나라도 `true`를 돌려주면 409 `MEMBER_HAS_ACTIVE_PARTICIPATION`. 지금 등록된 Guard는 없다.
+- **진행 중인 거래가 있으면 막는다 (`WithdrawalGuard`).** 도메인은 `member.application.WithdrawalGuard`를 구현한 `@Component`를 자기 패키지에 두면 된다. 하나라도 `true`를 돌려주면 409 `MEMBER_HAS_ACTIVE_PARTICIPATION`. 지금 등록된 Guard는 팬미팅(`FanMeetingWithdrawalGuard`)과 드롭(`DropWithdrawalGuard`)이다.
 
 ```java
 @Component

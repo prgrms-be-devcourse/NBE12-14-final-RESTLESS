@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/api/`, `backend/src/main/java/com/restless/drop/application/dto/`, `backend/src/test/java/com/restless/drop/acceptance/`
 >
-> 마지막 확인: 2026-11-14 (#92 등록 검증·판매 상태 구현과 대조. 탈퇴 제한은 #41)
+> 마지막 확인: 2026-11-14 (#92 등록 검증·판매 상태 구현과 대조. 탈퇴 제한은 #41, 탈퇴 동의는 #97)
 
 - 상태: v1 DECIDED (2026-11-13). 수용 테스트(`backend/src/test/java/com/restless/drop/acceptance/`)가 이 계약을 기준으로 판정한다.
 - Base URL: `/api` ([ADR-0002](../../decisions/0002-common-conventions.md)). 오류는 공통 형식 `{code, message, details, traceId, timestamp}` ([common.md](common.md)).
@@ -141,7 +141,7 @@ API는 회원 모듈의 `POST /api/me/withdraw`다. 드롭은 `WithdrawalGuard`(
 | 본인의 재고 점유가 `RESERVED`, `CONFIRMING`, `RECONCILING`, `COMPENSATING` | 재고를 잡고 있거나 결제 결과를 기다린다 |
 | 본인의 드롭 주문이 `PAYMENT_REVIEW`, `REFUND_PENDING`, `REFUND_REVIEW` | 돈의 행방이 정해지지 않았다 |
 
-막지 않는다: 점유 `CONFIRMED`(주문 `PAID`), `EXPIRED`, `RELEASED`, `RESTORED`, 주문 `PAID`, `CANCELLED`, `REFUNDED`. 실제 배송이 없으므로 결제가 끝난 구매는 탈퇴를 막지 않는다 (policy.md 11절, PROPOSED). 다른 회원의 거래는 상관없다.
+막지 않는다: 점유 `CONFIRMED`(주문 `PAID`), `EXPIRED`, `RELEASED`, `RESTORED`, 주문 `PAID`, `CANCELLED`, `REFUNDED`. 실제 배송이 없으므로 결제가 끝난 구매는 탈퇴를 막지 않는다. 대신 탈퇴 요청에 결제 완료 주문 안내 동의를 받는다 (policy.md 11절, [공통 API](common.md) 탈퇴, #97). 다른 회원의 거래는 상관없다.
 
 ## 운영자 API (v1 범위 밖)
 
