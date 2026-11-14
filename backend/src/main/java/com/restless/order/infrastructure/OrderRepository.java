@@ -13,6 +13,9 @@ import org.springframework.data.repository.query.Param;
 import java.util.Optional;
 
 public interface OrderRepository extends JpaRepository<Order, Long> {
+    org.springframework.data.domain.Page<Order> findByUserIdOrderByCreatedAtDescIdDesc(
+            Long userId, org.springframework.data.domain.Pageable pageable);
+
     boolean existsByUserIdAndOrderTypeAndStatusIn(Long userId,
             OrderType orderType, Collection<OrderStatus> statuses);
 
