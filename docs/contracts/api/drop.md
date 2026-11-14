@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/api/`, `backend/src/main/java/com/restless/drop/application/dto/`, `backend/src/test/java/com/restless/drop/acceptance/`
 >
-> 마지막 확인: 2026-11-14 (#92 등록 검증·판매 상태 구현과 대조. 탈퇴 제한은 #41, 탈퇴 동의는 #97, 검색·정렬 계약은 #104)
+> 마지막 확인: 2026-11-14 (#92 등록 검증·판매 상태 구현과 대조. 탈퇴 제한은 #41, 탈퇴 동의는 #97, 검색·정렬은 #105)
 
 - 상태: v1 DECIDED (2026-11-13). 수용 테스트(`backend/src/test/java/com/restless/drop/acceptance/`)가 이 계약을 기준으로 판정한다.
 - Base URL: `/api` ([ADR-0002](../../decisions/0002-common-conventions.md)). 오류는 공통 형식 `{code, message, details, traceId, timestamp}` ([common.md](common.md)).
@@ -54,8 +54,8 @@
 - 게시된 드롭만 (DRAFT, CANCELLED 제외). 상세의 `variants`는 등록 순서.
 - 200 `{ "items": [ { "dropId", "title", "imageUrl", "opensAt", "closesAt", "saleStatus" } ] }`
 - 검색과 정렬 (#105). 예: `GET /api/drops?q=후드&sort=NEWEST`
-  - `q`: 제목에 이 글자가 들어 있는 드롭만 준다. 대소문자를 가리지 않는다. 앞뒤 공백은 지우고, 비어 있으면 검색하지 않는다. `%`, `_`는 글자 그대로 찾는다. 50자를 넘으면 400 `INVALID_REQUEST`다.
-  - `sort`: `OPENS_AT`가 기본값이다. 판매 시작 시각 오름차순, 같으면 `dropId` 오름차순이다. `NEWEST`는 등록 최신순이다. 등록 시각 내림차순, 같으면 `dropId` 내림차순이다. 값은 대문자 그대로 받는다. 그 밖의 값은 400 `INVALID_REQUEST`다.
+  - `q`: 제목에 이 글자가 들어 있는 드롭만 준다. 대소문자를 가리지 않는다. 앞뒤 공백은 지우고, 비어 있으면 검색하지 않는다. `%`, `_`는 글자 그대로 찾는다. 50자를 넘으면 400 `INVALID_REQUEST`다. 글자 수는 한글과 이모지 모두 한 글자로 센다.
+  - `sort`: `OPENS_AT`가 기본값이다. 판매 시작 시각 오름차순, 같으면 `dropId` 오름차순이다. `NEWEST`는 등록 최신순이다. 등록 시각 내림차순, 같으면 `dropId` 내림차순이다. 값은 대문자 그대로 받는다. 빈 값을 포함해 그 밖의 값은 400 `INVALID_REQUEST`다.
   - 페이지는 없다. 조건에 맞는 게시 드롭을 모두 준다. 드롭은 운영자가 등록해 수가 적다. 판매 상태 필터도 없다.
 
 ### `GET /api/drops/{dropId}` (공개)
