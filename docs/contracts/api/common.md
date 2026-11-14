@@ -115,7 +115,7 @@ class FanMeetingWithdrawalGuard implements WithdrawalGuard {
 | Method | Endpoint | 기능 / 응답 |
 |---|---|---|
 | GET | `/api/me/orders` | 내 주문 목록. 200 페이지 (#101) |
-| GET | `/api/orders/{orderId}` | 주문 상세 (후속 구현) |
+| GET | `/api/orders/{orderId}` | 주문 상세. 결제 대상과 최근 결제 포함 200 (#109) |
 | POST | `/api/payments` | 결제 준비. 새 시도 201, 같은 키 재요청 200 |
 | POST | `/api/payments/confirm` | 토스 승인. 승인 200, 처리 중/불명확 202, 최종 거절 409 |
 | GET | `/api/payments/{paymentId}` | 본인 결제 조회 200 |
@@ -157,6 +157,37 @@ class FanMeetingWithdrawalGuard implements WithdrawalGuard {
 - 주문이 없거나 범위 밖 페이지면 `items`는 빈 배열이다. `totalElements`, `totalPages`는 실제 전체 주문 기준이다.
 - 토큰이 없으면 401 `UNAUTHORIZED`다. 탈퇴한 회원은 토큰이 남아 있어도 404 `MEMBER_NOT_FOUND`다. 탈퇴 안내대로 탈퇴 뒤에는 주문을 볼 수 없다.
 - 배송지와 결제 ID는 주지 않는다. 결제 연결은 주문 상세에서 다룬다.
+
+### 주문 상세
+
+`GET /api/orders/{orderId}` — 본인 주문 하나를 준다. 환불과 재결제에 필요한 결제 대상과 최근 결제를 함께 준다 (#109).
+
+```json
+{
+  "orderId": 7,
+  "orderType": "DROP",
+  "status": "PAID",
+  "totalAmount": 39000,
+  "createdAt": "2026-11-14T01:00:00Z",
+  "lines": [
+    { "itemType": "DROP_VARIANT", "itemName": "투어 후드", "optionName": "M", "unitPrice": 39000, "quantity": 1 }
+  ],
+  "shipping": { "recipient": "홍길동", "phone": "010-1234-5678", "address": "서울시 강남구 1" },
+  "payable": { "payableType": "DROP", "payableId": 5 },
+  "payableExpiresAt": "2026-11-14T01:05:00Z",
+  "payment": { "paymentId": 12, "status": "APPROVED" }
+}
+```
+
+- 목록 한 줄과 같은 필드에 `shipping`, `payable`, `payableExpiresAt`, `payment`를 더한다.
+- `shipping`: 주문할 때 복사한 배송지다. 배송이 없는 주문(티켓)은 null이다.
+- `payable`: 결제 준비 `POST /api/payments`에 그대로 넘기는 결제 대상이다. 드롭 주문은 `DROP`과 재고 점유 ID다. 결제 대상을 알려 주는 도메인이 아직 없으면 null이다. 지금 티켓 주문이 그렇다.
+- `payableExpiresAt`: 결제 대상의 결제 기한이다. 드롭은 재고 점유 만료 시각이다. 모르면 null이다.
+- `payment`: 그 결제 대상의 가장 최근 결제 시도다. 실패 뒤 다시 결제했으면 새 시도가 나온다. `status`는 결제 조회와 같은 값이다. 결제를 시작하지 않았으면 null이다. 환불은 이 `paymentId`로 요청한다.
+- 결제 가능 여부와 환불 가능 여부는 주지 않는다. 최종 판단은 결제 준비와 환불 API의 응답이다.
+- 남의 주문이나 없는 주문은 404 `ORDER_NOT_FOUND`다. 숫자가 아닌 ID는 400 `INVALID_REQUEST`다.
+- 토큰이 없으면 401 `UNAUTHORIZED`다. 탈퇴한 회원은 404 `MEMBER_NOT_FOUND`다.
+- 도메인 연결: 주문 모듈의 결제 대상 조회 인터페이스를 각 도메인이 구현한다. 주문 ID를 받아 결제 대상과 기한을 돌려준다. 구현이 없는 주문 종류는 `payable`이 null이다. 최근 결제는 주문 모듈이 결제 모듈의 읽기 메서드로 찾는다.
 
 ### 결제 준비
 
