@@ -20,15 +20,18 @@ import org.springframework.context.annotation.Primary;
 
 /**
  * 승격 테스트 공통. 승격은 야간(23:00~09:00 Asia/Seoul)에 하지 않으므로, 테스트가 도는 시각에 결과가 흔들리지 않게
- * 추첨이 끝난 뒤 시계를 오늘 낮 12:00(Asia/Seoul)에 세운다. 시계를 세우기 전(응모, 마감, 추첨)은 실제 시각으로 돈다.
+ * 추첨이 끝난 뒤 시계를 내일 낮 12:00(Asia/Seoul)에 세운다. 시계를 세우기 전(응모, 마감, 추첨)은 실제 시각으로 돈다.
  */
 @Import({TestcontainersConfiguration.class, FanMeetingPromotionSupport.ClockConfig.class})
 abstract class FanMeetingPromotionSupport extends FanMeetingOrderApiSupport {
 
     static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
-    /** 오늘 낮 12:00 (Asia/Seoul). 승격할 수 있는 시각이다. */
-    static final Instant NOON = LocalDate.now(SEOUL).atTime(12, 0).atZone(SEOUL).toInstant();
+    /**
+     * 내일 낮 12:00 (Asia/Seoul). 승격할 수 있는 시각이다. 오늘이 아니라 내일인 이유: 로그인 토큰은 이 시계로 발급하지만
+     * 만료 검사는 실제 시각으로 한다. 세운 시각이 과거면 방금 만든 토큰이 이미 만료된 것으로 보여 401이 난다.
+     */
+    static final Instant NOON = LocalDate.now(SEOUL).plusDays(1).atTime(12, 0).atZone(SEOUL).toInstant();
 
     @Autowired TestClock clock;
     @Autowired FanMeetingPromotionWorker promotionWorker;
@@ -140,8 +143,9 @@ abstract class FanMeetingPromotionSupport extends FanMeetingOrderApiSupport {
                 """, Integer.class, eventId);
     }
 
+    /** 내일의 그 시각 (Asia/Seoul). NOON과 같은 날이다. */
     static Instant seoul(int hour, int minute, int second) {
-        return LocalDate.now(SEOUL).atTime(hour, minute, second).atZone(SEOUL).toInstant();
+        return NOON.atZone(SEOUL).toLocalDate().atTime(hour, minute, second).atZone(SEOUL).toInstant();
     }
 
     static final Duration PAYMENT_WINDOW = Duration.ofMinutes(60);
