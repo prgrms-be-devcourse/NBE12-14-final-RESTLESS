@@ -69,6 +69,7 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 | 가입 시각 자격 | 설정 ON이면 가입 시각(`users.created_at`) `>= first_notice_scheduled_at`인 회원은 응모 불가. 기본 OFF(7절) |
 | 추첨 | HMAC-SHA256 순위 키 결정적 추첨. 앞에서 `winner_limit`명 WINNER, 다음 `reserve_limit`명 RESERVE. 탈퇴 회원은 계산 시 제외(응모 행은 유지) |
 | 결제 금액 | Order 생성 시점 `fee_amount` 스냅샷. 요청 본문의 금액·회원·기한은 무시 |
+| 0원 주문 | 공통 결제를 거치지 않는다. 손님이 기한(60분) 안에 확정 API를 불러야 확정된다. 누르지 않으면 유료 주문처럼 만료되고 예비가 승격된다. 확정 전에는 포기할 수 있다 |
 | 결제 기한 | `issued_at + 60분`. `approvedAt <= 기한`이면 기한 안(같으면 기한 안) |
 | 결제 포기 | 결제 준비를 한 번도 요청하지 않은(`attempt_requested_at IS NULL`) `PENDING_PAYMENT` 주문만. 되돌리기 없음 |
 | 결과 모름 | `UNKNOWN`은 실패로 처리하지 않고 보류(`PAYMENT_REVIEW`). 보류 중 자리는 만료되지 않고 넘어가지 않는다. 최종 결과는 결제 모듈이 같은 시도로 다시 알려 준다 |

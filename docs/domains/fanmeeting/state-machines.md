@@ -30,6 +30,7 @@ DRAWING → RECRUITMENT_COMPLETED   (추첨 후보 0명)
 | `WAITING` | 승격 차례에 탈퇴 확인 | `NOT_NEEDED` |
 | `WAITING` | 모집 완료 시 남은 예비 | `NOT_NEEDED` |
 | `PAYMENT_PENDING` | 기한 내 승인 | `CONFIRMED` |
+| `PAYMENT_PENDING` | 0원 주문을 기한 전에 확정 | `CONFIRMED` |
 | `PAYMENT_PENDING` | 늦은 승인·금액 불일치 | `EXPIRED` |
 | `PAYMENT_PENDING` | 기한 경과 + 최종 미승인 | `EXPIRED` |
 | `PAYMENT_PENDING` | 결제 시도 요청 전 포기 | `DECLINED` |
@@ -53,6 +54,8 @@ P0에서 끝 상태(더 바뀌지 않음): `CONFIRMED`, `EXPIRED`, `DECLINED`, `
 | `PENDING_PAYMENT` | 결과 모름(UNKNOWN) | `PAYMENT_REVIEW` | 유지 | — |
 | `PENDING_PAYMENT` | 기한 경과 + 진행 중인 시도 없음 (만료 Worker) | `EXPIRED` | `EXPIRED` | — |
 | `PENDING_PAYMENT` | 결제 준비 요청 전 포기 | `CANCELLED` | `DECLINED` | — |
+| `PENDING_PAYMENT` | 0원 주문을 기한 전에 확정 (결제 없음, `paid_at = now`) | `PAID` | `CONFIRMED` | NULL |
+| `PAID` (0원) | 확정 재요청 | 유지 | 유지 | NULL |
 | `PAYMENT_REVIEW` | 결과 모름 재도착 | 유지(아무것도 안 바꿈) | 유지 | — |
 | `REFUND_PENDING` | 보상 취소 완료 | `REFUNDED` | 유지 | 유지 |
 | `PAID` | 같은 시도의 승인 재도착 | 유지(받아들임) | 유지 | 유지 |

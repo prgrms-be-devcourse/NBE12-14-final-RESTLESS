@@ -31,6 +31,9 @@ public class FanMeetingOrder {
     /** 결제 기한 = 발급 + 60분 (policy.md 4절). */
     static final Duration PAYMENT_WINDOW = Duration.ofMinutes(60);
 
+    /** 보류가 이만큼 이어지면 경고한다 (policy.md 7절). */
+    static final Duration REVIEW_WARNING_AFTER = Duration.ofMinutes(30);
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "order_id")
@@ -100,8 +103,79 @@ public class FanMeetingOrder {
         return !now.isBefore(paymentDeadline());
     }
 
+    /** 이 시각 이전(같은 시각 포함)에 발급된 주문은 now에 기한이 지났다. 만료 대상을 찾는 조회에 쓴다. */
+    public static Instant issuedAtPastDeadline(Instant now) {
+        return now.minus(PAYMENT_WINDOW);
+    }
+
+    /** 이 시각 이전(같은 시각 포함)에 시작한 보류는 now에 경고 대상이다. */
+    public static Instant reviewStartedAtToWarn(Instant now) {
+        return now.minus(REVIEW_WARNING_AFTER);
+    }
+
+    public static long reviewWarningMinutes() {
+        return REVIEW_WARNING_AFTER.toMinutes();
+    }
+
     public boolean isPendingPayment() {
         return status == FanMeetingOrderStatus.PENDING_PAYMENT;
+    }
+
+    public boolean isPaid() {
+        return status == FanMeetingOrderStatus.PAID;
+    }
+
+    /** 참가비 0원. 공통 결제를 거치지 않고 확정한다. */
+    public boolean isFree() {
+        return amount == 0;
+    }
+
+    /** 결제 준비를 한 번이라도 요청했는지. 요청했으면 포기할 수 없다. */
+    public boolean hasRequestedAttempt() {
+        return attemptRequestedAt != null;
+    }
+
+    /** 지금 포기할 수 있는지: 결제 대기, 결제 준비 요청 없음, 기한 전. */
+    public boolean isDeclinable(Instant now) {
+        return isPendingPayment() && !hasRequestedAttempt() && !isPastDeadline(now);
+    }
+
+    /** 결제 준비 전 포기: CANCELLED. 포기할 수 있는지는 부르는 쪽이 먼저 확인한다. */
+    public void decline(Instant now) {
+        status = FanMeetingOrderStatus.CANCELLED;
+        updatedAt = now;
+    }
+
+    /** 0원 주문을 결제 없이 확정: PAID. 결제 시도가 없으므로 시도 기록은 비워 둔다. */
+    public void confirmFree(Instant now) {
+        status = FanMeetingOrderStatus.PAID;
+        paidAt = now;
+        updatedAt = now;
+    }
+
+    /**
+     * 만료 Worker가 만료할 주문인지: 결제 대기, 기한 경과, 진행 중인 시도 없음.
+     * 승인이 진행 중인 주문은 결제 모듈이 결과를 알려 주므로 건드리지 않는다.
+     */
+    public boolean isExpirable(Instant now) {
+        return isPendingPayment() && paymentId == null && isPastDeadline(now);
+    }
+
+    public void expire(Instant now) {
+        status = FanMeetingOrderStatus.EXPIRED;
+        updatedAt = now;
+    }
+
+    /** 보류가 30분을 넘었고 이번 보류에서 아직 경고하지 않았는지. 30분과 같은 시각도 넘은 것으로 본다. */
+    public boolean isReviewStale(Instant now) {
+        return status == FanMeetingOrderStatus.PAYMENT_REVIEW && reviewStartedAt != null && reviewWarnedAt == null
+                && !now.isBefore(reviewStartedAt.plus(REVIEW_WARNING_AFTER));
+    }
+
+    /** 보류 경고를 남겼다고 기록한다. 보류에서 나가면 지워져 다음 보류 때 다시 경고한다. */
+    public void markReviewWarned(Instant now) {
+        reviewWarnedAt = now;
+        updatedAt = now;
     }
 
     /** 결제 준비 요청을 기록한다. 이미 기록돼 있으면 그대로 둔다. */

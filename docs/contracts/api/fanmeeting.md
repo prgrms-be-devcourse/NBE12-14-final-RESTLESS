@@ -14,6 +14,7 @@
 | GET | `/api/fan-meetings/{eventId}/result/me` | 내 당첨·예비 결과 + `paymentDeadline` | 회원 |
 | GET | `/api/fan-meetings/{eventId}/orders/me` | 내 주문·결제 상태 + `paymentDeadline` | 회원 |
 | POST | `/api/fan-meetings/{eventId}/orders/{orderId}/decline` | 결제 포기 | 회원 |
+| POST | `/api/fan-meetings/{eventId}/orders/{orderId}/confirm` | 0원 주문 확정(결제 없음) | 회원 |
 | GET | `/api/admin/fan-meetings/{eventId}/summary` | 상태, 응모 수, Selection·Order 상태별 인원, 정원 점유, 승격된 예비 최대 순번, `promotion_closes_at`, 보류 목록(경과 시간), `REFUND_PENDING` 목록, 계약 위반 승인 목록 | ADMIN |
 
 주최자 API(`/api/organizer/**`)는 `role = ORGANIZER` 또는 `ADMIN`, 관리자 API(`/api/admin/**`)는 `role = ADMIN`만 호출할 수 있다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`([공통 API](common.md)).
@@ -71,6 +72,60 @@
 - 행사가 없으면 세 요청 모두 404 `FAN_MEETING_NOT_FOUND`.
 - 응모가 동시에 몰려 서버가 3번 다시 시도해도 처리하지 못하면 503 `APPLICATION_BUSY`. 같은 회원의 중복 요청은 재시도 뒤 409 `ALREADY_APPLIED`가 된다. 클라이언트는 503이면 잠시 뒤 다시 보내고, 409면 `GET .../applications/me`로 상태를 확인한다.
 
+## 내 결과 `GET /api/fan-meetings/{eventId}/result/me`
+
+항상 200이다. 추첨이 확정되기 전에는 `PENDING`만 내보낸다(결과가 미리 새지 않게).
+
+```json
+{
+  "result": "WINNER",
+  "selectionStatus": "PAYMENT_PENDING",
+  "reserveRank": null,
+  "orderId": 10,
+  "paymentDeadline": "2026-11-20T13:10:00Z"
+}
+```
+
+| `result` | 뜻 | 나머지 값 |
+|---|---|---|
+| `NOT_APPLIED` | 응모하지 않았거나 취소했다 | 모두 null |
+| `PENDING` | 응모했고 추첨이 아직 확정되지 않았다(응모 중, 마감, 추첨 중) | 모두 null |
+| `WINNER` | 당첨 | `selectionStatus`, `orderId`, `paymentDeadline` |
+| `RESERVE` | 예비 | `selectionStatus`, `reserveRank`(본인 순번, 1부터). 승격되면 `orderId`, `paymentDeadline`도 |
+| `NOT_SELECTED` | 응모했지만 뽑히지 않았다 | 모두 null |
+
+- `selectionStatus`: `PAYMENT_PENDING`, `WAITING`, `CONFIRMED`, `EXPIRED`, `DECLINED`, `NOT_NEEDED`.
+- 승격된 예비자도 `result`는 `RESERVE`다. `selectionStatus = PAYMENT_PENDING`과 `orderId`로 결제 차례임을 안다.
+- 다른 회원의 결과와 순번은 내보내지 않는다.
+
+## 내 주문·결제 포기·0원 확정
+
+| 요청 | 성공 | 본문 |
+|---|---|---|
+| `GET .../orders/me` | 200 | 주문 |
+| `POST .../orders/{orderId}/decline` | 200 | 주문(`status = CANCELLED`) |
+| `POST .../orders/{orderId}/confirm` | 200 | 주문(`status = PAID`). 이미 확정한 0원 주문이면 그대로 200 |
+
+```json
+{
+  "orderId": 10,
+  "status": "PENDING_PAYMENT",
+  "amount": 50000,
+  "issuedAt": "2026-11-20T12:10:00Z",
+  "paymentDeadline": "2026-11-20T13:10:00Z",
+  "paidAt": null,
+  "declinable": true
+}
+```
+
+- `status`: `PENDING_PAYMENT`, `PAYMENT_REVIEW`, `PAID`, `EXPIRED`, `CANCELLED`, `REFUND_PENDING`, `REFUNDED`.
+- `declinable`: 지금 포기할 수 있는지. 결제 대기이고 결제를 준비한 적 없고 기한 전일 때만 true다.
+- 회원 1명은 행사 1개에 주문이 최대 1개다. 주문이 없으면(예비 대기, 미선발, 미응모) 404 `ORDER_NOT_FOUND`.
+- `amount`가 0이면 결제 준비(`POST /api/payments`) 대신 `confirm`을 부른다. 기한 안에 부르지 않으면 만료된다.
+- 포기: 결제를 한 번이라도 준비한 주문은 409 `DECLINE_NOT_ALLOWED`, 결제 대기가 아니면 409 `ORDER_NOT_PAYABLE`, 기한이 지났으면 409 `PAYMENT_WINDOW_EXPIRED`.
+- 확정: 0원 주문이 아니거나 결제 대기가 아니거나 행사가 결제 진행 중이 아니면 409 `ORDER_NOT_PAYABLE`, 기한이 지났으면 409 `PAYMENT_WINDOW_EXPIRED`.
+- 포기·확정에서 주문이 없거나 다른 행사·다른 회원의 주문이면 404 `ORDER_NOT_FOUND`, 행사가 없으면 404 `FAN_MEETING_NOT_FOUND`.
+
 ## 결제 (공통 결제 API)
 
 팬미팅은 결제 API를 따로 두지 않는다. 손님은 공통 결제 API를 쓴다([공통 API](common.md)). 처리 흐름은 [transactions.md 6·7절](../../domains/fanmeeting/transactions.md#6-결제-시작-공통-결제-api).
@@ -84,6 +139,7 @@
 - 금액은 주문 금액(참가비), 결제 기한은 `발급 + 60분`이다. 요청 본문의 금액·기한은 쓰지 않는다.
 - 결제 대기(`PENDING_PAYMENT`) 주문이 아니거나 행사가 결제 진행 중(`PAYMENT_IN_PROGRESS`)이 아니면 409 `PAYMENT_NOT_PAYABLE`, 다른 회원 주문이면 404 `PAYMENT_TARGET_NOT_FOUND`, 기한이 지났으면 409 `PAYMENT_WINDOW_EXPIRED`다(공통 결제 오류 코드).
 - 시도가 실패하면 **새 키**로 다시 결제를 준비한다.
+- 참가비가 0원인 주문은 결제를 준비할 수 없다(409 `PAYMENT_NOT_PAYABLE`, `details.reason = "FREE_ORDER"`). 확정 API를 쓴다.
 
 ## 오류 코드
 
@@ -100,8 +156,8 @@
 | 응모 재시도 모두 실패 | 503 | `APPLICATION_BUSY` |
 | 취소할 응모 없음 | 409 | `APPLICATION_NOT_ACTIVE` |
 | 주문 없음·다른 행사·다른 회원 | 404 | `ORDER_NOT_FOUND` |
-| 결제 가능 상태 아님 | 409 | `ORDER_NOT_PAYABLE` |
-| 결제 기한 지난 주문의 포기 | 409 | `PAYMENT_WINDOW_EXPIRED` |
+| 결제 대기가 아닌 주문의 포기·확정, 0원이 아닌 주문의 확정 | 409 | `ORDER_NOT_PAYABLE` |
+| 결제 기한 지난 주문의 포기·확정 | 409 | `PAYMENT_WINDOW_EXPIRED` |
 | 결제를 준비한 주문의 포기 | 409 | `DECLINE_NOT_ALLOWED` |
 
 결제 준비·승인 오류는 공통 결제 오류 코드를 쓴다([공통 API](common.md)).

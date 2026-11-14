@@ -93,4 +93,15 @@ public class FanMeetingSelection {
         status = FanMeetingSelectionStatus.EXPIRED;
         updatedAt = now;
     }
+
+    /** 결제 준비 전 포기. */
+    public void decline(Instant now) {
+        status = FanMeetingSelectionStatus.DECLINED;
+        updatedAt = now;
+    }
+
+    /** 예비로 뽑혔는지(승격된 뒤에도 예비다). */
+    public boolean isReserve() {
+        return selectionType == FanMeetingSelectionType.RESERVE;
+    }
 }

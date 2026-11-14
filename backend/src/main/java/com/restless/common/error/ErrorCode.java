@@ -81,7 +81,9 @@ public enum ErrorCode {
     APPLICATION_NOT_ACTIVE(HttpStatus.CONFLICT, "취소할 응모가 없습니다."),
     APPLICATION_BUSY(HttpStatus.SERVICE_UNAVAILABLE, "응모 요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."),
     APPLICATION_NOT_ELIGIBLE(HttpStatus.FORBIDDEN, "응모 자격이 없습니다. 행사 공지 이후에 가입한 계정입니다."),
-    MEMBER_LOOKUP_FAILED(HttpStatus.SERVICE_UNAVAILABLE, "회원 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    MEMBER_LOOKUP_FAILED(HttpStatus.SERVICE_UNAVAILABLE, "회원 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요."),
+    ORDER_NOT_PAYABLE(HttpStatus.CONFLICT, "결제할 수 없는 주문입니다."),
+    DECLINE_NOT_ALLOWED(HttpStatus.CONFLICT, "결제를 시작한 주문은 포기할 수 없어요.");
 
     private final HttpStatus httpStatus;
     private final String message;

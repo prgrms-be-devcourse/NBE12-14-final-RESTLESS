@@ -170,6 +170,15 @@ public class FanMeetingEvent {
         }
     }
 
+    /** 추첨 결과가 확정됐는지. 최종화가 행사를 결제 진행 중(후보 0명이면 모집 완료)으로 바꾼다. */
+    public boolean isDrawFinalized() {
+        return status == FanMeetingStatus.PAYMENT_IN_PROGRESS || status == FanMeetingStatus.RECRUITMENT_COMPLETED;
+    }
+
+    public boolean isPaymentInProgress() {
+        return status == FanMeetingStatus.PAYMENT_IN_PROGRESS;
+    }
+
     /** 추첨 최종화: 후보가 있으면 결제 진행, 없으면 바로 모집 완료. */
     public void finishDraw(boolean hasCandidates, Instant now) {
         this.status = hasCandidates ? FanMeetingStatus.PAYMENT_IN_PROGRESS : FanMeetingStatus.RECRUITMENT_COMPLETED;

@@ -56,7 +56,9 @@ restless:
       enabled: ${FANMEETING_WORKER_ENABLED:true}
       fixed-delay-ms: 1000
       draw-fixed-delay-ms: 5000
-      # 한 번에 처리할 행사·추첨 수
+      # 주문 만료, 보류 30분 경고
+      expiry-fixed-delay-ms: 60000
+      # 한 번에 처리할 행사·추첨·주문 수
       batch-size: 100
     eligibility:
       # 행사 공지 시각 이후 가입한 회원의 응모를 막는다. 기본 꺼짐 (policy.md 7절).

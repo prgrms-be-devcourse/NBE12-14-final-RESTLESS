@@ -14,4 +14,7 @@ public interface FanMeetingSelectionRepository extends JpaRepository<FanMeetingS
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from FanMeetingSelection s where s.id = :id")
     Optional<FanMeetingSelection> findByIdForUpdate(@Param("id") Long id);
+
+    /** 내 선발(잠금 없음). 응모 하나는 최대 한 번 뽑히므로 회원·행사당 최대 1건이다. */
+    Optional<FanMeetingSelection> findByEventIdAndUserId(Long eventId, Long userId);
 }

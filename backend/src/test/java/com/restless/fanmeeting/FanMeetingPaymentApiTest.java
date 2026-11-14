@@ -2,36 +2,20 @@ package com.restless.fanmeeting;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
-import com.jayway.jsonpath.JsonPath;
-import com.restless.fanmeeting.application.FanMeetingDrawWorker;
 import com.restless.payment.application.payable.ApprovalDecision;
 import com.restless.payment.application.payable.ApprovedPayment;
 import com.restless.payment.application.payable.PaymentAttemptContext;
-import com.restless.payment.application.payable.PaymentResultHandler;
-import com.restless.payment.application.payable.PaymentResultHandlerRegistry;
-import com.restless.payment.domain.PayableType;
 import com.restless.payment.infrastructure.fake.FakePgClient;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
-import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.IllegalTransactionStateException;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 팬미팅 결제 (`transactions.md` 6·7절, `state-machines.md` 4절).
@@ -39,14 +23,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * 결제 모듈이 걸러 주어 API로는 만들 수 없는 결과(기한 경계, 같은 승인 두 번, 다른 시도의 승인)는 Handler를 직접 부른다.
  */
 @DisplayName("팬미팅 결제")
-class FanMeetingPaymentApiTest extends FanMeetingApiSupport {
+class FanMeetingPaymentApiTest extends FanMeetingOrderApiSupport {
 
-    private static final AtomicLong FAKE_PAYMENT_IDS = new AtomicLong(System.currentTimeMillis() * 1000);
-
-    @Autowired FanMeetingDrawWorker drawWorker;
     @Autowired FakePgClient fakePg;
-    @Autowired PaymentResultHandlerRegistry handlers;
-    @Autowired PlatformTransactionManager transactionManager;
 
     @BeforeEach
     void resetFakePg() {
@@ -352,52 +331,6 @@ class FanMeetingPaymentApiTest extends FanMeetingApiSupport {
 
     // ---- 도우미 ----
 
-    record WinnerOrder(Long eventId, Long orderId, String bearer) {
-    }
-
-    record Prepared(int status, String body, Long paymentId, String pgOrderId, long amount, String expiresAt) {
-    }
-
-    /** 응모 1명, 당첨 1명인 행사를 추첨해 당첨 주문 하나를 만든다. */
-    WinnerOrder winnerOrder() throws Exception {
-        Long eventId = closedEventWithApplicants(1, 0, 1);
-        drawWorker.drawDue();
-        Map<String, Object> row = jdbc.queryForMap(
-                "SELECT order_id, user_id FROM fan_meeting_orders WHERE event_id = ?", eventId);
-        Long orderId = ((Number) row.get("order_id")).longValue();
-        Long userId = ((Number) row.get("user_id")).longValue();
-        return new WinnerOrder(eventId, orderId, "Bearer " + tokenProvider.issue(userId, "USER").value());
-    }
-
-    /** 공통 결제 준비. 결제 대상은 FAN_MEETING, 대상 id는 주문 id. */
-    Prepared prepare(String bearer, Long orderId, String key) throws Exception {
-        MvcResult res = mockMvc.perform(post("/api/payments")
-                        .header(HttpHeaders.AUTHORIZATION, bearer)
-                        .header("Idempotency-Key", key)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"payableType\":\"FAN_MEETING\",\"payableId\":" + orderId + "}"))
-                .andReturn();
-        String body = contentOf(res);
-        int status = res.getResponse().getStatus();
-        if (status >= 300) {
-            return new Prepared(status, body, null, null, 0, null);
-        }
-        return new Prepared(status, body, ((Number) JsonPath.read(body, "$.paymentId")).longValue(),
-                JsonPath.read(body, "$.pgOrderId"), ((Number) JsonPath.read(body, "$.amount")).longValue(),
-                JsonPath.read(body, "$.expiresAt"));
-    }
-
-    /** 결제창에서 돌아와 승인 요청. */
-    MvcResult confirm(String bearer, Prepared p) throws Exception {
-        return mockMvc.perform(post("/api/payments/confirm")
-                        .header(HttpHeaders.AUTHORIZATION, bearer)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"paymentKey":"pk-%s","orderId":"%s","amount":%d}
-                                """.formatted(UUID.randomUUID(), p.pgOrderId(), p.amount())))
-                .andReturn();
-    }
-
     /**
      * 승인 시작은 기한 안에 받아들여지고, PG 응답을 기다리는 동안(Fake PG 3초 지연) 기한이 지나게 한다.
      */
@@ -413,60 +346,5 @@ class FanMeetingPaymentApiTest extends FanMeetingApiSupport {
         assertThat(orderColumn(order.orderId(), "payment_id")).as("승인 시작은 받아들여졌다").isEqualTo(p.paymentId());
         setDeadline(order.orderId(), Instant.now().minusSeconds(1));
         return confirming.get();
-    }
-
-    PaymentResultHandler handler() {
-        return handlers.get(PayableType.FAN_MEETING);
-    }
-
-    /** 결제 모듈처럼 트랜잭션을 열고 Handler를 부른다. */
-    <T> T inTx(Supplier<T> call) {
-        return new TransactionTemplate(transactionManager).execute(status -> call.get());
-    }
-
-    /** 결제 모듈 없이 승인 시작을 받아들인 상태로 만든다. 시도 번호를 돌려준다. */
-    Long startApproval(Long orderId) {
-        Long attempt = FAKE_PAYMENT_IDS.incrementAndGet();
-        ApprovalDecision decision = inTx(() -> handler().onApprovalStarting(orderId,
-                new PaymentAttemptContext(attempt, Instant.now())));
-        assertThat(decision.accepted()).isTrue();
-        return attempt;
-    }
-
-    static ApprovedPayment approved(Long attempt, Instant approvedAt) {
-        return new ApprovedPayment(attempt, "pg-" + attempt, "pk-" + attempt, 50000L,
-                approvedAt.minusSeconds(1), approvedAt);
-    }
-
-    /** 결제 기한(발급 + 60분)이 deadline이 되도록 발급 시각을 옮긴다. */
-    void setDeadline(Long orderId, Instant deadline) {
-        jdbc.update("UPDATE fan_meeting_orders SET issued_at = ? WHERE order_id = ?",
-                utc(deadline.minus(Duration.ofMinutes(60))), orderId);
-    }
-
-    Instant deadline(Long orderId) {
-        return issuedAt(orderId).plus(Duration.ofMinutes(60));
-    }
-
-    String orderStatus(Long orderId) {
-        return jdbc.queryForObject("SELECT status FROM fan_meeting_orders WHERE order_id = ?", String.class, orderId);
-    }
-
-    Object orderColumn(Long orderId, String column) {
-        return jdbc.queryForMap("SELECT " + column + " AS v FROM fan_meeting_orders WHERE order_id = ?", orderId)
-                .get("v");
-    }
-
-    String selectionStatus(Long orderId) {
-        return jdbc.queryForObject("""
-                SELECT s.status FROM fan_meeting_selections s
-                  JOIN fan_meeting_orders o ON o.selection_id = s.selection_id
-                 WHERE o.order_id = ?
-                """, String.class, orderId);
-    }
-
-    Instant issuedAt(Long orderId) {
-        return jdbc.queryForObject("SELECT issued_at FROM fan_meeting_orders WHERE order_id = ?",
-                LocalDateTime.class, orderId).toInstant(ZoneOffset.UTC);
     }
 }

@@ -7,7 +7,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 
 /**
- * 1초마다 응모 기간을 열고 닫고, 5초마다 추첨한다. 테스트에서는 {@code restless.fanmeeting.worker.enabled=false}로 끈다(build.gradle).
+ * 1초마다 응모 기간을 열고 닫고, 5초마다 추첨하고, 1분마다 주문을 만료하고 오래된 보류를 경고한다. 테스트에서는 {@code restless.fanmeeting.worker.enabled=false}로 끈다(build.gradle).
  * 스케줄링 켜기를 경매 설정에 기대지 않으려고 여기서 직접 켠다.
  */
 @Configuration
@@ -18,6 +18,7 @@ public class FanMeetingEntryScheduler {
 
     private final FanMeetingEntryWorker worker;
     private final FanMeetingDrawWorker drawWorker;
+    private final FanMeetingExpiryWorker expiryWorker;
 
     @Scheduled(fixedDelayString = "${restless.fanmeeting.worker.fixed-delay-ms:1000}")
     public void run() {
@@ -28,5 +29,11 @@ public class FanMeetingEntryScheduler {
     @Scheduled(fixedDelayString = "${restless.fanmeeting.worker.draw-fixed-delay-ms:5000}")
     public void draw() {
         drawWorker.drawDue();
+    }
+
+    @Scheduled(fixedDelayString = "${restless.fanmeeting.worker.expiry-fixed-delay-ms:60000}")
+    public void expire() {
+        expiryWorker.expireDue();
+        expiryWorker.warnStaleReviews();
     }
 }
