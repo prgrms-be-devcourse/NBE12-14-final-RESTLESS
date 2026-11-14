@@ -1,6 +1,5 @@
 package com.restless.drop.acceptance;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -20,7 +19,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 드롭 주문은 재고 점유 API로 만들고, 티켓 주문은 공통 주문 행을 직접 넣는다. 목록은 공통 주문 전체를 보여 줘야 하기 때문이다.
  * <b>하네스 파일이다.</b> #101 구현 PR에서 아래 {@code @Disabled} 한 줄만 지운다. 테스트 내용은 바꾸지 않는다.
  */
-@Disabled("#101 구현 PR에서 이 줄만 지운다")
 @DisplayName("내 주문 목록")
 class MyOrdersAcceptanceTest extends DropAcceptanceSupport {
 
