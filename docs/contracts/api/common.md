@@ -151,7 +151,7 @@ class FanMeetingWithdrawalGuard implements WithdrawalGuard {
 
 - 본인 주문만 준다. 공통 주문인 `DROP`, `TICKET`만 나온다. 팬미팅은 자체 주문을 쓰므로 나오지 않는다.
 - 모든 상태를 준다. 결제 전, 취소, 환불 주문도 나온다. `status`는 주문의 지금 상태다.
-- `lines`의 이름, 옵션, 가격은 주문할 때 복사해 둔 값이다. 상품 정보가 나중에 바뀌어도 그대로다. 옵션이 없으면 `optionName`은 빈 문자열이다.
+- `lines`의 이름, 옵션, 가격은 주문할 때 복사해 둔 값이다. 상품 정보가 나중에 바뀌어도 그대로다. 옵션이 없으면 `optionName`은 빈 문자열이다. `lines`는 주문에 담은 순서다.
 - 정렬은 주문 시각 내림차순이다. 시각이 같으면 `orderId` 내림차순이다.
 - `page`는 0부터, 기본 0이다. `size`는 1~100, 기본 20이다. 음수 `page`, 범위 밖 `size`, 숫자가 아닌 값은 400 `INVALID_REQUEST`다.
 - 주문이 없거나 범위 밖 페이지면 `items`는 빈 배열이다. `totalElements`, `totalPages`는 실제 전체 주문 기준이다.
