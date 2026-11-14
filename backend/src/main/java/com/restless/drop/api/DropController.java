@@ -13,8 +13,9 @@ public class DropController {
     private final DropQueryService service;
 
     @GetMapping
-    public Page getList() {
-        return service.getList();
+    public Page getList(@RequestParam(required = false) String q,
+                        @RequestParam(required = false) String sort) {
+        return service.getList(q, sort);
     }
 
     @GetMapping("/{dropId}")
