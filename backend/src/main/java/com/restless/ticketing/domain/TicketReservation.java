@@ -214,6 +214,20 @@ public class TicketReservation {
                 && !paymentResultPending && !now.isBefore(paymentExpiresAt);
     }
 
+    public boolean canCompleteCompensation(Long paymentId) {
+        return (status == TicketReservationStatus.PAYMENT_PENDING || status == TicketReservationStatus.RECONCILING)
+                && paymentResultPending && currentPaymentId != null && currentPaymentId.equals(paymentId);
+    }
+
+    /** PG 취소 확정 callback에서만 호출한다. 발급 전 보상이므로 확정 수량은 되돌리지 않는다. */
+    public void completeCompensation(Long paymentId) {
+        if (!canCompleteCompensation(paymentId)) {
+            throw new IllegalStateException("현재 미확정 시도의 보상 취소만 완료할 수 있습니다.");
+        }
+        status = TicketReservationStatus.RELEASED;
+        paymentResultPending = false;
+    }
+
     /** 승인 미시도 또는 최종 실패 후 기한이 지난 예약만 반환한다. 시도 문맥은 보존한다. */
     public void expirePayment(Instant now) {
         if (!canExpirePayment(now)) {

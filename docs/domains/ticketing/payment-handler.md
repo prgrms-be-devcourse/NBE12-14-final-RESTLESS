@@ -1,8 +1,8 @@
 # 티켓팅 PaymentResultHandler 연결
 
 - 상태: 상태 전이는 DECIDED (2026-11-12, 담당자 합의).
-- 기준: ADR-0003의 동기 Handler 계약. 승인 시도 저장 및 내부 서비스의 대상 조회·승인 시작·성공 확정/발급·실패/불명확 처리를 구현했다. 결제 기한 자동 만료도 구현했다. PaymentResultHandler 빈 등록과 보상 처리는 다음 단계다.
-- paymentId를 모든 상태 변경 Handler에 전달하는 원칙은 DECIDED (2026-11-12). 공통 DTO·인터페이스는 ADR-0003 개정에 반영됐고 티켓팅 예약의 시도 저장·수락 도메인 메서드를 구현했다. 실제 Handler 연결은 후속 단계다. 결제 대상 매핑은 예약 ID 기준으로 확정했다 (2026-11-13, 사용자 합의).
+- 기준: ADR-0003의 동기 Handler 계약. 승인 시도 저장 및 내부 서비스의 대상 조회·승인 시작·성공 확정/발급·실패/불명확 처리를 구현했다. 결제 기한 자동 만료도 구현했다. TicketPaymentResultHandler 등록과 보상 취소 확정 처리까지 구현했다. 정상 환불·불명확 운영 알림은 후속이다.
+- paymentId를 모든 상태 변경 Handler에 전달하는 원칙은 DECIDED (2026-11-12). 공통 DTO·인터페이스는 ADR-0003 개정에 반영됐고 티켓팅 예약의 시도 저장·수락 도메인 메서드를 구현했다. TicketPaymentResultHandler가 TICKET으로 등록돼 공통 준비·승인·대사에서 호출된다. 결제 대상 매핑은 예약 ID 기준으로 확정했다 (2026-11-13, 사용자 합의).
 
 ## 경계
 
@@ -21,6 +21,7 @@
 | onApproved | 기한 내 유효 시도·대상·금액·현재 소유권 검증 | PAYMENT_PENDING 또는 RECONCILING → CONFIRMED, 선점 CONFIRMED, 좌석 SOLD, reserved 감소·confirmed 증가, UUID 티켓 발급 |
 | onFailed | 해당 시도 최종 실패 확인, 다른 미완료 시도 없음과 현재 기한 검증 | 기한 전 PAYMENT_PENDING/HELD 유지. 기한과 같거나 이후 RELEASED, 선점 RELEASED·좌석 반환·reserved 감소 |
 | onUnknown | 해당 시도의 결과 불명확 기록 | PAYMENT_PENDING → RECONCILING. 좌석 HELD와 reserved 유지 |
+| onRefunded(COMPENSATION) | 현재 시도의 PG 취소 확정, 미확정 예약·자원 검증 | 예약·선점 RELEASED, 좌석 AVAILABLE/NULL, reserved 감소, 주문 CANCELLED. confirmed는 유지 |
 
 예약에 승인 중 상태를 추가하지 않는다. 실제 승인 시작 여부는 영속 승인 시도 기록으로 구분한다.
 성공 확인 시각이 늦어도 기한 내 기록·커밋된 유효 시도라면 확정한다. PG approvedAt으로 티켓팅 기한을 판정하지 않는다.
@@ -37,9 +38,9 @@ DB 오류 등 기술 실패는 예외로 전체 롤백한다. 업무상 승인 �
 - onRefundRequesting/onRefundRejected/onRefunded는 RefundContext(paymentId, kind)를 받는다. 문맥 자체는 PG 취소 확정을 뜻하지 않으며 CUSTOMER_REFUND와 COMPENSATION을 구분한다.
 - onRefundRequesting은 손님 환불 요청 트랜잭션에서 가능 여부를 검사한다. 기본 구현은 REFUND_NOT_SUPPORTED로 거절하며, 도메인이 수락할 경우 환불 대기 전환과 공통 결제·환불 기록을 함께 커밋한다. 좌석은 반환하지 않는다.
 - onRefundRejected는 손님 환불의 PG 최종 거절 시 결제 APPROVED 복귀·환불 FAILED와 같은 트랜잭션에서 호출된다. 기본은 no-op이며, 티켓팅의 환불 상태 처리 연결은 후속이다. 두 콜백은 보상 취소에 호출하지 않는다.
-- 실제 자원 복원은 onRefunded에서만 수행한다. 공통 손님 환불 API가 추가됐어도 티켓팅 환불·Handler가 구현된 것은 아니다.
+- 실제 자원 복원은 onRefunded에서만 수행한다. 티켓팅은 COMPENSATION 취소 확정만 처리한다. CUSTOMER_REFUND 요청은 기본 REFUND_NOT_SUPPORTED로 거절한다.
 - 공통 결제는 payableType/payableId로 식별한다. payments.order_id를 요구하지 않는다.
-- 티켓팅 내부 서비스의 대상 조회·승인 시작 검증·시도 저장·성공 확정/발급은 구현했다. PaymentResultHandler 빈 등록과 실제 공통 결제 API 연결은 후속이다. checkout 자체는 공통 주문 준비까지만 수행하며 payments 생성·PG 호출·예매 확정을 하지 않는다.
+- 티켓팅 내부 서비스의 대상 조회·승인 시작 검증·시도 저장·성공 확정/발급·실패/불명확·보상 처리를 TicketPaymentResultHandler로 공통 결제 API에 연결했다. checkout 자체는 공통 주문 준비까지만 수행하며 payments 생성·PG 호출·예매 확정을 하지 않는다.
 
 ## 검증 범위와 후속 계획
 
@@ -66,13 +67,13 @@ DB 오류 등 기술 실패는 예외로 전체 롤백한다. 업무상 승인 �
 티켓팅은 승인 시작을 받아들인 paymentId와 시각을 영속화하고 결과가 같은 시도인지 확인해야 한다.
 예약의 current_payment_id, approval_started_at, payment_result_pending을 V20261113_1500으로 추가했다. current_payment_id는 공통 payments.id의 스칼라 문맥으로 저장하며 물리 FK를 추가하지 않는다. 실제 대상·시도 관계는 공통 결제의 잠금·callback 계약과 티켓팅 Handler 검증으로 보장한다.
 current_payment_id는 NULL 허용 UNIQUE이며, DB CHECK는 ID/시각의 부분 저장과 checkout 이전·결제 기한 이상인 승인 시작 시각을 막는다. 아직 시도가 없는 기존 예약은 NULL/NULL/false이며 과거 시도를 추정해 채우지 않는다.
-payment_result_pending은 수락한 승인 결과 또는 필요한 보상 취소가 미확정임을 뜻한다. 예약 상태 PAYMENT_PENDING은 checkout 직후와 승인 진행 중 모두 쓰므로 이를 구분하는 별도 필드다. 성공 확정에서는 이 필드를 false로 바꾸고 시도 ID/시각을 보존한다. 내부 최종 실패 처리에서도 이 필드를 false로 바꾼다. 자동 만료는 이 필드로 미확정 시도를 보호한다. 실제 Handler·보상 연결은 후속 단계다.
+payment_result_pending은 수락한 승인 결과 또는 필요한 보상 취소가 미확정임을 뜻한다. 예약 상태 PAYMENT_PENDING은 checkout 직후와 승인 진행 중 모두 쓰므로 이를 구분하는 별도 필드다. 성공 확정에서는 이 필드를 false로 바꾸고 시도 ID/시각을 보존한다. 내부 최종 실패 처리에서도 이 필드를 false로 바꾼다. 자동 만료는 이 필드로 미확정 시도를 보호한다. 보상 취소가 확인되면 같은 시도에 한해 false로 바꾼다. 정상 환불·운영 알림은 후속이다.
 승인 전 READY 만료 실패의 approvalStartedAt은 null일 수 있다. 정상 환불과 보상 취소를 구분하고 예매 확정 전 보상 취소에 confirmed_count 감소를 적용하지 않는다.
 
 ## 공통 대사와 checkout의 관계
 
 공통 결제는 PaymentReconciler/PaymentReconciliationScheduler로 미완료 승인·취소를 재조회하고 같은 Handler로 결과를 반영한다. 기준과 주기는 [공통 대사 운영 계약](../../operations/failure-handling.md#공통-결제-대사-46)을 따른다.
-checkout은 payments 행을 생성하지 않으므로 공통 대사 후보가 아니다. 주문만 연결된 PAYMENT_PENDING 예약의 결제 기한 만료를 공통 대사가 대신 정리하지 않는다. 승인 미시도·최종 실패 예약은 티켓팅의 결제 기한 만료 작업이 정리한다. Handler·실제 결제 API 연결은 후속이다.
+checkout은 payments 행을 생성하지 않으므로 공통 대사 후보가 아니다. 주문만 연결된 PAYMENT_PENDING 예약의 결제 기한 만료를 공통 대사가 대신 정리하지 않는다. 승인 미시도·최종 실패 예약은 티켓팅의 결제 기한 만료 작업이 정리한다. 공통 Handler가 등록돼 결제 시도·결과 callback도 연결됐다.
 공통 UNKNOWN 최초 시각·나이 메트릭은 구현됐지만 티켓팅의 불명확 5분 운영 확인 등록·중복 없는 알림은 후속이며 좌석 보호 정책을 바꾸지 않는다.
 
 ## 단계별 구현: 승인 시도 기록 기반 (2026-11-13)
@@ -175,3 +176,26 @@ backend에서 실제 실행:
 ## 결제 기한 자동 만료 연결 (2026-11-15)
 
 실패 callback 없이 기한만 도래한 PAYMENT_PENDING도 이제 만료 작업으로 정리한다. 수락한 미확정 시도가 있거나 RECONCILING이면 기한 이후에도 보호한다. 후보 조회와 처리 사이의 승인 시작 경합은 같은 구매 관리·예약 잠금으로 직렬화한다. 실제 PG 결과를 조회하거나 최종 실패로 추정하지 않는다. 예약별 독립 트랜잭션·재시도·설정·검증은 [만료 문서](expiration.md#결제-기한-자동-만료-구현-2026-11-15)를 따른다. 앞선 단계별 기록의 자동 만료 후속 표기는 당시 범위이며, 현재는 구현 완료다. Handler 등록·보상 취소는 여전히 후속이다.
+
+## 보상 취소·공통 Handler 등록 (2026-11-16)
+
+TicketPaymentResultHandler를 PayableType.TICKET의 Spring 빈으로 등록했다. payableId는 예약 ID이며 공통 prepare/confirm 및 PaymentReconciler가 기존 계약으로 load/onApprovalStarting/onApproved/onFailed/onUnknown/onRefunded를 호출한다. 연결부는 내부 TicketPaymentService에 위임하며 callback 서비스의 MANDATORY로 공통 결제 트랜잭션에 참여한다. 기존 공통 API·주문 서비스·DB 스키마는 변경하지 않는다. 앞선 단계의 Handler/보상 후속 표기는 당시 범위다.
+
+### 보상 대기와 완료
+
+- onApproved가 업무상 REJECT하면 공통 결제가 취소 요청과 PG 호출을 조정한다. 티켓팅은 수락한 paymentId·시각과 payment_result_pending=true를 유지한다. 별도 예약 상태를 추가하거나 기한만으로 반환하지 않는다.
+- PG 취소 응답이 불명확하면 공통 CANCEL_UNKNOWN과 대사가 담당한다. 최종 취소 거절은 공통 APPROVED/환불 FAILED로 남고 공통 보상 거절 로그·메트릭이 운영 확인 대상이 된다. 두 경우 모두 취소 확정 callback이 없으므로 티켓팅 좌석 보호를 유지한다.
+- onRefunded의 RefundContext(paymentId, COMPENSATION)는 PG 취소가 확정된 문맥이다. 현재 시도 ID가 같고 결과 미확정인 PAYMENT_PENDING/RECONCILING에서만 반환한다. 기한 전후와 관계없이 예약·선점 RELEASED, 좌석 AVAILABLE/NULL, reserved 감소, 주문 CANCELLED를 함께 반영하고 결과 미확정을 false로 바꾼다. 최초 주문·기한·수락 문맥은 보존한다. 발급 전 보상이므로 confirmed 수량과 이미 발급한 티켓을 변경하지 않는다.
+- 구매 관리 → 예약 → 좌석 ID 오름차순 → 주문 잠금 순서를 유지한다. PG 호출은 공통 결제 모듈만 수행하며 DB 트랜잭션 밖에서 호출한다.
+- 같은 시도의 RELEASED/미확정=false 재통지는 무시한다. 과거 좌석에 새 소유자가 생겼어도 포인터나 수량을 다시 건드리지 않는다.
+
+### 불일치와 오류
+
+- 다른 시도, 이미 CONFIRMED인 예약, 지원하지 않는 CUSTOMER_REFUND 완료 통지, 좌석 소유권·수량·주문 불일치는 자원을 변경하지 않는다. 오류 로그에 예약·결제 ID와 사유를 남기고 ticketing.payment.compensation.anomalies{reason}을 기록한다. reason은 고정 값이며 ID를 태그로 사용하지 않는다. 이 메트릭은 이상 callback 관측 횟수다.
+- 이 불일치에서 예외로 공통 PG 취소 확정까지 계속 롤백하지 않는다. 공통 취소 기록은 완료되고 티켓팅의 미정리 상태는 운영 복구 대상으로 남는다. 특히 일부 좌석만 반환하거나 새 소유자의 좌석을 덮어쓰지 않는다.
+- 실제 DB/저장 오류는 예외를 전파한다. 결제·환불·예약·좌석·주문 변경이 전체 롤백되고, 공통 대사가 이미 취소된 PG 사실을 재조회해 새 트랜잭션에서 다시 반영한다.
+- 정상 환불 요청은 인터페이스 기본 REFUND_NOT_SUPPORTED, 정상 환불 거절 통지는 기본 no-op을 유지한다. 정상 환불/입장/불명확 운영 알림은 후속이다. 공통 주문 상세의 TICKET payable resolver와 결제창 UI도 별도 범위다.
+
+### 검증 범위
+
+기존 checkout fixture·성공/실패/만료 검증을 재사용한다. 추가 검증은 보상 취소 동시 재통지와 새 소유자 보호, 시도·종류·상태·자원 불일치, 공통 PaymentService의 준비·승인·실패·불명확 대사 연결, 취소 응답 유실·거절·DB 반영 롤백과 복구에 집중한다. Fake PG를 사용하며 실제 PG 부하나 운영 결제를 호출하지 않는다.

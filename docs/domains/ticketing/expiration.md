@@ -1,7 +1,7 @@
 # 예약 만료와 좌석 반환
 
 - 상태: DECIDED (2026-11-12, 담당자 합의).
-- 구현 상태: 결제 전 HELD 예약의 전체 좌석 반환과 요청 시 만료 정리, 5초 주기 만료 스케줄러를 구현했다. 내부 결제 실패 callback에서 기한이 지난 PAYMENT_PENDING/RECONCILING의 전체 반환을 추가했다. 승인 미시도·최종 실패 예약의 결제 기한 자동 만료도 구현했다. 실제 Handler 등록·보상 취소는 후속이다.
+- 구현 상태: 결제 전 HELD 예약의 전체 좌석 반환과 요청 시 만료 정리, 5초 주기 만료 스케줄러를 구현했다. 내부 결제 실패 callback에서 기한이 지난 PAYMENT_PENDING/RECONCILING의 전체 반환을 추가했다. 승인 미시도·최종 실패 예약의 결제 기한 자동 만료도 구현했다. TicketPaymentResultHandler와 보상 취소도 연결했다. 정상 환불·운영 알림은 후속이다.
 
 ## 1. 판단 기준
 
@@ -80,7 +80,7 @@ TicketPaymentService.onFailed는 현재 승인 시도의 최종 실패 확인 �
 - 후보 조회 뒤 승인 시작이 먼저 기록·커밋됐다면 만료 작업은 예약 잠금 획득 후 미확정 시도를 확인해 건너뛴다. 반대로 만료가 먼저 커밋됐다면 승인 시작은 종료 예약을 보고 거절한다. 여러 서버의 중복 실행도 같은 잠금으로 한 번만 반환한다.
 - V20261115_2100은 후보 조회용 (status, payment_result_pending, payment_expires_at, id) 인덱스만 추가한다. 기존 마이그레이션·업무 제약을 수정하지 않는다.
 
-실제 PaymentResultHandler 등록·보상 취소·불명확 운영 알림은 여전히 후속이다.
+이후 Handler 등록·보상 취소도 연결했다. 보상 대기에서도 payment_result_pending=true로 보호하며 PG 취소 확정 callback에서만 반환한다. 불명확 운영 알림은 후속이다.
 
 ### 자동 만료 검증 결과
 

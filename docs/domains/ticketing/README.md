@@ -22,6 +22,10 @@ design.md는 Notion 원본을 바탕으로 하며, 합의된 변경은 별도 �
 
 Drop 문서([../drop/](../drop/))처럼 policy, invariants, state-machines, transactions, data-model로 나눌지는 담당자가 정한다.
 
+## 현재 결제 연결 범위 (2026-11-16)
+
+TicketPaymentResultHandler를 등록해 예약 ID 기준 공통 결제 준비·승인·대사 callback을 연결했다. 승인 성공 발급, 실패/불명확, 자동 만료, 보상 취소 확정까지 서버 흐름을 구현했다. 정상 환불·공통 주문 상세의 TICKET payable resolver·결제창 UI·운영 알림은 후속이다. 아래 단계별 기록의 미구현/후속 표기는 당시 범위이며 현재 기준은 [Handler 문서](payment-handler.md#보상-취소공통-handler-등록-2026-11-16)를 따른다.
+
 ## 매핑 테스트 구성
 
 대표 저장·조회에 상태·이력·NULL/non-NULL 확인을 통합하고, 같은 제약의 반복 사례를 줄였다.

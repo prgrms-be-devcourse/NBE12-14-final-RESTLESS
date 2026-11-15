@@ -4,7 +4,7 @@
 # 티켓팅 결제 트랜잭션 경계
 
 - 상태: DECIDED (2026-11-12, 담당자 합의).
-- 구현 상태: checkout과 내부 대상 조회·승인 시작·성공 확정/티켓 발급을 구현했다. 실제 결제 시도 연결·Handler 빈 등록·실패/불명확·결제 후 만료·보상 취소는 다음 단계다. 실행 범위는 아래 단계별 검증 기록을 따른다.
+- 구현 상태: checkout·승인 시작·성공 발급·실패/불명확·자동 만료·보상 취소와 TicketPaymentResultHandler 등록을 구현했다. 정상 환불·결제창 UI·운영 알림은 후속이다. 실행 범위는 아래 단계별 검증 기록을 따른다.
 - 공통 승인·대사·손님 환불 계약은 ADR-0003과 [장애 처리 문서](../../operations/failure-handling.md)를 따른다. OPEN: 티켓팅 Handler·시도 저장 연결, 결제 이후 만료, 운영 확인 등록·알림의 담당과 세부 규칙.
 
 ## 1. 책임과 연결
@@ -71,7 +71,7 @@ PG 성공 후 DB 확정 실패는 PG 결제 실패가 아니다. DB 변경은 �
 
 준비 커밋 후 PG 호출 전 서버 종료, PG 요청 타임아웃, 승인 성공 후 응답 유실·서버 종료도 영속 승인 시도로 복구한다.
 준비 기록만으로 요청이 실제 전송됐다고 단정하지 않는다. 결과 조회의 미존재·처리 중 응답만으로 즉시 실패 처리하거나 새 승인 시도를 만들지 않는다.
-공통 대사의 후보·주기·PG 결과별 분기와 최종 실패 기준은 [공통 대사 운영 계약](../../operations/failure-handling.md#공통-결제-대사-46)에 구현돼 있다. 티켓팅 Handler 연결은 후속이다. checkout만 완료된 주문·예약에는 결제 시도 행이 없어 공통 대사가 예약 기한 만료를 대신 처리하지 않으며, 티켓팅의 결제 기한 자동 만료 작업이 정리한다.
+공통 대사의 후보·주기·PG 결과별 분기와 최종 실패 기준은 [공통 대사 운영 계약](../../operations/failure-handling.md#공통-결제-대사-46)에 구현돼 있다. 티켓팅 Handler는 공통 대사 callback에 연결돼 있다. checkout만 완료된 주문·예약에는 결제 시도 행이 없어 공통 대사가 예약 기한 만료를 대신 처리하지 않으며, 티켓팅의 결제 기한 자동 만료 작업이 정리한다.
 진행 중·불명확 결과를 실패로 추정하여 좌석을 반환하지 않는다.
 
 ## 6. 이벤트 경계
@@ -238,3 +238,9 @@ TicketPaymentService.onFailed/onUnknown은 공통 결제 트랜잭션에 MANDATO
 TicketPaymentService.expirePayment는 Worker용 REQUIRES_NEW/READ_COMMITTED다. callback의 MANDATORY와 달리 예약마다 독립 커밋·롤백하며, 실패 시 같은 예약을 다음 실행의 새 트랜잭션에서 다시 처리한다. 구매 관리 → 예약 → 좌석 ID 오름차순 → 주문 순서로 잠그고 DB UTC 시각·미확정 시도·현재 소유권·수량·주문을 재검증한다. 반환 코드와 검증은 onFailed와 공유하되 가짜 PaymentAttemptContext를 만들어 callback을 호출하지 않는다.
 
 미확정 시도가 없는 PAYMENT_PENDING의 결제 기한 정각 이상에서 예약·선점 RELEASED, 좌석 AVAILABLE/NULL, reserved 감소, 주문 CANCELLED를 함께 반영한다. 확정 수량과 최초 checkout·주문·시도 문맥은 보존한다. 결제 행을 조회하거나 잠그지 않아 결제 행 → 도메인 행 순서를 역전하지 않는다. PG를 호출하지 않는다. 앞선 단계의 자동 만료 후속 표기는 당시 범위다. 상세는 [만료 문서](expiration.md#결제-기한-자동-만료-구현-2026-11-15)를 따른다.
+
+## 보상 취소와 Handler 트랜잭션 (2026-11-16)
+
+TicketPaymentResultHandler는 TICKET/예약 ID로 등록됐다. load 및 상태 변경 callback은 기존 내부 서비스의 MANDATORY 트랜잭션에 참여한다. 새 트랜잭션을 여는 것은 Worker용 expirePayment뿐이며 공통 결제 callback에서 호출하지 않는다.
+
+업무상 승인 거절 후 공통 결제가 보상 취소를 수행하는 동안 티켓팅의 미확정 시도 보호를 유지한다. onRefunded(COMPENSATION)에서 현재 시도·예약 상태·전체 소유권·수량·주문을 확인하고 예약/선점/좌석/reserved/주문을 한 번에 반환한다. confirmed와 티켓은 변경하지 않는다. 과거 시도·확정 예약·종류/자원 불일치는 변경 없이 운영 확인으로 남기며, 실제 DB 오류는 전체 롤백하고 공통 대사로 재처리한다. 상세는 [Handler 문서](payment-handler.md#보상-취소공통-handler-등록-2026-11-16)를 따른다. 이전 단계의 Handler·보상 후속 표기는 당시 범위다.

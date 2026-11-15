@@ -20,6 +20,16 @@ import com.restless.payment.application.payable.ApprovalDecision;
 import com.restless.payment.application.payable.ApprovedPayment;
 import com.restless.payment.application.payable.PayableSnapshot;
 import com.restless.payment.application.payable.PaymentAttemptContext;
+import com.restless.payment.application.payable.RefundContext;
+import com.restless.payment.application.*;
+import com.restless.payment.application.pg.PgCancelCommand;
+import com.restless.payment.application.pg.PgCancelResult;
+import com.restless.payment.domain.PayableType;
+import com.restless.payment.domain.PaymentStatus;
+import com.restless.payment.domain.PaymentRefundKind;
+import com.restless.payment.domain.PaymentRefundStatus;
+import com.restless.payment.infrastructure.fake.FakePgClient;
+import io.micrometer.core.instrument.MeterRegistry;
 import com.restless.ticketing.application.dto.TicketCheckoutInfo;
 import com.restless.ticketing.application.dto.TicketReservationInfo;
 import com.restless.ticketing.domain.TicketSeat;
@@ -69,12 +79,20 @@ import org.springframework.transaction.support.DefaultTransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @DisplayName("티켓팅 결제 준비 통합 테스트")
-@SpringBootTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "spring.docker.compose.enabled=false"})
+@SpringBootTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "spring.docker.compose.enabled=false",
+        "pg.provider=fake", "restless.payment.reconcile.enabled=false",
+        "restless.payment.reconcile.cancel-stale-after=1ms", "restless.payment.reconcile.unknown-retry-after=1ms"})
 @Import(TestcontainersConfiguration.class)
 @AutoConfigureMockMvc
 class TicketCheckoutServiceTest {
     @Autowired TicketCheckoutService checkout;
-    @Autowired TicketPaymentService paymentService;
+    @MockitoSpyBean TicketPaymentService paymentService;
+    @Autowired TicketPaymentResultHandler handler;
+    @Autowired PaymentService commonPayments;
+    @Autowired PaymentRefundService commonRefunds;
+    @Autowired PaymentReconciler reconciler;
+    @Autowired MeterRegistry metrics;
+    @MockitoSpyBean FakePgClient fakePg;
     @Autowired TicketReservationRepository reservations;
     @Autowired TicketSeatRepository seats;
     @Autowired TicketReservationService service;
@@ -91,6 +109,7 @@ class TicketCheckoutServiceTest {
 
     @BeforeEach
     void setUp() {
+        fakePg.reset();
         // 서비스가 REQUIRES_NEW를 사용하므로 준비 데이터도 먼저 커밋한다.
         fixture = new TransactionTemplate(transactionManager).execute(status -> {
             Instant now = jdbc.queryForObject("SELECT UTC_TIMESTAMP(6)", LocalDateTime.class)
@@ -153,6 +172,9 @@ class TicketCheckoutServiceTest {
             jdbc.update("DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE user_id IN (?, ?))",
                     fixture.firstUserId(), fixture.secondUserId());
             jdbc.update("DELETE FROM orders WHERE user_id IN (?, ?)", fixture.firstUserId(), fixture.secondUserId());
+            jdbc.update("DELETE FROM payment_refunds WHERE payment_id IN (SELECT id FROM payments WHERE user_id IN (?, ?))",
+                    fixture.firstUserId(), fixture.secondUserId());
+            jdbc.update("DELETE FROM payments WHERE user_id IN (?, ?)", fixture.firstUserId(), fixture.secondUserId());
             jdbc.update("DELETE FROM users WHERE id IN (?, ?)", fixture.firstUserId(), fixture.secondUserId());
         });
     }
@@ -543,6 +565,8 @@ class TicketCheckoutServiceTest {
             assertThatThrownBy(() -> paymentService.onFailed(1L, PaymentAttemptContext.notStarted(9001L)))
                     .isInstanceOf(IllegalTransactionStateException.class);
             assertThatThrownBy(() -> paymentService.onUnknown(1L, new PaymentAttemptContext(9001L, databaseNow())))
+                    .isInstanceOf(IllegalTransactionStateException.class);
+            assertThatThrownBy(() -> handler.onRefunded(1L, new RefundContext(9001L, PaymentRefundKind.COMPENSATION)))
                     .isInstanceOf(IllegalTransactionStateException.class);
         }
 
@@ -1068,6 +1092,179 @@ class TicketCheckoutServiceTest {
 
         private void expireCheckoutFixture(Long reservationId) {
             jdbc.update("UPDATE ticket_reservations SET checkout_started_at = DATE_SUB(checkout_started_at, INTERVAL 10 MINUTE), payment_expires_at = DATE_SUB(payment_expires_at, INTERVAL 10 MINUTE), approval_started_at = DATE_SUB(approval_started_at, INTERVAL 10 MINUTE) WHERE id = ?", reservationId);
+        }
+    }
+
+    @Nested
+    @DisplayName("보상 취소와 공통 결제 연결")
+    class PaymentCompensation {
+        @Test
+        @DisplayName("거절한 승인의 취소 확정은 한 번만 반환하고 확정 수량·새 좌석 소유자를 보존한다")
+        void compensationReleasesOnceAndPreservesNewOwner() throws Exception {
+            var accepted = acceptStart();
+            var approved = approved(accepted);
+            assertThat(paymentTransaction(() -> handler.onApproved(accepted.reservation().reservationId(),
+                    new ApprovedPayment(approved.paymentId(), approved.pgOrderId(), approved.paymentKey(),
+                            approved.amount() + 1, approved.approvalStartedAt(), approved.approvedAt()))).rejected()).isTrue();
+            assertHeldSeats(accepted.reservation());
+            jdbc.update("UPDATE ticket_purchase_limits SET confirmed_count = 1 WHERE user_id = ? AND performance_id = ?",
+                    fixture.firstUserId(), fixture.performanceId());
+            var refund = new RefundContext(accepted.attempt().paymentId(), PaymentRefundKind.COMPENSATION);
+            try (var pool = Executors.newFixedThreadPool(2)) {
+                var start = new CountDownLatch(1);
+                Callable<Void> action = () -> { await(start); refunded(accepted, refund); return null; };
+                var first = pool.submit(action);
+                var second = pool.submit(action);
+                start.countDown();
+                first.get(15, TimeUnit.SECONDS);
+                second.get(15, TimeUnit.SECONDS);
+            }
+            assertReleased(accepted.reservation());
+            assertThat(orders.find(accepted.checkout().orderId()).orElseThrow().status()).isEqualTo(OrderStatus.CANCELLED);
+            assertThat(jdbc.queryForObject("SELECT confirmed_count FROM ticket_purchase_limits WHERE user_id = ? AND performance_id = ?",
+                    Integer.class, fixture.firstUserId(), fixture.performanceId())).isEqualTo(1);
+            assertThat(instantColumn("approval_started_at", accepted.reservation().reservationId())).isEqualTo(accepted.attempt().approvalStartedAt());
+            assertThat(instantColumn("payment_expires_at", accepted.reservation().reservationId())).isEqualTo(accepted.checkout().paymentExpiresAt());
+            var next = service.reserve(fixture.secondUserId(), UUID.randomUUID().toString(), fixture.performanceId(), accepted.reservation().seatIds());
+            refunded(accepted, refund);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM seat_holds h JOIN performance_seats s ON s.current_hold_id=h.id WHERE h.reservation_id=? AND h.status='HELD' AND s.status='HELD'",
+                    Integer.class, next.reservationId())).isEqualTo(2);
+        }
+
+        @ParameterizedTest(name = "{displayName} [{0}]")
+        @ValueSource(strings = {"OLD_ATTEMPT", "CUSTOMER_REFUND", "CONFIRMED", "SEAT_OWNER", "RESERVED_COUNT"})
+        @DisplayName("환불 종류·시도·상태·소유권 불일치는 변경 없이 운영 확인 로그와 메트릭을 남긴다")
+        void incompatibleRefundDoesNotMutateResources(String mismatch) {
+            var accepted = acceptStart();
+            if (mismatch.equals("CONFIRMED")) {
+                assertThat(paymentTransaction(() -> handler.onApproved(accepted.reservation().reservationId(), approved(accepted))))
+                        .isEqualTo(ApprovalDecision.accept());
+            } else if (mismatch.equals("SEAT_OWNER")) {
+                jdbc.update("UPDATE performance_seats SET status='AVAILABLE', current_hold_id=NULL WHERE id=?", accepted.reservation().seatIds().get(1));
+            } else if (mismatch.equals("RESERVED_COUNT")) {
+                jdbc.update("UPDATE ticket_purchase_limits SET reserved_count=1 WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId());
+            }
+            var before = compensationSnapshot(accepted);
+            double anomalies = anomalyCount();
+            refunded(accepted, new RefundContext(mismatch.equals("OLD_ATTEMPT") ? 8999L : accepted.attempt().paymentId(),
+                    mismatch.equals("CUSTOMER_REFUND") ? PaymentRefundKind.CUSTOMER_REFUND : PaymentRefundKind.COMPENSATION));
+            assertThat(compensationSnapshot(accepted)).isEqualTo(before);
+            assertThat(anomalyCount()).isEqualTo(anomalies + 1);
+        }
+
+        @ParameterizedTest(name = "{displayName} [PG 응답={0}]")
+        @ValueSource(strings = {"APPROVED", "UNKNOWN", "FAILED"})
+        @DisplayName("등록한 TICKET Handler로 공통 준비·승인·실패·불명확 대사가 실제 예약에 반영된다")
+        void commonPaymentUsesRegisteredTicketHandler(String outcome) {
+            var reservation = reserve();
+            var checkout = checkout(reservation);
+            var payment = commonPayments.prepare(new PreparePaymentCommand(fixture.firstUserId(), PayableType.TICKET,
+                    reservation.reservationId(), "ticket-prepare"));
+            var command = new ConfirmPaymentCommand(fixture.firstUserId(), "ticket-key-" + payment.paymentId(), payment.pgOrderId(), payment.amount());
+            if (outcome.equals("FAILED")) {
+                fakePg.willReject(payment.pgOrderId(), "REJECT_CARD_COMPANY");
+                assertThatThrownBy(() -> commonPayments.confirm(command)).isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.PAYMENT_FAILED));
+                assertHeldSeats(reservation);
+                assertThat(orders.find(checkout.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.PENDING_PAYMENT);
+                assertThat(commonPayments.get(payment.paymentId(), fixture.firstUserId()).status()).isEqualTo(PaymentStatus.FAILED);
+                return;
+            }
+            if (outcome.equals("UNKNOWN")) {
+                fakePg.willLoseResponse(payment.pgOrderId());
+                assertThat(commonPayments.confirm(command).status()).isEqualTo(PaymentStatus.UNKNOWN);
+                assertThat(reservationStatus(reservation.reservationId())).isEqualTo("RECONCILING");
+                jdbc.update("UPDATE ticket_reservations SET payment_expires_at=UTC_TIMESTAMP(6) WHERE id=?", reservation.reservationId());
+                assertThat(paymentService.expirePayment(reservation.reservationId())).isFalse();
+                reconciler.runOnce();
+            } else {
+                fakePg.willApprove(payment.pgOrderId());
+                assertThat(commonPayments.confirm(command).status()).isEqualTo(PaymentStatus.APPROVED);
+            }
+            assertThat(commonPayments.get(payment.paymentId(), fixture.firstUserId()).status()).isEqualTo(PaymentStatus.APPROVED);
+            assertThat(reservationStatus(reservation.reservationId())).isEqualTo("CONFIRMED");
+            assertThat(orders.find(checkout.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.PAID);
+            var numbers = tickets.findAllByReservationIdOrderByPerformanceSeatIdAsc(reservation.reservationId()).stream().map(Ticket::getTicketNo).toList();
+            assertThat(numbers).hasSize(2);
+            assertThat(commonPayments.confirm(command).status()).isEqualTo(PaymentStatus.APPROVED);
+            assertThat(tickets.findAllByReservationIdOrderByPerformanceSeatIdAsc(reservation.reservationId()).stream().map(Ticket::getTicketNo).toList()).isEqualTo(numbers);
+            assertThatThrownBy(() -> commonRefunds.refund(new RefundPaymentCommand(fixture.firstUserId(), payment.paymentId(), "refund", "customer refund")))
+                    .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.PAYMENT_NOT_REFUNDABLE));
+            org.mockito.Mockito.verify(fakePg, org.mockito.Mockito.never()).cancel(any(PgCancelCommand.class));
+        }
+
+        @ParameterizedTest(name = "{displayName} [보상 결과={0}]")
+        @ValueSource(strings = {"UNKNOWN", "ROLLBACK", "REJECTED"})
+        @DisplayName("보상 취소 유실·롤백·거절 동안 보호하고 취소 확인 후에만 결제·예약을 함께 완료한다")
+        void compensationWaitsForPgAndRecoversAtomically(String outcome) {
+            boolean lostResponse = outcome.equals("UNKNOWN");
+            boolean rejected = outcome.equals("REJECTED");
+            var reservation = reserve();
+            var checkout = checkout(reservation);
+            TicketPaymentService target = AopTestUtils.getUltimateTargetObject(paymentService);
+            // 공통 승인 거절→보상 경로의 연결 검증. 도메인의 구체적 거절 사유는 기존 테스트에서 검증한다.
+            doAnswer(invocation -> ApprovalDecision.reject("TICKET_NOT_CONFIRMABLE"))
+                    .when(target).onApproved(anyLong(), any(ApprovedPayment.class));
+            var payment = commonPayments.prepare(new PreparePaymentCommand(fixture.firstUserId(), PayableType.TICKET,
+                    reservation.reservationId(), "compensate"));
+            fakePg.willApprove(payment.pgOrderId());
+            doAnswer(invocation -> {
+                assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                if (rejected) return new PgCancelResult.Rejected("CANCEL_REJECTED", "manual review required");
+                Object result = callOriginal(invocation);
+                return lostResponse ? new PgCancelResult.Unknown("cancel response lost", null) : result;
+            }).when(fakePg).cancel(any(PgCancelCommand.class));
+            if (outcome.equals("ROLLBACK")) {
+                var failOnce = new AtomicBoolean(true);
+                doAnswer(invocation -> {
+                    Object result = callOriginal(invocation);
+                    if (failOnce.compareAndSet(true, false)) {
+                        entityManager.flush();
+                        assertReleased(reservation);
+                        throw new InjectedFailure();
+                    }
+                    return result;
+                }).when(orderTarget()).changeStatus(checkout.orderId(), OrderStatus.CANCELLED);
+            }
+            assertThatThrownBy(() -> commonPayments.confirm(new ConfirmPaymentCommand(fixture.firstUserId(), "comp-key-" + payment.paymentId(),
+                    payment.pgOrderId(), payment.amount()))).isInstanceOfSatisfying(BusinessException.class,
+                    error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.PAYMENT_REJECTED));
+            var pending = commonPayments.get(payment.paymentId(), fixture.firstUserId());
+            assertThat(pending.status()).isEqualTo(rejected ? PaymentStatus.APPROVED : lostResponse ? PaymentStatus.CANCEL_UNKNOWN : PaymentStatus.CANCEL_PENDING);
+            assertThat(pending.refund().status()).isEqualTo(rejected ? PaymentRefundStatus.FAILED : lostResponse ? PaymentRefundStatus.UNKNOWN : PaymentRefundStatus.REQUESTED);
+            assertThat(orders.find(checkout.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.PAYMENT_CONFIRMING);
+            assertHeldSeats(reservation);
+            jdbc.update("UPDATE ticket_reservations SET payment_expires_at=UTC_TIMESTAMP(6) WHERE id=?", reservation.reservationId());
+            assertThat(paymentService.expirePayment(reservation.reservationId())).isFalse();
+            reconciler.runOnce();
+            if (rejected) {
+                assertHeldSeats(reservation);
+                assertThat(commonPayments.get(payment.paymentId(), fixture.firstUserId()).status()).isEqualTo(PaymentStatus.APPROVED);
+                return;
+            }
+            var completed = commonPayments.get(payment.paymentId(), fixture.firstUserId());
+            assertThat(completed.status()).isEqualTo(PaymentStatus.CANCELLED);
+            assertThat(completed.refund().kind()).isEqualTo(PaymentRefundKind.COMPENSATION);
+            assertThat(completed.refund().status()).isEqualTo(PaymentRefundStatus.COMPLETED);
+            assertReleased(reservation);
+            assertThat(orders.find(checkout.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.CANCELLED);
+            assertThat(tickets.findAllByReservationIdOrderByPerformanceSeatIdAsc(reservation.reservationId())).isEmpty();
+        }
+
+        private void refunded(AcceptedReservation accepted, RefundContext refund) {
+            paymentTransaction(() -> { handler.onRefunded(accepted.reservation().reservationId(), refund); return null; });
+        }
+
+        private Object compensationSnapshot(AcceptedReservation accepted) {
+            return List.of(jdbc.queryForMap("SELECT status,current_payment_id,payment_result_pending FROM ticket_reservations WHERE id=?", accepted.reservation().reservationId()),
+                    jdbc.queryForList("SELECT status,current_hold_id FROM performance_seats WHERE performance_id=? ORDER BY id", fixture.performanceId()),
+                    jdbc.queryForList("SELECT status,released_at FROM seat_holds WHERE reservation_id=? ORDER BY id", accepted.reservation().reservationId()),
+                    jdbc.queryForMap("SELECT reserved_count,confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId()),
+                    orders.find(accepted.checkout().orderId()).orElseThrow().status());
+        }
+
+        private double anomalyCount() {
+            return metrics.find("ticketing.payment.compensation.anomalies").counters().stream().mapToDouble(counter -> counter.count()).sum();
         }
     }
 
