@@ -4,13 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 
 import com.restless.TestcontainersConfiguration;
 import com.restless.auction.application.AuctionCloseService;
+import com.restless.auction.application.AuctionScheduler;
 import com.restless.auction.application.BidService;
 import com.restless.auction.domain.AuctionResult;
 import com.restless.auction.infrastructure.AuctionResultRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.persistence.EntityManager;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -21,15 +24,16 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
- * 종료 처리 도중 실패를 일부러 넣어 확인한다 (operations/failure-handling.md A-05).
+ * 종료 처리 도중 실패를 일부러 넣어 확인한다 (operations/failure-handling.md A-05, A-06).
  * 실제 코드는 정상이고, 테스트에서만 특정 빈이 예외를 던지게 바꾼다.
  */
 @SpringBootTest(properties = "spring.docker.compose.enabled=false")
 @Import(TestcontainersConfiguration.class)
 class AuctionCloseFailureTest {
-    @Autowired AuctionCloseService closeService;
+    @MockitoSpyBean AuctionCloseService closeService;
     @Autowired BidService bidService;
     @Autowired JdbcTemplate jdbc;
     @Autowired EntityManager em;
@@ -37,6 +41,7 @@ class AuctionCloseFailureTest {
     AuctionFixtures f;
     Long seller;
     Long chulsoo;
+    Long younghee;
 
     @BeforeEach void setUp() {
         f = new AuctionFixtures(jdbc);
@@ -44,6 +49,8 @@ class AuctionCloseFailureTest {
         seller = f.user("ORGANIZER");
         chulsoo = f.user("USER");
         f.credit(chulsoo, 100_000);
+        younghee = f.user("USER");
+        f.credit(younghee, 100_000);
     }
 
     /** 같은 트랜잭션 안에서 본 크레딧 상태. 실패 직전에 차감이 실제로 반영돼 있었는지 확인하는 데 쓴다. */
@@ -91,6 +98,57 @@ class AuctionCloseFailureTest {
         assertThat(jdbc.queryForObject("SELECT result_type FROM auction_results WHERE auction_id = ?",
                 String.class, auctionId)).isEqualTo("SOLD");
         assertThat(f.status(auctionId)).isEqualTo("CLOSED");
+        f.assertInvariants();
+    }
+
+    /**
+     * 스케줄러 빈은 테스트에서 꺼져 있다 (build.gradle). 켜면 백그라운드 스레드가 아무 때나 경매를 닫으므로,
+     * 운영과 같은 클래스를 직접 만들어 테스트가 부를 때만 한 번 돌게 한다.
+     */
+    AuctionScheduler scheduler(SimpleMeterRegistry meters) {
+        AuctionScheduler scheduler = new AuctionScheduler(closeService, meters);
+        ReflectionTestUtils.setField(scheduler, "batchSize", 100);
+        return scheduler;
+    }
+
+    @Test void 스케줄러에서_경매_하나의_종료가_실패해도_나머지는_종료되고_실패한_경매는_다음_주기에_종료된다() {
+        Long first = f.openAuction(seller);
+        Long broken = f.openAuction(seller);
+        Long last = f.openAuction(seller);
+        bidService.place(chulsoo, first, 60_000, UUID.randomUUID().toString());
+        bidService.place(younghee, broken, 70_000, UUID.randomUUID().toString());
+        f.expireNow(first);
+        f.expireNow(broken);
+        f.expireNow(last);
+
+        doThrow(new IllegalStateException("테스트가 넣은 장애: 종료 실패")).when(closeService).close(broken);
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+        AuctionScheduler scheduler = scheduler(meters);
+
+        scheduler.run();
+
+        // 실패한 경매만 남고 앞뒤 경매는 종료됐다. 예외가 반복문 밖으로 나가지 않았다.
+        assertThat(f.status(first)).isEqualTo("CLOSED");
+        assertThat(f.status(last)).isEqualTo("CLOSED");
+        assertThat(f.status(broken)).isEqualTo("OPEN");
+        assertThat(jdbc.queryForObject("SELECT result_type FROM auction_results WHERE auction_id = ?",
+                String.class, first)).isEqualTo("SOLD");
+        assertThat(jdbc.queryForObject("SELECT result_type FROM auction_results WHERE auction_id = ?",
+                String.class, last)).isEqualTo("UNSOLD");
+        assertThat(f.count("SELECT COUNT(*) FROM auction_results WHERE auction_id = ?", broken)).isZero();
+        assertThat(f.available(younghee)).as("실패한 경매의 확보는 그대로").isEqualTo(30_000);
+        assertThat(meters.counter("auction.scheduler.failure", "action", "close").count()).isEqualTo(1.0);
+        f.assertInvariants();
+
+        // 장애를 풀면 다음 주기에 남은 경매도 종료된다.
+        reset(closeService);
+        scheduler.run();
+
+        assertThat(f.status(broken)).isEqualTo("CLOSED");
+        assertThat(jdbc.queryForObject("SELECT result_type FROM auction_results WHERE auction_id = ?",
+                String.class, broken)).isEqualTo("SOLD");
+        assertThat(f.balance(younghee)).isEqualTo(30_000);
+        assertThat(meters.counter("auction.scheduler.failure", "action", "close").count()).isEqualTo(1.0);
         f.assertInvariants();
     }
 }

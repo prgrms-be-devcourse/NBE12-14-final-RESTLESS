@@ -60,7 +60,7 @@
 
 잠금 뒤 상태를 다시 보므로 두 번 실행돼도 한 번만 바뀐다.
 
-**스케줄러 설정** (`application.yml` `restless.auction.scheduler`): `enabled`(기본 true), `fixed-delay-ms`(기본 1000), `batch-size`(한 번에 처리할 경매 수, 기본 100). 테스트에서는 `build.gradle`이 `enabled=false`로 끄고, 스케줄러 테스트만 다시 켠다. 경매 하나가 실패하면 로그와 `auction.scheduler.failure` 메트릭을 남기고 다음 경매를 계속 처리한다.
+**스케줄러 설정** (`application.yml` `restless.auction.scheduler`): `enabled`(기본 true), `fixed-delay-ms`(기본 1000), `batch-size`(한 번에 처리할 경매 수, 기본 100). 테스트에서는 `build.gradle`이 `enabled=false`로 끄고, 스케줄러 테스트만 다시 켠다. 경매 하나가 실패하면 로그와 `auction.scheduler.failure`(`action` = `open`, `close`) 메트릭을 남기고 다음 경매를 계속 처리한다 (`AuctionCloseFailureTest`).
 
 ## TX-AU-4. 경매 종료 (스케줄러)
 
