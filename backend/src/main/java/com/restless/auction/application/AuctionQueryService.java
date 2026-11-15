@@ -25,7 +25,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** 경매 목록·상세·실시간 상태 조회. 잠그지 않는다. */
+/** 경매 목록·상세·결과·실시간 상태 조회. 잠그지 않는다. */
 @Service
 @RequiredArgsConstructor
 public class AuctionQueryService {
@@ -62,6 +62,27 @@ public class AuctionQueryService {
                 auction.minimumBidAmount(highest == null ? null : highest.getBidAmount()),
                 auction.getStartsAt(), auction.getEndsAt(), auction.getExtensionDurationSeconds(),
                 auction.getRevision(), clock.instant());
+    }
+
+    /**
+     * 종료 결과. 결과는 종료할 때 한 번 만들어지고 바뀌지 않는다.
+     * 경매가 없으면 {@code AUCTION_NOT_FOUND}, 아직 종료되지 않았으면 {@code AUCTION_RESULT_NOT_FOUND}.
+     */
+    @Transactional(readOnly = true)
+    public AuctionResultView result(Long auctionId) {
+        if (!auctions.existsById(auctionId)) {
+            throw new BusinessException(ErrorCode.AUCTION_NOT_FOUND);
+        }
+        AuctionResult result = results.findById(auctionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.AUCTION_RESULT_NOT_FOUND));
+        if (result.getResultType() == AuctionResultType.UNSOLD) {
+            return new AuctionResultView(auctionId, AuctionResultType.UNSOLD, null, null, result.getFinalizedAt());
+        }
+        Bid winning = bids.findById(result.getWinningBidId())
+                .orElseThrow(() -> new IllegalStateException("낙찰 입찰이 없습니다. auctionId=" + auctionId));
+        String nickname = memberService.nicknames(List.of(winning.getBidderUserId())).get(winning.getBidderUserId());
+        return new AuctionResultView(auctionId, AuctionResultType.SOLD, nickname, winning.getBidAmount(),
+                result.getFinalizedAt());
     }
 
     /**
@@ -132,6 +153,12 @@ public class AuctionQueryService {
     /** 실시간 스트림 메시지. revision이 SSE 이벤트 id가 된다. */
     public record AuctionSnapshot(Long auctionId, AuctionStatus status, long revision, HighestBid highestBid,
                                   long minimumBidAmount, Instant endsAt, ResultView result) {
+    }
+
+    /** 결과 조회 응답. 유찰이면 낙찰자와 금액을 빼고 보낸다. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record AuctionResultView(Long auctionId, AuctionResultType type, String winnerNickname, Long amount,
+                                    Instant finalizedAt) {
     }
 
     /** 종료 결과. 유찰이면 type만 보낸다. */

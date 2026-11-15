@@ -24,7 +24,7 @@
 | Method | Endpoint | 기능 |
 |---|---|---|
 | POST | `/api/auctions/{auctionId}/bids` | 입찰. `Idempotency-Key` 헤더 필수 |
-| GET | `/api/me/bids?status=` | 내가 참여한 경매별 마지막 입찰, 입찰 상태(`HIGHEST`, `OUTBID`, `WON`), 경매 상태 |
+| GET | `/api/me/bids?status=&page=&size=` | 내가 참여한 경매별 마지막 입찰, 입찰 상태(`HIGHEST`, `OUTBID`, `WON`), 경매 상태 |
 | GET | `/api/me/wallet` | 보유, 묶인, 사용 가능 크레딧 |
 | POST | `/api/me/wallet/grants` | 테스트용 10,000 지급. 운영(prod)에서는 없음 |
 
@@ -157,6 +157,53 @@ Content-Type: application/json
   "details": { "minimumBidAmount": 54000 }
 }
 ```
+
+## 결과
+
+`GET /api/auctions/12/result`
+
+낙찰 200:
+
+```json
+{
+  "auctionId": 12,
+  "type": "SOLD",
+  "winnerNickname": "팬123",
+  "amount": 60000,
+  "finalizedAt": "2026-11-20T11:00:01.020Z"
+}
+```
+
+유찰 200:
+
+```json
+{ "auctionId": 12, "type": "UNSOLD", "finalizedAt": "2026-11-20T11:00:01.020Z" }
+```
+
+- 유찰이면 `winnerNickname`, `amount`를 보내지 않는다 (SSE의 `result`와 같다).
+- `finalizedAt`은 종료 처리 시각이다. 종료 시각(`endsAt`)보다 스케줄러 지연만큼 늦을 수 있다.
+- 경매가 없으면 404 `AUCTION_NOT_FOUND`, 아직 종료되지 않았으면 404 `AUCTION_RESULT_NOT_FOUND`.
+
+## 내 입찰
+
+`GET /api/me/bids?status=OUTBID&page=0&size=20` (`status`는 `HIGHEST`, `OUTBID`, `WON`이고 빼면 전체. `page`는 0부터, `size`는 1 ~ 100, 기본 20)
+
+```json
+{
+  "items": [
+    { "auctionId": 12, "title": "투어 사인 포스터 경매", "itemName": "사인 포스터",
+      "auctionStatus": "OPEN", "endsAt": "2026-11-20T11:00:00Z",
+      "bidId": 77, "amount": 53000, "status": "HIGHEST", "acceptedAt": "2026-11-20T10:30:00.010Z" }
+  ],
+  "page": 0, "size": 20, "totalElements": 1, "totalPages": 1
+}
+```
+
+- 경매마다 한 줄이다. 같은 경매에 여러 번 입찰했으면 내 마지막 입찰만 보인다.
+- `status`는 그 입찰의 상태다 ([state-machines.md](../../domains/auction/state-machines.md) 2절). 그 경매의 마지막 입찰이 아니면 `OUTBID`, 마지막 입찰이면 경매가 `CLOSED`일 때 `WON`, 아니면 `HIGHEST`.
+- 종료된 경매(`auctionStatus: CLOSED`)의 `OUTBID`는 화면에서 "낙찰 실패"로 표시한다.
+- 정렬: 내 마지막 입찰이 최근인 경매부터.
+- `status`가 위 세 값이 아니거나 `page`, `size`가 범위를 벗어나면 400 `INVALID_REQUEST`.
 
 ## 실시간 스트림 (SSE)
 

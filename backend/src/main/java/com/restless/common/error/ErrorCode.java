@@ -41,6 +41,7 @@ public enum ErrorCode {
 
     // 경매, 크레딧
     AUCTION_NOT_FOUND(HttpStatus.NOT_FOUND, "경매를 찾을 수 없습니다."),
+    AUCTION_RESULT_NOT_FOUND(HttpStatus.NOT_FOUND, "아직 종료되지 않아 경매 결과가 없습니다."),
     AUCTION_FORBIDDEN(HttpStatus.FORBIDDEN, "이 경매를 변경할 권한이 없습니다."),
     AUCTION_ALREADY_STARTED(HttpStatus.CONFLICT, "이미 시작된 경매는 수정하거나 삭제할 수 없습니다."),
     AUCTION_NOT_OPEN(HttpStatus.CONFLICT, "아직 시작하지 않은 경매입니다."),

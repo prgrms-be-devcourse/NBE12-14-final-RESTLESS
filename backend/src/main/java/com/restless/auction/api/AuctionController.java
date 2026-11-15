@@ -3,6 +3,7 @@ package com.restless.auction.api;
 import com.restless.auction.application.AuctionQueryService;
 import com.restless.auction.application.AuctionQueryService.AuctionDetail;
 import com.restless.auction.application.AuctionQueryService.AuctionPage;
+import com.restless.auction.application.AuctionQueryService.AuctionResultView;
 import com.restless.auction.domain.AuctionStatus;
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
@@ -13,7 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 경매 목록, 상세 조회. */
+/** 경매 목록, 상세, 결과 조회. */
 @RestController
 @RequestMapping("/api/auctions")
 @RequiredArgsConstructor
@@ -37,5 +38,11 @@ public class AuctionController {
     @GetMapping("/{auctionId}")
     public AuctionDetail detail(@PathVariable Long auctionId) {
         return auctionQueryService.detail(auctionId);
+    }
+
+    /** 종료 전이면 404 AUCTION_RESULT_NOT_FOUND. */
+    @GetMapping("/{auctionId}/result")
+    public AuctionResultView result(@PathVariable Long auctionId) {
+        return auctionQueryService.result(auctionId);
     }
 }
