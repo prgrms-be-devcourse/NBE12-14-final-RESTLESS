@@ -33,7 +33,7 @@ INV-AU-01 ~ 13은 원본([design.md](design.md) 8절)이고, 14 ~ 15는 크레�
 | INV-AU-09 | SSE 연결을 끊은 뒤에도 입찰·확보가 그대로인지 확인 (`AuctionStreamTest`) |
 | INV-AU-10, 11 | 종료 직전 입찰과 종료 스케줄러 경합 테스트. `ends_at`이 줄어들지 않고, `ends_at` 이후 `accepted_at`인 입찰이 없음 |
 | INV-AU-12 | 같은 키 동시 재전송 시 입찰·확보·내역·연장이 1번씩만 반영 |
-| INV-AU-13 | 종료 트랜잭션 중간에 예외를 넣어 결과와 차감이 함께 롤백되는지 확인. **이 테스트는 아직 없다.** 지금은 정상 종료 뒤 `SOLD` 결과의 낙찰 입찰이 마지막 입찰이고 그 확보가 `CAPTURED`인지만 확인한다 (`AuctionFixtures.assertInvariants`) |
+| INV-AU-13 | 차감 뒤 결과 저장에서 예외를 넣어 차감·결과·종료가 함께 롤백되고, 다시 종료하면 한 번만 차감되는지 확인 (`AuctionCloseFailureTest.차감_뒤_결과_저장에서_실패하면_차감까지_함께_롤백되고_다시_종료하면_한_번만_차감된다_INV_AU_13`). 정상 종료 뒤에는 `SOLD` 결과의 낙찰 입찰이 마지막 입찰이고 그 확보가 `CAPTURED`인지 `AuctionFixtures.assertInvariants`가 확인한다 |
 
 ## 테스트에서 확인하는 SQL
 
