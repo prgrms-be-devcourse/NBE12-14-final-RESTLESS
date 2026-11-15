@@ -40,7 +40,7 @@ Codex는 레포 루트에서 실행하면 이 파일을 자동으로 읽지 않�
 ## 테스트
 
 - 경매 테스트는 Testcontainers의 실제 MySQL로 돈다. 롤백·잠금·동시성은 DB를 가짜로 바꾼 단위 테스트로 확인하지 않는다.
-- 데이터를 바꾸는 테스트는 끝에 `AuctionFixtures.assertInvariants()`로 불변식을 확인한다.
+- 데이터를 바꾸는 테스트는 끝에 `AuctionFixtures.assertInvariants()`로 불변식을 확인한다. 쿼리는 `backend/src/test/resources/harness/auction-invariants.sql`에 있다. 새 불변식은 이 파일에 `-- name:` 블록으로 추가한다.
 - 테스트에서는 스케줄러가 꺼져 있다 (`build.gradle`의 `restless.auction.scheduler.enabled=false`). 스케줄러 동작을 볼 때는 `AuctionScheduler`를 테스트 안에서 직접 만들어 부른다 (`AuctionCloseFailureTest` 참고).
 - 시간이 흐르는 상황은 실제로 기다리지 않고 테스트용 시계를 옮긴다 (`SellerAuctionLockOrderTest`의 `MutableClock` 참고).
 - 실패 상황은 `@MockitoSpyBean`으로 특정 호출만 예외를 던지게 해서 만든다. 이런 테스트는 Spring 컨텍스트를 하나 더 띄우므로 기존 테스트 클래스에 섞지 않고 따로 둔다.

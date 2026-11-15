@@ -2,15 +2,21 @@ package com.restless.auction;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-/** 경매 통합 테스트용 데이터와 불변식 확인 SQL. 시각은 UTC 벽시계 값으로 넣는다 (엔티티가 TIMESTAMP_UTC). */
+/** 경매 통합 테스트용 데이터와 불변식 확인 (SQL은 harness/auction-invariants.sql). 시각은 UTC 벽시계 값으로 넣는다 (엔티티가 TIMESTAMP_UTC). */
 class AuctionFixtures {
     final JdbcTemplate jdbc;
     final TransactionTemplate tx;
@@ -90,71 +96,39 @@ class AuctionFixtures {
         return jdbc.queryForObject(sql, Integer.class, args);
     }
 
-    /** invariants.md 확인 SQL: INV-AU-07, 08, 14, 15. */
+    /**
+     * 불변식 SQL 파일({@code harness/auction-invariants.sql})의 쿼리를 모두 실행해, 어긴 행이 없는지 확인한다.
+     * 같은 파일을 부하 테스트 뒤 점검에도 쓴다.
+     */
     void assertInvariants() {
-        assertThat(jdbc.queryForList("""
-            SELECT a.auction_id FROM auctions a
-            JOIN auction_bids b ON b.auction_id = a.auction_id
-             AND b.bid_sequence = (SELECT MAX(bid_sequence) FROM auction_bids WHERE auction_id = a.auction_id)
-            LEFT JOIN credit_holds h ON h.auction_bid_id = b.auction_bid_id AND h.status = 'HELD'
-            WHERE a.status <> 'CLOSED' AND h.credit_hold_id IS NULL
-            """)).as("INV-AU-07 최고 입찰은 확보돼 있다").isEmpty();
-        assertThat(jdbc.queryForList("""
-            SELECT h.credit_hold_id FROM credit_holds h
-            JOIN auction_bids b ON b.auction_bid_id = h.auction_bid_id
-            WHERE h.status = 'HELD'
-              AND b.bid_sequence < (SELECT MAX(bid_sequence) FROM auction_bids WHERE auction_id = b.auction_id)
-            """)).as("INV-AU-08 추월된 입찰의 확보는 해제돼 있다").isEmpty();
-        assertThat(jdbc.queryForList("""
-            SELECT w.credit_wallet_id FROM credit_wallets w
-            LEFT JOIN credit_holds h ON h.credit_wallet_id = w.credit_wallet_id AND h.status = 'HELD'
-            GROUP BY w.credit_wallet_id, w.reserved_amount
-            HAVING w.reserved_amount <> COALESCE(SUM(h.held_amount), 0)
-            """)).as("INV-AU-14").isEmpty();
-        assertThat(jdbc.queryForList("""
-            SELECT w.credit_wallet_id FROM credit_wallets w
-            LEFT JOIN credit_transactions t ON t.credit_wallet_id = w.credit_wallet_id
-            GROUP BY w.credit_wallet_id, w.balance_amount, w.reserved_amount
-            HAVING w.balance_amount <> COALESCE(SUM(t.balance_delta), 0)
-                OR w.reserved_amount <> COALESCE(SUM(t.reserved_delta), 0)
-            """)).as("INV-AU-15").isEmpty();
-        assertThat(jdbc.queryForList("""
-            SELECT b2.auction_bid_id FROM auction_bids b1
-            JOIN auction_bids b2 ON b2.auction_id = b1.auction_id AND b2.bid_sequence = b1.bid_sequence + 1
-            JOIN auctions a ON a.auction_id = b1.auction_id
-            WHERE b2.bid_amount < b1.bid_amount + a.minimum_increment_amount
-            """)).as("INV-AU-03 다음 입찰은 이전 + 최소 인상액 이상").isEmpty();
-        assertClosedCombinations();
+        INVARIANTS.forEach((name, sql) -> assertThat(jdbc.queryForList(sql)).as(name).isEmpty());
     }
 
-    /** state-machines.md 6절 상태 조합 중 종료된 경매 부분. */
-    void assertClosedCombinations() {
-        assertThat(jdbc.queryForList("""
-            SELECT a.auction_id FROM auctions a LEFT JOIN auction_results r ON r.auction_id = a.auction_id
-            WHERE (a.status = 'CLOSED') <> (r.auction_id IS NOT NULL)
-            """)).as("CLOSED와 결과 행은 함께 있다").isEmpty();
-        assertThat(jdbc.queryForList("""
-            SELECT h.credit_hold_id FROM credit_holds h
-            JOIN auction_bids b ON b.auction_bid_id = h.auction_bid_id
-            JOIN auctions a ON a.auction_id = b.auction_id
-            WHERE a.status = 'CLOSED' AND h.status = 'HELD'
-            """)).as("종료된 경매에 HELD 확보가 없다").isEmpty();
-        assertThat(jdbc.queryForList("""
-            SELECT r.auction_id FROM auction_results r
-            LEFT JOIN auction_bids b ON b.auction_bid_id = r.winning_bid_id
-            LEFT JOIN credit_holds h ON h.auction_bid_id = r.winning_bid_id
-            WHERE r.result_type = 'SOLD'
-              AND (b.bid_sequence <> (SELECT MAX(bid_sequence) FROM auction_bids WHERE auction_id = r.auction_id)
-                   OR h.status <> 'CAPTURED')
-            """)).as("SOLD는 마지막 입찰이고 그 확보는 CAPTURED (INV-AU-13)").isEmpty();
-        assertThat(jdbc.queryForList("""
-            SELECT r.auction_id FROM auction_results r
-            WHERE r.result_type = 'UNSOLD' AND EXISTS (SELECT 1 FROM auction_bids b WHERE b.auction_id = r.auction_id)
-            """)).as("UNSOLD 경매에는 입찰이 없다").isEmpty();
-        assertThat(jdbc.queryForList("""
-            SELECT b.auction_bid_id FROM auction_bids b JOIN auctions a ON a.auction_id = b.auction_id
-            WHERE a.status = 'CLOSED' AND b.accepted_at >= a.ends_at
-            """)).as("INV-AU-11 종료 시각 이후 수락된 입찰이 없다").isEmpty();
+    private static final Map<String, String> INVARIANTS = loadInvariants();
+
+    /** "-- name: <이름>" 블록마다 쿼리 하나를 읽는다. 블록 밖의 줄과 주석 줄은 건너뛴다. */
+    private static Map<String, String> loadInvariants() {
+        String sql;
+        try {
+            sql = new ClassPathResource("harness/auction-invariants.sql").getContentAsString(StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        Map<String, String> queries = new LinkedHashMap<>();
+        String name = null;
+        StringBuilder body = new StringBuilder();
+        for (String line : sql.split("\n")) {
+            if (line.startsWith("-- name:")) {
+                if (name != null) queries.put(name, body.toString().trim().replaceAll(";$", ""));
+                name = line.substring("-- name:".length()).trim();
+                body.setLength(0);
+            } else if (name != null && !line.startsWith("--")) {
+                body.append(line).append('\n');
+            }
+        }
+        if (name != null) queries.put(name, body.toString().trim().replaceAll(";$", ""));
+        if (queries.isEmpty()) throw new IllegalStateException("auction-invariants.sql에 쿼리가 없다");
+        return queries;
     }
 
     /** 시간이 흐른 것처럼 종료 시각을 옮긴다. 앞당기면 base_ends_at도 함께 당겨 CHECK(base <= ends)를 지킨다. */

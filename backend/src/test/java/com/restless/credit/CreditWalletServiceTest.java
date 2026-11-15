@@ -94,7 +94,7 @@ class CreditWalletServiceTest {
         tx.executeWithoutResult(status -> work.run());
     }
 
-    /** INV-AU-14, 15: 지갑 금액 = HELD 합계 = 내역 합계. invariants.md의 확인 SQL. */
+    /** INV-AU-14, 15: 지갑 금액 = HELD 합계 = 내역 합계. harness/auction-invariants.sql의 같은 블록을 크레딧 단독 테스트용으로 옮긴 것. */
     void assertLedgerConsistent() {
         assertThat(jdbc.queryForList("""
             SELECT w.credit_wallet_id FROM credit_wallets w
