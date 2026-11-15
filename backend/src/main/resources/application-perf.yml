@@ -1,0 +1,42 @@
+# 부하 테스트 서버 설정. SPRING_PROFILES_ACTIVE=perf로 켠다.
+# prod처럼 비밀값은 환경변수로만 넣고 기본값을 두지 않는다. 다른 점은 가짜 PG와 지표 노출이다.
+# 실제 PG에는 부하를 주지 않는다. PerfProfilePgGuard가 가짜 PG가 아니면 기동을 막는다.
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+server:
+  shutdown: graceful
+  tomcat:
+    # 톰캣 스레드 지표(tomcat_threads_busy_threads 등)에 필요하다.
+    mbeanregistry:
+      enabled: true
+
+pg:
+  provider: fake
+  fake:
+    approve-delay: ${PG_FAKE_APPROVE_DELAY:300ms}
+    reject-rate: ${PG_FAKE_REJECT_RATE:0}
+    unknown-rate: ${PG_FAKE_UNKNOWN_RATE:0}
+    lost-response-rate: ${PG_FAKE_LOST_RESPONSE_RATE:0}
+
+management:
+  # 지표와 health는 서비스 포트와 다른 포트로 연다. 서버 상태 확인도 이 포트의 /actuator/health로 한다.
+  # 보안 그룹에서 부하 발생기만 이 포트에 접근하게 한다.
+  server:
+    port: ${MANAGEMENT_PORT:8081}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  metrics:
+    distribution:
+      # p95, p99를 Prometheus에서 계산하려면 히스토그램 구간이 필요하다.
+      percentiles-histogram:
+        http.server.requests: true
+        drop.reservation.duration: true
+        payment.pg.approve: true

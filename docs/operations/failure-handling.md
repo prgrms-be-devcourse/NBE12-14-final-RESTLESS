@@ -102,8 +102,8 @@ UNKNOWN 나이를 제공한다. **운영 확인 등록 여부 저장, 중복 없
 
 | 설정 | 기본값 | 내용 |
 |---|---|---|
-| `pg.provider` | 없으면 `toss`. dev 프로필은 `${PG_PROVIDER:fake}` | `fake`면 실제 PG를 부르지 않는 Fake PG를 쓴다. 부하 테스트는 반드시 `fake` |
+| `pg.provider` | 없으면 `toss`. dev 프로필은 `${PG_PROVIDER:fake}`, perf 프로필은 `fake` 고정 | `fake`면 실제 PG를 부르지 않는 Fake PG를 쓴다. 부하 테스트는 perf 프로필로 띄우고, 가짜 PG가 아니면 기동이 실패한다. Fake PG는 prod 프로필에서 만들어지지 않는다 |
 | `toss.secret-key` (환경 변수 `TOSS_SECRET_KEY`) | 없음 | `toss`일 때 필수. 비어 있으면 기동이 실패한다 (모든 결제가 401로 UNKNOWN에 쌓이는 것을 막음). 서버에서만 읽는다 |
 | `toss.base-url` | `https://api.tosspayments.com` | 결제 승인·조회·취소 호출 대상 |
 | `toss.connect-timeout`, `toss.read-timeout` | 3초, 30초 | 읽기 타임아웃이면 결과를 UNKNOWN으로 두고 대사가 확인한다 |
-| `pg.fake.*` | | Fake PG 응답 설정 (테스트·부하 테스트용) |
+| `pg.fake.*` | perf: 승인 지연 `PG_FAKE_APPROVE_DELAY` 300ms, 비율 `PG_FAKE_REJECT_RATE`·`PG_FAKE_UNKNOWN_RATE`·`PG_FAKE_LOST_RESPONSE_RATE` 0 | Fake PG 응답 설정 (테스트·부하 테스트용). 300ms는 측정값이 아닌 가정이다 |
