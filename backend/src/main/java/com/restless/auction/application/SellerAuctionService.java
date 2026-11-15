@@ -36,8 +36,9 @@ public class SellerAuctionService {
 
     @Transactional
     public Long update(Long userId, Long auctionId, Terms terms) {
-        Instant now = clock.instant();
         Auction auction = lockOwned(userId, auctionId);
+        // 잠금을 얻은 뒤에 시각을 읽는다. 먼저 읽으면 잠금을 기다리는 사이 시작된 경매를 "시작 전"으로 본다.
+        Instant now = clock.instant();
         auction.update(terms, now);
         // 시작 전 화면을 보던 회원에게 바뀐 시작가·종료 시각을 보낸다.
         events.publishEvent(new AuctionChangedEvent(auctionId, auction.getRevision()));
@@ -46,8 +47,9 @@ public class SellerAuctionService {
 
     @Transactional
     public void delete(Long userId, Long auctionId) {
-        Instant now = clock.instant();
         Auction auction = lockOwned(userId, auctionId);
+        // 잠금을 얻은 뒤에 시각을 읽는다. 먼저 읽으면 잠금을 기다리는 사이 시작된 경매를 "시작 전"으로 본다.
+        Instant now = clock.instant();
         auction.requireNotStarted(now);
         auctions.delete(auction);
         // 실시간 전달 쪽은 경매가 없는 것을 보고 연결을 닫는다.
