@@ -226,3 +226,9 @@ TicketPaymentService.onApproved가 수락한 같은 시도·금액·현재 소�
 내부 성공 처리 10개와 기존 준비·매핑을 포함한 집중 39개가 통과했다. Handler 등록·실제 PG·실패/불명확·만료·보상 연결의 검증 결과는 아니다. 상세는 [티켓 발급 문서](ticket-issuance.md#승인-성공-내부-서비스와-발급-상태-2026-11-13)를 따른다.
 
 승인 성공·발급 추가 후 `./gradlew build` 실행 성공: 전체 458개 통과, 실패·오류·건너뜀 0개. 공통 주문·결제 운영 코드는 기존 버전 그대로다. 커밋·푸시는 하지 않았다.
+
+## 단계별 구현: 실패·불명확 내부 서비스 (2026-11-14)
+
+TicketPaymentService.onFailed/onUnknown은 공통 결제 트랜잭션에 MANDATORY로 참여한다. 결제 행 → 구매 관리 → 예약 → 좌석 ID 오름차순 → 주문 순서이며, 기존 OrderService.find/changeStatus만 사용한다. 결과 시도 대조 후 전체 좌석·수량·주문을 검증하고 최종 실패의 기한을 DB UTC 시각으로 판정한다. 기한 전에는 PAYMENT_PENDING/PENDING_PAYMENT로 재시도 대기, 정각 이상이면 전체 반환과 CANCELLED를 같은 트랜잭션에 반영한다. 불명확은 RECONCILING/PAYMENT_REVIEW와 좌석 보호를 유지한다. 현재 시도의 결과 미확정 여부와 ID/시각으로 중복·과거 결과를 거른다.
+
+불일치·DB 오류·호출자 오류는 주문·예약·선점·좌석·수량 변경을 모두 롤백한다. 이 단계는 내부 callback 구현이며 Handler 등록·PG 연결·자동 만료·보상 취소를 추가하지 않는다. 구체적인 READY 미시도 통지 및 재시도 규칙은 [Handler 문서](payment-handler.md#단계별-구현-결제-실패불명확-2026-11-14)를 따른다.

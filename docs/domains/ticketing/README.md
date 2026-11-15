@@ -12,7 +12,7 @@
 | [expiration.md](expiration.md) | 승인 시도 유무별 만료와 전체 좌석 반환 |
 | [idempotency.md](idempotency.md) | MVP 중복 방지와 후속 전용 테이블·실행권 설계 |
 | [venue-consistency.md](venue-consistency.md) | 공연장 소속·회차 배치 일치 복합 FK |
-| [payment-handler.md](payment-handler.md) | 결제 Handler별 상태 전이와 공통 계약 차이 |
+| [payment-handler.md](payment-handler.md) | 결제 Handler별 상태 전이·내부 구현 범위와 후속 연결 |
 | [reservation-seat-consistency.md](reservation-seat-consistency.md) | 예약·선점·티켓 회차 및 현재 소유 좌석 일치 |
 | [purchase-limit.md](purchase-limit.md) | 사용자·회차 관리 행 잠금과 활성 예약·수량 제한 |
 | [API 계약](../../contracts/api/ticketing.md) | 원본에서 취합한 API |
@@ -62,3 +62,7 @@ TicketPaymentService가 공통 트랜잭션 안에서 예약 ID 기준 PayableSn
 ## 단계별 구현: 승인 성공·티켓 발급
 
 내부 TicketPaymentService.onApproved에서 수락한 시도와 현재 소유권을 확인해 예약/선점 CONFIRMED·좌석 SOLD·구매 수량 이동·ISSUED 티켓 발급·주문 PAID를 같은 트랜잭션으로 처리한다. 중복·동시 성공은 기존 티켓과 수량을 보존한다. 성공 내부 서비스 10개와 기존 준비·매핑을 포함한 집중 39개가 통과했다. 기존 공통 API만 사용하며 Handler 등록·나머지 실패/불명확/만료/보상 처리는 다음 단계다. [발급 문서](ticket-issuance.md#승인-성공-내부-서비스와-발급-상태-2026-11-13)를 따른다.
+
+## 단계별 구현: 결제 실패·불명확
+
+내부 onFailed/onUnknown을 추가했다. 최종 실패는 결제 기한 전 재시도 대기, 정각 이후 전체 반환이며, 불명확은 RECONCILING/PAYMENT_REVIEW로 좌석을 보호한다. 현재 수락한 시도와 결과를 대조하고 공통 주문의 기존 API만 사용한다. 실제 Handler 등록·자동 만료·보상 처리는 후속이다. 상세는 [Handler 문서](payment-handler.md#단계별-구현-결제-실패불명확-2026-11-14)를 따른다.

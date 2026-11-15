@@ -89,6 +89,23 @@ class TicketReservationPaymentAttemptTest {
         return reservation;
     }
 
+    @ParameterizedTest(name = "{displayName} [기한 대비 초={0}]")
+    @ValueSource(longs = {-1, 0, 1})
+    @DisplayName("최종 실패는 기한 직전만 재시도를 허용하고 정각부터 반환한다")
+    void failureDeadlineBoundary(long offset) {
+        var reservation = checkoutReservation();
+        Instant attemptAt = CHECKOUT_AT.plusSeconds(10);
+        reservation.startApproval(9001L, attemptAt, attemptAt);
+        reservation.markPaymentUnknown(9001L, attemptAt);
+        reservation.failPayment(9001L, attemptAt, PAYMENT_DEADLINE.plusSeconds(offset));
+        assertThat(reservation.getStatus()).isEqualTo(offset < 0
+                ? TicketReservationStatus.PAYMENT_PENDING : TicketReservationStatus.RELEASED);
+        assertThat(reservation.isPaymentResultPending()).isFalse();
+        assertThat(reservation.getCurrentPaymentId()).isEqualTo(9001L);
+        assertThat(reservation.getApprovalStartedAt()).isEqualTo(attemptAt);
+        assertThat(reservation.getPaymentExpiresAt()).isEqualTo(PAYMENT_DEADLINE);
+    }
+
     private TicketReservation heldReservation() {
         return TicketReservation.createHeld(1L, 2L, "hold-request", new byte[32],
                 CHECKOUT_AT.plusSeconds(240), CHECKOUT_AT.minusSeconds(60));

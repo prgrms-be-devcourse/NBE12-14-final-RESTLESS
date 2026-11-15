@@ -197,6 +197,69 @@ public class TicketPaymentService {
         return ApprovalDecision.accept();
     }
 
+    /** PG 미승인 확정만 받는다. 타임아웃이나 조회 미존재를 실패로 해석하지 않는다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void onFailed(Long reservationId, PaymentAttemptContext attempt) {
+        Objects.requireNonNull(attempt, "attempt");
+        LockedReservation locked = lockReservation(reservationId).orElse(null);
+        if (locked == null || !locked.reservation().canApplyPaymentFailure(
+                attempt.paymentId(), attempt.approvalStartedAt())) {
+            return;
+        }
+        TicketReservation reservation = locked.reservation();
+        List<HeldSeat> lockedSeats = lockReservationSeats(reservation);
+        OrderView order = validatePendingResources(locked, lockedSeats);
+        Instant now = databaseNow();
+        if (!now.isBefore(reservation.getPaymentExpiresAt())) {
+            for (HeldSeat held : lockedSeats) {
+                held.seat().release(held.hold().getId());
+                held.hold().release(now);
+            }
+            locked.limit().release(lockedSeats.size());
+        }
+        reservation.failPayment(attempt.paymentId(), attempt.approvalStartedAt(), now);
+        orders.changeStatus(order.orderId(), reservation.getStatus() == TicketReservationStatus.RELEASED
+                ? OrderStatus.CANCELLED : OrderStatus.PENDING_PAYMENT);
+    }
+
+    /** 불명확은 실패가 아니다. 최초 기한이 지나도 현재 시도와 좌석을 보호한다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void onUnknown(Long reservationId, PaymentAttemptContext attempt) {
+        Objects.requireNonNull(attempt, "attempt");
+        LockedReservation locked = lockReservation(reservationId).orElse(null);
+        if (locked == null || !locked.reservation().canConfirmPayment(
+                attempt.paymentId(), attempt.approvalStartedAt())) {
+            return;
+        }
+        List<HeldSeat> lockedSeats = lockReservationSeats(locked.reservation());
+        OrderView order = validatePendingResources(locked, lockedSeats);
+        locked.reservation().markPaymentUnknown(attempt.paymentId(), attempt.approvalStartedAt());
+        orders.changeStatus(order.orderId(), OrderStatus.PAYMENT_REVIEW);
+    }
+
+    private OrderView validatePendingResources(LockedReservation locked, List<HeldSeat> lockedSeats) {
+        TicketReservation reservation = locked.reservation();
+        if (!hasCheckout(reservation) || locked.limit().getReservedCount() != lockedSeats.size()) {
+            throw new IllegalStateException("결제 대상 예약의 checkout·선점 수량이 일치하지 않습니다.");
+        }
+        OrderView order = validateOrder(reservation, orders.find(reservation.getOrderId()));
+        OrderStatus expected = reservation.getStatus() == TicketReservationStatus.RECONCILING
+                ? OrderStatus.PAYMENT_REVIEW : reservation.isPaymentResultPending()
+                    ? OrderStatus.PAYMENT_CONFIRMING : OrderStatus.PENDING_PAYMENT;
+        long amount = 0;
+        for (HeldSeat held : lockedSeats) {
+            if (held.hold().getStatus() != SeatHoldStatus.HELD || held.seat().getStatus() != TicketSeatStatus.HELD
+                    || !held.hold().getId().equals(held.seat().getCurrentHoldId())) {
+                throw new IllegalStateException("결제 대상 좌석의 현재 소유권이 일치하지 않습니다.");
+            }
+            amount = Math.addExact(amount, held.hold().getPriceAmount());
+        }
+        if (order.status() != expected || order.totalAmount() != amount) {
+            throw new IllegalStateException("결제 대상 예약과 주문의 상태·금액이 일치하지 않습니다.");
+        }
+        return order;
+    }
+
     private Optional<LockedReservation> lockReservation(Long reservationId) {
         if (reservationId == null || reservationId <= 0) {
             return Optional.empty();

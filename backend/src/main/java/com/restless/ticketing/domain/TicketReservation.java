@@ -179,6 +179,35 @@ public class TicketReservation {
         paymentResultPending = false;
     }
 
+    /** READY 만료는 수락한 미확정 승인 시도가 없을 때만 반영한다. */
+    public boolean canApplyPaymentFailure(Long paymentId, Instant attemptStartedAt) {
+        if (attemptStartedAt == null) {
+            return paymentId != null && paymentId > 0 && status == TicketReservationStatus.PAYMENT_PENDING
+                    && orderId != null && paymentExpiresAt != null && !paymentResultPending;
+        }
+        return canConfirmPayment(paymentId, attemptStartedAt);
+    }
+
+    /** 호출자가 전체 좌석·수량 및 주문 변경을 같은 트랜잭션으로 처리한다. */
+    public void failPayment(Long paymentId, Instant attemptStartedAt, Instant now) {
+        Objects.requireNonNull(now, "now");
+        if (!canApplyPaymentFailure(paymentId, attemptStartedAt)) {
+            throw new IllegalStateException("현재 미확정 시도의 최종 실패만 반영할 수 있습니다.");
+        }
+        status = now.isBefore(paymentExpiresAt)
+                ? TicketReservationStatus.PAYMENT_PENDING : TicketReservationStatus.RELEASED;
+        paymentResultPending = false;
+        // 실패한 시도의 식별 정보와 최초 checkout 기한은 보존한다.
+    }
+
+    public boolean markPaymentUnknown(Long paymentId, Instant attemptStartedAt) {
+        if (!canConfirmPayment(paymentId, attemptStartedAt)) {
+            return false;
+        }
+        status = TicketReservationStatus.RECONCILING;
+        return true;
+    }
+
     public void cancelHold() {
         if (!canReleaseHold()) {
             throw new IllegalStateException("결제 전 선점 예약만 취소할 수 있습니다.");
