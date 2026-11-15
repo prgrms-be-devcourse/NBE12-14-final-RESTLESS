@@ -8,6 +8,7 @@
 | [invariants.md](invariants.md) | INV-AU-01 ~ 15, 테스트용 확인 SQL, 스키마 보강 항목 |
 | [state-machines.md](state-machines.md) | 경매, 입찰(계산), 결과, 크레딧 확보·내역 상태 |
 | [transactions.md](transactions.md) | 크레딧 지급, 입찰, 시작, 종료, 수정·삭제 트랜잭션과 장애 시나리오 |
+| [phase1-review.md](phase1-review.md) | 1차 구현 평가: 원본 명세·목표 대조, 남은 일 |
 | [design.md](design.md) | 담당자 설계 원본 (Notion에서 옮김) |
 | [API 계약](../../contracts/api/auction.md) | 1차 API, 오류 코드, SSE 스트림 |
 | [통합 ERD](../../architecture/erd.md) | 도메인 사이 연결 |
@@ -40,7 +41,7 @@ flowchart LR
 | 7 | 결과 조회, 내 입찰 조회 | 완료 (#131) |
 | 8 | 측정과 고도화 | 남음 |
 
-아직 정하지 않은 것은 [policy.md](policy.md) 9절에 있다.
+아직 정하지 않은 것은 [policy.md](policy.md) 9절, 원본 대비 평가와 남은 일은 [phase1-review.md](phase1-review.md)에 있다.
 
 ## 테이블
 
