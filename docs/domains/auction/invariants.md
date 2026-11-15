@@ -30,10 +30,10 @@ INV-AU-01 ~ 13은 원본([design.md](design.md) 8절)이고, 14 ~ 15는 크레�
 | INV-AU-02 | 종료를 동시에 여러 번 실행해도 결과 행 1건. 결과 행 직접 중복 INSERT가 PK에서 거부됨 |
 | INV-AU-06 | 한 회원이 여러 경매에 동시 입찰해 사용 가능액을 넘기는 테스트. `reserved > balance` 직접 UPDATE가 CHECK에서 거부됨 |
 | INV-AU-07, 08, 14, 15 | 아래 SQL |
-| INV-AU-09 | SSE 연결을 끊은 뒤에도 입찰·확보가 그대로인지 확인 |
+| INV-AU-09 | SSE 연결을 끊은 뒤에도 입찰·확보가 그대로인지 확인 (`AuctionStreamTest`) |
 | INV-AU-10, 11 | 종료 직전 입찰과 종료 스케줄러 경합 테스트. `ends_at`이 줄어들지 않고, `ends_at` 이후 `accepted_at`인 입찰이 없음 |
 | INV-AU-12 | 같은 키 동시 재전송 시 입찰·확보·내역·연장이 1번씩만 반영 |
-| INV-AU-13 | 종료 트랜잭션 중간에 예외를 넣어 결과와 차감이 함께 롤백되는지 확인 |
+| INV-AU-13 | 차감 뒤 결과 저장에서 예외를 넣어 차감·결과·종료가 함께 롤백되고, 다시 종료하면 한 번만 차감되는지 확인 (`AuctionCloseFailureTest.차감_뒤_결과_저장에서_실패하면_차감까지_함께_롤백되고_다시_종료하면_한_번만_차감된다_INV_AU_13`). 정상 종료 뒤에는 `SOLD` 결과의 낙찰 입찰이 마지막 입찰이고 그 확보가 `CAPTURED`인지 `AuctionFixtures.assertInvariants`가 확인한다 |
 
 ## 테스트에서 확인하는 SQL
 
@@ -76,9 +76,9 @@ HAVING w.balance_amount <> COALESCE(SUM(t.balance_delta), 0)
 - "Auction closing must produce at most one winner." → INV-AU-02
 - "Duplicate purchase requests must not create duplicate orders." → INV-AU-12
 
-## 스키마 보강이 필요한 항목
+## 스키마 보강 항목 (반영됨)
 
-아래 제약은 머지된 마이그레이션(`V20261111_1030`, `V20261111_1040`)에 없다. 1단계에서 새 마이그레이션으로 추가한다.
+아래 제약은 처음 머지된 마이그레이션(`V20261111_1030`, `V20261111_1040`)에 없어서 `V20261112_1045__auction_alter_tables.sql`로 추가했다. 위반하면 DB가 거부하는지는 `AuctionSchemaConstraintTest`가 확인한다.
 
 | 제약 | 관련 불변식 |
 |---|---|
@@ -88,3 +88,5 @@ HAVING w.balance_amount <> COALESCE(SUM(t.balance_delta), 0)
 | `auctions` `extension_duration_seconds` CHECK 30 ~ 300 | 정책 4절 |
 | `auctions.status`, `credit_holds.status`, `credit_transactions.transaction_type`, `auction_results.result_type` 값 CHECK | 상태 오기입 방지 |
 | `auctions` 인덱스 `(status, starts_at)`, `(status, ends_at)` | 스케줄러 조회 |
+
+보강하지 않은 차이: `ck_auctions_prices`는 `starting_price_amount >= 0`이라 정책(시작가 1 이상, policy.md 4절)보다 느슨하다. 1 이상은 요청 검증과 `Auction` 생성에서 막는다.

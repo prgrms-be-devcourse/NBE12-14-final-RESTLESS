@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 응모 기간 열기·마감 (transactions.md 2절). 행사 1건 = 트랜잭션 1개.
  * Event FOR UPDATE 뒤 상태와 시각을 다시 확인하므로, 서버가 여러 대여도 결과는 하나다.
+ * 판정에 쓰는 시각은 잠근 뒤에 읽는다. 잠금을 기다리는 사이 지난 시각으로 판정해야 하기 때문이다.
  */
 @Service
 @RequiredArgsConstructor
@@ -49,11 +50,11 @@ public class FanMeetingEntryTransitions {
     /** SCHEDULED → OPEN. 마감 시각까지 지났으면 열지 않고 MISSED. */
     @Transactional(timeout = 5)
     public OpenResult open(Long eventId) {
-        Instant now = clock.instant();
         FanMeetingEvent event = events.findByIdForUpdate(eventId).orElse(null);
         if (event == null) {
             return OpenResult.SKIPPED;
         }
+        Instant now = clock.instant();
         if (event.isOpenMissed(now)) {
             return OpenResult.MISSED;
         }
@@ -67,9 +68,12 @@ public class FanMeetingEntryTransitions {
     /** OPEN → CLOSED, 같은 트랜잭션에서 추첨 실행(PENDING, 새 seed)을 만든다. 닫았으면 true. */
     @Transactional(timeout = 5)
     public boolean close(Long eventId) {
-        Instant now = clock.instant();
         FanMeetingEvent event = events.findByIdForUpdate(eventId).orElse(null);
-        if (event == null || !event.canClose(now)) {
+        if (event == null) {
+            return false;
+        }
+        Instant now = clock.instant();
+        if (!event.canClose(now)) {
             return false;
         }
         event.close(now);

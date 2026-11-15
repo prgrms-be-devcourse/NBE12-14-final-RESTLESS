@@ -24,7 +24,7 @@
 | 한정판 드롭 | 이태호 | `drops`, `drop_variants`, `drop_inventories`, `drop_reservations`, `drop_purchase_slots`, `drop_queue_entries` |
 | 팬미팅 추첨 | 홍승연 | `fan_meeting_events`, `fan_meeting_draw_runs`, `fan_meeting_applications`, `fan_meeting_selections`, `fan_meeting_orders` |
 | 경매 | 천종원 | `auctions`, `auction_bids`, `auction_results`, `auction_images` |
-| 크레딧 | 천종원 (공통 모듈 여부 미정) | `credit_wallets`, `credit_holds`, `credit_transactions` |
+| 크레딧 | 천종원 (`com.restless.credit` 패키지로 분리, 지금은 경매만 사용) | `credit_wallets`, `credit_holds`, `credit_transactions` |
 
 ## 2. 도메인 사이 연결
 
@@ -105,6 +105,6 @@ erDiagram
 | ~~`payments.payment_key`가 NOT NULL인데, 승인 전(READY)에도 값이 있는지~~ 결정: NULL 허용, 승인 시작 때 채움 ([ADR-0003](../decisions/0003-payment-module-boundary.md)) | 공통 결제 |
 | ~~`auction_results.winning_bid_id`가 NOT NULL인데, 유찰을 결과 행으로 남기는지~~ 결정: 미낙찰도 결과 행으로 남김. `result_type`(`SOLD`/`UNSOLD`) 추가, `winning_bid_id` NULL 허용 (`V20261112_1045`) | 경매 |
 | 경매 입장 자격(`access_policy`, `required_performance_id`)을 티켓팅의 어떤 상태로 판단하는지 | 경매, 티켓팅 |
-| 크레딧을 공통 모듈로 둘지 경매가 소유할지, 드롭 구매에도 쓰는지 | 경매, 드롭, 공통 |
+| ~~크레딧을 공통 모듈로 둘지 경매가 소유할지~~ 결정: `com.restless.credit` 패키지로 분리. 드롭 구매에도 쓰는지는 미정 | 경매, 드롭, 공통 |
 | ~~팬미팅 결제(`fan_meeting_orders.payment_id`)를 공통 `payments`와 어떻게 연결하는지~~ 결정: `payments.(payable_type, payable_id)`로 연결, 물리 FK 없음 ([ADR-0003](../decisions/0003-payment-module-boundary.md)) | 팬미팅, 공통 결제 |
 | 공연 취소 시 연결된 드롭, 경매 처리 | 전체 |

@@ -26,7 +26,8 @@ public class DropAdminService {
 
     @Transactional
     public Admin create(CreateDropRequest request) {
-        if (!request.opensAt().isBefore(request.closesAt())) {
+        var now = clock.instant();
+        if (!request.opensAt().isBefore(request.closesAt()) || !request.closesAt().isAfter(now)) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
         var codes = new HashSet<String>();
@@ -37,7 +38,7 @@ public class DropAdminService {
         }
         concerts.getDetail(request.concertId());
         Drop drop = drops.save(Drop.draft(request.concertId(), request.title(), request.description(),
-                request.imageUrl(), request.opensAt(), request.closesAt(), clock.instant()));
+                request.imageUrl(), request.opensAt(), request.closesAt(), now));
         for (var sku : request.variants()) {
             DropVariant variant;
             try {

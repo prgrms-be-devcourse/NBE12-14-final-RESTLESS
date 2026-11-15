@@ -37,6 +37,10 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
     Optional<Payment> findByPgOrderId(String pgOrderId);
 
+    /** 결제 대상의 가장 최근 시도. 시도 ID가 클수록 최근이다. */
+    Optional<Payment> findFirstByPayableTypeAndPayableIdAndUserIdOrderByIdDesc(
+            PayableType payableType, Long payableId, Long userId);
+
     Optional<Payment> findByPayableTypeAndPayableIdAndIdempotencyKey(
             PayableType payableType, Long payableId, String idempotencyKey);
 

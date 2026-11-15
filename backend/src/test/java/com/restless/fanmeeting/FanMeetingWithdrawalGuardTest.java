@@ -84,7 +84,7 @@ class FanMeetingWithdrawalGuardTest extends FanMeetingApiSupport {
         String bearer = "Bearer " + tokenProvider.issue(winner, "USER").value();
 
         mockMvc.perform(post("/api/me/withdraw").header(HttpHeaders.AUTHORIZATION, bearer)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"password1!\"}"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"password1!\",\"paidOrderNoticeAgreed\":true}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MEMBER_HAS_ACTIVE_PARTICIPATION"));
         assertThat(jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String.class, winner))

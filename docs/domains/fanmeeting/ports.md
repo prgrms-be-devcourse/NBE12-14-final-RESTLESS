@@ -1,23 +1,8 @@
-# FanMeeting 외부 Port와 가짜 Adapter
+# FanMeeting 외부 Port와 결제 모듈 연결
 
 ## 1. Port
 
 ```java
-interface PaymentPort {
-    PaymentAttemptResult startAttempt(StartPaymentAttemptCommand command);
-    PaymentResolutionResult resolve(String payableType, Long payableId);
-}
-record StartPaymentAttemptCommand(String payableType, Long payableId, Long userId,
-                                  long amount, Instant expiresAt, String idempotencyKey) {}
-record PaymentAttemptResult(Long paymentId, String attemptId, AttemptStatus status,
-                            String checkoutUrl /* READY일 때만 */, boolean created) {}
-// 거절(IN_PROGRESS, UNDER_REVIEW, EXPIRED, ORDER_NOT_PAYABLE)은 예외로 전달한다
-enum AttemptStatus { READY, PROCESSING, UNKNOWN, APPROVED, FAILED }
-enum PaymentResolution { NOT_STARTED, APPROVED, NOT_APPROVED_FINAL, PROCESSING, UNKNOWN }
-record PaymentResolutionResult(PaymentResolution resolution, Instant approvedAt,
-                               String attemptId, long approvedAmount,
-                               boolean finalDecision /* true일 때만 만료 판정에 쓴다 */) {}
-
 interface MemberPort {
     Instant joinedAt(Long userId);                         // users.created_at. 조회 실패면 예외
     Set<Long> activeMemberIds(Collection<Long> userIds);   // 탈퇴하지 않은 회원 (users.status = ACTIVE)
@@ -26,38 +11,33 @@ interface MemberPort {
 interface NotificationRequestPort { void request(NotificationRequest request); }
 ```
 
-## 2. 결제 모듈 계약 (P0 가짜가 지킬 최소 규칙)
+결제는 Port를 두지 않는다. 팬미팅이 결제 모듈의 `PaymentResultHandler`를 구현하고, 결제 모듈이 부른다(2절).
 
-1. **한 주문에 끝나지 않은 시도(READY·UNKNOWN)는 1개.** 다른 키로 오면 READY는 `IN_PROGRESS`, UNKNOWN은 `UNDER_REVIEW`로 거절하고, 이미 APPROVED 시도가 있으면 `ORDER_NOT_PAYABLE`로 거절한다. 시도가 없거나 모두 FAILED면 새 시도를 만든다.
-2. **같은 `Idempotency-Key`면 같은 시도를 돌려준다**(현재 상태와 함께).
-3. **`expiresAt`이 지났으면 새 시도를 만들지 않는다.**
-4. **`resolve`의 최종 판정은 결제 모듈이 정한다.** `PaymentResolutionResult.finalDecision`이 `true`일 때만 팬미팅이 만료한다. 결제 모듈은 같은 주문 잠금 안에서, 기한이 지났으면 READY 시도를 FAILED로 닫고 `finalDecision = true`를 준다. 그 뒤로 그 주문의 시도는 승인되지 않는다. 기한 전이면 `finalDecision = false`.
-5. **판정 우선순위:** APPROVED > UNKNOWN > PROCESSING > NOT_APPROVED_FINAL(모두 FAILED) > NOT_STARTED(시도 없음 또는 READY만).
+## 2. 결제 모듈 연결 (`PaymentResultHandler`, ADR-0003)
 
-실제 결제 모듈과의 세부 계약(승인 전 PROCESSING 전환, 결제창 URL 재발급, 운영자 수동 결정 반영, 시계·버전 대조)은 **P1에서 결제 담당과 정한다**(담당자 문서 `PAYMENT_CONTRACT_REQUEST.md`).
+`FanMeetingPaymentResultHandler`가 `PayableType.FAN_MEETING`을 맡는다. 결제 대상 id는 주문 id(`fan_meeting_orders.order_id`)다. 처리 흐름은 [transactions.md 6·7절](transactions.md#6-결제-시작-공통-결제-api).
 
-## 3. 가짜 Payment Adapter (`local`/`test`)
+| 결제 모듈이 부르는 때 | Handler | 팬미팅이 하는 일 |
+|---|---|---|
+| 결제 준비 `POST /api/payments` | `load` | 결제 대기 주문이면 회원·금액·행사 제목·기한을 돌려주고 결제 준비 요청 시각 기록 |
+| 승인 요청 `POST /api/payments/confirm` | `onApprovalStarting` | 기한 전이면 이 시도를 현재 시도로 기록 |
+| PG 승인 | `onApproved` | 기한·금액·현재 시도 확인 후 확정, 아니면 거절(결제 모듈이 보상 취소) |
+| PG 미승인 확정, READY 시도 만료 | `onFailed` | 기한 남으면 다시 결제 가능, 지났으면 만료 |
+| PG 결과 모름 | `onUnknown` | 보류 |
+| 보상 취소 완료 | `onRefunded` | 환불 대기 → 환불됨 |
 
-**목적:** 테스트에서 "승인 / 실패 / 모름"을 마음대로 만들어 팬미팅 쪽 로직을 검증하는 대역. 실제 결제 모듈이 오면 통째로 버린다. 정교하게 만들지 않는다.
+결제 모듈과 맞춘 규칙(결제 담당 공유, 2026-11-13):
 
-```text
-모든 메서드는 자기 트랜잭션이고, 시작할 때 주문별 fake_payments 행을 배타 잠금한다
-  INSERT INTO fake_payments(...) ON DUPLICATE KEY UPDATE payment_id = payment_id
-  → startAttempt · resolve · recordResult가 같은 주문에서는 한 줄로 선다 (승인·만료 경합을 막는 최소 장치)
+1. **Handler는 결제 모듈의 트랜잭션 안에서 실행한다**(`MANDATORY`). 결제 모듈이 결제 행을 먼저 잠그고 부른다. Handler는 자기 행만 잠그고 결제 행을 다시 잠그지 않는다.
+2. **금액·기한은 `load()`가 돌려준 값을 쓴다.** 요청 본문의 금액·회원·기한은 쓰지 않는다.
+3. **같은 대상에 READY 시도가 있는데 다른 키로 오면** 결제 모듈이 이전 READY를 `FAILED(SUPERSEDED)`로 닫고 새 시도를 만든다. 진행 중인 시도는 항상 하나다.
+4. **READY 시도의 기한이 지나면** 결제 모듈이 `onFailed`(승인 시작 전)로 알려 준다. 결과를 따로 묻는 API는 없다.
+5. 결제 멱등 키는 대소문자를 구분한다.
 
-startAttempt   위 계약 1~3. 새 시도는 result = READY
-resolve        계약 4·5. 기한 뒤면 READY를 FAILED로 닫고 finalDecision = true
-recordResult(attemptId, result, approvedAt, approvedAmount)   ← 테스트 전용
-               READY·UNKNOWN 시도만 바꿀 수 있다 (READY → APPROVED/FAILED/UNKNOWN, UNKNOWN → APPROVED/FAILED)
-               FAILED로 닫힌 시도는 거절 (만료 판정 뒤 승인 방지)
-deliver(attemptId)                                            ← 테스트 전용, 트랜잭션 밖
-               커밋된 결과를 읽어 다른 빈의 PaymentResultHandler 호출. 실패하면 다시 부르면 된다
-```
+## 3. 테스트
 
-- `recordResult`(기록)와 `deliver`(전달)를 나눈다. 가짜 테이블 잠금을 쥔 채 팬미팅을 잠그지 않기 위해서다.
-- `deliver`를 빼먹어도 만료 Worker의 `resolve`가 결과를 읽어 반영한다.
-- 계약 위반(만료 뒤 승인, C49)은 테스트에서 가짜 결과 반영기를 거치지 않고 `PaymentResultHandler`를 직접 호출해 만든다.
-- 테이블과 마이그레이션 분리는 [data-model.md](data-model.md)에 있다.
+- 공통 결제 API와 `FakePgClient`로 끝까지 실행한다(`FanMeetingPaymentApiTest`). 승인·실패·모름·지연은 `willApprove`, `willReject`, `willTimeout`, `willDelay`로 만든다.
+- 결제 모듈이 걸러 주어 API로는 만들 수 없는 경우(기한 경계, 같은 승인 두 번, 다른 시도의 승인, 만료 뒤 승인)는 트랜잭션을 열고 Handler를 직접 부른다.
 
 ## 4. Member Adapter와 알림 기록
 

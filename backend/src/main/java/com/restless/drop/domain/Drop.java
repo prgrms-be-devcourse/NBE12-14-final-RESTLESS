@@ -40,7 +40,8 @@ public class Drop {
 
     public static Drop draft(Long concertId, String title, String description, String imageUrl,
                              Instant opensAt, Instant closesAt, Instant now) {
-        if (opensAt == null || closesAt == null || !opensAt.isBefore(closesAt)) {
+        if (opensAt == null || closesAt == null || !opensAt.isBefore(closesAt)
+                || !closesAt.isAfter(now)) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
         Drop drop = new Drop();
@@ -61,7 +62,16 @@ public class Drop {
     }
 
     public String saleStatus(Instant now) {
+        if (!hasSaleEnabledStatus()) return "ENDED";
         if (now.isBefore(opensAt)) return "UPCOMING";
         return now.isBefore(closesAt) ? "ON_SALE" : "ENDED";
+    }
+
+    public boolean isOnSale(Instant now) {
+        return "ON_SALE".equals(saleStatus(now));
+    }
+
+    private boolean hasSaleEnabledStatus() {
+        return status == DropStatus.SCHEDULED || status == DropStatus.OPEN;
     }
 }

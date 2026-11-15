@@ -81,4 +81,27 @@ public class FanMeetingSelection {
         selection.updatedAt = now;
         return selection;
     }
+
+    /** 기한 안 결제 완료. */
+    public void confirm(Instant now) {
+        status = FanMeetingSelectionStatus.CONFIRMED;
+        updatedAt = now;
+    }
+
+    /** 자리를 잃음(기한 경과, 늦은 승인, 금액 불일치). */
+    public void expire(Instant now) {
+        status = FanMeetingSelectionStatus.EXPIRED;
+        updatedAt = now;
+    }
+
+    /** 결제 준비 전 포기. */
+    public void decline(Instant now) {
+        status = FanMeetingSelectionStatus.DECLINED;
+        updatedAt = now;
+    }
+
+    /** 예비로 뽑혔는지(승격된 뒤에도 예비다). */
+    public boolean isReserve() {
+        return selectionType == FanMeetingSelectionType.RESERVE;
+    }
 }

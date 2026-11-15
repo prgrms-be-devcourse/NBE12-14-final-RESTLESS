@@ -1,5 +1,9 @@
 # Drop 정책
 
+> 관련 코드: `backend/src/main/java/com/restless/drop/`
+>
+> 마지막 확인: 2026-11-14 (#41 탈퇴 제한, #92 등록 검증, #97 탈퇴 동의 구현과 대조)
+
 상태 표기: `DECIDED` 결정됨, `PROPOSED` 제안, `OPEN` 미확정, `DEFERRED` 보류
 
 ## 1. 도메인 정의 (DECIDED)
@@ -209,14 +213,16 @@ Drop 전용: 드롭 목록, 드롭 상세, 배송·결제 페이지, 결제 대�
 
 PG가 손님 환불을 최종 거절하면 주문은 `REFUND_REVIEW`가 되고 판매 재고는 그대로다. 손님은 다시 환불을 요청할 수 있다 (`REFUND_REVIEW` → `PAID` → `REFUND_PENDING`, 한 트랜잭션, DECIDED 2026-11-13).
 
-## 11. 탈퇴 제한 (PROPOSED, 미구현)
+## 11. 탈퇴 제한 (DECIDED 2026-11-14)
 
 `WithdrawalGuard` 드롭 구현(`hasActiveParticipation(userId)`)으로 진행 중인 거래가 있는 회원의 탈퇴를 막는다 (`member/application/WithdrawalGuard.java`).
-등록된 Guard가 없으면 결제 진행 중인 회원도 탈퇴할 수 있으므로 드롭 구매 흐름 구현 때 함께 넣는다 (#41).
+Guard가 없으면 결제 진행 중인 회원도 탈퇴할 수 있어서 #41에서 드롭 Guard를 넣었다.
 
-`true`로 볼 후보:
+막는다 (`true`):
 
-- 예약 `RESERVED`, `CONFIRMING`, `RECONCILING`, `COMPENSATING` (재고를 점유하거나 결제 결과를 기다림)
+- 재고 점유 `RESERVED`, `CONFIRMING`, `RECONCILING`, `COMPENSATING` (재고를 점유하거나 결제 결과를 기다림)
 - 주문 `PAYMENT_REVIEW`, `REFUND_PENDING`, `REFUND_REVIEW` (돈의 행방을 확정하지 않음)
 
-OPEN: 실제 배송이 없으므로 `PAID` 주문은 탈퇴를 막지 않는 것으로 제안한다. 탈퇴 후 환불 요청 경로가 필요한지 확인한다.
+막지 않는다: 실제 배송이 없으므로 `PAID` 주문(점유 `CONFIRMED`)은 탈퇴를 막지 않는다. 끝난 점유(`EXPIRED`, `RELEASED`, `RESTORED`)와 주문(`CANCELLED`, `REFUNDED`)도 막지 않는다. 기준: [API 계약](../../contracts/api/drop.md) "회원 탈퇴 제한".
+
+탈퇴 동의 (DECIDED 2026-11-14, #97): 탈퇴 요청은 결제 완료 주문 안내에 동의해야 받는다. 탈퇴하면 그 주문을 조회하거나 환불 요청할 수 없다. 회원이 이를 확인하고 탈퇴하므로 탈퇴 회원의 환불 요청 경로는 만들지 않는다. 안내 문구와 요청 형식은 [공통 API](../../contracts/api/common.md) 탈퇴에 있다.

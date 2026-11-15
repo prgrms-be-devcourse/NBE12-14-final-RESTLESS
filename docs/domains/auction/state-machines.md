@@ -4,7 +4,7 @@
 
 ```text
 SCHEDULED → OPEN → CLOSED
-SCHEDULED → CLOSED      (스케줄러가 시작 처리를 놓친 채 종료 시각이 지난 경우)
+SCHEDULED → CLOSED      (스케줄러가 시작 처리를 하기 전에 종료 시각이 지난 경우)
 SCHEDULED → (삭제)      (시작 전 삭제. 행이 사라진다)
 ```
 
@@ -13,9 +13,11 @@ SCHEDULED → (삭제)      (시작 전 삭제. 행이 사라진다)
 | 등록 → `SCHEDULED` | 주최자, ADMIN | 시작 시각이 등록 시점보다 뒤 |
 | `SCHEDULED` → `OPEN` | 시작 스케줄러 | `starts_at <= 지금` |
 | `OPEN` → `CLOSED` | 종료 스케줄러 | 경매 행 잠금 뒤 `ends_at <= 지금`을 다시 확인 |
+| `SCHEDULED` → `CLOSED` | 종료 스케줄러 | 위와 같다. 종료 스케줄러는 `SCHEDULED`, `OPEN` 가운데 `ends_at <= 지금`인 경매를 고른다 |
 | `SCHEDULED` → 삭제 | 주최자 본인, ADMIN | 잠금 뒤 `지금 < starts_at` |
 
 - **입찰 가능 여부는 상태가 아니라 시각(`starts_at <= 지금 < ends_at`)으로 판단한다.** 스케줄러가 늦어도 마감 뒤 입찰은 거절된다.
+- 그래서 `starts_at`이 지났지만 시작 스케줄러가 아직 `OPEN`으로 바꾸지 않은 사이에는 `SCHEDULED` 상태에서도 입찰이 수락된다. 이 경매가 `SCHEDULED`인 채로 종료되면 결과는 `SOLD`일 수도 있다.
 - `CLOSED`가 되면 결과 행이 반드시 있다 (아래 3절).
 - 1차에는 진행 중 취소(`CANCELLED`)가 없다.
 
@@ -69,7 +71,7 @@ HELD → CAPTURED       (해당 입찰이 낙찰됨, 보유액에서 차감)
 
 | 경매 | 결과 | 최고 입찰의 확보 | 나머지 입찰의 확보 |
 |---|---|---|---|
-| `SCHEDULED` | 없음 | 입찰 없음 | 입찰 없음 |
+| `SCHEDULED` | 없음 | 입찰 없음, 또는 `HELD` (`starts_at`이 지나 입찰이 있으면, 1절) | 모두 `RELEASED` |
 | `OPEN` | 없음 | `HELD` (입찰이 있으면) | 모두 `RELEASED` |
 | `CLOSED` | `SOLD` | `CAPTURED` | 모두 `RELEASED` |
 | `CLOSED` | `UNSOLD` | 입찰 없음 | 입찰 없음 |

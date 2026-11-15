@@ -14,7 +14,7 @@
 | POST | `/api/auth/logout` | 이 기기의 Refresh 폐기, 쿠키 삭제 → 204 | 구현 |
 | GET | `/api/me/profile` | 내 프로필, 기본 배송지 → 200 프로필 | 구현 |
 | PATCH | `/api/me/profile` | 닉네임, 기본 배송지 수정 → 200 바뀐 프로필 | 구현 |
-| POST | `/api/me/withdraw` | 탈퇴 `{password}` → 204 | 구현 |
+| POST | `/api/me/withdraw` | 탈퇴 `{password, paidOrderNoticeAgreed}` → 204 | 구현 |
 
 ### 프로필
 
@@ -43,16 +43,21 @@
 
 - 필드를 빼거나 null이면 그대로 둔다. 기본 배송지 필드에 `""`를 보내면 그 값을 지운다.
 - 이메일, 역할은 바꿀 수 없다(보내도 무시).
-- 탈퇴한 회원은 Access Token이 남아 있어도 404 `MEMBER_NOT_FOUND`.
+- 탈퇴한 회원은 Access Token이 남아 있어도 404 `MEMBER_NOT_FOUND`. 문구는 `탈퇴한 회원입니다.`다. 없는 회원은 기존 문구 그대로다 (#110).
 - 드롭 주문의 "기본 배송지 불러오기"는 이 조회 API를 쓴다.
 
 ### 탈퇴
 
 - 비밀번호를 다시 받는다. 틀리면 400 `MEMBER_PASSWORD_MISMATCH`.
+- 결제 완료 주문 안내에 동의를 받는다 (#97). `paidOrderNoticeAgreed`가 `true`가 아니면 400 `INVALID_REQUEST`이고 `details.fields.paidOrderNoticeAgreed`가 붙는다. 필드를 빼도 같다.
+- 동의를 받는 이유: 결제 완료 주문은 탈퇴를 막지 않는다. 탈퇴하면 그 주문을 조회하거나 환불 요청할 수 없다. 프론트는 탈퇴 화면에 아래 안내와 체크 상자를 둔다.
+
+  > 탈퇴하면 결제 완료 주문을 더 이상 조회하거나 환불 요청할 수 없습니다. 이 내용을 확인했습니다.
+
 - 행은 지우지 않는다(`status = WITHDRAWN`, `deleted_at`). 주문, 결제, 응모 같은 다른 도메인 기록은 그대로 남는다.
 - 모든 기기의 Refresh Token을 폐기한다. 다시 로그인할 수 없고, 같은 이메일로 다시 가입할 수도 없다(`uk_users_email`).
 - Access Token은 만료(최대 1시간)까지 남는다. 회원 API는 404를 주지만 다른 도메인 API는 통과할 수 있으니, 결제·응모처럼 중요한 처리는 서비스에서 `memberService.getActive(userId)`로 한 번 더 확인한다.
-- **진행 중인 거래가 있으면 막는다 (`WithdrawalGuard`).** 도메인은 `member.application.WithdrawalGuard`를 구현한 `@Component`를 자기 패키지에 두면 된다. 하나라도 `true`를 돌려주면 409 `MEMBER_HAS_ACTIVE_PARTICIPATION`. 지금 등록된 Guard는 없다.
+- **진행 중인 거래가 있으면 막는다 (`WithdrawalGuard`).** 도메인은 `member.application.WithdrawalGuard`를 구현한 `@Component`를 자기 패키지에 두면 된다. 하나라도 `true`를 돌려주면 409 `MEMBER_HAS_ACTIVE_PARTICIPATION`. 지금 등록된 Guard는 팬미팅(`FanMeetingWithdrawalGuard`)과 드롭(`DropWithdrawalGuard`)이다.
 
 ```java
 @Component
@@ -109,8 +114,8 @@ class FanMeetingWithdrawalGuard implements WithdrawalGuard {
 
 | Method | Endpoint | 기능 / 응답 |
 |---|---|---|
-| GET | `/api/me/orders` | 내 주문 목록 (후속 구현) |
-| GET | `/api/orders/{orderId}` | 주문 상세 (후속 구현) |
+| GET | `/api/me/orders` | 내 주문 목록. 200 페이지 (#101) |
+| GET | `/api/orders/{orderId}` | 주문 상세. 결제 대상과 최근 결제 포함 200 (#109) |
 | POST | `/api/payments` | 결제 준비. 새 시도 201, 같은 키 재요청 200 |
 | POST | `/api/payments/confirm` | 토스 승인. 승인 200, 처리 중/불명확 202, 최종 거절 409 |
 | GET | `/api/payments/{paymentId}` | 본인 결제 조회 200 |
@@ -121,6 +126,68 @@ class FanMeetingWithdrawalGuard implements WithdrawalGuard {
 결제 대상은 `(payableType, payableId)`로 식별하며 `orderId`는 승인 요청에서만 우리 `pgOrderId`를 뜻한다.
 모든 결제 API는 Bearer 로그인이 필요하다(토큰 없음/만료/위조는 401 `UNAUTHORIZED`).
 회원 ID는 토큰의 `@LoginMember`에서만 받고 본문에서 받지 않는다.
+
+### 내 주문 목록
+
+`GET /api/me/orders?page=0&size=20` — 로그인한 회원의 공통 주문을 최신순으로 준다 (#101).
+
+```json
+{
+  "items": [
+    {
+      "orderId": 7,
+      "orderType": "DROP",
+      "status": "PAID",
+      "totalAmount": 39000,
+      "createdAt": "2026-11-14T01:00:00Z",
+      "lines": [
+        { "itemType": "DROP_VARIANT", "itemName": "투어 후드", "optionName": "M", "unitPrice": 39000, "quantity": 1 }
+      ]
+    }
+  ],
+  "page": 0, "size": 20, "totalElements": 1, "totalPages": 1
+}
+```
+
+- 본인 주문만 준다. 공통 주문인 `DROP`, `TICKET`만 나온다. 팬미팅은 자체 주문을 쓰므로 나오지 않는다.
+- 모든 상태를 준다. 결제 전, 취소, 환불 주문도 나온다. `status`는 주문의 지금 상태다.
+- `lines`의 이름, 옵션, 가격은 주문할 때 복사해 둔 값이다. 상품 정보가 나중에 바뀌어도 그대로다. 옵션이 없으면 `optionName`은 빈 문자열이다. `lines`는 주문에 담은 순서다.
+- 정렬은 주문 시각 내림차순이다. 시각이 같으면 `orderId` 내림차순이다.
+- `page`는 0부터, 기본 0이다. `size`는 1~100, 기본 20이다. 음수 `page`, 범위 밖 `size`, 숫자가 아닌 값은 400 `INVALID_REQUEST`다.
+- 주문이 없거나 범위 밖 페이지면 `items`는 빈 배열이다. `totalElements`, `totalPages`는 실제 전체 주문 기준이다.
+- 토큰이 없으면 401 `UNAUTHORIZED`다. 탈퇴한 회원은 토큰이 남아 있어도 404 `MEMBER_NOT_FOUND`다. 탈퇴 안내대로 탈퇴 뒤에는 주문을 볼 수 없다.
+- 배송지와 결제 ID는 주지 않는다. 결제 연결은 주문 상세에서 다룬다.
+
+### 주문 상세
+
+`GET /api/orders/{orderId}` — 본인 주문 하나를 준다. 환불과 재결제에 필요한 결제 대상과 최근 결제를 함께 준다 (#109).
+
+```json
+{
+  "orderId": 7,
+  "orderType": "DROP",
+  "status": "PAID",
+  "totalAmount": 39000,
+  "createdAt": "2026-11-14T01:00:00Z",
+  "lines": [
+    { "itemType": "DROP_VARIANT", "itemName": "투어 후드", "optionName": "M", "unitPrice": 39000, "quantity": 1 }
+  ],
+  "shipping": { "recipient": "홍길동", "phone": "010-1234-5678", "address": "서울시 강남구 1" },
+  "payable": { "payableType": "DROP", "payableId": 5 },
+  "payableExpiresAt": "2026-11-14T01:05:00Z",
+  "payment": { "paymentId": 12, "status": "APPROVED" }
+}
+```
+
+- 목록 한 줄과 같은 필드에 `shipping`, `payable`, `payableExpiresAt`, `payment`를 더한다.
+- `shipping`: 주문할 때 복사한 배송지다. 배송이 없는 주문(티켓)은 null이다.
+- `payable`: 결제 준비 `POST /api/payments`에 그대로 넘기는 결제 대상이다. 드롭 주문은 `DROP`과 재고 점유 ID다. 결제 대상을 알려 주는 도메인이 아직 없으면 null이다. 지금 티켓 주문이 그렇다.
+- `payableExpiresAt`: 결제 대상의 결제 기한이다. 드롭은 재고 점유 만료 시각이다. 모르면 null이다.
+- `payment`: 그 결제 대상의 가장 최근 결제 시도다. 실패 뒤 다시 결제했으면 새 시도가 나온다. `status`는 결제 조회와 같은 값이다. 결제를 시작하지 않았으면 null이다. 환불은 이 `paymentId`로 요청한다.
+- 결제 가능 여부와 환불 가능 여부는 주지 않는다. 최종 판단은 결제 준비와 환불 API의 응답이다.
+- 남의 주문이나 없는 주문은 404 `ORDER_NOT_FOUND`다. 숫자가 아닌 ID는 400 `INVALID_REQUEST`다.
+- 토큰이 없으면 401 `UNAUTHORIZED`다. 탈퇴한 회원은 404 `MEMBER_NOT_FOUND`다.
+- 도메인 연결: 주문 모듈의 결제 대상 조회 인터페이스를 각 도메인이 구현한다. 주문 ID를 받아 결제 대상과 기한을 돌려준다. 구현이 없는 주문 종류는 `payable`이 null이다. 최근 결제는 주문 모듈이 결제 모듈의 읽기 메서드로 찾는다.
 
 ### 결제 준비
 

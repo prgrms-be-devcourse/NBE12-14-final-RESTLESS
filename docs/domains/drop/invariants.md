@@ -1,5 +1,9 @@
 # Drop 불변식
 
+> 관련 코드: `backend/src/test/resources/harness/drop-invariants.sql`, `backend/src/main/java/com/restless/drop/domain/`
+>
+> 마지막 확인: 2026-11-14 (불변식별 테스트 표시 대조)
+
 단위, 통합, 동시성, 장애 테스트의 기준이다. 테스트 이름이나 주석에 `INV-xx`를 붙여 추적한다.
 
 | ID | 불변식 |

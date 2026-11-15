@@ -5,5 +5,14 @@ public enum FanMeetingSelectionStatus {
 
     PAYMENT_PENDING,
 
-    WAITING
+    WAITING,
+
+    /** 기한 안 결제 완료. */
+    CONFIRMED,
+
+    /** 기한이 지났거나 승인을 받아들이지 못해 자리를 잃음. */
+    EXPIRED,
+
+    /** 결제를 준비하기 전에 스스로 포기함. */
+    DECLINED
 }

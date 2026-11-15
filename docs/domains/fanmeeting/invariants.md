@@ -13,7 +13,7 @@
 | INV-FM-07 | **`CONFIRMED + PAYMENT_PENDING ≤ winner_limit`** |
 | INV-FM-08 | 승격된 RESERVE의 최대 순번보다 앞 순번인 `WAITING` 없음 |
 | INV-FM-09 | Selection·Order는 [Selection–Order 짝 표](state-machines.md#5-selectionorder-짝)의 조합으로만 존재 |
-| INV-FM-10 | **기한 안에 승인된 Order의 Selection은 `CONFIRMED`** (기한 내 결제자 자격 상실 0). 단, 결제 모듈이 최종 판정(`finalDecision`)을 지키는 한([ports.md 계약 4](ports.md#2-결제-모듈-계약-p0-가짜가-지킬-최소-규칙)). 그 뒤 승인이 오면 계약 위반으로 기록한다 |
+| INV-FM-10 | **기한 안에 승인된 Order의 Selection은 `CONFIRMED`** (기한 내 결제자 자격 상실 0). 결제 중인 시도가 있는 주문은 결제 모듈이 최종 실패를 알려 줄 때만 만료한다([transactions.md 7·8절](transactions.md#7-결제-결과-반영-fanmeetingpaymentresulthandler)). 만료 뒤 승인은 결제 모듈 계약 위반으로 거절한다 |
 | INV-FM-11 | 보류 중인 자리는 만료되지 않고 다른 사람에게 넘어가지 않음 |
 | INV-FM-12 | Order 금액 = 생성 시점 참가비 = 승인 금액 (다르면 확정하지 않음) |
 | INV-FM-13 | 같은 결제 시도로 주문 상태가 두 번 바뀌지 않음. (P0 범위: 상태 변경. 이중 결제 기록의 중복 제거는 P1 Inbox) |

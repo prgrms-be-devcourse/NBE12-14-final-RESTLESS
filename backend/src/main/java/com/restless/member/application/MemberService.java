@@ -84,12 +84,18 @@ public class MemberService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
     }
 
+    /** 활성 회원. 없으면 404 MEMBER_NOT_FOUND. 탈퇴한 회원도 같은 코드지만 문구로 탈퇴 사실을 알린다. */
     @Transactional(readOnly = true)
     public Member getActive(Long memberId) {
-        return memberRepository.findById(memberId)
-                .filter(Member::isActive)
+        Member member = memberRepository.findById(memberId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MEMBER_NOT_FOUND));
+        if (!member.isActive()) {
+            throw new BusinessException(ErrorCode.MEMBER_NOT_FOUND, WITHDRAWN_MESSAGE);
+        }
+        return member;
     }
+
+    static final String WITHDRAWN_MESSAGE = "탈퇴한 회원입니다.";
 
     /** 프로필 수정. 탈퇴한 회원이면 404 MEMBER_NOT_FOUND. */
     @Transactional

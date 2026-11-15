@@ -1,5 +1,9 @@
 # Drop API 계약
 
+> 관련 코드: `backend/src/main/java/com/restless/drop/api/`, `backend/src/main/java/com/restless/drop/application/dto/`, `backend/src/test/java/com/restless/drop/acceptance/`
+>
+> 마지막 확인: 2026-11-14 (#92 등록 검증·판매 상태 구현과 대조. 탈퇴 제한은 #41, 탈퇴 동의는 #97, 검색·정렬은 #105, 주문 상세 결제 대상은 #109)
+
 - 상태: v1 DECIDED (2026-11-13). 수용 테스트(`backend/src/test/java/com/restless/drop/acceptance/`)가 이 계약을 기준으로 판정한다.
 - Base URL: `/api` ([ADR-0002](../../decisions/0002-common-conventions.md)). 오류는 공통 형식 `{code, message, details, traceId, timestamp}` ([common.md](common.md)).
 - 회원 ID는 토큰(`@LoginMember`)에서만 받는다. 시각은 UTC ISO-8601.
@@ -13,6 +17,7 @@
 | D2 재고 점유 + 주문 생성 | 재고 점유 생성·조회 |
 | D3 결제 연결 | 재고 점유 취소, 결제는 공통 결제 API(`payableType = DROP`, `payableId = reservationId`) |
 | D4 대기열 | 대기열 진입, 내 대기 상태 |
+| 탈퇴 제한 (#41) | 회원 탈퇴(`POST /api/me/withdraw`)를 막는 드롭 조건 |
 
 호출 순서: 상품 상세 → (배송·결제 페이지) → **결제하기 = 대기열 진입** → 대기 상태 반복 조회 → 입장 허가 → 재고 점유 + 주문 생성 → `POST /api/payments` → 토스 결제창 → `POST /api/payments/confirm` → 결과 조회
 
@@ -37,7 +42,7 @@
 - 201 `{ "dropId": 1, "status": "DRAFT" }`
 - `opensAt`이 과거여도 등록할 수 있다 (게시하면 바로 판매 시작). 등록 직후 상태는 항상 `DRAFT`다.
 - 각 SKU의 재고는 `total = available = totalQuantity`, `reserved = 0`, `sold = 0`으로 시작한다.
-- 검증 400 `INVALID_REQUEST`: 필수값, `opensAt < closesAt`, SKU 1개 이상, `skuCode` 중복 없음, `priceAmount >= 0`, `totalQuantity >= 1`.
+- 검증 400 `INVALID_REQUEST`: 필수값, `opensAt < closesAt`, `closesAt > 서버 시각`(이미 끝난 판매 기간 금지. 시작 시각은 지나도 됨), SKU 1개 이상, `skuCode` 중복 없음, `priceAmount >= 1`(0원 주문은 결제 준비가 `FREE_ORDER`로 거절하므로 등록에서 막는다, #92), `totalQuantity >= 1`.
 - 없는 `concertId` 404 `NOT_FOUND`. 로그인 안 함 401, ADMIN 아님 403.
 
 ### `POST /api/admin/drops/{dropId}/publish` (ADMIN)
@@ -46,8 +51,12 @@
 
 ### `GET /api/drops` (공개)
 
-- 게시된 드롭만 (DRAFT, CANCELLED 제외). 판매 시작 시각 오름차순, 같으면 `dropId` 오름차순. 상세의 `variants`는 등록 순서.
+- 게시된 드롭만 (DRAFT, CANCELLED 제외). 상세의 `variants`는 등록 순서.
 - 200 `{ "items": [ { "dropId", "title", "imageUrl", "opensAt", "closesAt", "saleStatus" } ] }`
+- 검색과 정렬 (#105). 예: `GET /api/drops?q=후드&sort=NEWEST`
+  - `q`: 제목에 이 글자가 들어 있는 드롭만 준다. 대소문자를 가리지 않는다. 앞뒤 공백은 지우고, 비어 있으면 검색하지 않는다. `%`, `_`는 글자 그대로 찾는다. 50자를 넘으면 400 `INVALID_REQUEST`다. 글자 수는 한글과 이모지 모두 한 글자로 센다.
+  - `sort`: `OPENS_AT`가 기본값이다. 판매 시작 시각 오름차순, 같으면 `dropId` 오름차순이다. `NEWEST`는 등록 최신순이다. 등록 시각 내림차순, 같으면 `dropId` 내림차순이다. 값은 대문자 그대로 받는다. 빈 값을 포함해 그 밖의 값은 400 `INVALID_REQUEST`다.
+  - 페이지는 없다. 조건에 맞는 게시 드롭을 모두 준다. 드롭은 운영자가 등록해 수가 적다. 판매 상태 필터도 없다.
 
 ### `GET /api/drops/{dropId}` (공개)
 
@@ -60,7 +69,7 @@
   "variants": [ { "variantId": 10, "skuCode": "HOODIE-M", "optionName": "M", "priceAmount": 39000, "soldOut": false } ]
 }
 ```
-- `saleStatus`: 서버 시각 기준 `UPCOMING`(시작 전) / `ON_SALE`(`opensAt <= now < closesAt`) / `ENDED`(종료 후).
+- `saleStatus`: 판매 판정(D2)과 같은 기준이다. 게시 상태가 판매 가능(`SCHEDULED`, `OPEN`)이 아니면(`CLOSED` 등) 시각과 관계없이 `ENDED`. 판매 가능 상태이면 서버 시각 기준 `UPCOMING`(시작 전) / `ON_SALE`(`opensAt <= now < closesAt`) / `ENDED`(종료 후) (#92).
 - `soldOut`: 그 SKU의 `available_quantity = 0`. 재고 점유 중인 수량은 구매 가능 수량이 아니다.
 
 ## D2. 재고 점유 + 주문 생성
@@ -72,7 +81,7 @@
 ```
 
 - 수량 필드는 없다. 주문 하나 = SKU 한 종류, 수량 1 (INV-04).
-- 판매 가능 = 게시됨(`SCHEDULED` 또는 `OPEN`)이고 `opensAt <= 서버 시각 < closesAt`. 상태 전환(OPEN, CLOSED)은 표시용이며 판매 판정은 시각으로 한다.
+- 판매 가능 = 게시됨(`SCHEDULED` 또는 `OPEN`)이고 `opensAt <= 서버 시각 < closesAt`. `OPEN` 전환은 판정에 영향이 없다. `CLOSED`·`CANCELLED`는 시각과 관계없이 판매하지 않는다 (#92).
 - 하나의 트랜잭션: 판매 기간·상태 확인 → 구매 슬롯 점유(INV-05) → SKU 재고 조건부 차감(`available - 1`, `reserved + 1`) → 공통 주문(PENDING_PAYMENT, 금액 = 서버 가격, 배송지 스냅샷) 생성 → 재고 점유(RESERVED, 기한 = 지금 + TTL) 저장. 재고 점유가 주문을 NOT NULL FK로 가리켜서 주문을 먼저 만든다.
 - 201
 ```json
@@ -96,6 +105,7 @@
 ## D3. 결제 연결
 
 - 결제 준비: `POST /api/payments` `{ "payableType": "DROP", "payableId": <reservationId> }` ([common.md](common.md)).
+- 주문 상세 `GET /api/orders/{orderId}`의 `payable`과 `payableExpiresAt`은 드롭이 알려 준다. 결제 대상은 그 주문의 재고 점유이고, 기한은 점유 만료 시각이다 (`DropOrderPayableResolver`, #109).
 - 드롭 `PaymentResultHandler`는 [transactions.md](../../domains/drop/transactions.md) TX2~TX5와 [policy.md](../../domains/drop/policy.md) 8·10절을 따른다 (재결제 허용, 환불 종류별 재고 처리). 환불 요청은 받아들인다(전액 환불 지원).
 - 결제창에 보이는 주문명은 드롭 제목이다. 100자를 넘으면 100자로 자른다. 금액은 주문 스냅샷 금액이다.
 - 만료 작업 빈 이름 `dropReservationExpiryJob`, 메서드 `runOnce()`. RESERVED이고 기한이 지난 재고 점유를 EXPIRED로 닫는다. 설정 `restless.drop.expiry.enabled=false`는 **주기 실행만 멈추고 빈은 남는다** (수용 테스트가 직접 호출).
@@ -126,6 +136,17 @@
 - 기본값: `heartbeat-timeout` 30초, `admit-per-run` 100명.
 - 구매권 유효 시간 `restless.drop.queue.admission-ttl` (기본 5분). 재고 점유에 성공하면 CONSUMED.
 - 입장은 재고를 보장하지 않는다. 입장 후에도 품절이면 409 `DROP_SOLD_OUT`.
+
+## 회원 탈퇴 제한 (#41)
+
+API는 회원 모듈의 `POST /api/me/withdraw`다. 드롭은 `WithdrawalGuard`(`member/application/WithdrawalGuard.java`) 구현으로 아래 조건에서 탈퇴를 막는다. 막으면 409 `MEMBER_HAS_ACTIVE_PARTICIPATION`이고 회원 상태는 바뀌지 않는다.
+
+| 막는다 | 이유 |
+|---|---|
+| 본인의 재고 점유가 `RESERVED`, `CONFIRMING`, `RECONCILING`, `COMPENSATING` | 재고를 잡고 있거나 결제 결과를 기다린다 |
+| 본인의 드롭 주문이 `PAYMENT_REVIEW`, `REFUND_PENDING`, `REFUND_REVIEW` | 돈의 행방이 정해지지 않았다 |
+
+막지 않는다: 점유 `CONFIRMED`(주문 `PAID`), `EXPIRED`, `RELEASED`, `RESTORED`, 주문 `PAID`, `CANCELLED`, `REFUNDED`. 실제 배송이 없으므로 결제가 끝난 구매는 탈퇴를 막지 않는다. 대신 탈퇴 요청에 결제 완료 주문 안내 동의를 받는다 (policy.md 11절, [공통 API](common.md) 탈퇴, #97). 다른 회원의 거래는 상관없다.
 
 ## 운영자 API (v1 범위 밖)
 

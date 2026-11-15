@@ -16,6 +16,6 @@ public record CreateDropRequest(
     public record Variant(
             @NotBlank @Size(max = 50) String skuCode,
             @NotBlank @Size(max = 100) String optionName,
-            @NotNull @PositiveOrZero Long priceAmount,
+            @NotNull @Min(1) Long priceAmount,
             @NotNull @Min(1) Integer totalQuantity) {}
 }

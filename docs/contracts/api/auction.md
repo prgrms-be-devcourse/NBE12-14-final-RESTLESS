@@ -24,7 +24,7 @@
 | Method | Endpoint | 기능 |
 |---|---|---|
 | POST | `/api/auctions/{auctionId}/bids` | 입찰. `Idempotency-Key` 헤더 필수 |
-| GET | `/api/me/bids?status=` | 내가 참여한 경매별 마지막 입찰, 입찰 상태(`HIGHEST`, `OUTBID`, `WON`), 경매 상태 |
+| GET | `/api/me/bids?status=&page=&size=` | 내가 참여한 경매별 마지막 입찰, 입찰 상태(`HIGHEST`, `OUTBID`, `WON`), 경매 상태 |
 | GET | `/api/me/wallet` | 보유, 묶인, 사용 가능 크레딧 |
 | POST | `/api/me/wallet/grants` | 테스트용 10,000 지급. 운영(prod)에서는 없음 |
 
@@ -76,6 +76,7 @@ Content-Type: application/json
 - `extensionDurationSeconds`는 생략하면 60이고, 30 ~ 300만 받는다.
 - 응답: 201 `{ "auctionId": 12 }`
 - 수정(PATCH)은 같은 필드를 **모두** 다시 받는다 (부분 수정 아님). 응답은 200과 상세 형식.
+  `extensionDurationSeconds`를 빼면 기존 값을 유지하지 않고 60으로 바뀐다. 기존 값을 지키려면 함께 보낸다.
 - 삭제(DELETE)는 204, 본문 없음.
 
 ## 목록
@@ -143,6 +144,7 @@ Content-Type: application/json
 ```
 
 - 같은 회원이 같은 `Idempotency-Key`로 같은 경매, 같은 금액을 다시 보내면 **처음 수락된 입찰을 현재 상태와 함께** 201로 돌려준다. `bidId`, `amount`, `acceptedAt`은 처음과 같고, `status`와 `endsAt`은 지금 값이다 (그사이 추월당했으면 `OUTBID`). 입찰, 크레딧 확보, 연장은 다시 하지 않는다.
+- `Idempotency-Key`는 1 ~ 100자다. 없거나 비었거나 100자를 넘으면 400 `INVALID_REQUEST`.
 - 같은 키로 다른 경매나 다른 금액을 보내면 409 `IDEMPOTENCY_KEY_CONFLICT`.
 - 거절된 요청은 저장하지 않는다. 같은 키로 재시도하면 새 요청으로 다시 판단한다.
 
@@ -155,6 +157,53 @@ Content-Type: application/json
   "details": { "minimumBidAmount": 54000 }
 }
 ```
+
+## 결과
+
+`GET /api/auctions/12/result`
+
+낙찰 200:
+
+```json
+{
+  "auctionId": 12,
+  "type": "SOLD",
+  "winnerNickname": "팬123",
+  "amount": 60000,
+  "finalizedAt": "2026-11-20T11:00:01.020Z"
+}
+```
+
+유찰 200:
+
+```json
+{ "auctionId": 12, "type": "UNSOLD", "finalizedAt": "2026-11-20T11:00:01.020Z" }
+```
+
+- 유찰이면 `winnerNickname`, `amount`를 보내지 않는다 (SSE의 `result`와 같다).
+- `finalizedAt`은 종료 처리 시각이다. 종료 시각(`endsAt`)보다 스케줄러 지연만큼 늦을 수 있다.
+- 경매가 없으면 404 `AUCTION_NOT_FOUND`, 아직 종료되지 않았으면 404 `AUCTION_RESULT_NOT_FOUND`.
+
+## 내 입찰
+
+`GET /api/me/bids?status=OUTBID&page=0&size=20` (`status`는 `HIGHEST`, `OUTBID`, `WON`이고 빼면 전체. `page`는 0부터, `size`는 1 ~ 100, 기본 20)
+
+```json
+{
+  "items": [
+    { "auctionId": 12, "title": "투어 사인 포스터 경매", "itemName": "사인 포스터",
+      "auctionStatus": "OPEN", "endsAt": "2026-11-20T11:00:00Z",
+      "bidId": 77, "amount": 53000, "status": "HIGHEST", "acceptedAt": "2026-11-20T10:30:00.010Z" }
+  ],
+  "page": 0, "size": 20, "totalElements": 1, "totalPages": 1
+}
+```
+
+- 경매마다 한 줄이다. 같은 경매에 여러 번 입찰했으면 내 마지막 입찰만 보인다.
+- `status`는 그 입찰의 상태다 ([state-machines.md](../../domains/auction/state-machines.md) 2절). 그 경매의 마지막 입찰이 아니면 `OUTBID`, 마지막 입찰이면 경매가 `CLOSED`일 때 `WON`, 아니면 `HIGHEST`.
+- 종료된 경매(`auctionStatus: CLOSED`)의 `OUTBID`는 화면에서 "낙찰 실패"로 표시한다.
+- 정렬: 내 마지막 입찰이 최근인 경매부터.
+- `status`가 위 세 값이 아니거나 `page`, `size`가 범위를 벗어나면 400 `INVALID_REQUEST`.
 
 ## 실시간 스트림 (SSE)
 
@@ -178,7 +227,10 @@ data: {"auctionId":12,"status":"OPEN","revision":15,
 
 - `id`는 `revision`이다. 클라이언트는 받은 `revision`보다 작거나 같은 메시지를 무시한다.
 - 종료되면 `status`가 `CLOSED`이고 `result`에 `{ "type": "SOLD", "winnerNickname": "...", "amount": 60000 }`(낙찰) 또는 `{ "type": "UNSOLD" }`(유찰)가 온다.
-- 연결이 끊기면 상세 API로 최신 상태를 받은 뒤 다시 연결한다.
+- 종료 상태(`CLOSED`)를 보낸 뒤 서버가 연결을 닫는다. 이미 종료된 경매에 연결하면 결과를 한 번 받고 닫힌다. 클라이언트는 `CLOSED`를 받았으면 다시 연결하지 않는다.
+- 시작 전 경매가 수정되면 바뀐 상태를 보내고, 삭제되면 메시지 없이 연결을 닫는다.
+- 연결이 끊기면 상세 API로 최신 상태를 받은 뒤 다시 연결한다. 서버는 연결을 최대 30분 유지한 뒤 닫는다.
+- 연결할 때 경매가 없으면 404 `AUCTION_NOT_FOUND`(JSON), 토큰이 없으면 401이다.
 - 토큰은 연결할 때만 검사한다. 연결 중에 Access Token이 만료돼도 열린 연결은 유지되고, 다시 연결할 때는 유효한 토큰이 필요하다.
 
 ## 오류 코드

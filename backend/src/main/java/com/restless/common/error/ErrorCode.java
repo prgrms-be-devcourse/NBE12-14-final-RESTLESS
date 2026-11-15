@@ -41,6 +41,7 @@ public enum ErrorCode {
 
     // 경매, 크레딧
     AUCTION_NOT_FOUND(HttpStatus.NOT_FOUND, "경매를 찾을 수 없습니다."),
+    AUCTION_RESULT_NOT_FOUND(HttpStatus.NOT_FOUND, "아직 종료되지 않아 경매 결과가 없습니다."),
     AUCTION_FORBIDDEN(HttpStatus.FORBIDDEN, "이 경매를 변경할 권한이 없습니다."),
     AUCTION_ALREADY_STARTED(HttpStatus.CONFLICT, "이미 시작된 경매는 수정하거나 삭제할 수 없습니다."),
     AUCTION_NOT_OPEN(HttpStatus.CONFLICT, "아직 시작하지 않은 경매입니다."),
@@ -52,6 +53,7 @@ public enum ErrorCode {
     CREDIT_INSUFFICIENT(HttpStatus.CONFLICT, "사용 가능한 크레딧이 부족합니다."),
 
     // 결제
+    ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."),
     PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "결제를 찾을 수 없습니다."),
     PAYMENT_TARGET_NOT_FOUND(HttpStatus.NOT_FOUND, "결제 대상을 찾을 수 없습니다."),
     PAYMENT_NOT_PAYABLE(HttpStatus.CONFLICT, "결제할 수 없는 상태입니다."),
@@ -80,7 +82,9 @@ public enum ErrorCode {
     APPLICATION_NOT_ACTIVE(HttpStatus.CONFLICT, "취소할 응모가 없습니다."),
     APPLICATION_BUSY(HttpStatus.SERVICE_UNAVAILABLE, "응모 요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."),
     APPLICATION_NOT_ELIGIBLE(HttpStatus.FORBIDDEN, "응모 자격이 없습니다. 행사 공지 이후에 가입한 계정입니다."),
-    MEMBER_LOOKUP_FAILED(HttpStatus.SERVICE_UNAVAILABLE, "회원 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    MEMBER_LOOKUP_FAILED(HttpStatus.SERVICE_UNAVAILABLE, "회원 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요."),
+    ORDER_NOT_PAYABLE(HttpStatus.CONFLICT, "결제할 수 없는 주문입니다."),
+    DECLINE_NOT_ALLOWED(HttpStatus.CONFLICT, "결제를 시작한 주문은 포기할 수 없어요.");
 
     private final HttpStatus httpStatus;
     private final String message;
