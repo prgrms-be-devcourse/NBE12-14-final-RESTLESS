@@ -1,7 +1,7 @@
 # 티켓팅 PaymentResultHandler 연결
 
 - 상태: 상태 전이는 DECIDED (2026-11-12, 담당자 합의).
-- 기준: ADR-0003의 동기 Handler 계약. 승인 시도 저장 및 내부 서비스의 대상 조회·승인 시작·성공 확정/발급·실패/불명확 처리를 구현했다. PaymentResultHandler 빈 등록과 자동 만료/보상 처리는 다음 단계다.
+- 기준: ADR-0003의 동기 Handler 계약. 승인 시도 저장 및 내부 서비스의 대상 조회·승인 시작·성공 확정/발급·실패/불명확 처리를 구현했다. 결제 기한 자동 만료도 구현했다. PaymentResultHandler 빈 등록과 보상 처리는 다음 단계다.
 - paymentId를 모든 상태 변경 Handler에 전달하는 원칙은 DECIDED (2026-11-12). 공통 DTO·인터페이스는 ADR-0003 개정에 반영됐고 티켓팅 예약의 시도 저장·수락 도메인 메서드를 구현했다. 실제 Handler 연결은 후속 단계다. 결제 대상 매핑은 예약 ID 기준으로 확정했다 (2026-11-13, 사용자 합의).
 
 ## 경계
@@ -66,13 +66,13 @@ DB 오류 등 기술 실패는 예외로 전체 롤백한다. 업무상 승인 �
 티켓팅은 승인 시작을 받아들인 paymentId와 시각을 영속화하고 결과가 같은 시도인지 확인해야 한다.
 예약의 current_payment_id, approval_started_at, payment_result_pending을 V20261113_1500으로 추가했다. current_payment_id는 공통 payments.id의 스칼라 문맥으로 저장하며 물리 FK를 추가하지 않는다. 실제 대상·시도 관계는 공통 결제의 잠금·callback 계약과 티켓팅 Handler 검증으로 보장한다.
 current_payment_id는 NULL 허용 UNIQUE이며, DB CHECK는 ID/시각의 부분 저장과 checkout 이전·결제 기한 이상인 승인 시작 시각을 막는다. 아직 시도가 없는 기존 예약은 NULL/NULL/false이며 과거 시도를 추정해 채우지 않는다.
-payment_result_pending은 수락한 승인 결과 또는 필요한 보상 취소가 미확정임을 뜻한다. 예약 상태 PAYMENT_PENDING은 checkout 직후와 승인 진행 중 모두 쓰므로 이를 구분하는 별도 필드다. 성공 확정에서는 이 필드를 false로 바꾸고 시도 ID/시각을 보존한다. 내부 최종 실패 처리에서도 이 필드를 false로 바꾼다. 실제 Handler·자동 만료·보상 연결은 후속 단계다.
+payment_result_pending은 수락한 승인 결과 또는 필요한 보상 취소가 미확정임을 뜻한다. 예약 상태 PAYMENT_PENDING은 checkout 직후와 승인 진행 중 모두 쓰므로 이를 구분하는 별도 필드다. 성공 확정에서는 이 필드를 false로 바꾸고 시도 ID/시각을 보존한다. 내부 최종 실패 처리에서도 이 필드를 false로 바꾼다. 자동 만료는 이 필드로 미확정 시도를 보호한다. 실제 Handler·보상 연결은 후속 단계다.
 승인 전 READY 만료 실패의 approvalStartedAt은 null일 수 있다. 정상 환불과 보상 취소를 구분하고 예매 확정 전 보상 취소에 confirmed_count 감소를 적용하지 않는다.
 
 ## 공통 대사와 checkout의 관계
 
 공통 결제는 PaymentReconciler/PaymentReconciliationScheduler로 미완료 승인·취소를 재조회하고 같은 Handler로 결과를 반영한다. 기준과 주기는 [공통 대사 운영 계약](../../operations/failure-handling.md#공통-결제-대사-46)을 따른다.
-checkout은 payments 행을 생성하지 않으므로 공통 대사 후보가 아니다. 주문만 연결된 PAYMENT_PENDING 예약의 결제 기한 만료를 공통 대사가 대신 정리하지 않는다. 티켓팅 Handler·결제 시도 연동과 결제 이후 만료 처리는 여전히 후속 구현이다.
+checkout은 payments 행을 생성하지 않으므로 공통 대사 후보가 아니다. 주문만 연결된 PAYMENT_PENDING 예약의 결제 기한 만료를 공통 대사가 대신 정리하지 않는다. 승인 미시도·최종 실패 예약은 티켓팅의 결제 기한 만료 작업이 정리한다. Handler·실제 결제 API 연결은 후속이다.
 공통 UNKNOWN 최초 시각·나이 메트릭은 구현됐지만 티켓팅의 불명확 5분 운영 확인 등록·중복 없는 알림은 후속이며 좌석 보호 정책을 바꾸지 않는다.
 
 ## 단계별 구현: 승인 시도 기록 기반 (2026-11-13)
@@ -171,3 +171,7 @@ backend에서 실제 실행:
 - `./gradlew build`: 전체 623개 통과, 실패·오류·건너뜀 0개. 동시 실패에서 기존 confirmed 수량 보존 assertion을 보완한 최종 코드까지 포함한다.
 
 실제 TICKET Handler·PG 연결·자동 만료·보상 취소의 검증 결과는 아니다.
+
+## 결제 기한 자동 만료 연결 (2026-11-15)
+
+실패 callback 없이 기한만 도래한 PAYMENT_PENDING도 이제 만료 작업으로 정리한다. 수락한 미확정 시도가 있거나 RECONCILING이면 기한 이후에도 보호한다. 후보 조회와 처리 사이의 승인 시작 경합은 같은 구매 관리·예약 잠금으로 직렬화한다. 실제 PG 결과를 조회하거나 최종 실패로 추정하지 않는다. 예약별 독립 트랜잭션·재시도·설정·검증은 [만료 문서](expiration.md#결제-기한-자동-만료-구현-2026-11-15)를 따른다. 앞선 단계별 기록의 자동 만료 후속 표기는 당시 범위이며, 현재는 구현 완료다. Handler 등록·보상 취소는 여전히 후속이다.

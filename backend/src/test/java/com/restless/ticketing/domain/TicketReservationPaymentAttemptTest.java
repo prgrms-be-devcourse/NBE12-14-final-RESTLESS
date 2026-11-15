@@ -91,6 +91,21 @@ class TicketReservationPaymentAttemptTest {
 
     @ParameterizedTest(name = "{displayName} [기한 대비 초={0}]")
     @ValueSource(longs = {-1, 0, 1})
+    @DisplayName("승인 미시도 예약은 결제 기한 정각부터 만료하며 재처리하지 않는다")
+    void paymentExpirationBoundary(long offset) {
+        var reservation = checkoutReservation();
+        Instant now = PAYMENT_DEADLINE.plusSeconds(offset);
+        assertThat(reservation.canExpirePayment(now)).isEqualTo(offset >= 0);
+        if (offset >= 0) {
+            reservation.expirePayment(now);
+            assertThat(reservation.getStatus()).isEqualTo(TicketReservationStatus.RELEASED);
+            assertThat(reservation.canExpirePayment(now)).isFalse();
+        }
+        assertThat(reservation.getPaymentExpiresAt()).isEqualTo(PAYMENT_DEADLINE);
+    }
+
+    @ParameterizedTest(name = "{displayName} [기한 대비 초={0}]")
+    @ValueSource(longs = {-1, 0, 1})
     @DisplayName("최종 실패는 기한 직전만 재시도를 허용하고 정각부터 반환한다")
     void failureDeadlineBoundary(long offset) {
         var reservation = checkoutReservation();
@@ -104,6 +119,7 @@ class TicketReservationPaymentAttemptTest {
         assertThat(reservation.getCurrentPaymentId()).isEqualTo(9001L);
         assertThat(reservation.getApprovalStartedAt()).isEqualTo(attemptAt);
         assertThat(reservation.getPaymentExpiresAt()).isEqualTo(PAYMENT_DEADLINE);
+        assertThat(reservation.canExpirePayment(PAYMENT_DEADLINE)).isEqualTo(offset < 0);
     }
 
     private TicketReservation heldReservation() {

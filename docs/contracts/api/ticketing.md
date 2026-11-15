@@ -262,7 +262,7 @@ TicketReservationServiceTest에 본인·타인 취소, 중복 취소의 수량 �
 - checkoutStartedAt은 잠금 후 DB UTC 시각, paymentExpiresAt은 그 시각부터 별도 5분이다. 최초 선점 기한·이력 기한·좌석 소유권·구매 수량은 유지한다.
 - 기존 orderId가 있으면 기한 경과나 후속 상태와 무관하게 기존 주문과 최초 시각·기한을 반환한다. 새 주문·기한 연장은 없다. 이 응답은 현재 승인 가능함을 보장하지 않는다.
 - 주문 생성과 예약 변경은 같은 READ_COMMITTED 트랜잭션에서 커밋/롤백한다. 교착·잠금 대기 실패는 전체 롤백 후 최대 3회 시도한다.
-- 범용 Idempotency-Key 응답 재현은 후속이다. 결제 시도 생성, 티켓팅 PaymentResultHandler, PG 승인·티켓 발급 및 결제 이후 만료도 후속 구현이다. 현재 스케줄러는 결제 전 HELD만 반환한다.
+- 범용 Idempotency-Key 응답 재현과 실제 PaymentResultHandler·PG 연결은 후속이다. 내부 승인 시작·성공 발급·실패/불명확 처리는 구현했다. 스케줄러는 결제 전 HELD와, 미확정 시도가 없는 PAYMENT_PENDING의 결제 기한 만료를 각각 처리한다. 진행·불명확 시도는 기한만으로 반환하지 않는다. 자동 만료 뒤 checkout 재요청도 기존 주문·최초 기한을 반환하며 재생성하지 않는다.
 
 | HTTP | 코드 | 조건 |
 |---|---|---|

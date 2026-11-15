@@ -32,6 +32,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -211,11 +212,7 @@ public class TicketPaymentService {
         OrderView order = validatePendingResources(locked, lockedSeats);
         Instant now = databaseNow();
         if (!now.isBefore(reservation.getPaymentExpiresAt())) {
-            for (HeldSeat held : lockedSeats) {
-                held.seat().release(held.hold().getId());
-                held.hold().release(now);
-            }
-            locked.limit().release(lockedSeats.size());
+            releasePendingResources(locked, lockedSeats, now);
         }
         reservation.failPayment(attempt.paymentId(), attempt.approvalStartedAt(), now);
         orders.changeStatus(order.orderId(), reservation.getStatus() == TicketReservationStatus.RELEASED
@@ -235,6 +232,34 @@ public class TicketPaymentService {
         OrderView order = validatePendingResources(locked, lockedSeats);
         locked.reservation().markPaymentUnknown(attempt.paymentId(), attempt.approvalStartedAt());
         orders.changeStatus(order.orderId(), OrderStatus.PAYMENT_REVIEW);
+    }
+
+    /** Worker는 예약별 새 트랜잭션을 사용한다. 결제 행이나 PG를 호출하지 않는다. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
+    public boolean expirePayment(Long reservationId) {
+        LockedReservation locked = lockReservation(reservationId).orElse(null);
+        if (locked == null || !locked.reservation().canExpirePayment(databaseNow())) {
+            return false;
+        }
+        List<HeldSeat> lockedSeats = lockReservationSeats(locked.reservation());
+        OrderView order = validatePendingResources(locked, lockedSeats);
+        Instant now = databaseNow();
+        // 후보 조회 이후 승인 시작/결과 반영이 먼저 커밋됐으면 위 예약 잠금 아래에서 제외된다.
+        if (!locked.reservation().canExpirePayment(now)) {
+            return false;
+        }
+        releasePendingResources(locked, lockedSeats, now);
+        locked.reservation().expirePayment(now);
+        orders.changeStatus(order.orderId(), OrderStatus.CANCELLED);
+        return true;
+    }
+
+    private void releasePendingResources(LockedReservation locked, List<HeldSeat> lockedSeats, Instant now) {
+        for (HeldSeat held : lockedSeats) {
+            held.seat().release(held.hold().getId());
+            held.hold().release(now);
+        }
+        locked.limit().release(lockedSeats.size());
     }
 
     private OrderView validatePendingResources(LockedReservation locked, List<HeldSeat> lockedSeats) {

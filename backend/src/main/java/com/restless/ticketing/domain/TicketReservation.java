@@ -208,6 +208,20 @@ public class TicketReservation {
         return true;
     }
 
+    public boolean canExpirePayment(Instant now) {
+        return status == TicketReservationStatus.PAYMENT_PENDING
+                && orderId != null && checkoutStartedAt != null && paymentExpiresAt != null
+                && !paymentResultPending && !now.isBefore(paymentExpiresAt);
+    }
+
+    /** 승인 미시도 또는 최종 실패 후 기한이 지난 예약만 반환한다. 시도 문맥은 보존한다. */
+    public void expirePayment(Instant now) {
+        if (!canExpirePayment(now)) {
+            throw new IllegalStateException("결과가 미확정인 예약이나 결제 기한 전 예약은 만료할 수 없습니다.");
+        }
+        status = TicketReservationStatus.RELEASED;
+    }
+
     public void cancelHold() {
         if (!canReleaseHold()) {
             throw new IllegalStateException("결제 전 선점 예약만 취소할 수 있습니다.");

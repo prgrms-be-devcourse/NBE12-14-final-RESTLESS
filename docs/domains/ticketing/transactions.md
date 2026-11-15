@@ -71,7 +71,7 @@ PG 성공 후 DB 확정 실패는 PG 결제 실패가 아니다. DB 변경은 �
 
 준비 커밋 후 PG 호출 전 서버 종료, PG 요청 타임아웃, 승인 성공 후 응답 유실·서버 종료도 영속 승인 시도로 복구한다.
 준비 기록만으로 요청이 실제 전송됐다고 단정하지 않는다. 결과 조회의 미존재·처리 중 응답만으로 즉시 실패 처리하거나 새 승인 시도를 만들지 않는다.
-공통 대사의 후보·주기·PG 결과별 분기와 최종 실패 기준은 [공통 대사 운영 계약](../../operations/failure-handling.md#공통-결제-대사-46)에 구현돼 있다. 티켓팅 Handler 연결과 결제 이후 만료는 후속이다. checkout만 완료된 주문·예약에는 결제 시도 행이 없어 공통 대사가 예약 기한 만료를 대신 처리하지 않는다.
+공통 대사의 후보·주기·PG 결과별 분기와 최종 실패 기준은 [공통 대사 운영 계약](../../operations/failure-handling.md#공통-결제-대사-46)에 구현돼 있다. 티켓팅 Handler 연결은 후속이다. checkout만 완료된 주문·예약에는 결제 시도 행이 없어 공통 대사가 예약 기한 만료를 대신 처리하지 않으며, 티켓팅의 결제 기한 자동 만료 작업이 정리한다.
 진행 중·불명확 결과를 실패로 추정하여 좌석을 반환하지 않는다.
 
 ## 6. 이벤트 경계
@@ -232,3 +232,9 @@ TicketPaymentService.onApproved가 수락한 같은 시도·금액·현재 소�
 TicketPaymentService.onFailed/onUnknown은 공통 결제 트랜잭션에 MANDATORY로 참여한다. 결제 행 → 구매 관리 → 예약 → 좌석 ID 오름차순 → 주문 순서이며, 기존 OrderService.find/changeStatus만 사용한다. 결과 시도 대조 후 전체 좌석·수량·주문을 검증하고 최종 실패의 기한을 DB UTC 시각으로 판정한다. 기한 전에는 PAYMENT_PENDING/PENDING_PAYMENT로 재시도 대기, 정각 이상이면 전체 반환과 CANCELLED를 같은 트랜잭션에 반영한다. 불명확은 RECONCILING/PAYMENT_REVIEW와 좌석 보호를 유지한다. 현재 시도의 결과 미확정 여부와 ID/시각으로 중복·과거 결과를 거른다.
 
 불일치·DB 오류·호출자 오류는 주문·예약·선점·좌석·수량 변경을 모두 롤백한다. 이 단계는 내부 callback 구현이며 Handler 등록·PG 연결·자동 만료·보상 취소를 추가하지 않는다. 구체적인 READY 미시도 통지 및 재시도 규칙은 [Handler 문서](payment-handler.md#단계별-구현-결제-실패불명확-2026-11-14)를 따른다.
+
+## 단계별 구현: 결제 기한 자동 만료 (2026-11-15)
+
+TicketPaymentService.expirePayment는 Worker용 REQUIRES_NEW/READ_COMMITTED다. callback의 MANDATORY와 달리 예약마다 독립 커밋·롤백하며, 실패 시 같은 예약을 다음 실행의 새 트랜잭션에서 다시 처리한다. 구매 관리 → 예약 → 좌석 ID 오름차순 → 주문 순서로 잠그고 DB UTC 시각·미확정 시도·현재 소유권·수량·주문을 재검증한다. 반환 코드와 검증은 onFailed와 공유하되 가짜 PaymentAttemptContext를 만들어 callback을 호출하지 않는다.
+
+미확정 시도가 없는 PAYMENT_PENDING의 결제 기한 정각 이상에서 예약·선점 RELEASED, 좌석 AVAILABLE/NULL, reserved 감소, 주문 CANCELLED를 함께 반영한다. 확정 수량과 최초 checkout·주문·시도 문맥은 보존한다. 결제 행을 조회하거나 잠그지 않아 결제 행 → 도메인 행 순서를 역전하지 않는다. PG를 호출하지 않는다. 앞선 단계의 자동 만료 후속 표기는 당시 범위다. 상세는 [만료 문서](expiration.md#결제-기한-자동-만료-구현-2026-11-15)를 따른다.

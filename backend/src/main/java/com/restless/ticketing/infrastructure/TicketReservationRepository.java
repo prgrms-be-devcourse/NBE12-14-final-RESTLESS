@@ -46,6 +46,15 @@ public interface TicketReservationRepository extends JpaRepository<TicketReserva
             """, nativeQuery = true)
     List<Long> findExpiredHoldIds();
 
+    @Query(value = """
+            SELECT id FROM ticket_reservations
+            WHERE status = 'PAYMENT_PENDING' AND payment_result_pending = FALSE
+                AND order_id IS NOT NULL AND checkout_started_at IS NOT NULL
+                AND payment_expires_at <= UTC_TIMESTAMP(6)
+            ORDER BY payment_expires_at, id LIMIT 100
+            """, nativeQuery = true)
+    List<Long> findExpiredPaymentIds();
+
     interface ReservationOwner {
         Long getUserId();
         Long getPerformanceId();

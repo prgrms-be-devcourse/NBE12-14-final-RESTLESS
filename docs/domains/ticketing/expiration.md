@@ -1,13 +1,12 @@
 # 예약 만료와 좌석 반환
 
 - 상태: DECIDED (2026-11-12, 담당자 합의).
-- 구현 상태: 결제 전 HELD 예약의 전체 좌석 반환과 요청 시 만료 정리, 5초 주기 만료 스케줄러를 구현했다. 내부 결제 실패 callback에서 기한이 지난 PAYMENT_PENDING/RECONCILING의 전체 반환을 추가했다. callback 없이 기한만 도래한 예약의 자동 만료와 실제 Handler 연결은 후속이다.
+- 구현 상태: 결제 전 HELD 예약의 전체 좌석 반환과 요청 시 만료 정리, 5초 주기 만료 스케줄러를 구현했다. 내부 결제 실패 callback에서 기한이 지난 PAYMENT_PENDING/RECONCILING의 전체 반환을 추가했다. 승인 미시도·최종 실패 예약의 결제 기한 자동 만료도 구현했다. 실제 Handler 등록·보상 취소는 후속이다.
 
 ## 1. 판단 기준
 
 PAYMENT_PENDING은 결제 단계 진입을 의미한다. 실제 PG 승인 시도 여부는 공통 결제의 영속 승인 시도 기록으로 구분한다.
-티켓팅이 결제 Repository를 직접 조회하지 않고, Coordinator가 공통 결제 서비스의 결과와 예약 상태를 함께 검증한다.
-시도 상태의 실제 enum·컬럼과 전체 잠금 순서는 공통 계약에서 정한다.
+티켓팅은 결제 Repository를 직접 조회하지 않는다. 공통 결제 callback과 같은 트랜잭션에 저장한 current_payment_id/approval_started_at/payment_result_pending을 예약 잠금 아래 확인한다. 승인 시작 수락은 PG 호출 전에 커밋되며, 진행·불명확·보상 미확정은 payment_result_pending=true로 보호한다. 결제 미시도 또는 최종 실패 확인 후의 false만 자동 만료 대상으로 삼는다.
 
 | 예약·승인 상황 | 만료 판단 |
 |---|---|
@@ -30,7 +29,7 @@ PG 조회 미존재만으로 최종 실패라고 단정하지 않는다.
 ## 2. 승인 준비·checkout과 만료의 경합
 
 구매 관리 행 → 예약 행 → 좌석 행(ID 오름차순) 순으로 잠그고 상태·기한을 재검증한다.
-승인 준비와 만료는 같은 예약 잠금으로 직렬화한다. 공통 결제 기록도 이 경계에서 일관되게 확인한다.
+승인 준비와 만료는 같은 구매 관리·예약 잠금으로 직렬화한다. 만료 작업이 결제 행을 잠그거나 도메인 잠금 뒤 결제 API로 역방향 잠금을 획득하지 않는다. 공통 결제가 결제 행을 먼저 잠그고 승인 시작 callback을 기다리는 경우, 만료가 먼저 끝났다면 callback이 RELEASED를 보고 거절한다.
 
 - 기한 내 승인 준비가 먼저 유효 시도를 기록·커밋하면 만료 작업은 좌석을 유지한다.
 - 기한 이후 만료가 먼저 좌석을 반환하면 승인 준비는 RELEASED 예약을 보고 거절하며 PG를 호출하지 않는다.
@@ -47,15 +46,15 @@ PG 조회 미존재만으로 최종 실패라고 단정하지 않는다.
 4. 다중 좌석은 모두 함께 반환한다. 중복 만료 실행은 상태를 재검증하여 카운터를 한 번만 감소시킨다.
 
 5초 스케줄러와 요청 시 만료 검증은 같은 반환 규칙을 사용한다.
-현재 스케줄러는 DB UTC 시각으로 만료된 HELD 예약을 만료 시각·ID 순으로 최대 100건 조회하고 예약별 별도 트랜잭션으로 처리한다.
-기본 실행 간격은 처리 종료 후 5초이며 restless.ticketing.hold-expiration-delay-ms로 조정할 수 있다.
-예약별 실패는 로그와 ticketing.hold.expiration.failures 메트릭을 남기고 다른 예약 처리를 계속한다.
-PAYMENT_PENDING/RECONCILING과 결제 관련 필드가 있는 비정상 HELD는 자동 반환하지 않는다.
+결제 전 작업은 DB UTC 시각으로 만료된 HELD를 조회한다. 결제 기한 작업은 PAYMENT_PENDING·payment_result_pending=false·checkout 필드가 있는 예약 중 payment_expires_at <= DB UTC 현재 시각인 ID를 기한·ID 순으로 최대 100건 조회한다. 후보는 잠금 없는 힌트이며, 반환 여부는 TicketPaymentService.expirePayment의 예약별 REQUIRES_NEW/READ_COMMITTED 트랜잭션에서 다시 판정한다.
+두 작업 모두 처리 종료 후 기본 5초 간격이다. 결제 전 선점은 restless.ticketing.hold-expiration-delay-ms, 결제 기한은 restless.ticketing.payment-expiration-delay-ms로 각각 조정한다.
+선점 만료 실패는 ticketing.hold.expiration.failures, 결제 기한 후보 조회·예약별 실패는 ticketing.payment.expiration.failures와 오류 로그를 남긴다. 개별 실패 후 나머지 예약을 계속 처리하며 롤백된 예약은 다음 실행에서 재시도한다. ID는 로그에만 남기고 메트릭 태그로 쓰지 않는다.
+payment_result_pending=true 또는 RECONCILING/CONFIRMED/종료 상태는 결제 기한으로 반환하지 않는다. 결제 관련 필드가 있는 비정상 HELD도 기존 결제 전 반환 검증으로 거절한다.
 기한 도달은 반환 가능한 시점이며 스케줄러 실행 지연으로 실제 정리가 늦을 수 있다.
 불명확 상태 5분 후 운영 전환은 반환 조건이 아니다. 자동 조회와 좌석 보호를 계속한다.
 복구 정책은 [결제 트랜잭션 설계](transactions.md)를 따른다.
 
-## 4. 검증 계획 (미실행)
+## 4. 검증 범위
 
 - HELD 최초 기한, 승인 미시도 결제 기한 각각의 직전·정각·직후 판정.
 - checkout 후 최초 선점 기한 경과: 별도 결제 기한까지 유지.
@@ -71,4 +70,26 @@ PAYMENT_PENDING/RECONCILING과 결제 관련 필드가 있는 비정상 HELD는 
 
 TicketPaymentService.onFailed는 현재 승인 시도의 최종 실패 확인 또는 승인 미시도 READY 종료 통지에서 반환 가능성을 검사한다. 잠금 후 DB UTC 시각이 결제 기한 정각 이상이고 미확정 다른 시도가 없으면 주문 취소와 예약·좌석·선점·reserved 전체 반환을 같은 트랜잭션에서 처리한다. 기한 전 실패는 재시도 대기이며, 불명확은 기한 이후에도 보호한다. 구체적인 시도 대조와 중복 처리 규칙은 [Handler 문서](payment-handler.md#단계별-구현-결제-실패불명확-2026-11-14)를 따른다.
 
-기존 5초 스케줄러의 대상은 여전히 결제 전 HELD뿐이다. checkout만 했거나 기한 전에 이미 실패 처리된 예약의 결제 기한 도래를 이번 변경이 자동 정리하지 않는다.
+실패 callback이 기한 전에 끝나 좌석을 유지했거나 checkout만 완료한 예약은 결제 기한 자동 만료 작업이 정리한다. 실패 callback과 자동 만료는 동일한 소유권·수량·주문 검증 및 좌석 반환 코드를 재사용한다.
+
+## 결제 기한 자동 만료 구현 (2026-11-15)
+
+- TicketReservation.canExpirePayment/expirePayment는 미확정 시도가 없는 PAYMENT_PENDING의 기한 정각 이상만 허용한다. 최초 checkout·주문·시도 문맥은 보존한다.
+- TicketPaymentService.expirePayment는 구매 관리 → 예약 → 좌석 ID 오름차순 → 기존 OrderService.changeStatus 순서로 잠근다. 기존 find로 주문을 검증하고 CANCELLED로 전환하며, 외부 공통 API·Repository 변경은 없다. 결제 행·PG 호출·새 승인 시도 생성은 하지 않는다.
+- 모든 좌석의 현재 선점 포인터·HELD 이력, 회차·수량·주문 소유자/종류/상태/금액이 일치해야 한다. 하나라도 불일치하면 예외로 전체 롤백한다. 예약 RELEASED·선점 RELEASED/released_at·좌석 AVAILABLE/NULL·reserved 감소·주문 CANCELLED를 함께 커밋한다. confirmed 수량은 변경하지 않는다.
+- 후보 조회 뒤 승인 시작이 먼저 기록·커밋됐다면 만료 작업은 예약 잠금 획득 후 미확정 시도를 확인해 건너뛴다. 반대로 만료가 먼저 커밋됐다면 승인 시작은 종료 예약을 보고 거절한다. 여러 서버의 중복 실행도 같은 잠금으로 한 번만 반환한다.
+- V20261115_2100은 후보 조회용 (status, payment_result_pending, payment_expires_at, id) 인덱스만 추가한다. 기존 마이그레이션·업무 제약을 수정하지 않는다.
+
+실제 PaymentResultHandler 등록·보상 취소·불명확 운영 알림은 여전히 후속이다.
+
+### 자동 만료 검증 결과
+
+기존 checkout fixture·소유권/반환 검증을 재사용했다. 새 검증은 통합 8개 사례, 도메인 기한 경계 3개, 스케줄러 실패 격리 1개다.
+
+- 승인 미시도/최종 실패 예약의 기한 전 유지, 후보 포함·제외, 동시 만료 1회 반환, 최초 주문·기한·시도 문맥 보존.
+- 진행/불명확/실패 후 새 시도의 기한 이후 보호.
+- 실제 DB 기한 경과 및 latches로 승인 시작과 만료의 선행·후행을 고정한다. 승인 시작이 잠금을 가진 동안 읽은 오래된 후보도 승인 커밋 후에는 반환하지 않는다.
+- 주문 취소까지 실제 flush 후 오류를 발생시켜 예약·주문·좌석·수량 전체 롤백과 새 트랜잭션 재처리를 확인한다.
+- 후보 조회 오류와 개별 예약 오류의 메트릭·후속 실행·나머지 예약 처리를 확인한다.
+
+backend에서 `./gradlew test --tests 'com.restless.ticketing.*'` 실행: 132개 통과, 실패·오류·건너뜀 0개. 새 인덱스 Flyway 적용과 JPA validate를 포함한다. 이번 단계에서 전체 백엔드 빌드는 재실행하지 않았다.

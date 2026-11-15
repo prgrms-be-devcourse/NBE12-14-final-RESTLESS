@@ -177,6 +177,8 @@
 | `payment_result_pending` | 수락한 시도 결과·필요한 보상 취소 미확정 여부 | NOT NULL, 기본 false. 아직 승인 시작을 수락하지 않았다면 false |
 | `created_at` | 예약 생성 시각 | 최초 선점 성공 시 기록 |
 
+결제 기한 후보 조회용 인덱스 `idx_ticket_reservations_payment_expiry(status, payment_result_pending, payment_expires_at, id)`를 V20261115_2100으로 추가했다. 미확정 시도를 제외하고 기한·ID 순으로 배치 조회한다.
+
 ## 10. seat_holds — 좌석별 선점 이력
 
 어떤 예약이 어떤 판매 좌석을 확보했는지 기록한다. 2좌석 예약이면 선점 기록도 2개다.
