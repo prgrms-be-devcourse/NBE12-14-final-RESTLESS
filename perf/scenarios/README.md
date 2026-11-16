@@ -6,6 +6,9 @@
 | 파일 | 실험 | 내용 |
 |---|---|---|
 | [drop-reservation-spike.js](drop-reservation-spike.js) | EXP-01 쓰기 기준선 | 판매 시작 순간 핫 드롭 재고 점유 스파이크. 대기열 없음 |
+| [drop-reservation-step.js](drop-reservation-step.js) | EXP-01 용량 측정 | 도착률을 계단식으로 올려 무릎 지점과 최대 지속 처리량을 찾는다. 대기열 없음 |
+
+두 시나리오는 [lib/drop-reservation.js](lib/drop-reservation.js)의 호스트 안전장치, 요청, 결과 분류, 요약을 같이 쓴다. 다른 것은 부하 모델뿐이다.
 
 ## drop-reservation-spike.js
 
@@ -52,6 +55,7 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
 | `PEAK_RATE`, `RAMP`, `HOLD` | 1000, 5s, 20s | 최고 도착률(초당 반복), 오르는 시간, 유지 시간 |
 | `PRE_VUS`, `MAX_VUS` | 500, 3000 | 미리 만들 VU, 최대 VU |
 | `SUMMARY_PATH` | 없음 | JSON 요약 경로. 없으면 화면 요약만 출력 |
+| `ROW_OFFSET` | 0 | `users.csv` 앞에서 건너뛸 행 수. 같은 시드로 다시 실행할 때 앞 실행이 쓴 계정을 건너뛴다 |
 
 총 도착 수가 참여자보다 많으면 남는 반복은 요청 없이 끝나고 `skipped_no_account`로 센다. 모든 계정이 요청했는지는 결과 합계가 참여자 수와 같은지로 본다.
 
@@ -81,6 +85,9 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
 - 측정이 끝나면 `seed.sh --verify`를 실행한다. 드롭 불변식, 금액, FK 고아 행 검사는 0이어야 한다. `seed baseline` 검사는 부하 뒤에 실패하는 것이 정상이다.
 - 앱 지표는 관리 포트의 `/actuator/prometheus`에서 본다. `drop.reservation.duration`, HikariCP, 톰캣 스레드 지표가 있다.
 
+- 실행 화면은 k6 웹 대시보드(`K6_WEB_DASHBOARD=true`, `-p 5665:5665`)로 보고, `K6_WEB_DASHBOARD_EXPORT`로 HTML 리포트를 `.ai-output/perf/`에 남긴다.
+- 서버 지표는 실행 직전과 직후에 `curl -s http://perf-app:8081/actuator/prometheus`를 파일로 저장해 차이를 본다. 실행 전체의 서버 평균 지연과 Hikari, 톰캣 상태를 얻는다.
+
 ### 로컬 확인 (2026-11-16, 측정 결과 아님)
 
 시나리오가 도는지만 확인했다. 앱, MySQL, k6를 맥북 한 대에서 같이 돌렸으므로 지연은 기준선이 아니다.
@@ -91,3 +98,47 @@ small 시드는 재고 100개, 참여자 1,000명이다. 첫 실행은 시드 �
 | 200/s | 100 | 900 | 0 | 0 | 시드 기준값 외 0 |
 | 1000/s | 100 | 900 | 0 | 0 | 시드 기준값 외 0 |
 | 200/s, DB `perf-restless`, 호스트 `perf-app` | 100 | 900 | 0 | 0 | 시드 기준값 외 0 |
+
+## drop-reservation-step.js
+
+스파이크와 같은 요청을 계단식 도착률로 보낸다. 계단마다 `STEP_RAMP` 동안 올리고 `STEP_HOLD` 동안 유지한다.
+p95가 꺾이거나 5xx, 타임아웃이 생기는 무릎 지점을 찾는다. 그 직전 계단이 최대 지속 처리량이다.
+
+### 재고를 크게 두는 이유
+
+base 재고 1,000은 200/s에서 5초 만에 품절된다. 그 뒤로는 품절 응답만 재게 된다. 품절 경로는 조건부 UPDATE가 0행으로 끝나 주문과 점유를 만들지 않으므로, 성공 점유 경로보다 훨씬 가볍다.
+그래서 용량 측정은 시드 `--scale capacity`를 쓴다. 재고와 계정이 21만이라 기본 계단의 계획 도착 수 약 19만 9천을 넘는다.
+핫 SKU 3개, 배경 데이터 크기는 base와 같다. 행 경합과 테이블 크기 조건은 그대로고 재고 수량만 다르다.
+계획 도착 수가 재고보다 크면 시작하지 않는다. 품절까지 포함해 재려면 `ALLOW_SOLD_OUT=1`을 준다.
+실제 드롭 오픈처럼 품절까지 가는 경합은 base 시드와 스파이크 시나리오로 잰다.
+
+### 실행
+
+```bash
+docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" -p 5665:5665 \
+  --add-host perf-app:3.35.88.242 \
+  -e BASE_URL=http://perf-app:8080 -e MANAGEMENT_URL=http://perf-app:8081 \
+  -e PERF_ALLOWED_APP_HOSTS=perf-app -e SEED_OUT=/perf/seed/out \
+  -e K6_WEB_DASHBOARD=true -e K6_WEB_DASHBOARD_HOST=0.0.0.0 -e K6_WEB_DASHBOARD_EXPORT=/out/step.html \
+  -e STEPS=50,100,200,400,800 -e SUMMARY_PATH=/out/step.json \
+  grafana/k6:2.4.0 run /perf/scenarios/drop-reservation-step.js
+```
+
+| 변수 | 기본값 | 뜻 |
+|---|---|---|
+| `STEPS` | 50,100,200,400,800 | 계단별 도착률(초당 반복) |
+| `STEP_RAMP`, `STEP_HOLD` | 10s, 2m | 계단 사이 오르는 시간, 계단 유지 시간. `30s`, `2m` 형식 |
+| `ABORT_ERROR_RATE` | 0.05 | 5xx, 연결 오류, 타임아웃의 누적 비율이 이 값을 넘으면 멈춘다. 30초 뒤부터 판정한다. 1이면 멈추지 않는다 |
+| `ALLOW_SOLD_OUT` | 없음 | 1이면 재고가 계획 도착 수보다 적어도 실행한다 |
+| `PRE_VUS`, `MAX_VUS` | 200, 3000 | 미리 만들 VU, 최대 VU |
+| `ROW_OFFSET`, `SEED_OUT`, `SUMMARY_PATH` | | 스파이크와 같다 |
+
+스모크와 계단식을 한 시드로 돌릴 때는 스모크가 쓴 계정 수만큼 `ROW_OFFSET`을 준다. 예: `STEPS=10,20 STEP_HOLD=30s`는 약 1,000행을 쓴다.
+
+### 결과 해석
+
+- 요청은 `stage` 태그를 단다. 유지 구간은 도착률 값이고, 오르는 구간은 `ramp`다. 요약은 유지 구간만 계단별로 보여 준다.
+- 계단별 `achieved`는 유지 구간 요청 수를 유지 시간으로 나눈 값이다. 목표보다 낮으면 `dropped_iterations`와 노트북 CPU를 먼저 본다.
+- 결과 분류와 정합성 판정은 스파이크와 같다. 측정 뒤 `seed.sh --verify`를 실행한다.
+- 무릎 지점은 계단별 k6 지연과 오류율로 판단한다. k6 지연에는 집 네트워크 왕복이 섞이므로 테스트 전 왕복 지연을 같이 기록한다.
+- 계단별 서버 지연이 필요하면 계단을 따로 실행하고 실행마다 `/actuator/prometheus` 전후 값을 저장한다.

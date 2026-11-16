@@ -40,7 +40,8 @@ perf/seed/seed.sh --scale base --profile perf
 
 ## 수치
 
-모든 수치는 [scale.yml](scale.yml)에서 바꾼다. small은 로컬, base는 기본 실험, large는 확장 실험용이다.
+모든 수치는 [scale.yml](scale.yml)에서 바꾼다. small은 로컬, base는 기본 실험, capacity는 계단식 용량 측정, large는 확장 실험용이다.
+capacity는 base와 같고 핫 재고와 계정만 21만이다. 품절 응답 대신 성공 점유 경로의 처리량을 재려는 것이다 ([이유](../scenarios/README.md#재고를-크게-두는-이유)).
 
 | 구분 | base |
 |---|---|
@@ -119,5 +120,6 @@ Refresh Token은 한 번 쓰면 교체되므로 같은 행을 다시 쓰려면 �
 |---|---|---|
 | 로컬 macOS, Docker MySQL 8.4 | small | 1초 (토큰과 점검 포함) |
 | 로컬 macOS, Docker MySQL 8.4 | base | 21초 (토큰과 점검 포함) |
+| 로컬 macOS, Docker MySQL 8.4 | capacity | 17초 (경매 시드 포함). `users.csv` 45MB, gzip 10MB |
 
 EC2와 RDS에서는 아직 재지 않았다.
