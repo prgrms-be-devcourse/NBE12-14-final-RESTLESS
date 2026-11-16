@@ -47,4 +47,6 @@ public interface FanMeetingApplicationRepository extends JpaRepository<FanMeetin
 
         Long getUserId();
     }
+
+    long countByEventIdAndStatus(Long eventId, FanMeetingApplicationStatus status);
 }

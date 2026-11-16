@@ -63,6 +63,8 @@ restless:
       draw-fixed-delay-ms: 5000
       # 주문 만료, 보류 30분 경고
       expiry-fixed-delay-ms: 60000
+      # 예비 승격, 모집 완료
+      promotion-fixed-delay-ms: 30000
       # 한 번에 처리할 행사·추첨·주문 수
       batch-size: 100
     eligibility:

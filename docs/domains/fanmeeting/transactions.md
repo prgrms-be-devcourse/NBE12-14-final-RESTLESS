@@ -267,7 +267,7 @@ occupied = Selection(CONFIRMED, PAYMENT_PENDING) 수
 vacancy = winner_limit - occupied
 
 승격 (아래 둘 다 만족할 때만):
-  야간 아님 (Asia/Seoul 23:00~09:00 아님)
+  야간 아님 (Asia/Seoul 23:00부터 09:00 전까지가 야간. 23:00:00은 금지, 09:00:00은 허용)
   now + 60분 <= promotion_closes_at
   → WAITING을 rank ASC로 FOR UPDATE 하며 하나씩:
        탈퇴자면 NOT_NEEDED로 바꾸고 다음 순번
@@ -285,6 +285,9 @@ COMMIT
 ```
 
 - 승격은 매번 다시 세서 빈자리만큼만 하므로 여러 번·동시에 돌아도 안전하다.
+- **빈자리와 모집 완료 판정에 쓰는 인원은 `Event FOR UPDATE` 뒤에 센다.** 트랜잭션의 첫 문장이 행사 잠금이어야 한다. 자리를 바꾸는 다른 처리(결제 결과, 만료, 포기, 0원 확정)는 모두 Event를 `FOR SHARE`로 쥐므로, 배타 잠금을 얻은 뒤에는 진행 중인 변경이 없다. `REPEATABLE READ`에서는 트랜잭션의 첫 일반 조회 때 스냅샷이 정해지므로, 잠그기 전에 일반 조회가 하나라도 끼면 낡은 인원으로 세게 된다. 현재 시각도 잠근 뒤에 읽는다.
+- 트랜잭션 밖에서 미리 센 빈자리는 "탈퇴 여부를 몇 명까지 확인할지"에만 쓴다. 승격이 잠금을 기다리는 사이 자리가 더 비면 같은 회차에 채우되, 미리 확인한 범위(빈자리 × 2명)까지만 채운다.
+- Worker는 결제 진행 중인 행사를 `event_id` 순서로 `batch-size`개씩 끝까지 훑는다. 행사마다 트랜잭션을 따로 쓰고, 실패는 `FANMEETING_PROMOTION_FAILED` 로그와 `fanmeeting.worker.failure{action=promotion}`으로 남긴 뒤 다음 행사로 넘어간다. 설정 `restless.fanmeeting.worker.promotion-fixed-delay-ms`(30000).
 - `REFUND_PENDING`은 모집 완료를 막지 않는다.
 - 야간에도 모집 완료 판정은 한다.
 

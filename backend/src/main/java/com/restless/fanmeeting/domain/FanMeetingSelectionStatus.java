@@ -14,5 +14,8 @@ public enum FanMeetingSelectionStatus {
     EXPIRED,
 
     /** 결제를 준비하기 전에 스스로 포기함. */
-    DECLINED
+    DECLINED,
+
+    /** 예비로 기다렸지만 승격되지 않고 끝남(모집 완료, 또는 승격 차례에 탈퇴 확인). */
+    NOT_NEEDED
 }

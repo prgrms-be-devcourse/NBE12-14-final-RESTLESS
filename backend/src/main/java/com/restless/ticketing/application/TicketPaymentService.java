@@ -8,6 +8,9 @@ import com.restless.payment.application.payable.ApprovalDecision;
 import com.restless.payment.application.payable.ApprovedPayment;
 import com.restless.payment.application.payable.PayableSnapshot;
 import com.restless.payment.application.payable.PaymentAttemptContext;
+import com.restless.payment.application.payable.RefundContext;
+import com.restless.payment.domain.PaymentRefundKind;
+import io.micrometer.core.instrument.MeterRegistry;
 import com.restless.ticketing.domain.SeatHold;
 import com.restless.ticketing.domain.SeatHoldStatus;
 import com.restless.ticketing.domain.Ticket;
@@ -29,18 +32,22 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 티켓팅 결제의 업무 검증. 공통 결제 트랜잭션에 참여하며 PG를 호출하지 않는다.
- * 전체 결과 처리를 완성한 후 PaymentResultHandler가 이 서비스를 호출하도록 연결한다.
+ * TicketPaymentResultHandler가 공통 결제 callback을 이 서비스로 전달한다.
  */
 @Service
 @RequiredArgsConstructor
 public class TicketPaymentService {
+    private static final Logger log = LoggerFactory.getLogger(TicketPaymentService.class);
     private final TicketPurchaseLimitRepository limits;
     private final TicketReservationRepository reservations;
     private final SeatHoldRepository holds;
@@ -48,6 +55,7 @@ public class TicketPaymentService {
     private final TicketRepository tickets;
     private final OrderService orders;
     private final JdbcTemplate jdbc;
+    private final MeterRegistry metrics;
 
     /**
      * 결제 대상은 예약 ID다. 공통 결제는 활성 결제 행을 먼저 잠근 뒤 이 조회를 호출한다.
@@ -197,6 +205,140 @@ public class TicketPaymentService {
         return ApprovalDecision.accept();
     }
 
+    /** PG 미승인 확정만 받는다. 타임아웃이나 조회 미존재를 실패로 해석하지 않는다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void onFailed(Long reservationId, PaymentAttemptContext attempt) {
+        Objects.requireNonNull(attempt, "attempt");
+        LockedReservation locked = lockReservation(reservationId).orElse(null);
+        if (locked == null || !locked.reservation().canApplyPaymentFailure(
+                attempt.paymentId(), attempt.approvalStartedAt())) {
+            return;
+        }
+        TicketReservation reservation = locked.reservation();
+        List<HeldSeat> lockedSeats = lockReservationSeats(reservation);
+        OrderView order = validatePendingResources(locked, lockedSeats);
+        Instant now = databaseNow();
+        if (!now.isBefore(reservation.getPaymentExpiresAt())) {
+            releasePendingResources(locked, lockedSeats, now);
+        }
+        reservation.failPayment(attempt.paymentId(), attempt.approvalStartedAt(), now);
+        orders.changeStatus(order.orderId(), reservation.getStatus() == TicketReservationStatus.RELEASED
+                ? OrderStatus.CANCELLED : OrderStatus.PENDING_PAYMENT);
+    }
+
+    /** 불명확은 실패가 아니다. 최초 기한이 지나도 현재 시도와 좌석을 보호한다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void onUnknown(Long reservationId, PaymentAttemptContext attempt) {
+        Objects.requireNonNull(attempt, "attempt");
+        LockedReservation locked = lockReservation(reservationId).orElse(null);
+        if (locked == null || !locked.reservation().canConfirmPayment(
+                attempt.paymentId(), attempt.approvalStartedAt())) {
+            return;
+        }
+        List<HeldSeat> lockedSeats = lockReservationSeats(locked.reservation());
+        OrderView order = validatePendingResources(locked, lockedSeats);
+        locked.reservation().markPaymentUnknown(attempt.paymentId(), attempt.approvalStartedAt());
+        orders.changeStatus(order.orderId(), OrderStatus.PAYMENT_REVIEW);
+    }
+
+    /** 취소 확정 이전에는 기존 미확정 시도 보호를 유지한다. 정상 환불과 발급 전 보상을 구분한다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void onRefunded(Long reservationId, RefundContext refund) {
+        Objects.requireNonNull(refund, "refund");
+        if (refund.kind() != PaymentRefundKind.COMPENSATION) {
+            compensationAnomaly(reservationId, refund.paymentId(), "UNSUPPORTED_REFUND");
+            return;
+        }
+        LockedReservation locked = lockReservation(reservationId).orElse(null);
+        if (locked == null) {
+            compensationAnomaly(reservationId, refund.paymentId(), "RESERVATION_NOT_FOUND");
+            return;
+        }
+        TicketReservation reservation = locked.reservation();
+        boolean samePayment = refund.paymentId().equals(reservation.getCurrentPaymentId());
+        if (samePayment && reservation.getStatus() == TicketReservationStatus.RELEASED
+                && !reservation.isPaymentResultPending()) {
+            // 반환 뒤 새 소유자가 생겼을 수 있으므로 과거 좌석을 다시 검사하거나 변경하지 않는다.
+            return;
+        }
+        if (!hasCheckout(reservation) || !reservation.canCompleteCompensation(refund.paymentId())) {
+            compensationAnomaly(reservationId, refund.paymentId(), "STATE_OR_ATTEMPT_MISMATCH");
+            return;
+        }
+        List<HeldSeat> lockedSeats = tryLockReservationSeats(reservation).orElse(null);
+        OrderView order = orders.find(reservation.getOrderId()).orElse(null);
+        if (lockedSeats == null || order == null || !reservation.getUserId().equals(order.userId())
+                || order.orderType() != OrderType.TICKET || !pendingResourcesMatch(locked, lockedSeats, order)) {
+            // 공통 계약: 상태/소유권 불일치로 PG 취소 확정까지 반복 롤백하지 않는다. 운영 복구 대상으로 남긴다.
+            compensationAnomaly(reservationId, refund.paymentId(), "RESOURCE_MISMATCH");
+            return;
+        }
+        releasePendingResources(locked, lockedSeats, databaseNow());
+        reservation.completeCompensation(refund.paymentId());
+        orders.changeStatus(order.orderId(), OrderStatus.CANCELLED);
+        // DB 예외는 전파한다. 결제·환불·티켓팅 변경 전체가 롤백되고 공통 대사가 재처리한다.
+    }
+
+    private void compensationAnomaly(Long reservationId, Long paymentId, String reason) {
+        log.error("티켓팅 보상 취소 불일치: reservationId={}, paymentId={}, reason={}", reservationId, paymentId, reason);
+        metrics.counter("ticketing.payment.compensation.anomalies", "reason", reason).increment();
+    }
+
+    /** Worker는 예약별 새 트랜잭션을 사용한다. 결제 행이나 PG를 호출하지 않는다. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
+    public boolean expirePayment(Long reservationId) {
+        LockedReservation locked = lockReservation(reservationId).orElse(null);
+        if (locked == null || !locked.reservation().canExpirePayment(databaseNow())) {
+            return false;
+        }
+        List<HeldSeat> lockedSeats = lockReservationSeats(locked.reservation());
+        OrderView order = validatePendingResources(locked, lockedSeats);
+        Instant now = databaseNow();
+        // 후보 조회 이후 승인 시작/결과 반영이 먼저 커밋됐으면 위 예약 잠금 아래에서 제외된다.
+        if (!locked.reservation().canExpirePayment(now)) {
+            return false;
+        }
+        releasePendingResources(locked, lockedSeats, now);
+        locked.reservation().expirePayment(now);
+        orders.changeStatus(order.orderId(), OrderStatus.CANCELLED);
+        return true;
+    }
+
+    private void releasePendingResources(LockedReservation locked, List<HeldSeat> lockedSeats, Instant now) {
+        for (HeldSeat held : lockedSeats) {
+            held.seat().release(held.hold().getId());
+            held.hold().release(now);
+        }
+        locked.limit().release(lockedSeats.size());
+    }
+
+    private OrderView validatePendingResources(LockedReservation locked, List<HeldSeat> lockedSeats) {
+        OrderView order = validateOrder(locked.reservation(), orders.find(locked.reservation().getOrderId()));
+        if (!pendingResourcesMatch(locked, lockedSeats, order)) {
+            throw new IllegalStateException("결제 대상 예약과 좌석·수량·주문이 일치하지 않습니다.");
+        }
+        return order;
+    }
+
+    private boolean pendingResourcesMatch(LockedReservation locked, List<HeldSeat> lockedSeats, OrderView order) {
+        TicketReservation reservation = locked.reservation();
+        if (!hasCheckout(reservation) || locked.limit().getReservedCount() != lockedSeats.size()) {
+            return false;
+        }
+        OrderStatus expected = reservation.getStatus() == TicketReservationStatus.RECONCILING
+                ? OrderStatus.PAYMENT_REVIEW : reservation.isPaymentResultPending()
+                    ? OrderStatus.PAYMENT_CONFIRMING : OrderStatus.PENDING_PAYMENT;
+        long amount = 0;
+        for (HeldSeat held : lockedSeats) {
+            if (held.hold().getStatus() != SeatHoldStatus.HELD || held.seat().getStatus() != TicketSeatStatus.HELD
+                    || !held.hold().getId().equals(held.seat().getCurrentHoldId())) {
+                return false;
+            }
+            amount = Math.addExact(amount, held.hold().getPriceAmount());
+        }
+        return order.status() == expected && order.totalAmount() == amount;
+    }
+
     private Optional<LockedReservation> lockReservation(Long reservationId) {
         if (reservationId == null || reservationId <= 0) {
             return Optional.empty();
@@ -237,22 +379,26 @@ public class TicketPaymentService {
     }
 
     private List<HeldSeat> lockReservationSeats(TicketReservation reservation) {
+        return tryLockReservationSeats(reservation)
+                .orElseThrow(() -> new IllegalStateException("예약·선점·좌석의 관계가 일치하지 않습니다."));
+    }
+
+    private Optional<List<HeldSeat>> tryLockReservationSeats(TicketReservation reservation) {
         List<SeatHold> originalHolds = holds.findAllByReservationIdOrderByPerformanceSeatIdAsc(reservation.getId());
         if (originalHolds.isEmpty()) {
-            throw new IllegalStateException("승인 대상 예약에 선점 이력이 없습니다.");
+            return Optional.empty();
         }
         List<HeldSeat> locked = new ArrayList<>(originalHolds.size());
         for (SeatHold hold : originalHolds) {
-            TicketSeat seat = seats.findLockedById(hold.getPerformanceSeatId())
-                    .orElseThrow(() -> new IllegalStateException("선점 좌석이 없습니다."));
-            if (!reservation.getId().equals(hold.getReservationId())
+            TicketSeat seat = seats.findLockedById(hold.getPerformanceSeatId()).orElse(null);
+            if (seat == null || !reservation.getId().equals(hold.getReservationId())
                     || !reservation.getPerformanceId().equals(hold.getPerformanceId())
                     || !reservation.getPerformanceId().equals(seat.getPerformanceId())) {
-                throw new IllegalStateException("예약·선점·좌석의 관계가 일치하지 않습니다.");
+                return Optional.empty();
             }
             locked.add(new HeldSeat(hold, seat));
         }
-        return locked;
+        return Optional.of(locked);
     }
 
     private OrderView validateOrder(TicketReservation reservation, Optional<OrderView> foundOrder) {

@@ -88,3 +88,7 @@
 ## 승인 성공 내부 서비스의 수량 이동
 
 TicketPaymentService.onApproved에서 최초 확정 때만 reserved_count를 발급 좌석 수만큼 줄이고 confirmed_count를 같은 수만큼 늘린다. 전체 합은 유지한다. 동일 성공 재수신은 수량을 다시 이동하지 않는다. 주문·예약·선점·좌석·티켓과 같은 트랜잭션에 참여한다. 공통 Handler 등록과 실패/만료/보상 연결은 아직 다음 단계다.
+
+## 보상 취소 수량 (2026-11-16)
+
+onRefunded(COMPENSATION)은 현재 미확정 시도와 전체 HELD 소유권·reserved 수량이 일치할 때만 reserved를 감소시킨다. confirmed는 유지한다. 중복 완료나 다른 시도·이미 확정된 예약은 수량을 다시 변경하지 않는다. Handler 등록을 통해 공통 PG 취소 확정 트랜잭션과 함께 반영된다.

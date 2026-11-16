@@ -96,10 +96,14 @@ UUID 번호 자체의 충돌은 발급 대상 중복과 구분하여 새 번호�
 - 구매 관리 → 예약 → 좌석 ID 오름차순 잠금 뒤 모든 HELD/현재 포인터를 확인하고, 선점 CONFIRMED·좌석 SOLD·예약 CONFIRMED·payment_result_pending=false·reserved-N/confirmed+N·좌석별 ISSUED 티켓·주문 PAID를 같은 트랜잭션에서 처리한다.
 - 가격은 SeatHold.priceAmount, 발급 시각은 DB UTC 현재 시각이다. 기존 선점 포인터·최초 결제 기한·수락 시도 ID/시각은 보존한다.
 - 같은 성공의 반복·동시 전달은 기존 주문 PAID·티켓 수/좌석/가격·SOLD 포인터·확정 수량의 일관성을 확인하고 ACCEPT한다. 새 번호를 생성하거나 수량을 다시 이동하지 않는다. 불일치는 기술 오류로 남기며 티켓을 임의 재생성하지 않는다.
-- 다른 시도·승인 금액 불일치·소유권 상실·종료 상태는 REJECT한다. 모든 좌석을 먼저 검증하므로 일부 좌석만 변경한 채 거절하지 않는다. 이후 공통 보상 취소 연결은 다음 단계다.
+- 다른 시도·승인 금액 불일치·소유권 상실·종료 상태는 REJECT한다. 모든 좌석을 먼저 검증하므로 일부 좌석만 변경한 채 거절하지 않는다. 공통 보상 취소를 통해 PG 취소를 요청하고, 취소 확정 시만 미확정 자원을 반환한다.
 - 티켓 INSERT나 후속 확정 중 기술 오류는 예외로 전체 롤백한다. UNIQUE 오류를 삼키고 같은 트랜잭션에서 계속하지 않는다. 같은 승인 결과의 재처리는 새 트랜잭션에서 수행하며 번호도 새로 생성한다.
 
 이번 단계는 새 마이그레이션이나 공통 API 변경이 없다. 내부 성공 처리만 구현했으며 Handler 등록·실제 PG 호출·실패/불명확/만료/보상 취소·정상 환불·입장 처리는 아직 다음 단계다.
 
 필수 테스트는 기존 checkout fixture에 ApprovalConfirmation 중첩 테스트 4개 메서드/10개 사례로 추가했다. 늦은 성공 2개 상태, 동시·반복 성공, 다른 시도/시각·금액·좌석 소유권·반환 예약 5개 거절, 두 번째 INSERT/전체 flush 후 오류 2개와 재처리를 검증한다. 기존 UUID 형식·DB UNIQUE·FK·checkout 가격·승인 시작 경계 테스트를 복제하지 않았다.
 집중 명령 `./gradlew test --tests 'com.restless.ticketing.application.TicketCheckoutServiceTest*' --tests 'com.restless.ticketing.entity.TicketMappingTest'`: 39개 통과, 실패·오류·건너뜀 0개.
+
+## 공통 결제 callback 연결 (2026-11-16)
+
+TicketPaymentResultHandler가 onApproved를 내부 발급 서비스로 전달한다. 거절된 승인은 공통 결제가 보상 취소하며, 티켓팅은 onRefunded(COMPENSATION)에서 미확정 자원만 정리한다. 이미 CONFIRMED인 예약에 보상 취소가 오면 티켓·confirmed 수량을 변경하지 않고 운영 확인 대상으로 기록한다. 정상 환불·입장 기능은 후속이다. 이전 단계의 Handler·보상 연결 후속 표기는 당시 범위다.

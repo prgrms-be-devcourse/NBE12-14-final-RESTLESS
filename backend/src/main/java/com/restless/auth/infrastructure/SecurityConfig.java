@@ -43,6 +43,8 @@ public class SecurityConfig implements WebMvcConfigurer {
             "/api/auctions", "/api/auctions/*", "/api/auctions/*/bids", "/api/auctions/*/result",
             "/api/fan-meetings/*",
             "/actuator/health", "/actuator/health/**",
+            // perf 프로필에서만 노출된다. 관리 포트를 보안 그룹으로 막는다 (application-perf.yml)
+            "/actuator/prometheus",
     };
 
     /** 토큰 없이 부르는 인증 API. refresh, logout은 Access Token이 만료된 뒤에도 불려야 한다. */

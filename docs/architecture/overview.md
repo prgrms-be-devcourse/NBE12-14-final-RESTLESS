@@ -69,8 +69,10 @@ Spring Boot → Toss Payments HTTPS API
 |---|---|---|---|
 | 로컬 개발 | `dev` (기본값) | `dev`: `mysql` 서비스 | 로컬 Docker MySQL |
 | 배포 | `prod` | `prod`: `app` 서비스 | RDS MySQL |
+| 부하 테스트 | `perf` | 없음 | 부하 테스트 전용 RDS MySQL |
 
 - `prod` 설정 값은 환경변수로만 주입하고 기본값을 두지 않는다. 값이 빠지면 기동이 실패한다.
+- `perf`는 `prod`처럼 환경변수로만 값을 받는다. 다른 점은 가짜 PG를 쓰고 관리 포트(기본 8081)에 `/actuator/prometheus`와 health를 여는 것이다. 가짜 PG가 아니면 기동이 실패한다 (`PerfProfilePgGuard`).
 - 앱 컨테이너는 `127.0.0.1:8080`으로만 열고, 외부 요청은 Nginx가 받는다.
 - 필수 값 검사는 compose(`${VAR:?}`)가 아니라 `application-prod.yml`이 맡는다. compose는 꺼진 프로필의 서비스까지 변수를 검사하므로, compose에 필수 표기를 쓰면 `dev` 실행도 실패한다.
 - 백엔드 `Dockerfile`은 아직 없다. `prod` compose 프로필은 이미지를 만든 뒤에 쓸 수 있다.

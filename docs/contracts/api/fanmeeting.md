@@ -15,7 +15,7 @@
 | GET | `/api/fan-meetings/{eventId}/orders/me` | 내 주문·결제 상태 + `paymentDeadline` | 회원 |
 | POST | `/api/fan-meetings/{eventId}/orders/{orderId}/decline` | 결제 포기 | 회원 |
 | POST | `/api/fan-meetings/{eventId}/orders/{orderId}/confirm` | 0원 주문 확정(결제 없음) | 회원 |
-| GET | `/api/admin/fan-meetings/{eventId}/summary` | 상태, 응모 수, Selection·Order 상태별 인원, 정원 점유, 승격된 예비 최대 순번, `promotion_closes_at`, 보류 목록(경과 시간), `REFUND_PENDING` 목록, 계약 위반 승인 목록 | ADMIN |
+| GET | `/api/admin/fan-meetings/{eventId}/summary` | 상태, 응모 수, Selection·Order 상태별 인원, 정원 점유, 승격된 예비 최대 순번, `promotionClosesAt`, 보류 목록(경과 시간), `REFUND_PENDING` 목록 | ADMIN |
 
 주최자 API(`/api/organizer/**`)는 `role = ORGANIZER` 또는 `ADMIN`, 관리자 API(`/api/admin/**`)는 `role = ADMIN`만 호출할 수 있다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`([공통 API](common.md)).
 
@@ -125,6 +125,35 @@
 - 포기: 결제를 한 번이라도 준비한 주문은 409 `DECLINE_NOT_ALLOWED`, 결제 대기가 아니면 409 `ORDER_NOT_PAYABLE`, 기한이 지났으면 409 `PAYMENT_WINDOW_EXPIRED`.
 - 확정: 0원 주문이 아니거나 결제 대기가 아니거나 행사가 결제 진행 중이 아니면 409 `ORDER_NOT_PAYABLE`, 기한이 지났으면 409 `PAYMENT_WINDOW_EXPIRED`.
 - 포기·확정에서 주문이 없거나 다른 행사·다른 회원의 주문이면 404 `ORDER_NOT_FOUND`, 행사가 없으면 404 `FAN_MEETING_NOT_FOUND`.
+
+## 관리자 summary `GET /api/admin/fan-meetings/{eventId}/summary`
+
+200. 없는 행사는 404 `FAN_MEETING_NOT_FOUND`, ADMIN이 아니면 403 `FORBIDDEN`.
+
+```json
+{
+  "eventId": 1,
+  "status": "PAYMENT_IN_PROGRESS",
+  "winnerLimit": 300,
+  "reserveLimit": 100,
+  "promotionClosesAt": "2026-11-22T09:00:00Z",
+  "applicationCount": 12000,
+  "occupied": 287,
+  "selectionCounts": {"PAYMENT_PENDING": 12, "WAITING": 80, "CONFIRMED": 275, "EXPIRED": 20, "DECLINED": 5, "NOT_NEEDED": 0},
+  "orderCounts": {"PENDING_PAYMENT": 10, "PAYMENT_REVIEW": 2, "PAID": 275, "EXPIRED": 18, "CANCELLED": 5, "REFUND_PENDING": 1, "REFUNDED": 1},
+  "maxPromotedReserveRank": 20,
+  "reviews": [{"orderId": 55, "reviewStartedAt": "2026-11-20T12:30:00Z", "elapsedMinutes": 42}],
+  "refundPending": [{"orderId": 71}]
+}
+```
+
+- `applicationCount`: 취소하지 않은 응모(`APPLIED`) 수.
+- `occupied`: 확정 + 결제 대기 인원. 정원(`winnerLimit`)을 넘지 않는다(INV-FM-07). 보류 중인 자리도 결제 대기에 들어 있다.
+- `selectionCounts`, `orderCounts`: 0명인 상태도 모두 담는다.
+- `maxPromotedReserveRank`: 승격된 예비 중 가장 뒤 순번. 승격된 예비가 없으면 null. 승격 차례에 탈퇴가 확인돼 `NOT_NEEDED`가 된 예비는 세지 않는다.
+- `reviews`: 결제 결과를 모르는 보류 주문. `elapsedMinutes`는 보류가 이어진 분(내림).
+- 회원 ID는 내보내지 않는다. 주문 번호로 추적한다.
+- 현재 시도가 아니어서 거절한 승인(계약 위반)은 저장하지 않으므로 summary에 없다. 로그 `FANMEETING_APPROVAL_NOT_CURRENT`로 확인한다. 늦은 승인·금액 불일치는 `refundPending`에 나온다.
 
 ## 결제 (공통 결제 API)
 

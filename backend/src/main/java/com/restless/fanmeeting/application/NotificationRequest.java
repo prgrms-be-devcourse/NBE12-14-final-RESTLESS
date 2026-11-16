@@ -8,4 +8,8 @@ public record NotificationRequest(String type, Long eventId, Long orderId, Insta
     public static NotificationRequest winner(Long eventId, Long orderId, Instant paymentDeadline) {
         return new NotificationRequest("WINNER", eventId, orderId, paymentDeadline);
     }
+
+    public static NotificationRequest promotion(Long eventId, Long orderId, Instant paymentDeadline) {
+        return new NotificationRequest("PROMOTION", eventId, orderId, paymentDeadline);
+    }
 }

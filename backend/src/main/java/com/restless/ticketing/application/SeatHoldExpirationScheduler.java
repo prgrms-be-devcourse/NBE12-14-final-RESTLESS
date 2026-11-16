@@ -18,6 +18,7 @@ public class SeatHoldExpirationScheduler {
 
     private final TicketReservationRepository reservations;
     private final TicketReservationService reservationService;
+    private final TicketPaymentService paymentService;
     private final MeterRegistry metrics;
 
     @Scheduled(fixedDelayString = "${restless.ticketing.hold-expiration-delay-ms:5000}")
@@ -30,5 +31,28 @@ public class SeatHoldExpirationScheduler {
                 metrics.counter("ticketing.hold.expiration.failures").increment();
             }
         }
+    }
+
+    @Scheduled(fixedDelayString = "${restless.ticketing.payment-expiration-delay-ms:5000}")
+    public void expirePayments() {
+        java.util.List<Long> candidates;
+        try {
+            candidates = reservations.findExpiredPaymentIds();
+        } catch (RuntimeException failure) {
+            paymentFailure(null, failure);
+            return;
+        }
+        for (Long reservationId : candidates) {
+            try {
+                paymentService.expirePayment(reservationId);
+            } catch (RuntimeException failure) {
+                paymentFailure(reservationId, failure);
+            }
+        }
+    }
+
+    private void paymentFailure(Long reservationId, RuntimeException failure) {
+        log.error("결제 기한 만료 처리 실패: reservationId={}", reservationId, failure);
+        metrics.counter("ticketing.payment.expiration.failures").increment();
     }
 }
