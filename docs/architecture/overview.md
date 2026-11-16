@@ -62,6 +62,7 @@ Spring Boot → Toss Payments HTTPS API
 - 백엔드 API도 HTTPS가 필요하다.
 - RDS를 인터넷에 공개하지 않는다.
 - 재고, 결제, 인증 API는 캐시 대상이 아니다.
+- 백엔드 이미지는 `backend/Dockerfile`로 만든다. dev에서 CI가 통과한 커밋을 `.github/workflows/backend-image.yml`이 amd64로 빌드해 GHCR `nbe12-14-final-restless-backend`에 `sha-<커밋 12자리>`와 `dev` 태그로 올린다. 다른 브랜치는 수동 실행으로 sha 태그만 만든다.
 
 ### 실행 환경 구분
 
