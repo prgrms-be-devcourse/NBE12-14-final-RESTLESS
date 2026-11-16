@@ -1,0 +1,44 @@
+# 부하 테스트 시드 수치. 값은 여기서만 바꾼다.
+# 형식: 최상위 구역 아래 "키: 정수". 들여쓰기 2칸, 주석은 #. lib/scale.py가 읽는다 (PyYAML 불필요).
+# common은 모든 스케일에 적용되고, 스케일 구역의 같은 키가 덮어쓴다.
+# 핫 데이터 기준값(재고)은 고정값이다. 테스트 후 불변식 대조에 쓴다.
+
+common:
+  # 핫 이벤트 경쟁률 N:1. 참여자 = 기준값 x 경쟁률, users 이하여야 한다.
+  contention_ratio: 10
+  # 시드가 서명하는 Access Token, DB의 Refresh Token 유효 시간. 테스트 길이보다 길게 둔다.
+  token_ttl_hours: 72
+  # 핫 드롭 판매 기간. 시드 또는 --refresh-window 시각부터 센다.
+  hot_window_hours: 24
+  credit_wallet_balance: 1000000
+  drop_hot_variants: 3
+  drop_hot_price: 59000
+  # 핫 드롭 대기열에 미리 넣을 WAITING 행 수. 0이면 대기열 등록 자체를 측정한다.
+  drop_hot_queue_prefill: 0
+  drop_bg_variants_per_drop: 3
+  drop_bg_price: 39000
+  # 종료된 드롭 점유의 상태 비율(%). 나머지는 EXPIRED. restored가 환불 비율이다.
+  drop_bg_pct_confirmed: 80
+  drop_bg_pct_restored: 3
+  drop_bg_pct_released: 7
+
+# 로컬 확인용
+small:
+  users: 1000
+  drop_hot_stock: 100
+  drop_bg_drops: 5
+  drop_bg_reservations: 1000
+
+# 기본 실험 (EXP-01~04)
+base:
+  users: 100000
+  drop_hot_stock: 10000
+  drop_bg_drops: 100
+  drop_bg_reservations: 100000
+
+# 확장 실험
+large:
+  users: 1000000
+  drop_hot_stock: 100000
+  drop_bg_drops: 1000
+  drop_bg_reservations: 1000000

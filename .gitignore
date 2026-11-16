@@ -37,6 +37,8 @@ CLAUDE.local.md
 
 # Load test raw results (summaries go to docs/reports/)
 performance/**/results/
+# Load test seed output: tokens for the perf database
+/perf/seed/out/
 
 # Drop harness is a personal tool (each member keeps their own copy)
 /tools/harness/
