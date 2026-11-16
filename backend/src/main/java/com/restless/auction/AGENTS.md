@@ -27,6 +27,8 @@ Codex는 레포 루트에서 실행하면 이 파일을 자동으로 읽지 않�
 - 오류 코드는 `ErrorCode`에 `AUCTION_`, `BID_`, `CREDIT_` 접두어로 추가하고, 계약 문서의 오류 표도 같이 고친다.
 - 스키마는 새 마이그레이션 `V<YYYYMMDD>_<HHMM>__auction_<내용>.sql`로만 바꾼다. dev에 머지된 마이그레이션은 고치지 않는다.
 - 공용 파일(`ErrorCode`, `SecurityConfig`, `GlobalExceptionHandler`, `application.yml`, `build.gradle`)은 꼭 필요한 만큼만 고치고, 고친 이유를 보고한다.
+- 시각은 주입된 `Clock`으로 얻는다. 운영 코드에서 `Instant.now()`를 직접 부르지 않는다.
+- 메트릭 태그에는 정해진 몇 개의 값(예: `action`, `stage`)만 넣는다. `auctionId`처럼 끝없이 늘어나는 값은 태그가 아니라 로그에 남긴다. 로그에 토큰·비밀번호를 남기지 않는다.
 - 커밋과 push는 하지 않는다. 바꾼 파일과 이유를 보고하고, 커밋은 사람이 한다.
 
 ## 교훈 (버그에서 나온 규칙)
@@ -43,6 +45,9 @@ Codex는 레포 루트에서 실행하면 이 파일을 자동으로 읽지 않�
 - 데이터를 바꾸는 테스트는 끝에 `AuctionFixtures.assertInvariants()`로 불변식을 확인한다. 쿼리는 `backend/src/test/resources/harness/auction-invariants.sql`에 있다. 새 불변식은 이 파일에 `-- name:` 블록으로 추가한다.
 - 테스트에서는 스케줄러가 꺼져 있다 (`build.gradle`의 `restless.auction.scheduler.enabled=false`). 스케줄러 동작을 볼 때는 `AuctionScheduler`를 테스트 안에서 직접 만들어 부른다 (`AuctionCloseFailureTest` 참고).
 - 시간이 흐르는 상황은 실제로 기다리지 않고 테스트용 시계를 옮긴다 (`SellerAuctionLockOrderTest`의 `MutableClock` 참고).
+- 고정 시계나 테스트용 시계로 JWT를 발급하지 않는다. 실제 날짜가 그 시각을 넘으면 토큰이 만료돼 401로 깨진다.
+- 저장 전 시각과 DB에서 읽은 시각을 비교할 때는 1마이크로초 오차를 두거나, 처음부터 `truncatedTo(ChronoUnit.MICROS)`로 자른 값을 쓴다. MySQL은 나노초를 마이크로초로 반올림해 저장하고 Linux CI 시계는 나노초를 주므로, 그냥 비교하면 macOS에서만 통과한다 (드롭 HD-19, #119).
+- 기본값이 있는 설정(`restless.auction.scheduler.enabled`, `stream.flush-interval-ms`, `scheduler.batch-size` 등)을 바꾸면, 그 기본값에 기대는 기존 테스트를 찾아 값을 명시한다. 특히 테스트에서 스케줄러를 끄는 `build.gradle`의 설정을 지우면 스케줄러가 테스트 중에 경매를 종료한다.
 - 실패 상황은 `@MockitoSpyBean`으로 특정 호출만 예외를 던지게 해서 만든다. 이런 테스트는 Spring 컨텍스트를 하나 더 띄우므로 기존 테스트 클래스에 섞지 않고 따로 둔다.
 
 ## 검증 (`backend/`에서)
