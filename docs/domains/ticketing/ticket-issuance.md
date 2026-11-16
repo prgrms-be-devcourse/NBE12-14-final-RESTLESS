@@ -4,7 +4,7 @@
 
 - 티켓번호: DECIDED (2026-11-12, 담당자 합의).
 - 중복 발급 방지 절차와 추가 제약: DECIDED (2026-11-12, 담당자 합의).
-- 구현 상태: 기존 복합 UNIQUE·UUID v4 매핑을 사용해 TicketPaymentService.onApproved의 예약 확정·좌석별 발급·중복 방지를 구현했다. PaymentResultHandler 등록과 실제 결제 API 연결은 아직 다음 단계다.
+- 구현 상태: 기존 복합 UNIQUE·UUID v4 매핑을 사용해 TicketPaymentService.onApproved의 예약 확정·좌석별 발급·중복 방지를 구현했다. TicketPaymentResultHandler를 통해 공통 결제 API에도 연결돼 있다. 본인 발급 티켓 목록·상세 조회를 추가했으며 테스트 실행은 사용자에게 맡긴다.
 
 ## 1. 티켓번호
 
@@ -107,3 +107,14 @@ UUID 번호 자체의 충돌은 발급 대상 중복과 구분하여 새 번호�
 ## 공통 결제 callback 연결 (2026-11-16)
 
 TicketPaymentResultHandler가 onApproved를 내부 발급 서비스로 전달한다. 거절된 승인은 공통 결제가 보상 취소하며, 티켓팅은 onRefunded(COMPENSATION)에서 미확정 자원만 정리한다. 이미 CONFIRMED인 예약에 보상 취소가 오면 티켓·confirmed 수량을 변경하지 않고 운영 확인 대상으로 기록한다. 정상 환불·입장 기능은 후속이다. 이전 단계의 Handler·보상 연결 후속 표기는 당시 범위다.
+
+
+## 본인 발급 티켓 조회 (2026-11-16)
+
+TicketQueryService/TicketController가 GET /api/tickets와 GET /api/tickets/{ticketId}를 제공한다. 티켓 → 예약의 userId로 소유자를 제한하고, 현재 좌석 소유 포인터와 별개로 발급 이력을 조회한다. 타인/없는 티켓은 동일 404이며 비로그인은 401이다.
+
+목록은 발급 시각·ID 내림차순 페이지이며 상세와 같은 IssuedTicketInfo를 사용한다. 기존 UUID·발급 금액·상태·사용/취소 시각과 예약·주문·회차·공연·좌석 정보를 반환한다. 공연 정보는 ConcertQueryService에서 일괄 조회해 도메인 경계를 유지하며, 개별 티켓마다 조회하거나 상태를 수정하지 않는다. 가격은 티켓에 보존된 값이고 공연명·좌석 표시·등급은 현재 카탈로그 값이다.
+
+조회는 입장 권한·QR 생성·티켓 사용·환불을 수행하지 않는다. 상태값은 저장된 문자열을 그대로 반환하며 사용/취소 전이 정책은 별도다. 새 스키마·인덱스·공통 API 변경은 없다. API 응답과 오류 규칙은 [티켓팅 API](../../contracts/api/ticketing.md#본인-발급-티켓-목록상세)를 따른다.
+
+기존 매핑/발급 검증을 반복하지 않고 TicketQueryApiTest에 인증·본인 범위·정렬/페이지·표시 데이터·과거 이력·입력 검증을 추가했다. 테스트는 작성만 했으며 실행하지 않았다.
