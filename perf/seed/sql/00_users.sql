@@ -10,7 +10,7 @@ INSERT INTO _perf_seq (n)
 WITH RECURSIVE s (n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM s WHERE n + 1 < @seq_size)
 SELECT n FROM s;
 
--- 시드 기록. 운영 DB에는 이 테이블이 없으므로 --refresh-window, --tokens-only의 안전장치로도 쓴다.
+-- 시드 기록. 운영 DB에는 이 테이블이 없으므로 --refresh, --verify의 안전장치로도 쓴다.
 CREATE TABLE IF NOT EXISTS perf_seed_meta
 (
     k VARCHAR(64)  NOT NULL PRIMARY KEY,

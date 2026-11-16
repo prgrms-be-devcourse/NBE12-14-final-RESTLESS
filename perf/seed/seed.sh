@@ -56,7 +56,7 @@ shopt -u nocasematch
 export MYSQL_PWD="$DB_PASSWORD"
 # shellcheck disable=SC2086 # MYSQL may be a multi-word command
 mysql_run() { $MYSQL -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USERNAME" --default-character-set=utf8mb4 "$DB_NAME" "$@"; }
-query() { mysql_run --batch --skip-column-names -e "$1"; }
+query() { mysql_run --batch --raw --skip-column-names -e "$1"; }
 
 table_exists() {
   query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = '$1'"

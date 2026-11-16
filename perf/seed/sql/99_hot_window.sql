@@ -1,5 +1,5 @@
 -- 핫 이벤트 판매 기간과 Refresh Token 만료를 실행 시각 기준으로 다시 맞춘다.
--- 시드 마지막에 실행하고, 스냅샷을 복원한 뒤 실험 전에도 seed.sh --refresh-window로 다시 실행한다.
+-- 시드 마지막에 실행하고, 스냅샷을 복원한 뒤 실험 전에도 seed.sh --refresh로 다시 실행한다.
 -- 재고, 점유, 주문은 건드리지 않는다.
 SET @now = UTC_TIMESTAMP(6);
 

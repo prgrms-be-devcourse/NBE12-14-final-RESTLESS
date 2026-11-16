@@ -4,11 +4,13 @@
 # 핫 데이터 기준값(재고)은 고정값이다. 테스트 후 불변식 대조에 쓴다.
 
 common:
-  # 핫 이벤트 경쟁률 N:1. 참여자 = 기준값 x 경쟁률, users 이하여야 한다.
+  # 핫 이벤트 기본 경쟁률 N:1. 참여자 = 기준값 x 경쟁률, users 이하여야 한다.
+  # 핫 이벤트는 빈 상태로 시작하므로 실제 참여자 수는 k6가 CSV 앞에서 몇 행을 쓰는지로 바꾼다.
+  # base는 재고 1,000에 계정 100,000이라 10:1부터 100:1까지 다시 시드하지 않고 실험한다.
   contention_ratio: 10
   # 시드가 서명하는 Access Token, DB의 Refresh Token 유효 시간. 테스트 길이보다 길게 둔다.
   token_ttl_hours: 72
-  # 핫 드롭 판매 기간. 시드 또는 --refresh-window 시각부터 센다.
+  # 핫 드롭 판매 기간. 시드 또는 --refresh 시각부터 센다.
   hot_window_hours: 24
   credit_wallet_balance: 1000000
   drop_hot_variants: 3
@@ -32,7 +34,7 @@ small:
 # 기본 실험 (EXP-01~04)
 base:
   users: 100000
-  drop_hot_stock: 10000
+  drop_hot_stock: 1000
   drop_bg_drops: 100
   drop_bg_reservations: 100000
 
