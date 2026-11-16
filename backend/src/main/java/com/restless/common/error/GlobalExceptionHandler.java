@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -23,6 +25,9 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 /**
  * 컨트롤러 이후에 난 예외를 {@link ErrorResponse}로 바꾼다.
  * 필터 단계의 401, 403은 Security 설정의 JsonSecurityErrorHandler가 같은 모양으로 쓴다.
+ *
+ * <p>응답 형식을 JSON으로 못 박는다. 그러지 않으면 {@code Accept: text/event-stream}(SSE) 요청의 오류를
+ * JSON으로 쓰지 못해 404 대신 500이 나간다.
  */
 @RestControllerAdvice
 @RequiredArgsConstructor
@@ -92,12 +97,22 @@ public class GlobalExceptionHandler {
      * 위에서 못 잡은 예외. Spring MVC 표준 예외(406 등)는 원래 상태 코드를 지키고,
      * 나머지는 500으로 답하며 traceId와 함께 로그를 남긴다.
      */
+    /**
+     * 클라이언트가 먼저 연결을 끊었다 (SSE 화면 이탈 등). 응답을 쓸 곳이 없으므로 아무것도 쓰지 않는다.
+     * 정상 상황이라 ERROR로 남기지 않는다.
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleDisconnected(AsyncRequestNotUsableException e) {
+        log.debug("Client disconnected: {}", e.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception e) {
         if (e instanceof org.springframework.web.ErrorResponse standard
                 && standard.getStatusCode().is4xxClientError()) {
             HttpStatus status = HttpStatus.valueOf(standard.getStatusCode().value());
             return ResponseEntity.status(status)
+                    .contentType(MediaType.APPLICATION_JSON)
                     .body(ErrorResponse.of(ErrorCode.INVALID_REQUEST, status.getReasonPhrase(), null, clock.instant()));
         }
         log.error("Unhandled exception", e);
@@ -110,6 +125,7 @@ public class GlobalExceptionHandler {
 
     private ResponseEntity<ErrorResponse> respond(ErrorCode code, String message, Map<String, Object> details) {
         return ResponseEntity.status(code.getHttpStatus())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(ErrorResponse.of(code, message, details, clock.instant()));
     }
 }

@@ -106,4 +106,22 @@ class PaymentTest {
         assertThat(p.getApprovedAt()).isEqualTo(NOW);
         assertThatIllegalStateException().isThrownBy(() -> p.revertCancel(NOW));
     }
+    @Test void startProcessingRecordsApprovalStartTimeAndReadyClosureDoesNot() {
+        Payment started = ready();
+        assertThat(started.getApprovalStartedAt()).isNull();
+        started.startProcessing("key", NOW.plusSeconds(10));
+        assertThat(started.getApprovalStartedAt()).isEqualTo(NOW.plusSeconds(10));
+        started.markUnknown(NOW.plusSeconds(20));
+        started.fail("DECLINED", "confirmed by PG lookup", NOW.plusSeconds(30));
+        assertThat(started.getApprovalStartedAt()).isEqualTo(NOW.plusSeconds(10));
+
+        Payment closed = ready();
+        closed.fail("EXPIRED", "expired before approval", NOW.plusSeconds(61));
+        assertThat(closed.getApprovalStartedAt()).isNull();
+    }
+    @Test void rejectedStartAfterExpiryLeavesApprovalStartTimeEmpty() {
+        Payment p = ready();
+        assertThatIllegalStateException().isThrownBy(() -> p.startProcessing("key", NOW.plusSeconds(61)));
+        assertThat(p.getApprovalStartedAt()).isNull();
+    }
 }

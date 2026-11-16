@@ -1,4 +1,68 @@
 package com.restless.auction.application;
 
+import com.restless.auction.domain.Auction;
+import com.restless.auction.domain.Auction.Terms;
+import com.restless.auction.infrastructure.AuctionRepository;
+import com.restless.common.error.BusinessException;
+import com.restless.common.error.ErrorCode;
+import com.restless.member.application.MemberService;
+import com.restless.member.domain.MemberRole;
+import java.time.Clock;
+import java.time.Instant;
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * 주최자의 경매 등록, 수정, 삭제 (TX-AU-5).
+ *
+ * <p>역할(ORGANIZER, ADMIN)은 Security가 먼저 막고, 여기서는 본인 경매인지와 시작 전인지를 확인한다.
+ * ADMIN은 다른 주최자의 경매도 수정·삭제할 수 있다.
+ */
+@Service
+@RequiredArgsConstructor
 public class SellerAuctionService {
+
+    private final AuctionRepository auctions;
+    private final MemberService memberService;
+    private final Clock clock;
+    private final ApplicationEventPublisher events;
+
+    @Transactional
+    public Long create(Long sellerUserId, Terms terms) {
+        return auctions.save(Auction.schedule(sellerUserId, terms, clock.instant())).getId();
+    }
+
+    @Transactional
+    public Long update(Long userId, Long auctionId, Terms terms) {
+        Auction auction = lockOwned(userId, auctionId);
+        // 잠금을 얻은 뒤에 시각을 읽는다. 먼저 읽으면 잠금을 기다리는 사이 시작된 경매를 "시작 전"으로 본다.
+        Instant now = clock.instant();
+        auction.update(terms, now);
+        // 시작 전 화면을 보던 회원에게 바뀐 시작가·종료 시각을 보낸다.
+        events.publishEvent(new AuctionChangedEvent(auctionId, auction.getRevision()));
+        return auction.getId();
+    }
+
+    @Transactional
+    public void delete(Long userId, Long auctionId) {
+        Auction auction = lockOwned(userId, auctionId);
+        // 잠금을 얻은 뒤에 시각을 읽는다. 먼저 읽으면 잠금을 기다리는 사이 시작된 경매를 "시작 전"으로 본다.
+        Instant now = clock.instant();
+        auction.requireNotStarted(now);
+        auctions.delete(auction);
+        // 실시간 전달 쪽은 경매가 없는 것을 보고 연결을 닫는다.
+        events.publishEvent(new AuctionChangedEvent(auctionId, auction.getRevision()));
+    }
+
+    /** 경매 행을 잠그고 본인(또는 ADMIN)인지 확인한다. 시작 여부는 잠금 뒤에 호출한 쪽이 확인한다. */
+    private Auction lockOwned(Long userId, Long auctionId) {
+        Auction auction = auctions.findByIdForUpdate(auctionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.AUCTION_NOT_FOUND));
+        if (!auction.isSeller(userId) && memberService.getActive(userId).getRole() != MemberRole.ADMIN) {
+            throw new BusinessException(ErrorCode.AUCTION_FORBIDDEN);
+        }
+        return auction;
+    }
 }

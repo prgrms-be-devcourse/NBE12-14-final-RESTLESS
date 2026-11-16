@@ -1,4 +1,7 @@
 package com.restless.order.infrastructure;
 
-public interface OrderShippingSnapshotRepository {
+import com.restless.order.domain.OrderShippingSnapshot;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface OrderShippingSnapshotRepository extends JpaRepository<OrderShippingSnapshot, Long> {
 }

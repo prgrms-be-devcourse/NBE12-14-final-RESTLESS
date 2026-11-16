@@ -11,6 +11,7 @@
 - 위험한 순서는 latch로 강제한다(C03, C14, C23, C29, C43).
 - 반복 경합(100~1,000회)은 `-Pstress` 프로필에서만.
 - 매 시나리오 테스트 끝에 INV-FM-07, 09, 14, 15를 SQL로 확인한다.
+- 불변식 SQL은 테스트 도우미 `FanMeetingInvariants`에 모아 둔다(INV-FM-07, 08, 09, 10, 12, 14, 15, 16, 17). 관통 테스트(C72·C73)가 매 단계 뒤에 돌린다. 구간별 테스트는 각자 필요한 상태를 직접 확인한다.
 
 ## 2. 목록
 
@@ -27,14 +28,14 @@
 | C11 | UNKNOWN으로 기한 경과 | REVIEW 유지, 그 자리 승격 없음, 다른 빈자리 승격은 진행 |
 | C12 | `approvedAt == 기한` | PAID |
 | C13 | `approvedAt == 기한 + 1ms` | REFUND_PENDING, EXPIRED |
-| C14 | 승인 기록(`recordResult`)·반영과 만료 Worker 동시 (latch, 기한 경계) | 한 결과로 수렴. 승인이 먼저면 PAID, 만료 판정이 먼저면 시도가 닫혀 승인 거절. **EXPIRED인데 승인된 시도 0건** (INV-FM-10) |
+| C14 | 승인 반영(Handler)과 만료 Worker 동시 (latch, 기한 경계) | 한 결과로 수렴. 승인이 먼저면 PAID, 만료 판정이 먼저면 시도가 닫혀 승인 거절. **EXPIRED인데 승인된 시도 0건** (INV-FM-10) |
 | C15 | 승격 Worker 2개 동시 | 승격 합계 = vacancy |
 | C21 | 가입 시각 검사 ON, 가입 기준 시각 이후 가입 회원 응모 | 403 `APPLICATION_NOT_ELIGIBLE` |
 | C22 | 승격된 예비 일부 재만료 | 다음 순위 승격, 정원 유지 |
 | C23 | 승격과 결제 승인 동시 (latch) | INV-FM-07 유지 |
 | C25 | 다른 행사의 `event_id` 또는 다른 회원의 `user_id`로 Selection/Order 저장 | 복합 FK 위반, 롤백. 물리 FK가 없으면 [정합성 SQL](data-model.md#4-정합성-sql) 0건 |
 | C26 | 다른 회원 orderId로 결제 시작·포기 | 404, 상태 변화 없음 |
-| C27 | 요청 금액 변조 / 승인 금액 불일치 | 서버 금액 사용 / REFUND_PENDING, EXPIRED |
+| C27 | 요청 금액 변조 / 승인 금액 불일치 | 서버 금액 사용 / 거절 → 보상 취소, REFUNDED, EXPIRED |
 | C28 | 결제 시작 전 포기 | CANCELLED, DECLINED, 다음 회차에 예비 1명 승격 |
 | C29 | 포기와 결제 시작 동시 (latch) | 하나만 성공, 다른 쪽 409, INV-FM-17 |
 | C30 | 결제 시작 후 포기 (시도 FAILED여도) | 409 `DECLINE_NOT_ALLOWED` |
@@ -43,22 +44,38 @@
 | C33 | 탈퇴자 처리 | 탈퇴 응모자는 선발 안 되고 응모 행 유지, 예비 1순위 탈퇴 시 2순위부터 승격·1순위 NOT_NEEDED, `hasActiveParticipation` 참/거짓 |
 | C34 | 보류 30분 경과 | 경고 1회(다음 회차에 다시 안 남음), 자동 확정·탈락 없음 |
 | C36 | 알림 요청 | 최종화 시 당첨자 수만큼 기록, 롤백되면 기록 0 |
-| C41 | 일반 회원이 관리자 API 호출(생성·summary) | 403 `FORBIDDEN`, 상태 변화 없음 |
-| C42 | 다른 행사의 eventId + 내 orderId로 결제 시작·포기 | 404 `ORDER_NOT_FOUND`, 어느 Event도 상태 변화 없음 |
-| C43 | 같은 주문에 서로 다른 Idempotency-Key로 결제 시작 동시 2건 (latch) | 시도 1개 생성(201), 다른 쪽 409 `PAYMENT_ATTEMPT_IN_PROGRESS` |
-| C44 | ① READY 시도가 있는 주문에 새 키 ② 주문 `PENDING_PAYMENT`에서 같은 키 재요청(시도 READY·FAILED) ③ 주문 `PAID`·`PAYMENT_REVIEW`에서 같은 키 재요청 ④ 이전 시도 FAILED 뒤 새 키 ⑤ 키 A 시도가 FAILED가 된 뒤 키 A 재요청 | ① 409 `PAYMENT_ATTEMPT_IN_PROGRESS`, 시도 수 그대로 ② 그 시도의 현재 상태(READY만 URL, 200) ③ 409 `ORDER_NOT_PAYABLE` / 409 `PAYMENT_UNDER_REVIEW`, 결제 모듈 호출 없음 ④ 새 시도(201) ⑤ 같은 FAILED 시도(200), 새 시도 안 생김 |
+| C41 | 일반 회원이 주최자 API(생성)·관리자 API(summary) 호출 | 403 `FORBIDDEN`, 상태 변화 없음 |
+| C42 | 다른 행사의 eventId + 내 orderId로 포기 (결제는 공통 API라 eventId가 없다) | 404 `ORDER_NOT_FOUND`, 어느 Event도 상태 변화 없음 |
+| C43 | 같은 주문에 서로 다른 Idempotency-Key로 결제 준비 동시 2건 (latch) | 결제 모듈 규칙(공통 결제 테스트): 진행 중인 시도는 1개 |
+| C44 | 결제 준비 멱등·READY 교체 | 결제 모듈 규칙(공통 결제 테스트): 같은 키 → 같은 시도, 다른 키 → 이전 READY를 `SUPERSEDED`로 닫고 새 시도, UNKNOWN이면 409 `PAYMENT_UNDER_REVIEW`. 팬미팅은 주문이 `PENDING_PAYMENT`가 아니면 `load`가 거절 |
 | C45 | 같은 회원 첫 응모 2건·10건 동시 | Application 1개, 나머지 `ALREADY_APPLIED`, 5xx 0 |
 | C46 | 서로 다른 회원 1,000명 첫 응모 동시 (`-Pstress`) | **최종 정합성:** Application 정확히 1,000건, 회원당 1건, 성공 응답 수 = 커밋 수. **재시도:** 1062·1213·1205가 나도 재시도로 성공해 `APPLICATION_BUSY` 0건(0이 아니면 건수와 원인 기록). 교착·잠금 시간 초과 발생 수는 **지표로 기록**(실패 조건 아님) |
-| C47 | `REFUND_PENDING` 주문에 같은 승인 2회 / 다른 시도의 승인 | 상태·`approved_attempt_id` 변화 없음 / 이중 결제 기록, 상태 유지 |
+| C47 | 결제 완료·환불 대기 주문에 같은 승인 2회 / 다른 시도의 승인 | 상태·`approved_attempt_id` 변화 없음 / 거절 → 보상 취소, 상태 유지 |
 | C48 | `PAYMENT_REVIEW` 상태에서 UNKNOWN 반복, 30분 경과 | `review_started_at` 그대로, 30분에 경고 1회 |
-| C49 | `EXPIRED` 뒤 기한 안 `approvedAt`을 가진 승인 도착 | `REFUND_PENDING`, Selection `EXPIRED`, `FANMEETING_APPROVAL_AFTER_FINAL` 로그, 정원 변화 없음 |
+| C49 | `EXPIRED` 뒤 기한 안 `approvedAt`을 가진 승인 도착 | 거절 → 보상 취소, Order·Selection `EXPIRED` 유지, `FANMEETING_APPROVAL_NOT_CURRENT` 로그, 정원 변화 없음 |
 | C50 | 가입 시각 검사 ON + MemberPort 조회 예외 | 503 `MEMBER_LOOKUP_FAILED`, Application 0 |
-| C51 | `deliver` 중 Handler 예외 → `deliver` 재호출 | 시도 기록 유지, 재호출로 한 번만 반영 |
+| C51 | Handler 기술 예외 | 결제 모듈 트랜잭션 전체 롤백, 결제는 PROCESSING/UNKNOWN으로 남아 대사가 재시도, 한 번만 반영 |
 | C52 | 응모 재시도 3회 모두 잠금 시간 초과(강제) | 503 `APPLICATION_BUSY`, Application 0, 트랜잭션 남은 것 없음 |
 | C55 | 같은 DrawRun에 최종화 두 번 (완료 뒤 같은 token으로 재시도, 다른 Worker의 늦은 최종화) | 두 번째는 저장 0, 예외 없이 종료, Selection·Order 수 변화 없음 |
-| C56 | 운영 마이그레이션 검증: 운영 설정의 `spring.flyway.locations`(가짜 폴더 제외)로 빈 MySQL에 migrate 후, 가짜 엔티티를 뺀 JPA `validate` (Testcontainers, 슬라이스 테스트) | migrate 성공, `fake_*` 테이블 없음, validate 통과. **전체 앱 기동은 검증하지 않는다**: P0에는 운영용 `PaymentPort` 구현이 없어 운영 프로필 전체 기동은 실패하는 게 정상이다 |
+| C56 | (삭제) 가짜 결제 테이블을 만들지 않아 운영 마이그레이션 분리 검증이 필요 없다 | — |
+| C60 | 0원 주문: 공통 결제 준비 / 기한 안 확정 / 다시 확정 / 기한 뒤 확정 / 유료 주문 확정 | 409 `FREE_ORDER`(결제 준비 기록 없음) / PAID·CONFIRMED(결제 시도 기록 없음) / 200, 변화 없음 / 409 `PAYMENT_WINDOW_EXPIRED` / 409 `ORDER_NOT_PAYABLE` |
+| C61 | 만료 Worker 대상: 결제 준비 안 함 / 결제창만 열어 둠 / 실패 뒤 다시 결제 안 함 / 확정 안 한 0원 / 승인 진행 중 / 보류 / 끝난 주문 | 앞의 넷은 Order·Selection EXPIRED, 뒤의 셋은 변화 없음 |
+| C62 | 내 결과: 미응모·취소 / 추첨 확정 전(응모 중, 마감, 추첨 중) / 당첨 / 예비 / 미선발 / 승격된 예비 | `NOT_APPLIED` / `PENDING`(다른 값 null) / `WINNER`+주문·기한 / `RESERVE`+본인 순번 / `NOT_SELECTED` / `RESERVE`+주문·기한 |
+| C63 | 내 주문: 당첨자 / 결제 준비함·기한 지남·결제 완료 / 주문 없는 회원 | 주문과 `declinable = true` / `declinable = false` / 404 `ORDER_NOT_FOUND` |
+| C64 | 열기·마감이 행사 잠금을 기다리는 사이 오픈·마감 시각이 지남 (latch) | 잠근 뒤 읽은 시각으로 판정해 OPEN / CLOSED + DrawRun 1개 |
+| C65 | 주문 기한 경계(단위): 기한 1초 전, 같은 시각, 1초 뒤 | 포기·확정·승인 시작은 1초 전까지, 만료는 같은 시각부터. 보류 경고는 30분과 같은 시각부터 |
 
-번호: C24는 B안(P1), C37~C40은 잔여석(P1)이 쓴다. C35·C53·C54·C57·C58·C59는 수동 처리·실제 결제 수준 경합이라 P1로 넘겼다. 새 테스트는 C60부터.
+| C66 | 승격이 행사 잠금을 기다리는 사이 다른 트랜잭션이 자리를 하나 더 비움 (latch) | 잠근 뒤에 세어 같은 회차에 빈자리 2개를 모두 승격, INV-FM-07 유지 |
+| C67 | 야간 경계(단위): 22:59:59 / 23:00:00 / 08:59:59 / 09:00:00 (Asia/Seoul) | 허용 / 금지 / 금지 / 허용. 야간에도 모집 완료 판정은 한다 |
+| C68 | 미리 확인한 예비(빈자리 × 2명)가 모두 탈퇴자 | 그 예비들은 `NOT_NEEDED`, 이번 회차는 멈춤. 다음 회차에 다음 순번 승격 |
+| C69 | 모집 완료: 정원이 다 참 / 예비·결제 대기 모두 0(`REFUND_PENDING` 있음) / 결제 대기 남음 / 마지막 예비를 방금 승격 | 완료·남은 예비 `NOT_NEEDED` / 완료 / 완료 안 됨 / 완료 안 됨 |
+| C70 | 승격 저장 중 오류 (주문 UNIQUE 위반 강제) | 그 행사는 전체 롤백·알림 0건, 다른 행사는 계속 승격 |
+| C71 | 관리자 summary: 추첨 전 / 결제 진행 중 / 탈퇴한 예비만 `NOT_NEEDED` / 없는 행사 | 응모 수만 / 상태별 인원·정원 점유·승격 최대 순번·보류(경과 분)·환불 대기 목록, 회원 ID 없음 / 승격 순번 null / 404 `FAN_MEETING_NOT_FOUND` |
+
+| C72 | 관통(고정 줄거리): 행사 생성 → 오픈 → 응모 8 → 마감 → 추첨(당첨 3, 예비 4) → 결제 / 포기 / 응답 유실 보류 → 대사가 승인 확인 → 예비 1 승격 뒤 미결제 만료 → 예비 2 승격·결과 모름 보류 → 대사가 실패 확정 → 야간에는 승격 없음 → 아침에 예비 3 승격·결제 → 모집 완료 | 매 단계 뒤 불변식 SQL 0건, 확정 3명, 예비 4는 `NOT_NEEDED`, 승격 알림 3건, 보류 경고 1건, summary 일치. 상태는 DB로 고치지 않고 API·시계·워커·대사만 쓴다 |
+| C73 | 관통(무작위, 시드 고정 4개): 행사 10개에 포기·0원 확정·승인·카드 거절·결과 모름(PG 기록 없음, 응답 유실)·늦은 승인·결제창만 열기·예비 탈퇴를 섞고, 회차마다 대사 → 만료 → 승격 | 매 단계 뒤 불변식 SQL 0건, 승격 마감 뒤 모든 행사가 모집 완료 |
+
+번호: C24는 B안(P1), C37~C40은 잔여석(P1)이 쓴다. C35·C53·C54·C57·C58·C59는 수동 처리·실제 결제 수준 경합이라 P1로 넘겼다. 새 테스트는 C74부터.
 
 ## 3. 추첨 재현성
 

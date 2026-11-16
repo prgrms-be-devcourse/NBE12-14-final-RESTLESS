@@ -6,45 +6,169 @@
 
 | Method | Endpoint | 설명 | 권한 |
 |---|---|---|---|
-| POST | `/api/admin/fan-meetings` | Event 생성 | ADMIN |
-| GET | `/api/fan-meetings/{eventId}` | 상세. OPEN 전 `entry_opens_at`은 숨김. OPEN 중 `entryClosesAt` 포함 | 공개 |
+| POST | `/api/organizer/fan-meetings` | Event 생성. 만든 회원이 주최자 | ORGANIZER, ADMIN |
+| GET | `/api/fan-meetings/{eventId}` | 상세. 게릴라 오픈이면 OPEN 전 `entryOpensAt` null. `entryClosesAt`은 OPEN 중에만 | 공개 |
 | POST | `/api/fan-meetings/{eventId}/applications` | 응모·재응모 | 회원 |
 | DELETE | `/api/fan-meetings/{eventId}/applications/me` | 응모 취소 | 회원 |
 | GET | `/api/fan-meetings/{eventId}/applications/me` | 내 응모 상태 | 회원 |
 | GET | `/api/fan-meetings/{eventId}/result/me` | 내 당첨·예비 결과 + `paymentDeadline` | 회원 |
 | GET | `/api/fan-meetings/{eventId}/orders/me` | 내 주문·결제 상태 + `paymentDeadline` | 회원 |
-| POST | `/api/fan-meetings/{eventId}/orders/{orderId}/payment-attempts` | 결제 시작. 헤더 `Idempotency-Key` 필수 | 회원 |
 | POST | `/api/fan-meetings/{eventId}/orders/{orderId}/decline` | 결제 포기 | 회원 |
-| GET | `/api/admin/fan-meetings/{eventId}/summary` | 상태, 응모 수, Selection·Order 상태별 인원, 정원 점유, 승격된 예비 최대 순번, `promotion_closes_at`, 보류 목록(경과 시간), `REFUND_PENDING` 목록, 계약 위반 승인 목록 | ADMIN |
+| POST | `/api/fan-meetings/{eventId}/orders/{orderId}/confirm` | 0원 주문 확정(결제 없음) | 회원 |
+| GET | `/api/admin/fan-meetings/{eventId}/summary` | 상태, 응모 수, Selection·Order 상태별 인원, 정원 점유, 승격된 예비 최대 순번, `promotionClosesAt`, 보류 목록(경과 시간), `REFUND_PENDING` 목록 | ADMIN |
 
-관리자 API는 `role = ADMIN`만 호출할 수 있다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`([공통 API](common.md)).
+주최자 API(`/api/organizer/**`)는 `role = ORGANIZER` 또는 `ADMIN`, 관리자 API(`/api/admin/**`)는 `role = ADMIN`만 호출할 수 있다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`([공통 API](common.md)).
 
-응모는 `UNIQUE(event_id, user_id)`로 중복을 막으므로 `Idempotency-Key`를 쓰지 않는다. 결제 시작만 `Idempotency-Key`를 받는다.
+응모는 `UNIQUE(event_id, user_id)`로 중복을 막으므로 `Idempotency-Key`를 쓰지 않는다.
 
-## 결제 시작 응답
+## 행사 생성 `POST /api/organizer/fan-meetings`
 
-주문 상태 확인이 먼저다. 주문이 `PENDING_PAYMENT`가 아니면 결제 모듈을 부르지 않는다.
+요청(시각은 ISO-8601 UTC, 예 `2026-11-20T12:00:00Z`). `promotionClosesAt`만 선택이고 나머지는 필수다.
 
-| 주문 상태 | 같은 키·새 키 모두 |
+```json
+{
+  "title": "연말 팬미팅",
+  "entryOpensAt": "2026-11-20T12:00:00Z",
+  "firstNoticeScheduledAt": "2026-11-17T12:00:00Z",
+  "winnerLimit": 300,
+  "reserveLimit": 100,
+  "feeAmount": 50000,
+  "meetingAt": "2026-11-23T09:00:00Z",
+  "promotionClosesAt": null,
+  "opensAtPublic": true
+}
+```
+
+- 201 `{"eventId": 1}`
+- 필수 값 누락·형식 오류: 400 `INVALID_REQUEST`
+- 생성 규칙 위반([policy.md 3절](../../domains/fanmeeting/policy.md)): 400 `INVALID_FAN_MEETING_SETTINGS`, `message`에 어긴 규칙
+
+## 행사 상세 `GET /api/fan-meetings/{eventId}`
+
+```json
+{
+  "eventId": 1, "title": "연말 팬미팅", "status": "SCHEDULED",
+  "entryOpensAt": null, "entryClosesAt": null,
+  "meetingAt": "2026-11-23T09:00:00Z", "winnerLimit": 300, "reserveLimit": 100, "feeAmount": 50000
+}
+```
+
+필드는 항상 있고, 공개하지 않는 시각은 null이다.
+
+| 필드 | 공개 조건 |
 |---|---|
-| `PAID` | 409 `ORDER_NOT_PAYABLE` (클라이언트는 `/orders/me`로 확정을 확인) |
-| `PAYMENT_REVIEW` | 409 `PAYMENT_UNDER_REVIEW` |
-| `EXPIRED`, `CANCELLED`, `REFUND_PENDING` | 409 `ORDER_NOT_PAYABLE` |
-| `PENDING_PAYMENT` | 결제 모듈 호출, 아래 표대로 |
+| `entryOpensAt` | `opens_at_public = true`(예고 오픈)이거나 상태가 `SCHEDULED`가 아님 |
+| `entryClosesAt` | 상태가 `OPEN` |
 
-| 결제 모듈 결과 | HTTP | 본문 |
+## 응모·취소·내 응모
+
+| 요청 | 성공 | 본문 |
 |---|---|---|
-| 새 시도 생성(READY) | 201 | `attemptId`, `status = READY`, `checkoutUrl`, `paymentDeadline` |
-| 같은 키 재요청 (주문이 아직 `PENDING_PAYMENT`) | 200 | 그 시도의 **현재 상태**. READY면 `checkoutUrl` 포함, 그 외는 없음 |
-| 다른 키, READY 시도 있음 | 409 | `PAYMENT_ATTEMPT_IN_PROGRESS`. 새 시도를 만들지 않는다 |
-| 다른 키, UNKNOWN 시도 있음 | 409 | `PAYMENT_UNDER_REVIEW` |
-| 다른 키, 이미 APPROVED 시도 있음(결과 전달 전) | 409 | `ORDER_NOT_PAYABLE` |
-| 이전 시도가 모두 FAILED | 201 | 새 시도 |
-| 결제 모듈이 기한 지남으로 거절 | 409 | `PAYMENT_WINDOW_EXPIRED` |
-| 호출 실패·타임아웃 | 503 | `PAYMENT_UNAVAILABLE`. `attempt_requested_at`은 그대로 |
+| `POST .../applications` (첫 응모, 재응모) | 201 | `{"status": "APPLIED", "appliedAt": "..."}` |
+| `DELETE .../applications/me` | 204 | 없음 |
+| `GET .../applications/me` | 200 | `{"status": "APPLIED" \| "WITHDRAWN" \| "NONE", "appliedAt": ... }`. 응모한 적 없으면 `NONE`, `appliedAt` null |
 
-- "같은 키 재요청 = 200"은 주문이 아직 `PENDING_PAYMENT`일 때만이다. 결제 모듈 수준의 멱등(같은 키 → 같은 시도)은 그대로 유지되고, API 응답은 주문 상태가 우선한다.
-- `FAILED` 상태를 받은 클라이언트는 **새 키**로 다시 결제를 시작한다.
+- 응모·취소는 `OPEN`이고 `entry_opens_at <= now < entry_closes_at`일 때만. 아니면 409 `APPLICATION_WINDOW_CLOSED`.
+- 행사가 없으면 세 요청 모두 404 `FAN_MEETING_NOT_FOUND`.
+- 응모가 동시에 몰려 서버가 3번 다시 시도해도 처리하지 못하면 503 `APPLICATION_BUSY`. 같은 회원의 중복 요청은 재시도 뒤 409 `ALREADY_APPLIED`가 된다. 클라이언트는 503이면 잠시 뒤 다시 보내고, 409면 `GET .../applications/me`로 상태를 확인한다.
+
+## 내 결과 `GET /api/fan-meetings/{eventId}/result/me`
+
+항상 200이다. 추첨이 확정되기 전에는 `PENDING`만 내보낸다(결과가 미리 새지 않게).
+
+```json
+{
+  "result": "WINNER",
+  "selectionStatus": "PAYMENT_PENDING",
+  "reserveRank": null,
+  "orderId": 10,
+  "paymentDeadline": "2026-11-20T13:10:00Z"
+}
+```
+
+| `result` | 뜻 | 나머지 값 |
+|---|---|---|
+| `NOT_APPLIED` | 응모하지 않았거나 취소했다 | 모두 null |
+| `PENDING` | 응모했고 추첨이 아직 확정되지 않았다(응모 중, 마감, 추첨 중) | 모두 null |
+| `WINNER` | 당첨 | `selectionStatus`, `orderId`, `paymentDeadline` |
+| `RESERVE` | 예비 | `selectionStatus`, `reserveRank`(본인 순번, 1부터). 승격되면 `orderId`, `paymentDeadline`도 |
+| `NOT_SELECTED` | 응모했지만 뽑히지 않았다 | 모두 null |
+
+- `selectionStatus`: `PAYMENT_PENDING`, `WAITING`, `CONFIRMED`, `EXPIRED`, `DECLINED`, `NOT_NEEDED`.
+- 승격된 예비자도 `result`는 `RESERVE`다. `selectionStatus = PAYMENT_PENDING`과 `orderId`로 결제 차례임을 안다.
+- 다른 회원의 결과와 순번은 내보내지 않는다.
+
+## 내 주문·결제 포기·0원 확정
+
+| 요청 | 성공 | 본문 |
+|---|---|---|
+| `GET .../orders/me` | 200 | 주문 |
+| `POST .../orders/{orderId}/decline` | 200 | 주문(`status = CANCELLED`) |
+| `POST .../orders/{orderId}/confirm` | 200 | 주문(`status = PAID`). 이미 확정한 0원 주문이면 그대로 200 |
+
+```json
+{
+  "orderId": 10,
+  "status": "PENDING_PAYMENT",
+  "amount": 50000,
+  "issuedAt": "2026-11-20T12:10:00Z",
+  "paymentDeadline": "2026-11-20T13:10:00Z",
+  "paidAt": null,
+  "declinable": true
+}
+```
+
+- `status`: `PENDING_PAYMENT`, `PAYMENT_REVIEW`, `PAID`, `EXPIRED`, `CANCELLED`, `REFUND_PENDING`, `REFUNDED`.
+- `declinable`: 지금 포기할 수 있는지. 결제 대기이고 결제를 준비한 적 없고 기한 전일 때만 true다.
+- 회원 1명은 행사 1개에 주문이 최대 1개다. 주문이 없으면(예비 대기, 미선발, 미응모) 404 `ORDER_NOT_FOUND`.
+- `amount`가 0이면 결제 준비(`POST /api/payments`) 대신 `confirm`을 부른다. 기한 안에 부르지 않으면 만료된다.
+- 포기: 결제를 한 번이라도 준비한 주문은 409 `DECLINE_NOT_ALLOWED`, 결제 대기가 아니면 409 `ORDER_NOT_PAYABLE`, 기한이 지났으면 409 `PAYMENT_WINDOW_EXPIRED`.
+- 확정: 0원 주문이 아니거나 결제 대기가 아니거나 행사가 결제 진행 중이 아니면 409 `ORDER_NOT_PAYABLE`, 기한이 지났으면 409 `PAYMENT_WINDOW_EXPIRED`.
+- 포기·확정에서 주문이 없거나 다른 행사·다른 회원의 주문이면 404 `ORDER_NOT_FOUND`, 행사가 없으면 404 `FAN_MEETING_NOT_FOUND`.
+
+## 관리자 summary `GET /api/admin/fan-meetings/{eventId}/summary`
+
+200. 없는 행사는 404 `FAN_MEETING_NOT_FOUND`, ADMIN이 아니면 403 `FORBIDDEN`.
+
+```json
+{
+  "eventId": 1,
+  "status": "PAYMENT_IN_PROGRESS",
+  "winnerLimit": 300,
+  "reserveLimit": 100,
+  "promotionClosesAt": "2026-11-22T09:00:00Z",
+  "applicationCount": 12000,
+  "occupied": 287,
+  "selectionCounts": {"PAYMENT_PENDING": 12, "WAITING": 80, "CONFIRMED": 275, "EXPIRED": 20, "DECLINED": 5, "NOT_NEEDED": 0},
+  "orderCounts": {"PENDING_PAYMENT": 10, "PAYMENT_REVIEW": 2, "PAID": 275, "EXPIRED": 18, "CANCELLED": 5, "REFUND_PENDING": 1, "REFUNDED": 1},
+  "maxPromotedReserveRank": 20,
+  "reviews": [{"orderId": 55, "reviewStartedAt": "2026-11-20T12:30:00Z", "elapsedMinutes": 42}],
+  "refundPending": [{"orderId": 71}]
+}
+```
+
+- `applicationCount`: 취소하지 않은 응모(`APPLIED`) 수.
+- `occupied`: 확정 + 결제 대기 인원. 정원(`winnerLimit`)을 넘지 않는다(INV-FM-07). 보류 중인 자리도 결제 대기에 들어 있다.
+- `selectionCounts`, `orderCounts`: 0명인 상태도 모두 담는다.
+- `maxPromotedReserveRank`: 승격된 예비 중 가장 뒤 순번. 승격된 예비가 없으면 null. 승격 차례에 탈퇴가 확인돼 `NOT_NEEDED`가 된 예비는 세지 않는다.
+- `reviews`: 결제 결과를 모르는 보류 주문. `elapsedMinutes`는 보류가 이어진 분(내림).
+- 회원 ID는 내보내지 않는다. 주문 번호로 추적한다.
+- 현재 시도가 아니어서 거절한 승인(계약 위반)은 저장하지 않으므로 summary에 없다. 로그 `FANMEETING_APPROVAL_NOT_CURRENT`로 확인한다. 늦은 승인·금액 불일치는 `refundPending`에 나온다.
+
+## 결제 (공통 결제 API)
+
+팬미팅은 결제 API를 따로 두지 않는다. 손님은 공통 결제 API를 쓴다([공통 API](common.md)). 처리 흐름은 [transactions.md 6·7절](../../domains/fanmeeting/transactions.md#6-결제-시작-공통-결제-api).
+
+| 단계 | 호출 | 팬미팅 값 |
+|---|---|---|
+| 결제 준비 | `POST /api/payments` + 헤더 `Idempotency-Key` | `payableType = FAN_MEETING`, `payableId = orderId` |
+| 승인 | `POST /api/payments/confirm` | 결제창 결과(`paymentKey`, `orderId` = 결제 모듈의 `pgOrderId`, `amount`) |
+| 결제 상태 | `GET /api/payments/{paymentId}` | — |
+
+- 금액은 주문 금액(참가비), 결제 기한은 `발급 + 60분`이다. 요청 본문의 금액·기한은 쓰지 않는다.
+- 결제 대기(`PENDING_PAYMENT`) 주문이 아니거나 행사가 결제 진행 중(`PAYMENT_IN_PROGRESS`)이 아니면 409 `PAYMENT_NOT_PAYABLE`, 다른 회원 주문이면 404 `PAYMENT_TARGET_NOT_FOUND`, 기한이 지났으면 409 `PAYMENT_WINDOW_EXPIRED`다(공통 결제 오류 코드).
+- 시도가 실패하면 **새 키**로 다시 결제를 준비한다.
+- 참가비가 0원인 주문은 결제를 준비할 수 없다(409 `PAYMENT_NOT_PAYABLE`, `details.reason = "FREE_ORDER"`). 확정 API를 쓴다.
 
 ## 오류 코드
 
@@ -61,13 +185,11 @@
 | 응모 재시도 모두 실패 | 503 | `APPLICATION_BUSY` |
 | 취소할 응모 없음 | 409 | `APPLICATION_NOT_ACTIVE` |
 | 주문 없음·다른 행사·다른 회원 | 404 | `ORDER_NOT_FOUND` |
-| 결제 기한 지남 | 409 | `PAYMENT_WINDOW_EXPIRED` |
-| 보류 중 결제 시도 | 409 | `PAYMENT_UNDER_REVIEW` |
-| 처리 중인 결제 시도 있음 | 409 | `PAYMENT_ATTEMPT_IN_PROGRESS` |
-| 결제 모듈 호출 실패 | 503 | `PAYMENT_UNAVAILABLE` |
-| 모집 완료 | 409 | `FAN_MEETING_NOT_PAYABLE` |
-| 결제 가능 상태 아님 | 409 | `ORDER_NOT_PAYABLE` |
-| 결제를 시작한 주문의 포기 | 409 | `DECLINE_NOT_ALLOWED` |
+| 결제 대기가 아닌 주문의 포기·확정, 0원이 아닌 주문의 확정 | 409 | `ORDER_NOT_PAYABLE` |
+| 결제 기한 지난 주문의 포기·확정 | 409 | `PAYMENT_WINDOW_EXPIRED` |
+| 결제를 준비한 주문의 포기 | 409 | `DECLINE_NOT_ALLOWED` |
+
+결제 준비·승인 오류는 공통 결제 오류 코드를 쓴다([공통 API](common.md)).
 
 오류 코드 일부(`APPLICATION_*`, `ORDER_*`, `PAYMENT_*`)는 [공통 규칙 4번](README.md#공통-규칙-proposed)의 `도메인_상황` 형식과 달리 도메인 접두어가 없다. 명세 동결로 이름을 그대로 둔다.
 

@@ -31,9 +31,19 @@ frontend/coverage/
 .claude/settings.local.json
 CLAUDE.local.md
 .ai-output/
+# Root agent instructions are personal (each member keeps their own). Subfolder ones stay versioned.
+/AGENTS.md
+/CLAUDE.md
 
 # Load test raw results (summaries go to docs/reports/)
 performance/**/results/
+
+# Drop harness is a personal tool (each member keeps their own copy)
+/tools/harness/
+
+# Python cache
+
+__pycache__/
 
 # Logs, heap dumps
 *.log

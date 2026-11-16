@@ -51,10 +51,10 @@ class PaymentResultHandlerRegistryTest {
 
     record StubHandler(PayableType type) implements PaymentResultHandler {
         @Override public Optional<PayableSnapshot> load(Long payableId) { return Optional.empty(); }
-        @Override public ApprovalDecision onApprovalStarting(Long payableId) { return ApprovalDecision.accept(); }
+        @Override public ApprovalDecision onApprovalStarting(Long payableId, PaymentAttemptContext attempt) { return ApprovalDecision.accept(); }
         @Override public ApprovalDecision onApproved(Long payableId, ApprovedPayment payment) { return ApprovalDecision.accept(); }
-        @Override public void onFailed(Long payableId) { }
-        @Override public void onUnknown(Long payableId) { }
-        @Override public void onRefunded(Long payableId) { }
+        @Override public void onFailed(Long payableId, PaymentAttemptContext attempt) { }
+        @Override public void onUnknown(Long payableId, PaymentAttemptContext attempt) { }
+        @Override public void onRefunded(Long payableId, RefundContext refund) { }
     }
 }

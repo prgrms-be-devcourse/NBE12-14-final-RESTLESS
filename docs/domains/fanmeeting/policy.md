@@ -4,7 +4,7 @@
 
 ### P0 포함
 
-행사 생성(관리자), 응모·취소·재응모, 응모 기간 자동 열기·마감, 결정적 추첨(당첨·예비), 당첨자 결제 기한(60분) 안 결제, 결제 포기, 결제 결과 보류, 기한 만료, 빈자리 예비 승격, 모집 완료, 관리자 summary.
+행사 생성(주최자·관리자), 응모·취소·재응모, 응모 기간 자동 열기·마감, 결정적 추첨(당첨·예비), 당첨자 결제 기한(60분) 안 결제, 결제 포기, 결제 결과 보류, 기한 만료, 빈자리 예비 승격, 모집 완료, 관리자 summary.
 
 ### 만들지 말 것 (P0 범위 밖)
 
@@ -38,12 +38,15 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 | 보류 | Order `PAYMENT_REVIEW`. 결제 결과를 몰라 자리를 지키는 상태 |
 | 승격 | 빈자리만큼 예비자를 순번대로 `PAYMENT_PENDING`으로 바꾸고 Order를 만드는 것 |
 | 승격 마감 | `promotion_closes_at`. 이 시각 이후 승격 없음 |
-| 야간 | Asia/Seoul 23:00~09:00. 승격하지 않음 |
+| 야간 | Asia/Seoul 23:00부터 09:00 전까지(`[23:00, 09:00)`). 23:00:00은 야간이고 09:00:00은 야간이 아니다. 승격하지 않음 |
+| 대사 | 결제 모듈이 결제 결과를 모르는 시도(`UNKNOWN`, 오래된 `PROCESSING`)를 PG에 다시 물어 승인·실패로 확정하는 일. 확정한 결과는 같은 시도로 팬미팅 Handler에 알려 준다. 보류는 대사로만 풀린다(팬미팅은 기다린다) |
 | 끝나지 않은 결제 시도 | 결과가 `READY`(시도만 생성) 또는 `UNKNOWN`인 시도 (실제 결제 모듈은 `PROCESSING`도 포함) |
 
 ## 3. 행사 생성
 
-권한: ADMIN (6절). 결과: `SCHEDULED`.
+권한: ORGANIZER, ADMIN (6절). 만든 회원이 그 행사의 주최자(`organizer_id`)가 된다. 결과: `SCHEDULED`.
+
+오픈 시각 공개 여부(`opens_at_public`, 필수): `true`면 예고 오픈(OPEN 전에도 상세에 `entryOpensAt` 공개), `false`면 게릴라 오픈(OPEN 전에는 `entryOpensAt`을 null로 준다).
 
 검증(위반 시 400 `INVALID_FAN_MEETING_SETTINGS`, 메시지에 어긴 규칙):
 
@@ -67,29 +70,32 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 | 가입 시각 자격 | 설정 ON이면 가입 시각(`users.created_at`) `>= first_notice_scheduled_at`인 회원은 응모 불가. 기본 OFF(7절) |
 | 추첨 | HMAC-SHA256 순위 키 결정적 추첨. 앞에서 `winner_limit`명 WINNER, 다음 `reserve_limit`명 RESERVE. 탈퇴 회원은 계산 시 제외(응모 행은 유지) |
 | 결제 금액 | Order 생성 시점 `fee_amount` 스냅샷. 요청 본문의 금액·회원·기한은 무시 |
+| 0원 주문 | 공통 결제를 거치지 않는다. 손님이 기한(60분) 안에 확정 API를 불러야 확정된다. 누르지 않으면 유료 주문처럼 만료되고 예비가 승격된다. 확정 전에는 포기할 수 있다 |
 | 결제 기한 | `issued_at + 60분`. `approvedAt <= 기한`이면 기한 안(같으면 기한 안) |
-| 결제 포기 | 결제 시작을 한 번도 요청하지 않은(`attempt_requested_at IS NULL`) `PENDING_PAYMENT` 주문만. 되돌리기 없음 |
-| 결과 모름 | `UNKNOWN`/`PROCESSING`은 실패로 처리하지 않고 보류(`PAYMENT_REVIEW`). 보류 중 자리는 만료되지 않고 넘어가지 않는다 |
-| 만료 | 결제 모듈이 최종(`finalDecision = true`)이라고 답했을 때만. 팬미팅 시계로 최종 여부를 판단하지 않는다 |
+| 결제 포기 | 결제 준비를 한 번도 요청하지 않은(`attempt_requested_at IS NULL`) `PENDING_PAYMENT` 주문만. 되돌리기 없음 |
+| 결과 모름 | `UNKNOWN`은 실패로 처리하지 않고 보류(`PAYMENT_REVIEW`). 보류 중 자리는 만료되지 않고 넘어가지 않는다. 최종 결과는 결제 모듈이 같은 시도로 다시 알려 준다 |
+| 만료 | 진행 중인 결제 시도가 없을 때만. 시도가 있으면 결제 모듈이 알려 주는 최종 실패(`onFailed`) 때 기한을 보고 만료한다. 결제 중인 주문을 팬미팅 시계만으로 만료하지 않는다 |
 | 보류 장기화 | 30분 경과 시 경고 로그 1회(보류 회차당). 자동 확정·탈락 없음. 수동 처리는 P1 |
-| 늦은 승인·금액 불일치 | 확정하지 않고 `REFUND_PENDING` 표시. 실제 환불 명령은 보내지 않는다 |
+| 늦은 승인·금액 불일치 | 확정하지 않고 승인을 거절한다(`REFUND_PENDING`). 결제 모듈이 보상 취소하면 `REFUNDED` |
 | 승격 | 빈자리만큼 예비 순번대로. 야간(23:00~09:00 Asia/Seoul) 금지, `now + 60분 <= promotion_closes_at`일 때만 |
 | 승격 마감 기본값 | `meeting_at - 24시간` |
 | 모집 완료 | 보류 0건이고 ① 확정 인원 `>= winner_limit` ② 예비·결제 대기 모두 0 ③ 승격 마감이 지났고 결제 대기 0 중 하나. 남은 예비는 `NOT_NEEDED`. 야간에도 판정한다. `REFUND_PENDING`은 완료를 막지 않는다 |
 | 알림 | 실제 발송 없음. 추첨 최종화·승격 커밋 뒤 `NotificationRequestPort`에 기록만 |
 | 개인 정보 | `random_seed`, `lease_token`, 다른 회원 정보는 응답·로그에 내보내지 않는다 |
 
-## 5. 탈퇴 확인 `hasActiveParticipation(userId)` (FanMeeting Facade)
+## 5. 탈퇴 확인 `hasActiveParticipation(userId)` (`WithdrawalGuard`)
 
-그 회원의 Order가 `PENDING_PAYMENT`, `PAYMENT_REVIEW`, `REFUND_PENDING`이거나, `PAID`이면서 해당 Event의 `meeting_at`이 아직 안 지났으면 `true`. 인증 모듈 연결은 하지 않는다(메서드만 제공).
+그 회원의 Order가 `PENDING_PAYMENT`, `PAYMENT_REVIEW`, `REFUND_PENDING`이거나, `PAID`이면서 해당 Event의 `meeting_at`이 아직 안 지났으면 `true`. 회원 모듈의 `WithdrawalGuard`로 구현해(`FanMeetingWithdrawalGuard`), 회원 탈퇴 때 `true`면 409 `MEMBER_HAS_ACTIVE_PARTICIPATION`으로 막는다.
 
 알려진 틈: 탈퇴 확인(`false`)과 승격·추첨 최종화가 동시에 일어나면 탈퇴한 사람에게 주문이 생길 수 있다. 결제를 못 하므로 기한 뒤 만료 → 승격으로 처리된다(정원·자격 정합성 문제 없음, 자리만 늦게 참).
 
-## 6. 관리자 권한
+## 6. 주최자·관리자 권한
 
-- `/api/admin/**`(생성, summary)는 `role = ADMIN`인 회원만 호출한다. 인증 모듈의 보안 설정이 경로 단위로 막고, 권한이 없으면 403 `FORBIDDEN`(팀 공통 오류 형식 `{code, message}`), 로그인하지 않았으면 401 `UNAUTHORIZED`다([공통 API](../../contracts/api/common.md)).
-- 팬미팅 컨트롤러는 권한을 다시 검사하지 않는다. 로그인 회원 ID는 `@LoginMember Long userId`로 받는다.
-- **[팀 미확정]** 판매자(SELLER) 역할이 생기면 주최자에게도 열지는 팀 결정을 따른다.
+- `/api/organizer/**`(행사 생성)는 `role = ORGANIZER` 또는 `ADMIN`인 회원만 호출한다.
+- `/api/admin/**`(summary)는 `role = ADMIN`만 호출한다.
+- 역할은 인증 모듈의 보안 설정이 경로 단위로 막는다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`이고, 형식은 팀 공통 오류 응답 `{code, message, details, traceId, timestamp}`다([공통 API](../../contracts/api/common.md)).
+- 팬미팅 컨트롤러는 역할을 다시 검사하지 않는다. 로그인 회원 ID는 `@LoginMember Long userId`로 받는다.
+- 주최자는 자기 행사(`organizer_id`)만 다룬다. 남의 행사는 404로 답한다. 주최자용 조회·관리 API(P1)를 만들 때 서비스에서 확인한다. ADMIN은 모든 행사를 다룬다.
 
 ## 7. 설정값 (설정 파일)
 
@@ -102,9 +108,9 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 | 승격 Worker | 30초 |
 | 결제 기한 | 60분 |
 | 보류 경고 | 30분 |
-| 야간 승격 중지 | 23:00~09:00 Asia/Seoul |
+| 야간 승격 중지 | 23:00~09:00 Asia/Seoul (23:00:00 포함, 09:00:00 제외) |
 | 승격 마감 기본값 | `meeting_at - 24시간` |
 | 일반 트랜잭션 timeout | 5초 |
 | 추첨 최종화 timeout | 30초 |
 | 응모 재시도 | 최대 3회, 10~50ms 무작위 대기 |
-| 가입 시각 검사 `fanmeeting.eligibility.joined-at-check.enabled` | 기본 OFF. 가입 시각은 `users.created_at`(`MemberPort.joinedAt`). 시연·측정에서 켤지는 담당자가 정한다. 테스트 C21·C50은 ON으로 돌린다 |
+| 가입 시각 검사 `restless.fanmeeting.eligibility.joined-at-check.enabled` | 기본 OFF. 가입 시각은 `users.created_at`(`MemberPort.joinedAt`). 시연·측정에서 켤지는 담당자가 정한다. 테스트 C21·C50은 ON으로 돌린다 |

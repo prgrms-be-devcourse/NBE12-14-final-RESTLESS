@@ -107,7 +107,8 @@ class MemberWithdrawApiTest {
 
         mockMvc.perform(get("/api/me/profile").header(HttpHeaders.AUTHORIZATION, "Bearer " + login.accessToken()))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("MEMBER_NOT_FOUND"));
+                .andExpect(jsonPath("$.code").value("MEMBER_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("탈퇴한 회원입니다."));
         withdraw(login.accessToken(), PASSWORD).andExpect(status().isNotFound());
     }
 
@@ -134,6 +135,23 @@ class MemberWithdrawApiTest {
     }
 
     @Test
+    void 결제_완료_주문_안내에_동의하지_않으면_400이고_탈퇴되지_않는다() throws Exception {
+        Login login = signupAndLogin();
+
+        withdrawWithBody(login.accessToken(), "{\"password\":\"" + PASSWORD + "\",\"paidOrderNoticeAgreed\":false}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.details.fields.paidOrderNoticeAgreed").isString());
+        withdrawWithBody(login.accessToken(), "{\"password\":\"" + PASSWORD + "\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.details.fields.paidOrderNoticeAgreed").isString());
+
+        assertThat(statusOf(login.email())).isEqualTo("ACTIVE");
+        refresh(login.refreshToken()).andExpect(status().isOk());
+    }
+
+    @Test
     void Guard가_막으면_409이고_탈퇴되지_않는다() throws Exception {
         Login login = signupAndLogin();
         BLOCKED.add(memberIdOf(login.email()));
@@ -149,7 +167,7 @@ class MemberWithdrawApiTest {
     @Test
     void 로그인하지_않으면_401() throws Exception {
         mockMvc.perform(post("/api/me/withdraw").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"password\":\"" + PASSWORD + "\"}"))
+                        .content("{\"password\":\"" + PASSWORD + "\",\"paidOrderNoticeAgreed\":true}"))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -175,8 +193,13 @@ class MemberWithdrawApiTest {
     }
 
     private ResultActions withdraw(String accessToken, String password) throws Exception {
+        return withdrawWithBody(accessToken,
+                "{\"password\":\"" + password + "\",\"paidOrderNoticeAgreed\":true}");
+    }
+
+    private ResultActions withdrawWithBody(String accessToken, String body) throws Exception {
         return mockMvc.perform(post("/api/me/withdraw").header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
-                .contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"" + password + "\"}"));
+                .contentType(MediaType.APPLICATION_JSON).content(body));
     }
 
     private ResultActions refresh(String refreshToken) throws Exception {

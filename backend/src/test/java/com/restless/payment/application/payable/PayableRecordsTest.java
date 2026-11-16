@@ -1,5 +1,6 @@
 package com.restless.payment.application.payable;
 
+import com.restless.payment.domain.PaymentRefundKind;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -34,10 +35,29 @@ class PayableRecordsTest {
         assertThatIllegalArgumentException().isThrownBy(() -> new ApprovalDecision(true, "reason"));
     }
 
-    @Test void approvedPaymentRequiresPgIdentityAndApprovalTime() {
-        assertThat(new ApprovedPayment(1L, "PAY-1", "pk", 1000, NOW).approvedAt()).isEqualTo(NOW);
-        assertThatNullPointerException().isThrownBy(() -> new ApprovedPayment(1L, "PAY-1", null, 1000, NOW));
-        assertThatNullPointerException().isThrownBy(() -> new ApprovedPayment(1L, "PAY-1", "pk", 1000, null));
-        assertThatIllegalArgumentException().isThrownBy(() -> new ApprovedPayment(1L, "PAY-1", "pk", -1, NOW));
+    static final Instant STARTED = NOW.minusSeconds(30);
+
+    @Test void approvedPaymentRequiresPgIdentityAndBothTimes() {
+        var approved = new ApprovedPayment(1L, "PAY-1", "pk", 1000, STARTED, NOW);
+        assertThat(approved.approvedAt()).isEqualTo(NOW);
+        assertThat(approved.attempt()).isEqualTo(new PaymentAttemptContext(1L, STARTED));
+        assertThatNullPointerException().isThrownBy(() -> new ApprovedPayment(1L, "PAY-1", null, 1000, STARTED, NOW));
+        assertThatNullPointerException().isThrownBy(() -> new ApprovedPayment(1L, "PAY-1", "pk", 1000, null, NOW));
+        assertThatNullPointerException().isThrownBy(() -> new ApprovedPayment(1L, "PAY-1", "pk", 1000, STARTED, null));
+        assertThatIllegalArgumentException().isThrownBy(() -> new ApprovedPayment(1L, "PAY-1", "pk", -1, STARTED, NOW));
+    }
+
+    @Test void attemptAlwaysCarriesPaymentIdButStartTimeOnlyAfterApprovalStarted() {
+        assertThat(new PaymentAttemptContext(7L, STARTED).approvalStarted()).isTrue();
+        var notStarted = PaymentAttemptContext.notStarted(7L);
+        assertThat(notStarted.paymentId()).isEqualTo(7L);
+        assertThat(notStarted.approvalStarted()).isFalse();
+        assertThatNullPointerException().isThrownBy(() -> new PaymentAttemptContext(null, STARTED));
+    }
+
+    @Test void refundContextRequiresPaymentIdAndKind() {
+        assertThat(new RefundContext(7L, PaymentRefundKind.COMPENSATION).kind()).isEqualTo(PaymentRefundKind.COMPENSATION);
+        assertThatNullPointerException().isThrownBy(() -> new RefundContext(null, PaymentRefundKind.CUSTOMER_REFUND));
+        assertThatNullPointerException().isThrownBy(() -> new RefundContext(7L, null));
     }
 }

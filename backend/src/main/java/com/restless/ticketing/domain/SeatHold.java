@@ -72,6 +72,13 @@ public class SeatHold {
         return new SeatHold(reservationId, performanceId, performanceSeatId, priceAmount, expiresAt, now);
     }
 
+    public void confirm() {
+        if (status != SeatHoldStatus.HELD) {
+            throw new IllegalStateException("선점 중인 이력만 확정할 수 있습니다.");
+        }
+        status = SeatHoldStatus.CONFIRMED;
+    }
+
     public void release(Instant now) {
         if (status != SeatHoldStatus.HELD) {
             throw new IllegalStateException("반환 가능한 선점이 아닙니다.");

@@ -1,4 +1,12 @@
 package com.restless.order.infrastructure;
 
-public interface OrderItemRepository {
+import com.restless.order.domain.OrderItem;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+
+public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
+    List<OrderItem> findByOrderIdInOrderByIdAsc(java.util.Collection<Long> orderIds);
+
+    List<OrderItem> findByOrderIdOrderByIdAsc(Long orderId);
 }

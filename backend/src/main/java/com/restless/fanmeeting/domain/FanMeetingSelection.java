@@ -1,0 +1,119 @@
+package com.restless.fanmeeting.domain;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import java.time.Instant;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
+/** 추첨으로 뽑힌 당첨·예비 1명 (fan_meeting_selections). 응모 하나는 최대 한 번 뽑힌다. */
+@Entity
+@Table(name = "fan_meeting_selections")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class FanMeetingSelection {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "selection_id")
+    private Long id;
+
+    private Long eventId;
+
+    private Long drawRunId;
+
+    private Long applicationId;
+
+    private Long userId;
+
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    private FanMeetingSelectionType selectionType;
+
+    /** 당첨·예비 각각 1부터. */
+    private int selectionRank;
+
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    private FanMeetingSelectionStatus status;
+
+    @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
+    private Instant createdAt;
+
+    @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
+    private Instant updatedAt;
+
+    /** 당첨: 결제 대기. */
+    public static FanMeetingSelection winner(FanMeetingDrawRun run, Long applicationId, Long userId, int rank,
+                                             Instant now) {
+        return of(run, applicationId, userId, FanMeetingSelectionType.WINNER, rank,
+                FanMeetingSelectionStatus.PAYMENT_PENDING, now);
+    }
+
+    /** 예비: 승격을 기다림. */
+    public static FanMeetingSelection reserve(FanMeetingDrawRun run, Long applicationId, Long userId, int rank,
+                                              Instant now) {
+        return of(run, applicationId, userId, FanMeetingSelectionType.RESERVE, rank,
+                FanMeetingSelectionStatus.WAITING, now);
+    }
+
+    private static FanMeetingSelection of(FanMeetingDrawRun run, Long applicationId, Long userId,
+                                          FanMeetingSelectionType type, int rank, FanMeetingSelectionStatus status,
+                                          Instant now) {
+        FanMeetingSelection selection = new FanMeetingSelection();
+        selection.eventId = run.getEventId();
+        selection.drawRunId = run.getId();
+        selection.applicationId = applicationId;
+        selection.userId = userId;
+        selection.selectionType = type;
+        selection.selectionRank = rank;
+        selection.status = status;
+        selection.createdAt = now;
+        selection.updatedAt = now;
+        return selection;
+    }
+
+    /** 기한 안 결제 완료. */
+    public void confirm(Instant now) {
+        status = FanMeetingSelectionStatus.CONFIRMED;
+        updatedAt = now;
+    }
+
+    /** 자리를 잃음(기한 경과, 늦은 승인, 금액 불일치). */
+    public void expire(Instant now) {
+        status = FanMeetingSelectionStatus.EXPIRED;
+        updatedAt = now;
+    }
+
+    /** 결제 준비 전 포기. */
+    public void decline(Instant now) {
+        status = FanMeetingSelectionStatus.DECLINED;
+        updatedAt = now;
+    }
+
+    /** 예비 승격: 빈자리를 받아 결제 대기가 된다. */
+    public void promote(Instant now) {
+        status = FanMeetingSelectionStatus.PAYMENT_PENDING;
+        updatedAt = now;
+    }
+
+    /** 승격되지 않고 끝남(모집 완료, 또는 승격 차례에 탈퇴 확인). */
+    public void markNotNeeded(Instant now) {
+        status = FanMeetingSelectionStatus.NOT_NEEDED;
+        updatedAt = now;
+    }
+
+    /** 예비로 뽑혔는지(승격된 뒤에도 예비다). */
+    public boolean isReserve() {
+        return selectionType == FanMeetingSelectionType.RESERVE;
+    }
+}

@@ -1,5 +1,9 @@
 # Drop 불변식
 
+> 관련 코드: `backend/src/test/resources/harness/drop-invariants.sql`, `backend/src/main/java/com/restless/drop/domain/`
+>
+> 마지막 확인: 2026-11-14 (불변식별 테스트 표시 대조)
+
 단위, 통합, 동시성, 장애 테스트의 기준이다. 테스트 이름이나 주석에 `INV-xx`를 붙여 추적한다.
 
 | ID | 불변식 |
@@ -18,3 +22,4 @@
 | INV-12 | 전액 환불이 확정되면 해당 SKU 재고를 정확히 한 번 복원한다 |
 | INV-13 | 확정된 주문의 상품명, SKU, 금액, 배송지는 원본이 바뀌어도 변하지 않는다 |
 | INV-14 | 판매 종료 후 새 예약을 만들지 않는다. 진행 중인 결제의 확인과 복구는 별도로 처리한다 |
+| INV-15 | 예약이 기록한 현재 결제 시도(`current_payment_id`)가 아닌 결제 결과로 예약, 재고, 주문을 바꾸지 않는다 |

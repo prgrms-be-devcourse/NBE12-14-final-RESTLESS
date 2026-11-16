@@ -5,11 +5,11 @@
 
 | 문서 | 담당 | 상태 |
 |---|---|---|
-| [common.md](common.md) | TBD | 드롭 요구사항 기준 초안 |
+| [common.md](common.md) | 홍승연 (인증·회원), 이태호 (주문·결제) | 인증 구현. 주문·결제는 구현 기준 |
 | [ticketing.md](ticketing.md) | 송혜민 | 원본 문서에서 취합 |
 | [drop.md](drop.md) | 이태호 | 원본 |
 | [fanmeeting.md](fanmeeting.md) | 홍승연 | 원본 문서에서 취합 |
-| [auction.md](auction.md) | 천종원 | 원본에 API 없음, 취합자 초안 |
+| [auction.md](auction.md) | 천종원 | 1차 구현 기준 (PROPOSED) |
 
 ## 공통 규칙 (PROPOSED)
 

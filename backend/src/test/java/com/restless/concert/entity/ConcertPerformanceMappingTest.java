@@ -1,7 +1,6 @@
 package com.restless.concert.entity;
 
 import com.restless.TestcontainersConfiguration;
-import com.restless.concert.infrastructure.PerformanceRepository;
 import com.restless.concert.domain.Concert;
 import com.restless.concert.domain.Performance;
 import com.restless.concert.domain.Venue;
@@ -15,16 +14,22 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @DisplayName("공연·공연 회차 매핑")
 @SpringBootTest(properties = {
@@ -32,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "spring.docker.compose.enabled=false"
 })
 @Import(TestcontainersConfiguration.class)
+@AutoConfigureMockMvc
 @Transactional
 class ConcertPerformanceMappingTest {
 
@@ -44,11 +50,11 @@ class ConcertPerformanceMappingTest {
     private EntityManager entityManager;
 
     @Autowired
-    private PerformanceRepository performanceRepository;
+    private MockMvc mockMvc;
 
-    @DisplayName("같은 공연장·배치를 사용하는 공연의 여러 회차와 UTC 시각을 저장하고 조회한다")
+    @DisplayName("공연·회차 매핑을 보존하고 비로그인 API는 해당 공연의 회차만 시작 시각순으로 반환한다")
     @Test
-    void reloadsConcertAndSeparatePerformancesSharingVenueAndLayout() {
+    void reloadsConcertAndSeparatePerformancesSharingVenueAndLayout() throws Exception {
         Venue venue = persistVenue("Hall");
         VenueLayout layout = persistLayout(venue.getId());
         Concert concert = persistConcert(venue.getId());
@@ -84,10 +90,40 @@ class ConcertPerformanceMappingTest {
         assertThat(performance.getMaxTicketsPerUser()).isEqualTo(4);
         assertThat(performance.getStatus()).isEqualTo("SCHEDULED");
 
-        var performances = performanceRepository.findAllByConcertIdOrderByStartsAtAsc(concert.getId());
-        assertThat(performances).extracting(Performance::getId).containsExactly(first.getId(), second.getId());
-        assertThat(performances.get(1).getStartsAt()).isEqualTo(STARTS_AT.plusSeconds(86400));
-        assertThat(performances.get(1).getMaxTicketsPerUser()).isEqualTo(2);
+        // 인증 없이 실제 Controller·Service·Repository와 응답 DTO를 함께 검증한다.
+        mockMvc.perform(get("/api/concerts/{concertId}", concert.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.concertId").value(concert.getId()))
+                .andExpect(jsonPath("$.venueId").value(venue.getId()))
+                .andExpect(jsonPath("$.title").value("RESTLESS Concert"))
+                .andExpect(jsonPath("$.status").value("SCHEDULED"))
+                .andExpect(jsonPath("$.createdAt").value(CREATED_AT.toString()));
+
+        mockMvc.perform(get("/api/concerts/{concertId}/performances", concert.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].performanceId").value(first.getId()))
+                .andExpect(jsonPath("$[0].concertId").value(concert.getId()))
+                .andExpect(jsonPath("$[0].venueId").value(venue.getId()))
+                .andExpect(jsonPath("$[0].layoutId").value(layout.getId()))
+                .andExpect(jsonPath("$[0].startsAt").value(STARTS_AT.toString()))
+                .andExpect(jsonPath("$[0].bookingOpensAt").value(OPENS_AT.toString()))
+                .andExpect(jsonPath("$[0].bookingClosesAt").value(CLOSES_AT.toString()))
+                .andExpect(jsonPath("$[0].maxTicketsPerUser").value(4))
+                .andExpect(jsonPath("$[0].status").value("SCHEDULED"))
+                .andExpect(jsonPath("$[1].performanceId").value(second.getId()))
+                .andExpect(jsonPath("$[1].concertId").value(concert.getId()))
+                .andExpect(jsonPath("$[1].startsAt").value(STARTS_AT.plusSeconds(86400).toString()))
+                .andExpect(jsonPath("$[1].maxTicketsPerUser").value(2));
+    }
+
+    @DisplayName("없는 공연의 상세·회차 목록은 비로그인 요청에도 404 NOT_FOUND를 반환한다")
+    @ParameterizedTest(name = "{displayName} [경로=/api/concerts/미존재ID{0}]")
+    @ValueSource(strings = {"", "/performances"})
+    void rejectsMissingConcertForBothQueryEndpoints(String suffix) throws Exception {
+        mockMvc.perform(get("/api/concerts/{concertId}" + suffix, Long.MAX_VALUE))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
     @DisplayName("회차의 공연장이 공연 또는 배치의 공연장과 다르면 저장할 수 없다")
@@ -132,6 +168,68 @@ class ConcertPerformanceMappingTest {
                 Arguments.of(OPENS_AT, CLOSES_AT, 0, "ck_performances_max_tickets"),
                 Arguments.of(OPENS_AT, CLOSES_AT, -1, "ck_performances_max_tickets")
         );
+    }
+
+    @Test
+    @DisplayName("비로그인 공연 목록은 생성 시각·ID 최신순이며 기본값·페이지 이동·범위 밖 빈 목록을 반환한다")
+    void listsConcertsNewestFirstWithPaginationWithoutLogin() throws Exception {
+        long existingCount = entityManager.createQuery("select count(c) from Concert c", Long.class).getSingleResult();
+        Instant latest = entityManager.createQuery("select max(c.createdAt) from Concert c", Instant.class)
+                .getSingleResult();
+        Instant base = (latest == null ? CREATED_AT : latest).plusSeconds(3600);
+        Venue venue = persistVenue("List Hall");
+        // 기존 데이터보다 최신으로 만들고 생성 시각 동률의 ID 정렬도 검증한다.
+        Member seller = Member.register("concert-list@example.com", "test-hash", "Host", CREATED_AT);
+        entityManager.persist(seller);
+        Concert first = Concert.create(venue.getId(), seller.getId(), "First", "SCHEDULED", base.plusSeconds(1));
+        entityManager.persist(first);
+        Concert second = Concert.create(venue.getId(), first.getSellerId(), "Second", "SCHEDULED", base.plusSeconds(1));
+        entityManager.persist(second);
+        // 가장 늦게 INSERT한 행이지만 생성 시각은 이전이므로 목록에서 뒤에 와야 한다.
+        Concert older = Concert.create(venue.getId(), first.getSellerId(), "Older", "SCHEDULED", base);
+        entityManager.persist(older);
+        entityManager.flush();
+        entityManager.clear();
+        long total = existingCount + 3;
+        int totalPages = (int) ((total + 1) / 2);
+
+        mockMvc.perform(get("/api/concerts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(total))
+                .andExpect(jsonPath("$.content[0].concertId").value(second.getId()))
+                .andExpect(jsonPath("$.content[1].concertId").value(first.getId()));
+
+        mockMvc.perform(get("/api/concerts").param("page", "0").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[0].concertId").value(second.getId()))
+                .andExpect(jsonPath("$.content[1].concertId").value(first.getId()))
+                .andExpect(jsonPath("$.totalElements").value(total))
+                .andExpect(jsonPath("$.totalPages").value(totalPages));
+
+        mockMvc.perform(get("/api/concerts").param("page", "1").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(2))
+                .andExpect(jsonPath("$.content.length()").value((int) Math.min(2, total - 2)))
+                .andExpect(jsonPath("$.content[0].concertId").value(older.getId()));
+
+        mockMvc.perform(get("/api/concerts").param("page", String.valueOf(totalPages)).param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(0))
+                .andExpect(jsonPath("$.totalElements").value(total))
+                .andExpect(jsonPath("$.totalPages").value(totalPages));
+    }
+
+    @DisplayName("잘못된 공연 목록 페이지·크기와 숫자가 아닌 값은 400 INVALID_REQUEST다")
+    @ParameterizedTest(name = "{displayName} [page={0}, size={1}]")
+    @CsvSource({"-1,20", "0,0", "0,101", "invalid,20", "0,invalid"})
+    void rejectsInvalidConcertPagination(String page, String size) throws Exception {
+        mockMvc.perform(get("/api/concerts").param("page", page).param("size", size))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
     }
 
     private Venue persistVenue(String name) {

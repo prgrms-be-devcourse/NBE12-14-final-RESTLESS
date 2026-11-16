@@ -50,6 +50,15 @@ public class TicketPurchaseLimit {
         reservedCount = Math.addExact(reservedCount, quantity);
     }
 
+    public void confirm(int quantity) {
+        if (quantity <= 0 || reservedCount < quantity) {
+            throw new IllegalStateException("확정할 선점 수량이 일치하지 않습니다.");
+        }
+        int nextConfirmedCount = Math.addExact(confirmedCount, quantity);
+        reservedCount -= quantity;
+        confirmedCount = nextConfirmedCount;
+    }
+
     public void release(int quantity) {
         if (quantity <= 0 || reservedCount < quantity) {
             throw new IllegalStateException("반환할 선점 수량이 일치하지 않습니다.");

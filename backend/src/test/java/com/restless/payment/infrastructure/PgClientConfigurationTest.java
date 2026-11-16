@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class PgClientConfigurationTest {
     final ApplicationContextRunner runner = new ApplicationContextRunner()
-        .withUserConfiguration(TossPaymentsConfig.class, TossPaymentsClient.class, FakePgClient.class);
+        .withUserConfiguration(com.restless.common.config.ClockConfig.class, TossPaymentsConfig.class, TossPaymentsClient.class, FakePgClient.class);
 
     @Test void fakeProviderCreatesOnlyFakeClientWithoutDatabase() {
         runner.withPropertyValues("pg.provider=fake").run(context -> {

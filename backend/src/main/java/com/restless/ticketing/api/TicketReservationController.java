@@ -1,13 +1,19 @@
 package com.restless.ticketing.api;
 
 import com.restless.auth.LoginMember;
+import com.restless.ticketing.api.dto.TicketCheckoutResponse;
+import com.restless.ticketing.application.TicketCheckoutService;
 import com.restless.ticketing.api.dto.TicketReservationRequest;
-import com.restless.ticketing.application.TicketReservationInfo;
+import com.restless.ticketing.application.dto.TicketReservationInfo;
+import com.restless.ticketing.application.dto.TicketReservationDetail;
+import com.restless.ticketing.application.TicketReservationQueryService;
 import com.restless.ticketing.application.TicketReservationService;
 import jakarta.validation.Valid;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -21,7 +27,20 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class TicketReservationController {
 
+    private final TicketCheckoutService ticketCheckoutService;
     private final TicketReservationService ticketReservationService;
+    private final TicketReservationQueryService ticketReservationQueryService;
+
+    @GetMapping("/active")
+    public List<TicketReservationDetail> getActive(@LoginMember Long userId) {
+        return ticketReservationQueryService.getActive(userId);
+    }
+
+    @GetMapping("/{reservationId}")
+    public TicketReservationDetail getDetail(@LoginMember Long userId,
+                                             @PathVariable("reservationId") Long reservationId) {
+        return ticketReservationQueryService.getDetail(userId, reservationId);
+    }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -29,6 +48,12 @@ public class TicketReservationController {
                                          @RequestHeader("Idempotency-Key") String requestKey,
                                          @Valid @RequestBody TicketReservationRequest request) {
         return ticketReservationService.reserve(userId, requestKey, request.performanceId(), request.seatIds());
+    }
+
+    @PostMapping("/{reservationId}/checkout")
+    public TicketCheckoutResponse checkout(@LoginMember Long userId,
+                                            @PathVariable("reservationId") Long reservationId) {
+        return TicketCheckoutResponse.from(ticketCheckoutService.checkout(userId, reservationId));
     }
 
     @DeleteMapping("/{reservationId}")

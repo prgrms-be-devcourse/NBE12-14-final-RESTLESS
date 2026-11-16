@@ -40,8 +40,8 @@ public class FakePgClient implements PgClient {
     private final ConcurrentHashMap<String, Duration> delays = new ConcurrentHashMap<>();
 
     @Autowired
-    public FakePgClient(FakePgProperties properties, ObjectProvider<RandomGenerator> random) {
-        this(properties, random.getIfAvailable(RandomGenerator::getDefault), Clock.systemUTC());
+    public FakePgClient(FakePgProperties properties, ObjectProvider<RandomGenerator> random, Clock clock) {
+        this(properties, random.getIfAvailable(RandomGenerator::getDefault), clock);
     }
 
     public FakePgClient(FakePgProperties properties, RandomGenerator random, Clock clock) {

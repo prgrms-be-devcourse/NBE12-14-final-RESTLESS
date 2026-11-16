@@ -3,6 +3,7 @@
 - 상태: Draft (2026-11-11)
 - 기준: MySQL 8, PK는 `BIGINT AUTO_INCREMENT`, 시각은 `DATETIME(6)` UTC ([ADR-0002](../decisions/0002-common-conventions.md))
 - 컬럼 정본은 아래 그림이다. 실제 DDL은 `backend/src/main/resources/db/migration/`에 있다.
+- 주문·결제·드롭 테이블은 그림 작성 뒤 마이그레이션으로 바뀌었다(결제의 `order_id` 제거, `payable_type`/`payable_id`/`idempotency_key` 등 추가, 드롭 대기열 추가). 이 테이블들은 마이그레이션이 정본이다.
 
 ![통합 ERD](erd.svg)
 
@@ -20,17 +21,17 @@
 | 주문·결제 | 공통 | `orders`, `order_items`, `order_shipping_snapshots`, `payments`, `payment_refunds` |
 | 공연, 공연장 | 송혜민 | `venues`, `venue_sections`, `venue_seats`, `venue_layouts`, `layout_seats`, `concerts`, `performances` |
 | 티켓팅 | 송혜민 | `performance_seats`, `seat_holds`, `ticket_reservations`, `tickets`, `ticket_purchase_limits` |
-| 한정판 드롭 | 이태호 | `drops`, `drop_variants`, `drop_inventories`, `drop_reservations`, `drop_purchase_slots` |
+| 한정판 드롭 | 이태호 | `drops`, `drop_variants`, `drop_inventories`, `drop_reservations`, `drop_purchase_slots`, `drop_queue_entries` |
 | 팬미팅 추첨 | 홍승연 | `fan_meeting_events`, `fan_meeting_draw_runs`, `fan_meeting_applications`, `fan_meeting_selections`, `fan_meeting_orders` |
 | 경매 | 천종원 | `auctions`, `auction_bids`, `auction_results`, `auction_images` |
-| 크레딧 | 천종원 (공통 모듈 여부 미정) | `credit_wallets`, `credit_holds`, `credit_transactions` |
+| 크레딧 | 천종원 (`com.restless.credit` 패키지로 분리, 지금은 경매만 사용) | `credit_wallets`, `credit_holds`, `credit_transactions` |
 
 ## 2. 도메인 사이 연결
 
 ```mermaid
 erDiagram
     USERS ||--o{ ORDERS : places
-    ORDERS ||--o{ PAYMENTS : paid_by
+    ORDERS ||..o{ PAYMENTS : "payable (논리 참조)"
 
     VENUES ||--o{ CONCERTS : hosts
     CONCERTS ||--o{ PERFORMANCES : schedules
@@ -76,8 +77,9 @@ erDiagram
 
 ### 드롭
 
-- 구매 대기열 테이블은 설계 미정이라 제외했다 ([data-model.md](../domains/drop/data-model.md)).
-- `drops.concert_id`는 `확인` 대상이다. 원본은 필수다.
+- 구매 대기열은 `drop_queue_entries`다 (V20261113_1800, [data-model.md](../domains/drop/data-model.md)). 그림에는 아직 없다.
+- `drops.concert_id`는 현재 필수(NOT NULL FK)로 구현돼 있다. NULL 허용 여부는 팀 확인 대상으로 남아 있다.
+- 결제는 주문을 FK로 가리키지 않는다. `payments.payable_type`/`payable_id`로 결제 대상(드롭은 재고 점유 ID)을 가리킨다 ([ADR-0003](../decisions/0003-payment-module-boundary.md)).
 
 ### 팬미팅
 
@@ -99,10 +101,10 @@ erDiagram
 | 항목 | 관련 |
 |---|---|
 | `users.role` 이름 (문서마다 USER, FAN, SELLER, ORGANIZER, ADMIN이 다름) | 전체 |
-| `orders.order_type`의 티켓팅 값 (공통 주문 연결은 확정) | 티켓팅, 공통 결제 |
+| ~~`orders.order_type`의 티켓팅 값~~ 결정: `DROP`, `TICKET` (`ck_orders_order_type`, `V20261112_2100`). 상태도 `ck_orders_status`로 제한 | 티켓팅, 공통 결제 |
 | ~~`payments.payment_key`가 NOT NULL인데, 승인 전(READY)에도 값이 있는지~~ 결정: NULL 허용, 승인 시작 때 채움 ([ADR-0003](../decisions/0003-payment-module-boundary.md)) | 공통 결제 |
-| `auction_results.winning_bid_id`가 NOT NULL인데, 유찰을 결과 행으로 남기는지 | 경매 |
+| ~~`auction_results.winning_bid_id`가 NOT NULL인데, 유찰을 결과 행으로 남기는지~~ 결정: 미낙찰도 결과 행으로 남김. `result_type`(`SOLD`/`UNSOLD`) 추가, `winning_bid_id` NULL 허용 (`V20261112_1045`) | 경매 |
 | 경매 입장 자격(`access_policy`, `required_performance_id`)을 티켓팅의 어떤 상태로 판단하는지 | 경매, 티켓팅 |
-| 크레딧을 공통 모듈로 둘지 경매가 소유할지, 드롭 구매에도 쓰는지 | 경매, 드롭, 공통 |
+| ~~크레딧을 공통 모듈로 둘지 경매가 소유할지~~ 결정: `com.restless.credit` 패키지로 분리. 드롭 구매에도 쓰는지는 미정 | 경매, 드롭, 공통 |
 | ~~팬미팅 결제(`fan_meeting_orders.payment_id`)를 공통 `payments`와 어떻게 연결하는지~~ 결정: `payments.(payable_type, payable_id)`로 연결, 물리 FK 없음 ([ADR-0003](../decisions/0003-payment-module-boundary.md)) | 팬미팅, 공통 결제 |
 | 공연 취소 시 연결된 드롭, 경매 처리 | 전체 |

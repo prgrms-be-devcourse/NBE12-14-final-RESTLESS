@@ -55,8 +55,16 @@ public class Payment {
 
     private long amount;
 
+    /** 승인 시작(READY → PROCESSING)을 기록한 서버 시각. Handler에 시도 문맥으로 전달한다. */
+    @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
+    private Instant approvalStartedAt;
+
     @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
     private Instant approvedAt;
+
+    /** First UNKNOWN entry survives polling/restarts for operations monitoring. */
+    @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
+    private Instant unknownSinceAt;
 
     @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
     private Instant expiresAt;
@@ -101,6 +109,7 @@ public class Payment {
         Objects.requireNonNull(paymentKey);
         transition(PaymentStatus.PROCESSING, now);
         this.paymentKey = paymentKey;
+        this.approvalStartedAt = now;
     }
 
     public void approve(Instant approvedAt, Instant now) {
@@ -119,7 +128,13 @@ public class Payment {
         failureMessage = message;
     }
 
-    public void markUnknown(Instant now) { transition(PaymentStatus.UNKNOWN, now); }
+    public void markUnknown(Instant now) {
+        transition(PaymentStatus.UNKNOWN, now);
+        if (unknownSinceAt == null) unknownSinceAt = now;
+    }
+
+    /** Poll cadence only; never changes the first UNKNOWN timestamp or business status. */
+    public void recordReconciliationCheck(Instant now) { updatedAt = Objects.requireNonNull(now); }
     public void requestCancel(Instant now) { transition(PaymentStatus.CANCEL_PENDING, now); }
     public void completeCancel(Instant now) { transition(PaymentStatus.CANCELLED, now); }
     public void markCancelUnknown(Instant now) { transition(PaymentStatus.CANCEL_UNKNOWN, now); }

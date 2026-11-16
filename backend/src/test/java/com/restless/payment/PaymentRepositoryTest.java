@@ -107,21 +107,44 @@ class PaymentRepositoryTest {
     }
     @Test void oneActiveFullRefundPerPaymentAndFailedRefundAllowsRetry() {
         Long id = payments.saveAndFlush(attempt("one")).getId();
-        PaymentRefund first = refunds.saveAndFlush(PaymentRefund.request(id, 1000L, "refund-one", "reason", NOW));
-        assertThatThrownBy(() -> refunds.saveAndFlush(PaymentRefund.request(id, 1000L, "refund-two", "reason", NOW)))
+        PaymentRefund first = refunds.saveAndFlush(PaymentRefund.request(id, PaymentRefundKind.CUSTOMER_REFUND, 1000L, "refund-one", "reason", NOW));
+        assertThatThrownBy(() -> refunds.saveAndFlush(PaymentRefund.request(id, PaymentRefundKind.CUSTOMER_REFUND, 1000L, "refund-two", "reason", NOW)))
             .isInstanceOf(DataIntegrityViolationException.class).hasMessageContaining("uk_payment_refunds_active_payment_id");
         first.fail("REJECTED", "confirmed", NOW);
         refunds.saveAndFlush(first);
-        refunds.saveAndFlush(PaymentRefund.request(id, 1000L, "refund-two", "reason", NOW));
+        refunds.saveAndFlush(PaymentRefund.request(id, PaymentRefundKind.CUSTOMER_REFUND, 1000L, "refund-two", "reason", NOW));
         assertThat(refunds.count()).isEqualTo(2);
     }
     @Test void refundIdempotencyKeyIsGloballyUnique() {
         Long id = payments.saveAndFlush(attempt("one")).getId();
-        PaymentRefund first = PaymentRefund.request(id, 1000L, "refund-one", "reason", NOW);
+        PaymentRefund first = PaymentRefund.request(id, PaymentRefundKind.CUSTOMER_REFUND, 1000L, "refund-one", "reason", NOW);
         first.fail("REJECTED", "confirmed", NOW);
         refunds.saveAndFlush(first);
-        assertThatThrownBy(() -> refunds.saveAndFlush(PaymentRefund.request(id, 1000L, "refund-one", "reason", NOW)))
+        assertThatThrownBy(() -> refunds.saveAndFlush(PaymentRefund.request(id, PaymentRefundKind.CUSTOMER_REFUND, 1000L, "refund-one", "reason", NOW)))
             .isInstanceOf(DataIntegrityViolationException.class).hasMessageContaining("uk_payment_refunds_idempotency_key");
+    }
+
+    @Test void paymentKeysDifferingOnlyInCaseAreDifferentAttempts() {
+        Payment lower = payments.saveAndFlush(attempt("key-a"));
+        lower.fail("SUPERSEDED", "replaced", NOW);
+        payments.saveAndFlush(lower);
+        Payment upper = payments.saveAndFlush(attempt("KEY-A"));
+        assertThat(upper.getId()).isNotEqualTo(lower.getId());
+        assertThat(payments.findByPayableTypeAndPayableIdAndIdempotencyKey(PayableType.DROP, 1L, "key-a"))
+            .get().extracting(Payment::getId).isEqualTo(lower.getId());
+        assertThat(payments.findByPayableTypeAndPayableIdAndIdempotencyKey(PayableType.DROP, 1L, "KEY-A"))
+            .get().extracting(Payment::getId).isEqualTo(upper.getId());
+    }
+    @Test void refundKeysDifferingOnlyInCaseAreDifferentRequests() {
+        Long id = payments.saveAndFlush(attempt("one")).getId();
+        PaymentRefund lower = PaymentRefund.requestCustomer(id, 1000L, "refund-key", "reason", NOW);
+        lower.fail("REJECTED", "confirmed", NOW);
+        refunds.saveAndFlush(lower);
+        PaymentRefund upper = refunds.saveAndFlush(PaymentRefund.requestCustomer(id, 1000L, "REFUND-KEY", "reason", NOW));
+        assertThat(refunds.findByPaymentIdAndKindAndClientKey(id, PaymentRefundKind.CUSTOMER_REFUND, "refund-key"))
+            .get().extracting(PaymentRefund::getId).isEqualTo(lower.getId());
+        assertThat(refunds.findByPaymentIdAndKindAndClientKey(id, PaymentRefundKind.CUSTOMER_REFUND, "REFUND-KEY"))
+            .get().extracting(PaymentRefund::getId).isEqualTo(upper.getId());
     }
 
     /** Locked load + entity method: the second transaction waits, then sees APPROVED and does nothing. */
@@ -164,8 +187,31 @@ class PaymentRepositoryTest {
     }
     @Test void dbRejectsCompletedRefundWithoutTransactionKey() {
         Long paymentId = payments.saveAndFlush(attempt("one")).getId();
-        Long refundId = refunds.saveAndFlush(PaymentRefund.request(paymentId, 1000L, "refund-one", "reason", NOW)).getId();
+        Long refundId = refunds.saveAndFlush(PaymentRefund.request(paymentId, PaymentRefundKind.CUSTOMER_REFUND, 1000L, "refund-one", "reason", NOW)).getId();
         assertThatThrownBy(() -> jdbc.update("UPDATE payment_refunds SET status = 'COMPLETED' WHERE id = ?", refundId))
             .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_payment_refunds_completed");
+    }
+    @Test void approvalStartTimeAndRefundKindRoundTrip() {
+        Payment p = attempt("one");
+        p.startProcessing("pg-key", NOW.plusSeconds(5));
+        Long paymentId = payments.saveAndFlush(p).getId();
+        assertThat(payments.findById(paymentId).orElseThrow().getApprovalStartedAt()).isEqualTo(NOW.plusSeconds(5));
+        Long refundId = refunds.saveAndFlush(
+            PaymentRefund.request(paymentId, PaymentRefundKind.COMPENSATION, 1000L, "refund-one", "reason", NOW)).getId();
+        assertThat(refunds.findById(refundId).orElseThrow().getKind()).isEqualTo(PaymentRefundKind.COMPENSATION);
+    }
+    @Test void dbRejectsPaymentKeyWithoutApprovalStartTimeAndViceVersa() {
+        Long readyId = payments.saveAndFlush(attempt("one")).getId();
+        assertThatThrownBy(() -> jdbc.update("UPDATE payments SET payment_key = 'pg-key' WHERE id = ?", readyId))
+            .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_payments_approval_started_with_key");
+        assertThatThrownBy(() -> jdbc.update("UPDATE payments SET approval_started_at = NOW(6) WHERE id = ?", readyId))
+            .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_payments_approval_started_with_key");
+    }
+    @Test void dbRejectsUnknownRefundKind() {
+        Long paymentId = payments.saveAndFlush(attempt("one")).getId();
+        Long refundId = refunds.saveAndFlush(
+            PaymentRefund.request(paymentId, PaymentRefundKind.CUSTOMER_REFUND, 1000L, "refund-one", "reason", NOW)).getId();
+        assertThatThrownBy(() -> jdbc.update("UPDATE payment_refunds SET kind = 'PARTIAL' WHERE id = ?", refundId))
+            .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_payment_refunds_kind");
     }
 }

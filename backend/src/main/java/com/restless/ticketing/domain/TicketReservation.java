@@ -59,6 +59,18 @@ public class TicketReservation {
     @Column(name = "payment_expires_at")
     private Instant paymentExpiresAt;
 
+    /** 이 예약이 승인 시작을 받아들인 마지막 시도. 완료 후에도 결과 대조를 위해 보존한다. */
+    @Column(name = "current_payment_id")
+    private Long currentPaymentId;
+
+    @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
+    @Column(name = "approval_started_at")
+    private Instant approvalStartedAt;
+
+    /** 승인 결과 또는 필요한 보상 취소가 미확정이면 만료로 좌석을 반환하지 않는다. */
+    @Column(name = "payment_result_pending", nullable = false)
+    private boolean paymentResultPending;
+
     @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -100,7 +112,128 @@ public class TicketReservation {
 
     public boolean canReleaseHold() {
         return status == TicketReservationStatus.HELD
-                && orderId == null && checkoutStartedAt == null && paymentExpiresAt == null;
+                && orderId == null && checkoutStartedAt == null && paymentExpiresAt == null
+                && currentPaymentId == null && approvalStartedAt == null && !paymentResultPending;
+    }
+
+    public void startCheckout(Long orderId, Instant now, Instant paymentExpiresAt) {
+        Objects.requireNonNull(orderId);
+        Objects.requireNonNull(now);
+        Objects.requireNonNull(paymentExpiresAt);
+        if (!canReleaseHold() || !now.isBefore(holdExpiresAt) || !now.isBefore(paymentExpiresAt)) {
+            throw new IllegalStateException("유효한 결제 전 선점 예약만 결제를 시작할 수 있습니다.");
+        }
+        this.orderId = orderId;
+        this.checkoutStartedAt = now;
+        this.paymentExpiresAt = paymentExpiresAt;
+        this.status = TicketReservationStatus.PAYMENT_PENDING;
+    }
+
+    /**
+     * 호출자는 예약·좌석 잠금과 소유권 검증을 먼저 수행해야 한다.
+     * 기한은 잠금 후 읽은 DB 시각(now), 시도 대조는 공통 결제의 원래 시작 시각으로 한다.
+     * 업무상 시작할 수 없으면 필드를 변경하지 않고 false를 반환한다.
+     */
+    public boolean startApproval(Long paymentId, Instant attemptStartedAt, Instant now) {
+        Objects.requireNonNull(paymentId, "paymentId");
+        Objects.requireNonNull(attemptStartedAt, "attemptStartedAt");
+        Objects.requireNonNull(now, "now");
+        if (paymentId <= 0) {
+            throw new IllegalArgumentException("결제 시도 ID는 양수여야 합니다.");
+        }
+        if (status != TicketReservationStatus.PAYMENT_PENDING || orderId == null
+                || checkoutStartedAt == null || paymentExpiresAt == null
+                || !now.isBefore(paymentExpiresAt)
+                || attemptStartedAt.isBefore(checkoutStartedAt) || attemptStartedAt.isAfter(now)) {
+            return false;
+        }
+        if (currentPaymentId != null && currentPaymentId.equals(paymentId)) {
+            // 같은 ID의 재수신으로 최초 시각을 덮어쓰거나 최종 종료한 시도를 다시 열지 않는다.
+            return paymentResultPending && matchesPaymentAttempt(paymentId, attemptStartedAt);
+        }
+        if (paymentResultPending) {
+            return false;
+        }
+        currentPaymentId = paymentId;
+        approvalStartedAt = attemptStartedAt;
+        paymentResultPending = true;
+        return true;
+    }
+
+    public boolean matchesPaymentAttempt(Long paymentId, Instant attemptStartedAt) {
+        return currentPaymentId != null && approvalStartedAt != null
+                && currentPaymentId.equals(paymentId) && approvalStartedAt.equals(attemptStartedAt);
+    }
+
+    public boolean canConfirmPayment(Long paymentId, Instant attemptStartedAt) {
+        return (status == TicketReservationStatus.PAYMENT_PENDING || status == TicketReservationStatus.RECONCILING)
+                && paymentResultPending && matchesPaymentAttempt(paymentId, attemptStartedAt);
+    }
+
+    /** 승인 시작 수락 때 기한을 검증했으므로 성공 확인 시각으로 다시 만료시키지 않는다. */
+    public void confirmPayment(Long paymentId, Instant attemptStartedAt) {
+        if (!canConfirmPayment(paymentId, attemptStartedAt)) {
+            throw new IllegalStateException("수락한 미확정 결제 시도만 예매를 확정할 수 있습니다.");
+        }
+        status = TicketReservationStatus.CONFIRMED;
+        paymentResultPending = false;
+    }
+
+    /** READY 만료는 수락한 미확정 승인 시도가 없을 때만 반영한다. */
+    public boolean canApplyPaymentFailure(Long paymentId, Instant attemptStartedAt) {
+        if (attemptStartedAt == null) {
+            return paymentId != null && paymentId > 0 && status == TicketReservationStatus.PAYMENT_PENDING
+                    && orderId != null && paymentExpiresAt != null && !paymentResultPending;
+        }
+        return canConfirmPayment(paymentId, attemptStartedAt);
+    }
+
+    /** 호출자가 전체 좌석·수량 및 주문 변경을 같은 트랜잭션으로 처리한다. */
+    public void failPayment(Long paymentId, Instant attemptStartedAt, Instant now) {
+        Objects.requireNonNull(now, "now");
+        if (!canApplyPaymentFailure(paymentId, attemptStartedAt)) {
+            throw new IllegalStateException("현재 미확정 시도의 최종 실패만 반영할 수 있습니다.");
+        }
+        status = now.isBefore(paymentExpiresAt)
+                ? TicketReservationStatus.PAYMENT_PENDING : TicketReservationStatus.RELEASED;
+        paymentResultPending = false;
+        // 실패한 시도의 식별 정보와 최초 checkout 기한은 보존한다.
+    }
+
+    public boolean markPaymentUnknown(Long paymentId, Instant attemptStartedAt) {
+        if (!canConfirmPayment(paymentId, attemptStartedAt)) {
+            return false;
+        }
+        status = TicketReservationStatus.RECONCILING;
+        return true;
+    }
+
+    public boolean canExpirePayment(Instant now) {
+        return status == TicketReservationStatus.PAYMENT_PENDING
+                && orderId != null && checkoutStartedAt != null && paymentExpiresAt != null
+                && !paymentResultPending && !now.isBefore(paymentExpiresAt);
+    }
+
+    public boolean canCompleteCompensation(Long paymentId) {
+        return (status == TicketReservationStatus.PAYMENT_PENDING || status == TicketReservationStatus.RECONCILING)
+                && paymentResultPending && currentPaymentId != null && currentPaymentId.equals(paymentId);
+    }
+
+    /** PG 취소 확정 callback에서만 호출한다. 발급 전 보상이므로 확정 수량은 되돌리지 않는다. */
+    public void completeCompensation(Long paymentId) {
+        if (!canCompleteCompensation(paymentId)) {
+            throw new IllegalStateException("현재 미확정 시도의 보상 취소만 완료할 수 있습니다.");
+        }
+        status = TicketReservationStatus.RELEASED;
+        paymentResultPending = false;
+    }
+
+    /** 승인 미시도 또는 최종 실패 후 기한이 지난 예약만 반환한다. 시도 문맥은 보존한다. */
+    public void expirePayment(Instant now) {
+        if (!canExpirePayment(now)) {
+            throw new IllegalStateException("결과가 미확정인 예약이나 결제 기한 전 예약은 만료할 수 없습니다.");
+        }
+        status = TicketReservationStatus.RELEASED;
     }
 
     public void cancelHold() {

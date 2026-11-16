@@ -14,6 +14,24 @@ spring:
     out-of-order: true
 
 restless:
+  drop:
+    queue:
+      required: true
+      heartbeat-timeout: 30s
+      admission-ttl: 5m
+      admit-per-run: 100
+      scheduler:
+        enabled: true
+        fixed-delay-ms: 1000
+  payment:
+    reconcile:
+      enabled: ${PAYMENT_RECONCILE_ENABLED:true}
+      fixed-delay-ms: 5000
+      batch-size: 100
+      processing-stale-after: 30s
+      unknown-retry-after: 10s
+      cancel-stale-after: 30s
+      not-found-final-after: 15m
   auth:
     jwt:
       # HS256 서명 키, 32바이트 이상. dev는 application-dev.yml에 기본값이 있고, prod는 환경변수로만 넣는다.
@@ -24,6 +42,35 @@ restless:
       cookie-name: refresh_token
       cookie-secure: ${REFRESH_COOKIE_SECURE:true}
       same-site: Strict
+  auction:
+    scheduler:
+      # 경매 시작·종료 스케줄러. 테스트에서는 build.gradle이 false로 끈다.
+      enabled: ${AUCTION_SCHEDULER_ENABLED:true}
+      # 한 번 처리한 뒤 다음 실행까지 쉬는 시간(ms)
+      fixed-delay-ms: 1000
+      # 한 번에 처리할 경매 수
+      batch-size: 100
+    stream:
+      # 경매별로 변경을 모아 최신 상태를 보내는 간격(ms). policy.md 8절
+      flush-interval-ms: 200
+      # SSE 연결 최대 유지 시간(ms). 지나면 서버가 닫고, 클라이언트는 상세를 다시 받은 뒤 재연결한다.
+      timeout-ms: 1800000
+  fanmeeting:
+    worker:
+      # 팬미팅 응모 기간 열기·마감, 추첨 Worker. 테스트에서는 build.gradle이 false로 끈다.
+      enabled: ${FANMEETING_WORKER_ENABLED:true}
+      fixed-delay-ms: 1000
+      draw-fixed-delay-ms: 5000
+      # 주문 만료, 보류 30분 경고
+      expiry-fixed-delay-ms: 60000
+      # 예비 승격, 모집 완료
+      promotion-fixed-delay-ms: 30000
+      # 한 번에 처리할 행사·추첨·주문 수
+      batch-size: 100
+    eligibility:
+      # 행사 공지 시각 이후 가입한 회원의 응모를 막는다. 기본 꺼짐 (policy.md 7절).
+      joined-at-check:
+        enabled: ${FANMEETING_JOINED_AT_CHECK_ENABLED:false}
 
 logging:
   pattern:

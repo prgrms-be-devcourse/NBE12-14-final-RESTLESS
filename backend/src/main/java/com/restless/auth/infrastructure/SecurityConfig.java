@@ -43,6 +43,8 @@ public class SecurityConfig implements WebMvcConfigurer {
             "/api/auctions", "/api/auctions/*", "/api/auctions/*/bids", "/api/auctions/*/result",
             "/api/fan-meetings/*",
             "/actuator/health", "/actuator/health/**",
+            // perf 프로필에서만 노출된다. 관리 포트를 보안 그룹으로 막는다 (application-perf.yml)
+            "/actuator/prometheus",
     };
 
     /** 토큰 없이 부르는 인증 API. refresh, logout은 Access Token이 만료된 뒤에도 불려야 한다. */
@@ -65,6 +67,12 @@ public class SecurityConfig implements WebMvcConfigurer {
                         .requestMatchers(HttpMethod.GET, PUBLIC_GET_PATHS).permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        // 주최자 API는 주최자와 관리자만. 본인 것인지는 각 도메인 서비스가 확인한다.
+                        .requestMatchers("/api/organizer/**").hasAnyRole("ORGANIZER", "ADMIN")
+                        // 경매 등록·수정·삭제는 주최자와 관리자만. 본인 경매인지는 경매 서비스가 확인한다.
+                        .requestMatchers(HttpMethod.POST, "/api/auctions").hasAnyRole("ORGANIZER", "ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/auctions/*").hasAnyRole("ORGANIZER", "ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/auctions/*").hasAnyRole("ORGANIZER", "ADMIN")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .bearerTokenResolver(bearerTokenResolver())

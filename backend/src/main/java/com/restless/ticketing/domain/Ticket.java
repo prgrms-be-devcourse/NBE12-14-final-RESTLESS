@@ -67,6 +67,12 @@ public class Ticket {
         this.ticketNo = UUID.randomUUID().toString();
     }
 
+    /** 실제 예매 확정의 최초 발급 상태는 ISSUED다. */
+    public static Ticket issue(Long reservationId, Long performanceId, Long performanceSeatId,
+                               long priceAmount, Instant now) {
+        return new Ticket(reservationId, performanceId, performanceSeatId, priceAmount, "ISSUED", now);
+    }
+
     public static Ticket issue(Long reservationId, Long performanceId, Long performanceSeatId,
                                long priceAmount, String status, Instant now) {
         return new Ticket(reservationId, performanceId, performanceSeatId, priceAmount, status, now);

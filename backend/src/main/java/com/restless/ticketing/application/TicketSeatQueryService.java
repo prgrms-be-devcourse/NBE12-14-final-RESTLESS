@@ -1,8 +1,9 @@
 package com.restless.ticketing.application;
 
+import com.restless.ticketing.application.dto.TicketSeatInfo;
 import com.restless.concert.application.ConcertQueryService;
-import com.restless.concert.application.ConcertQueryService.PerformanceLayout;
-import com.restless.concert.application.ConcertQueryService.SeatPosition;
+import com.restless.concert.application.dto.PerformanceLayout;
+import com.restless.concert.application.dto.SeatPosition;
 import com.restless.ticketing.domain.TicketSeat;
 import com.restless.ticketing.infrastructure.TicketSeatRepository;
 import java.util.Comparator;

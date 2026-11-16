@@ -5,7 +5,7 @@ import org.springframework.http.HttpStatus;
 
 /**
  * 오류 코드. 응답의 {@code code}는 상수 이름이다.
- * 공통·인증·회원·티켓팅에서 사용하는 오류를 정의한다.
+ * 공통·인증·회원·티켓팅·경매·크레딧에서 사용하는 오류를 정의한다.
  */
 @Getter
 public enum ErrorCode {
@@ -34,9 +34,57 @@ public enum ErrorCode {
     TICKET_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "회차별 구매 한도를 초과했습니다."),
     BOOKING_NOT_OPEN(HttpStatus.CONFLICT, "예매 시작 전입니다."),
     BOOKING_CLOSED(HttpStatus.CONFLICT, "예매가 마감되었습니다."),
+    RESERVATION_EXPIRED(HttpStatus.CONFLICT, "선점 기한이 지났습니다."),
+    RESERVATION_CANNOT_CHECKOUT(HttpStatus.CONFLICT, "결제를 시작할 수 없는 예약입니다."),
     RESERVATION_CANNOT_CANCEL(HttpStatus.CONFLICT, "결제 전 선점 예약만 취소할 수 있습니다."),
-    IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "같은 요청 키를 다른 요청에 사용할 수 없습니다."),
-    SEAT_LOCK_TIMEOUT(HttpStatus.CONFLICT, "좌석 처리 경합이 발생했습니다. 같은 요청 키로 재시도해 주세요.");
+    SEAT_LOCK_TIMEOUT(HttpStatus.CONFLICT, "좌석 처리 경합이 발생했습니다. 같은 요청 키로 재시도해 주세요."),
+
+    // 경매, 크레딧
+    AUCTION_NOT_FOUND(HttpStatus.NOT_FOUND, "경매를 찾을 수 없습니다."),
+    AUCTION_RESULT_NOT_FOUND(HttpStatus.NOT_FOUND, "아직 종료되지 않아 경매 결과가 없습니다."),
+    AUCTION_FORBIDDEN(HttpStatus.FORBIDDEN, "이 경매를 변경할 권한이 없습니다."),
+    AUCTION_ALREADY_STARTED(HttpStatus.CONFLICT, "이미 시작된 경매는 수정하거나 삭제할 수 없습니다."),
+    AUCTION_NOT_OPEN(HttpStatus.CONFLICT, "아직 시작하지 않은 경매입니다."),
+    AUCTION_CLOSED(HttpStatus.CONFLICT, "종료된 경매입니다."),
+    BID_BY_SELLER(HttpStatus.CONFLICT, "자신의 경매에는 입찰할 수 없습니다."),
+    BID_ALREADY_HIGHEST(HttpStatus.CONFLICT, "이미 현재 최고 입찰자입니다."),
+    BID_AMOUNT_TOO_LOW(HttpStatus.CONFLICT, "최소 입찰 가능 금액보다 낮습니다."),
+    IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "같은 요청 키로 다른 요청을 보냈습니다."),
+    CREDIT_INSUFFICIENT(HttpStatus.CONFLICT, "사용 가능한 크레딧이 부족합니다."),
+
+    // 결제
+    ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."),
+    PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "결제를 찾을 수 없습니다."),
+    PAYMENT_TARGET_NOT_FOUND(HttpStatus.NOT_FOUND, "결제 대상을 찾을 수 없습니다."),
+    PAYMENT_NOT_PAYABLE(HttpStatus.CONFLICT, "결제할 수 없는 상태입니다."),
+    PAYMENT_WINDOW_EXPIRED(HttpStatus.CONFLICT, "결제 기한이 지났습니다."),
+    PAYMENT_ATTEMPT_IN_PROGRESS(HttpStatus.CONFLICT, "결제 승인이 진행 중입니다."),
+    PAYMENT_UNDER_REVIEW(HttpStatus.CONFLICT, "결제 결과를 확인 중입니다."),
+    PAYMENT_AMOUNT_MISMATCH(HttpStatus.BAD_REQUEST, "결제 금액이 일치하지 않습니다."),
+    PAYMENT_FAILED(HttpStatus.CONFLICT, "결제 승인이 실패했습니다."),
+    PAYMENT_REJECTED(HttpStatus.CONFLICT, "구매를 확정할 수 없어 보상 취소합니다."),
+    PAYMENT_NOT_REFUNDABLE(HttpStatus.CONFLICT, "환불할 수 없는 결제입니다."),
+    PAYMENT_REFUND_IN_PROGRESS(HttpStatus.CONFLICT, "환불이 진행 중입니다."),
+    PAYMENT_ALREADY_REFUNDED(HttpStatus.CONFLICT, "이미 환불된 결제입니다."),
+    PAYMENT_REFUND_REJECTED(HttpStatus.CONFLICT, "PG가 환불을 거절했습니다."),
+
+    DROP_INVALID_STATE(HttpStatus.CONFLICT, "드롭 상태가 올바르지 않습니다."),
+    DROP_NOT_ON_SALE(HttpStatus.CONFLICT, "드롭 판매 기간이 아닙니다."),
+    DROP_SOLD_OUT(HttpStatus.CONFLICT, "드롭 재고가 소진되었습니다."),
+    DROP_ACTIVE_PURCHASE_EXISTS(HttpStatus.CONFLICT, "진행 중인 드롭 구매가 있습니다."),
+    DROP_ADMISSION_REQUIRED(HttpStatus.FORBIDDEN, "드롭 구매권이 필요합니다."),
+
+    // 팬미팅
+    FAN_MEETING_NOT_FOUND(HttpStatus.NOT_FOUND, "팬미팅을 찾을 수 없습니다."),
+    INVALID_FAN_MEETING_SETTINGS(HttpStatus.BAD_REQUEST, "팬미팅 설정이 올바르지 않습니다."),
+    APPLICATION_WINDOW_CLOSED(HttpStatus.CONFLICT, "응모 기간이 아닙니다."),
+    ALREADY_APPLIED(HttpStatus.CONFLICT, "이미 응모했습니다."),
+    APPLICATION_NOT_ACTIVE(HttpStatus.CONFLICT, "취소할 응모가 없습니다."),
+    APPLICATION_BUSY(HttpStatus.SERVICE_UNAVAILABLE, "응모 요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."),
+    APPLICATION_NOT_ELIGIBLE(HttpStatus.FORBIDDEN, "응모 자격이 없습니다. 행사 공지 이후에 가입한 계정입니다."),
+    MEMBER_LOOKUP_FAILED(HttpStatus.SERVICE_UNAVAILABLE, "회원 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요."),
+    ORDER_NOT_PAYABLE(HttpStatus.CONFLICT, "결제할 수 없는 주문입니다."),
+    DECLINE_NOT_ALLOWED(HttpStatus.CONFLICT, "결제를 시작한 주문은 포기할 수 없어요.");
 
     private final HttpStatus httpStatus;
     private final String message;
