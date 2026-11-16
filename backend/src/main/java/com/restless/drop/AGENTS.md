@@ -30,4 +30,3 @@ Codex는 레포 루트에서 실행하면 이 파일을 자동으로 읽지 않�
 
 - 드롭 테스트: `./gradlew test --tests 'com.restless.drop.*'`
 - 모듈 경계: `./gradlew test --tests 'com.restless.architecture.*'`
-- 최종 판정 (레포 루트에서): `bash tools/harness/harness-check.sh`. 규칙, 문서, dev와 합친 전체 빌드를 본다.
