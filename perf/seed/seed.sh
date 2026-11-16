@@ -13,8 +13,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$ROOT/../.." && pwd)"
 OUT="$ROOT/out"
 DROP_INVARIANTS="$REPO/backend/src/test/resources/harness/drop-invariants.sql"
-# 모든 시드 계정의 비밀번호 perf-password의 BCrypt 해시 (cost 10).
-PASSWORD_HASH='$2y$10$7tegSVACM8q6z1UY7oci0OchPPdpSxL9w1qLDYRKeyb4kolp1B1Ki'
+# 모든 시드 계정의 비밀번호 0000의 BCrypt 해시 (cost 10).
+PASSWORD_HASH='$2y$10$y6OOQqM1Leen.h4r02zhS.toyPydGqZ6rOBGO1MybH6UaYBdTtMQC'
 
 die() { echo "seed: $*" >&2; exit 1; }
 
@@ -48,7 +48,9 @@ for host in "${hosts[@]}"; do
 done
 [[ $allowed -eq 1 ]] || die "DB_HOST $DB_HOST is not in PERF_ALLOWED_DB_HOSTS"
 
-# 3. 운영으로 보이는 이름은 허용 목록에 있어도 막는다.
+# 3. 성능 테스트 DB 이름은 perf-로 시작한다 (예: perf-restless). 배포 DB에는 접두어가 없다.
+#    운영으로 보이는 이름은 접두어가 맞아도 막는다.
+[[ "$DB_NAME" == perf-* ]] || die "DB_NAME must start with perf- (e.g. perf-restless): $DB_NAME"
 shopt -s nocasematch
 [[ "$DB_HOST $DB_NAME" =~ prod ]] && die "DB_HOST or DB_NAME looks like production: $DB_HOST/$DB_NAME"
 shopt -u nocasematch

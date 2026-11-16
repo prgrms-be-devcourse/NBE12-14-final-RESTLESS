@@ -30,7 +30,7 @@ INSERT INTO perf_seed_meta (k, v) VALUES
     ('drop_bg_drops', @bg_drops),
     ('drop_bg_reservations', @bg_reservations);
 
--- 비밀번호는 모두 perf-password (BCrypt). README 참고.
+-- 비밀번호는 모두 0000 (BCrypt). README 참고.
 -- 앱에는 메일 발송 기능이 없어 이 주소로 메일이 나가지 않는다.
 INSERT INTO users (id, email, password_hash, nickname, role, status, created_at, updated_at)
 SELECT s.n + 1,
