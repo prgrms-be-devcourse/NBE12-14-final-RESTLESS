@@ -1,5 +1,9 @@
 # Auction 정책
 
+> 관련 코드: `backend/src/main/java/com/restless/auction/`, `backend/src/main/java/com/restless/credit/`
+>
+> 마지막 확인: 2026-11-15 (#135 정리 기준)
+
 담당자: 천종원. 원본은 [design.md](design.md)이고, 이 문서는 원본에 1차 구현 결정을 더한 구현 기준이다.
 
 ## 1. 개요

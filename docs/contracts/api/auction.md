@@ -1,5 +1,9 @@
 # 경매 API
 
+> 관련 코드: `backend/src/main/java/com/restless/auction/api/`, `backend/src/main/java/com/restless/credit/api/`, `backend/src/main/java/com/restless/common/error/ErrorCode.java`
+>
+> 마지막 확인: 2026-11-15 (#131 결과·내 입찰 조회까지)
+
 - 담당: 천종원
 - 상태: PROPOSED (1차 구현 기준). 정책은 [policy.md](../../domains/auction/policy.md)를 따른다.
 - 오류 응답 형식은 [공통 규칙](README.md)을 따른다.

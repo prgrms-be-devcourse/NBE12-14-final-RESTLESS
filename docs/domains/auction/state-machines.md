@@ -1,5 +1,9 @@
 # Auction 상태 머신
 
+> 관련 코드: `backend/src/main/java/com/restless/auction/domain/`, `backend/src/main/java/com/restless/credit/domain/`, `backend/src/main/java/com/restless/auction/application/AuctionQueryService.java`
+>
+> 마지막 확인: 2026-11-15 (#131 결과·내 입찰 조회까지)
+
 ## 1. 경매 (`auctions.status`)
 
 ```text
