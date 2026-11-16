@@ -1,23 +1,30 @@
 # 팬미팅 API
 
-- 담당: 홍승연
+> 담당: 홍승연
+>
+> 상태: IMPLEMENTED (P0 설계 동결 2026-11-10, 코드 기준)
+>
+> 관련 코드: `backend/src/main/java/com/restless/fanmeeting/api/`
+>
+> 마지막 확인: 2026-11-16 (엔드포인트와 상세 응답 필드를 컨트롤러·DTO와 대조)
+
 - 출처: 담당자 P0 구현 명세 8장, 6.6절. 처리 흐름은 [domains/fanmeeting/transactions.md](../../domains/fanmeeting/transactions.md)
-- 상태: P0 설계 동결 (2026-11-10)
+- 팬미팅 목록 API는 없다.
 
-| Method | Endpoint | 설명 | 권한 |
-|---|---|---|---|
-| POST | `/api/organizer/fan-meetings` | Event 생성. 만든 회원이 주최자 | ORGANIZER, ADMIN |
-| GET | `/api/fan-meetings/{eventId}` | 상세. 게릴라 오픈이면 OPEN 전 `entryOpensAt` null. `entryClosesAt`은 OPEN 중에만 | 공개 |
-| POST | `/api/fan-meetings/{eventId}/applications` | 응모·재응모 | 회원 |
-| DELETE | `/api/fan-meetings/{eventId}/applications/me` | 응모 취소 | 회원 |
-| GET | `/api/fan-meetings/{eventId}/applications/me` | 내 응모 상태 | 회원 |
-| GET | `/api/fan-meetings/{eventId}/result/me` | 내 당첨·예비 결과 + `paymentDeadline` | 회원 |
-| GET | `/api/fan-meetings/{eventId}/orders/me` | 내 주문·결제 상태 + `paymentDeadline` | 회원 |
-| POST | `/api/fan-meetings/{eventId}/orders/{orderId}/decline` | 결제 포기 | 회원 |
-| POST | `/api/fan-meetings/{eventId}/orders/{orderId}/confirm` | 0원 주문 확정(결제 없음) | 회원 |
-| GET | `/api/admin/fan-meetings/{eventId}/summary` | 상태, 응모 수, Selection·Order 상태별 인원, 정원 점유, 승격된 예비 최대 순번, `promotionClosesAt`, 보류 목록(경과 시간), `REFUND_PENDING` 목록 | ADMIN |
+| Method | Endpoint | 설명 | 권한 | 구현 |
+|---|---|---|---|---|
+| POST | `/api/organizer/fan-meetings` | Event 생성. 만든 회원이 주최자 | ORGANIZER, ADMIN | 구현 |
+| GET | `/api/fan-meetings/{eventId}` | 상세. 게릴라 오픈이면 OPEN 전 `entryOpensAt` null. `entryClosesAt`은 OPEN 중에만 | 공개 | 구현 |
+| POST | `/api/fan-meetings/{eventId}/applications` | 응모·재응모 | 회원 | 구현 |
+| DELETE | `/api/fan-meetings/{eventId}/applications/me` | 응모 취소 | 회원 | 구현 |
+| GET | `/api/fan-meetings/{eventId}/applications/me` | 내 응모 상태 | 회원 | 구현 |
+| GET | `/api/fan-meetings/{eventId}/result/me` | 내 당첨·예비 결과 + `paymentDeadline` | 회원 | 구현 |
+| GET | `/api/fan-meetings/{eventId}/orders/me` | 내 주문·결제 상태 + `paymentDeadline` | 회원 | 구현 |
+| POST | `/api/fan-meetings/{eventId}/orders/{orderId}/decline` | 결제 포기 | 회원 | 구현 |
+| POST | `/api/fan-meetings/{eventId}/orders/{orderId}/confirm` | 0원 주문 확정(결제 없음) | 회원 | 구현 |
+| GET | `/api/admin/fan-meetings/{eventId}/summary` | 상태, 응모 수, Selection·Order 상태별 인원, 정원 점유, 승격된 예비 최대 순번, `promotionClosesAt`, 보류 목록(경과 시간), `REFUND_PENDING` 목록 | ADMIN | 구현 |
 
-주최자 API(`/api/organizer/**`)는 `role = ORGANIZER` 또는 `ADMIN`, 관리자 API(`/api/admin/**`)는 `role = ADMIN`만 호출할 수 있다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`([공통 API](common.md)).
+주최자 API(`/api/organizer/**`)는 `role = ORGANIZER` 또는 `ADMIN`, 관리자 API(`/api/admin/**`)는 `role = ADMIN`만 호출할 수 있다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`([인증 규칙](auth.md#인증-규칙)).
 
 응모는 `UNIQUE(event_id, user_id)`로 중복을 막으므로 `Idempotency-Key`를 쓰지 않는다.
 
@@ -157,7 +164,7 @@
 
 ## 결제 (공통 결제 API)
 
-팬미팅은 결제 API를 따로 두지 않는다. 손님은 공통 결제 API를 쓴다([공통 API](common.md)). 처리 흐름은 [transactions.md 6·7절](../../domains/fanmeeting/transactions.md#6-결제-시작-공통-결제-api).
+팬미팅은 결제 API를 따로 두지 않는다. 손님은 공통 결제 API를 쓴다([주문·결제 API](payment.md)). 처리 흐름은 [transactions.md 6·7절](../../domains/fanmeeting/transactions.md#6-결제-시작-공통-결제-api).
 
 | 단계 | 호출 | 팬미팅 값 |
 |---|---|---|
@@ -189,9 +196,9 @@
 | 결제 기한 지난 주문의 포기·확정 | 409 | `PAYMENT_WINDOW_EXPIRED` |
 | 결제를 준비한 주문의 포기 | 409 | `DECLINE_NOT_ALLOWED` |
 
-결제 준비·승인 오류는 공통 결제 오류 코드를 쓴다([공통 API](common.md)).
+결제 준비·승인 오류는 공통 결제 오류 코드를 쓴다([주문·결제 API](payment.md#결제-오류)).
 
-오류 코드 일부(`APPLICATION_*`, `ORDER_*`, `PAYMENT_*`)는 [공통 규칙 4번](README.md#공통-규칙-proposed)의 `도메인_상황` 형식과 달리 도메인 접두어가 없다. 명세 동결로 이름을 그대로 둔다.
+오류 코드 일부(`APPLICATION_*`, `ORDER_*`, `PAYMENT_*`)는 [공통 규칙 4번](README.md#공통-규칙)의 `도메인_상황` 형식과 달리 도메인 접두어가 없다. 명세 동결로 이름을 그대로 둔다.
 
 ## DTO 원칙
 

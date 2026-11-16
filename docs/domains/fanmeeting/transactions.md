@@ -123,7 +123,7 @@ COMMIT
 
 ## 6. 결제 시작 (공통 결제 API)
 
-팬미팅은 결제 시작 API를 따로 두지 않는다. 손님은 **공통 결제 API**를 부르고([공통 API](../../contracts/api/common.md)), 결제 모듈이 팬미팅 Handler(`FanMeetingPaymentResultHandler`, `PayableType.FAN_MEETING`)를 부른다.
+팬미팅은 결제 시작 API를 따로 두지 않는다. 손님은 **공통 결제 API**를 부르고([주문·결제 API](../../contracts/api/payment.md)), 결제 모듈이 팬미팅 Handler(`FanMeetingPaymentResultHandler`, `PayableType.FAN_MEETING`)를 부른다.
 
 ```text
 POST /api/payments {payableType: FAN_MEETING, payableId: orderId}, 헤더 Idempotency-Key

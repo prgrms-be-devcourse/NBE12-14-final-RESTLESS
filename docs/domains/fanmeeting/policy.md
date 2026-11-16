@@ -93,7 +93,7 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 
 - `/api/organizer/**`(행사 생성)는 `role = ORGANIZER` 또는 `ADMIN`인 회원만 호출한다.
 - `/api/admin/**`(summary)는 `role = ADMIN`만 호출한다.
-- 역할은 인증 모듈의 보안 설정이 경로 단위로 막는다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`이고, 형식은 팀 공통 오류 응답 `{code, message, details, traceId, timestamp}`다([공통 API](../../contracts/api/common.md)).
+- 역할은 인증 모듈의 보안 설정이 경로 단위로 막는다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`이고, 형식은 팀 공통 오류 응답 `{code, message, details, traceId, timestamp}`다([인증 규칙](../../contracts/api/auth.md#인증-규칙)).
 - 팬미팅 컨트롤러는 역할을 다시 검사하지 않는다. 로그인 회원 ID는 `@LoginMember Long userId`로 받는다.
 - 주최자는 자기 행사(`organizer_id`)만 다룬다. 남의 행사는 404로 답한다. 주최자용 조회·관리 API(P1)를 만들 때 서비스에서 확인한다. ADMIN은 모든 행사를 다룬다.
 
