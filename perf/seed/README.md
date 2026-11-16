@@ -3,16 +3,10 @@
 Flyway로 만든 빈 스키마에 실험 데이터를 SQL로 대량 생성한다. 애플리케이션 코드를 거치지 않는다.
 운영 마이그레이션(`backend/src/main/resources/db/migration`)과 분리되어 있어 운영 DB에는 들어가지 않는다.
 
-## 구현 범위
+## 범위
 
-| 도메인 | 상태 |
-|---|---|
-| member (users, refresh_tokens, credit_wallets) | 구현 |
-| drop | 구현 |
-| order, payment | 구현. 드롭 배경 데이터에서 파생 |
-| ticketing | 드롭이 참조하는 공연장 1개, 공연만. 좌석, 회차, 선점은 담당자 구현 예정 |
-| fanmeeting, auction | 담당자 구현 예정 (`30_fanmeeting.sql`, `40_auction.sql`) |
-| coupon | 테이블이 없어 제외 |
+회원, 드롭, 주문, 결제 데이터만 만든다. 다른 도메인의 데이터와 테스트는 각 담당자가 준비한다.
+드롭이 FK로 참조하는 공연장 1개와 공연만 `10_concert.sql`로 함께 넣는다.
 
 ## 실행
 
@@ -50,7 +44,7 @@ perf/seed/seed.sh --scale base --profile perf
 
 | 구분 | base |
 |---|---|
-| 회원 | users 100,000 + 관리자 1 + 주최자 1, refresh_tokens와 credit_wallets 회원마다 1 |
+| 회원 | users 100,000 + 관리자 1 + 주최자 1, refresh_tokens 계정마다 1 |
 | 핫 드롭 | 1건, SKU 3, 총재고 1,000. 기본 경쟁률 10:1 → 참여자 10,000, 계정이 10만이라 100:1까지 가능 |
 | 배경 드롭 | 종료 100건, SKU 300, 점유 100,000 (CONFIRMED 80%, RESTORED 3%, RELEASED 7%, EXPIRED 10%) |
 | 주문, 결제 | 배경 점유마다 주문 1, 품목 1, 배송 스냅샷 1, 결제 1. 환불 완료 3,000 |

@@ -1,4 +1,4 @@
--- 회원, Refresh Token, 크레딧 지갑. 모든 도메인이 같은 계정을 공유한다.
+-- 회원, Refresh Token. 모든 도메인이 같은 계정을 공유한다.
 -- seed.sh가 세션 변수(@users, @t0, @salt 등)를 먼저 정하고 이 파일부터 차례로 실행한다.
 -- ID는 명시적으로 넣는다: 일반 회원 1..@users, 관리자 @users+1, 주최자 @users+2.
 
@@ -58,7 +58,3 @@ SELECT u.id,
        @t0
 FROM users u;
 
-INSERT INTO credit_wallets (credit_wallet_id, user_id, balance_amount, reserved_amount, created_at, updated_at)
-SELECT u.id, u.id, @credit_balance, 0, @t0, @t0
-FROM users u
-WHERE u.role = 'USER';

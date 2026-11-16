@@ -12,7 +12,6 @@ common:
   token_ttl_hours: 72
   # 핫 드롭 판매 기간. 시드 또는 --refresh 시각부터 센다.
   hot_window_hours: 24
-  credit_wallet_balance: 1000000
   drop_hot_variants: 3
   drop_hot_price: 59000
   # 핫 드롭 대기열에 미리 넣을 WAITING 행 수. 0이면 대기열 등록 자체를 측정한다.

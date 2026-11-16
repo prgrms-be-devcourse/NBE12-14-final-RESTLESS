@@ -99,7 +99,6 @@ session_header() {
 SET @scale = '$SCALE', @salt = '$1', @t0 = UTC_TIMESTAMP(6), @password_hash = '$PASSWORD_HASH';
 SET @users = $SCALE_users, @ratio = $SCALE_contention_ratio, @seq_size = $seq_size;
 SET @token_ttl_hours = $SCALE_token_ttl_hours, @hot_window_hours = $SCALE_hot_window_hours;
-SET @credit_balance = $SCALE_credit_wallet_balance;
 SET @hot_variants = $SCALE_drop_hot_variants, @hot_price = $SCALE_drop_hot_price;
 SET @hot_stock = $SCALE_drop_hot_stock, @hot_queue_prefill = $SCALE_drop_hot_queue_prefill;
 SET @bg_drops = $SCALE_drop_bg_drops, @bg_vpd = $SCALE_drop_bg_variants_per_drop, @bg_price = $SCALE_drop_bg_price;

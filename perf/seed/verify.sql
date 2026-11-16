@@ -122,9 +122,8 @@ SELECT 'check', 'seed baseline: user count (members + 2 staff)', ABS(COUNT(*) - 
 FROM users;
 
 INSERT INTO _perf_checks
-SELECT 'check', 'seed baseline: one refresh token and wallet per member',
-       ABS((SELECT COUNT(*) FROM refresh_tokens) - (@meta_users + 2))
-           + ABS((SELECT COUNT(*) FROM credit_wallets) - @meta_users);
+SELECT 'check', 'seed baseline: one refresh token per account',
+       ABS((SELECT COUNT(*) FROM refresh_tokens) - (@meta_users + 2));
 
 INSERT INTO _perf_checks
 SELECT 'check', 'seed baseline: hot drop total stock', ABS(COALESCE(SUM(i.total_quantity), 0) - @meta_hot_stock)
@@ -150,7 +149,6 @@ INSERT INTO _perf_checks
 SELECT 'info', t.name, t.value
 FROM (SELECT 'rows users' AS name, (SELECT COUNT(*) FROM users) AS value
       UNION ALL SELECT 'rows refresh_tokens', (SELECT COUNT(*) FROM refresh_tokens)
-      UNION ALL SELECT 'rows credit_wallets', (SELECT COUNT(*) FROM credit_wallets)
       UNION ALL SELECT 'rows drops', (SELECT COUNT(*) FROM drops)
       UNION ALL SELECT 'rows drop_variants', (SELECT COUNT(*) FROM drop_variants)
       UNION ALL SELECT 'rows drop_reservations', (SELECT COUNT(*) FROM drop_reservations)
