@@ -9,18 +9,18 @@ INSERT INTO auctions (auction_id, seller_user_id, performance_id, title, item_na
 SELECT n + 1, @users + 2 + MOD(n, @organizers), NULL, CONCAT('Performance auction ', n + 1),
  CONCAT('Item ', n + 1), 'Performance seed', @auction_start_price, @auction_min_increment, 'ALL', NULL,
  IF(n <= @auction_spread, 'OPEN', 'CLOSED'),
- IF(n <= @auction_spread, @t0 - INTERVAL 1 MINUTE, @t0 - INTERVAL 2 DAY),
- IF(n <= @auction_spread, @t0 + INTERVAL @hot_window_hours HOUR, @t0 - INTERVAL 2 DAY + INTERVAL ((n - @auction_spread) * (@auction_bg_bids_per + 2)) SECOND),
- IF(n <= @auction_spread, @t0 + INTERVAL @hot_window_hours HOUR, @t0 - INTERVAL 2 DAY + INTERVAL ((n - @auction_spread) * (@auction_bg_bids_per + 2)) SECOND),
- 60, IF(n <= @auction_spread, NULL, @t0 - INTERVAL 2 DAY + INTERVAL ((n - @auction_spread) * (@auction_bg_bids_per + 2)) SECOND), 0,
- @t0 - INTERVAL 3 DAY, @t0 - INTERVAL 1 DAY
+ IF(n <= @auction_spread, @t0 - INTERVAL 1 MINUTE, @t0 - INTERVAL 10 DAY),
+ IF(n <= @auction_spread, @t0 + INTERVAL @hot_window_hours HOUR, @t0 - INTERVAL 10 DAY + INTERVAL ((n - @auction_spread) * (@auction_bg_bids_per + 2)) SECOND),
+ IF(n <= @auction_spread, @t0 + INTERVAL @hot_window_hours HOUR, @t0 - INTERVAL 10 DAY + INTERVAL ((n - @auction_spread) * (@auction_bg_bids_per + 2)) SECOND),
+ 60, IF(n <= @auction_spread, NULL, @t0 - INTERVAL 10 DAY + INTERVAL ((n - @auction_spread) * (@auction_bg_bids_per + 2)) SECOND), 0,
+ @t0 - INTERVAL 11 DAY, @t0 - INTERVAL 1 DAY
 FROM _perf_seq WHERE n < 1 + @auction_spread + @auction_bg;
 
 INSERT INTO auction_bids (auction_bid_id, auction_id, bidder_user_id, bid_amount, bid_sequence, request_key, accepted_at)
 SELECT s.n + 1, 2 + @auction_spread + s.n DIV @auction_bg_bids_per,
  MOD(s.n, @users) + 1, @auction_start_price + MOD(s.n, @auction_bg_bids_per) * @auction_min_increment,
  MOD(s.n, @auction_bg_bids_per) + 1, CONCAT('perf-auction-', s.n + 1),
- @t0 - INTERVAL 2 DAY + INTERVAL (s.n DIV @auction_bg_bids_per * (@auction_bg_bids_per + 2) + MOD(s.n, @auction_bg_bids_per) + 1) SECOND
+ @t0 - INTERVAL 10 DAY + INTERVAL (s.n DIV @auction_bg_bids_per * (@auction_bg_bids_per + 2) + MOD(s.n, @auction_bg_bids_per) + 1) SECOND
 FROM _perf_seq s
 WHERE s.n < (@auction_bg - FLOOR(@auction_bg * @auction_bg_pct_unsold / 100)) * @auction_bg_bids_per;
 

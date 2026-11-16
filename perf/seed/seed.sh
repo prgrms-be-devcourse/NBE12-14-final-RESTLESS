@@ -12,6 +12,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$ROOT/../.." && pwd)"
 OUT="$ROOT/out"
+AUCTION_INVARIANTS="$REPO/backend/src/test/resources/harness/auction-invariants.sql"
 DROP_INVARIANTS="$REPO/backend/src/test/resources/harness/drop-invariants.sql"
 # 모든 시드 계정의 비밀번호 0000의 BCrypt 해시 (cost 10).
 PASSWORD_HASH='$2y$10$y6OOQqM1Leen.h4r02zhS.toyPydGqZ6rOBGO1MybH6UaYBdTtMQC'
@@ -92,7 +93,7 @@ per_drop=$(( (SCALE_drop_bg_reservations + SCALE_drop_bg_drops - 1) / SCALE_drop
 
 seq_size=$SCALE_users
 for n in $(( SCALE_users + 1 + SCALE_organizers )) "$SCALE_drop_bg_reservations" \
-         $(( SCALE_drop_bg_drops * SCALE_drop_bg_variants_per_drop )) "$SCALE_drop_hot_queue_prefill"; do
+         $(( SCALE_drop_bg_drops * SCALE_drop_bg_variants_per_drop )) "$SCALE_drop_hot_queue_prefill" $(( 1 + SCALE_auction_spread + SCALE_auction_bg )) $(( SCALE_auction_bg * SCALE_auction_bg_bids_per )); do
   (( n > seq_size )) && seq_size=$n
 done
 
@@ -107,6 +108,9 @@ SET @bg_drops = $SCALE_drop_bg_drops, @bg_vpd = $SCALE_drop_bg_variants_per_drop
 SET @bg_reservations = $SCALE_drop_bg_reservations;
 SET @pct_confirmed = $SCALE_drop_bg_pct_confirmed, @pct_restored = $SCALE_drop_bg_pct_restored;
 SET @pct_released = $SCALE_drop_bg_pct_released;
+SET @auction_spread = $SCALE_auction_spread, @auction_bg = $SCALE_auction_bg, @auction_bg_bids_per = $SCALE_auction_bg_bids_per;
+SET @auction_bg_pct_unsold = $SCALE_auction_bg_pct_unsold, @auction_start_price = $SCALE_auction_start_price;
+SET @auction_min_increment = $SCALE_auction_min_increment, @credit_grant = $SCALE_credit_grant;
 SQL
 }
 
@@ -134,6 +138,7 @@ write_tokens() {
       'seeded_at', (SELECT v FROM perf_seed_meta WHERE k = 'seeded_at'),
       'contention_ratio', $SCALE_contention_ratio,
       'participants', 'users.csv rows 1..$participants',
+      'auction', JSON_OBJECT('hot_auction_id', 1, 'spread_first_id', 2, 'spread_last_id', 1 + $SCALE_auction_spread, 'start_price', $SCALE_auction_start_price, 'min_increment', $SCALE_auction_min_increment, 'credit_grant', $SCALE_credit_grant),
       'drop', JSON_OBJECT(
           'hot_drop_id', 1,
           'opens_at', (SELECT opens_at FROM drops WHERE id = 1),
@@ -162,6 +167,17 @@ verify() {
           name = ""
         }
       }' "$DROP_INVARIANTS"
+    awk '
+      /^-- name: / { name = substr($0, 10); q = ""; next }
+      /^--/ { next }
+      name != "" {
+        q = q " " $0
+        if ($0 ~ /;[[:space:]]*$/) {
+          sub(/;[[:space:]]*$/, "", q); gsub(/\047/, "\047\047", name)
+          printf "SELECT \047check\047, \047auction %s\047, COUNT(*) FROM (%s) invariant_rows;\n", name, q
+          name = ""
+        }
+      }' "$AUCTION_INVARIANTS"
   } | mysql_run --batch --skip-column-names)"
   echo "$result" | column -t -s $'\t'
   local failed

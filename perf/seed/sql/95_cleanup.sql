@@ -3,4 +3,5 @@ DROP TABLE IF EXISTS _perf_seq, _perf_venues, _perf_artists, _perf_products;
 
 ANALYZE TABLE users, refresh_tokens, venues, concerts,
     drops, drop_variants, drop_inventories, drop_reservations, drop_purchase_slots, drop_queue_entries,
-    orders, order_items, order_shipping_snapshots, payments, payment_refunds;
+    orders, order_items, order_shipping_snapshots, payments, payment_refunds,
+    auctions, auction_bids, auction_results, credit_wallets, credit_holds, credit_transactions;

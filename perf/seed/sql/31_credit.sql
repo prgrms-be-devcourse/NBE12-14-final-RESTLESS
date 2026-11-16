@@ -1,6 +1,6 @@
 -- Wallet IDs equal user IDs; hold IDs equal bid IDs. All background holds are closed.
 INSERT INTO credit_wallets (credit_wallet_id, user_id, balance_amount, reserved_amount, created_at, updated_at)
-SELECT u.id, u.id, @credit_grant - COALESCE(w.spent, 0), 0, @t0 - INTERVAL 3 DAY, @t0 - INTERVAL 1 DAY
+SELECT u.id, u.id, @credit_grant - COALESCE(w.spent, 0), 0, @t0 - INTERVAL 11 DAY, @t0 - INTERVAL 1 DAY
 FROM users u LEFT JOIN (
  SELECT b.bidder_user_id, SUM(b.bid_amount) AS spent FROM auction_bids b
  WHERE b.bid_sequence = @auction_bg_bids_per GROUP BY b.bidder_user_id
@@ -15,7 +15,7 @@ FROM auction_bids b;
 
 INSERT INTO credit_transactions (credit_wallet_id, credit_hold_id, transaction_type, balance_delta, reserved_delta, balance_after, reserved_after, operation_key, created_at)
 SELECT u.id, NULL, 'GRANT', @credit_grant, 0, @credit_grant, 0,
- CONCAT('GRANT:', LPAD(HEX(u.id), 8, '0'), '-0000-4000-8000-000000000000'), @t0 - INTERVAL 3 DAY
+ CONCAT('GRANT:', LPAD(LOWER(HEX(u.id)), 8, '0'), '-0000-4000-8000-000000000000'), @t0 - INTERVAL 11 DAY
 FROM users u WHERE u.role = 'USER';
 
 -- Cumulative captures give each record the wallet balance at that point in the synthetic history.

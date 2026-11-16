@@ -11,3 +11,10 @@ WHERE id = 1;
 UPDATE refresh_tokens
 SET expires_at = @now + INTERVAL @token_ttl_hours HOUR
 WHERE revoked_at IS NULL;
+
+UPDATE auctions
+SET starts_at = @now - INTERVAL 1 MINUTE,
+    base_ends_at = @now + INTERVAL @hot_window_hours HOUR,
+    ends_at = @now + INTERVAL @hot_window_hours HOUR
+WHERE auction_id BETWEEN 1 AND 1 + @auction_spread AND status = 'OPEN'
+  AND NOT EXISTS (SELECT 1 FROM auction_bids b WHERE b.auction_id = auctions.auction_id);

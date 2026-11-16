@@ -145,6 +145,16 @@ SELECT 'check', 'seed baseline: background drop reservation count',
 FROM drop_reservations
 WHERE drop_id <> @meta_hot_drop;
 
+-- Auction seed baseline. Metadata is written by 30_auction.sql.
+SET @auction_spread = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_spread');
+SET @auction_bg = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_bg');
+SET @auction_unsold_pct = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_bg_pct_unsold');
+INSERT INTO _perf_checks SELECT 'check', 'seed baseline: hot and spread auction count', ABS(COUNT(*) - (1 + @auction_spread)) FROM auctions WHERE auction_id BETWEEN 1 AND 1 + @auction_spread AND status = 'OPEN';
+INSERT INTO _perf_checks SELECT 'check', 'seed baseline: hot and spread no bids', COUNT(*) FROM auction_bids WHERE auction_id BETWEEN 1 AND 1 + @auction_spread;
+INSERT INTO _perf_checks SELECT 'check', 'seed baseline: background closed count', ABS(COUNT(*) - @auction_bg) FROM auctions WHERE auction_id > 1 + @auction_spread AND status = 'CLOSED';
+INSERT INTO _perf_checks SELECT 'check', 'seed baseline: background unsold count', ABS(COUNT(*) - FLOOR(@auction_bg * @auction_unsold_pct / 100)) FROM auction_results WHERE auction_id > 1 + @auction_spread AND result_type = 'UNSOLD';
+INSERT INTO _perf_checks SELECT 'check', 'seed baseline: wallet count', ABS((SELECT COUNT(*) FROM credit_wallets) - (SELECT COUNT(*) FROM users WHERE role = 'USER'));
+
 -- ---------------------------------------------------------------- 참고값
 INSERT INTO _perf_checks
 SELECT 'info', t.name, t.value
