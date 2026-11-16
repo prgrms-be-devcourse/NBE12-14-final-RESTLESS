@@ -87,6 +87,7 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
 
 - 실행 화면은 k6 웹 대시보드(`K6_WEB_DASHBOARD=true`, `-p 5665:5665`)로 보고, `K6_WEB_DASHBOARD_EXPORT`로 HTML 리포트를 `.ai-output/perf/`에 남긴다.
 - 서버 지표는 실행 직전과 직후에 `curl -s http://perf-app:8081/actuator/prometheus`를 파일로 저장해 차이를 본다. 실행 전체의 서버 평균 지연과 Hikari, 톰캣 상태를 얻는다.
+- EC2에서 준비하는 순서는 [ec2](../ec2/README.md)에 있다.
 
 ### 로컬 확인 (2026-11-16, 측정 결과 아님)
 
