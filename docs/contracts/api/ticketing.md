@@ -14,6 +14,8 @@
 | POST | `/api/ticket-reservations` | 좌석 선점 (`Idempotency-Key`) |
 | GET | `/api/ticket-reservations/{reservationId}` | 예약 상세 |
 | GET | `/api/ticket-reservations/active` | 활성 예약 조회, 복구 |
+| GET | `/api/tickets` | 본인 발급 티켓 목록 (페이지 조회) |
+| GET | `/api/tickets/{ticketId}` | 본인 발급 티켓 상세 |
 | DELETE | `/api/ticket-reservations/{reservationId}` | 선점 취소 |
 | POST | `/api/ticket-reservations/{reservationId}/checkout` | 결제 시작 |
 | POST | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 요청 |
@@ -341,3 +343,59 @@ Java 엔티티·Repository는 Performance/PerformanceRepository, DB 테이블은
 
 티켓팅은 공통 결제의 `payableType=TICKET`, `payableId=예약 ID`로 연결한다. 공통 주문 ID와 결제창의 pgOrderId는 별개다. 금액은 예약에 연결된 공통 주문에서 확인한다.
 현재 예약의 수락 시도 저장 기반과 내부 서비스의 대상 조회·승인 시작·성공 확정/티켓 발급을 구현했으며 티켓팅 PaymentResultHandler는 아직 등록하지 않았다. 따라서 이 매핑 합의가 티켓팅의 공통 결제 준비·승인 API 사용 가능을 뜻하지 않는다. checkout 응답과 기존 API 동작은 유지한다.
+
+
+## 본인 발급 티켓 목록·상세
+
+로그인이 필수다. 회원 ID는 `@LoginMember`에서만 받으며 요청의 userId나 티켓번호로 권한을 부여하지 않는다. tickets.reservation_id가 가리키는 예약의 user_id로 DB 조회부터 소유자를 제한한다.
+
+- `GET /api/tickets?page=0&size=20`: 본인 발급 티켓을 issuedAt 내림차순, 동률은 ticketId 내림차순으로 반환한다. page 기본 0, size 기본 20·허용 1~100이다. 목록이 없거나 페이지 범위 밖이면 content는 빈 배열이며 totalElements/totalPages는 본인의 실제 전체 건수 기준이다.
+- `GET /api/tickets/{ticketId}`: URL의 ticketId는 내부 BIGINT PK다. 타인 티켓과 없는 티켓은 모두 `404 NOT_FOUND`로 처리한다. ticketNo는 사용자에게 보여주는 기존 UUID이며 조회 권한이나 입장 토큰을 뜻하지 않는다.
+- 비로그인은 두 API 모두 `401 UNAUTHORIZED`다. 음수 page, 범위 밖 size, page×size가 JPA offset 범위(Integer.MAX_VALUE)를 넘는 요청, 양수가 아닌 ticketId, 정수 변환이 불가능한 파라미터는 `400 INVALID_REQUEST`다.
+- 티켓 레코드가 존재하면 저장된 상태와 사용·취소 시각을 그대로 반환한다. ISSUED만 필터링하거나 취소 이력을 숨기지 않는다. 사용/환불/입장 상태 전이를 새로 구현하거나 허용 상태 집합을 추가하지 않는다.
+- 소유권은 예약 사용자 기준이다. 과거 티켓의 좌석이 재판매돼 current_hold_id가 다른 예약을 가리켜도 본인의 과거 티켓은 조회할 수 있으며 새 구매자의 티켓은 볼 수 없다.
+- 가격은 tickets.price_amount의 발급 당시 금액이다. 공연명·회차 시작 시각·배치 표시명·좌석 등급은 현재 카탈로그에서 읽으며 과거 시점의 별도 표시 스냅샷을 보장하지 않는다. 다른 도메인의 Repository를 직접 접근하지 않고 ConcertQueryService의 페이지 단위 일괄 조회를 사용한다.
+- 조회는 읽기 전용 REPEATABLE_READ로 수행한다. 예약·좌석 잠금, 발급/사용/취소 처리, 주문·결제 상태 변경, 기한 연장을 하지 않는다.
+
+상세 성공 (`200 OK`):
+
+```json
+{
+  "ticketId": 101,
+  "ticketNo": "8b4e35ae-179c-4bb8-97bd-4fc2c6d98bd3",
+  "reservationId": 10,
+  "orderId": 20,
+  "performanceId": 100,
+  "concertId": 1,
+  "concertTitle": "RESTLESS 공연",
+  "startsAt": "2026-11-20T10:00:00Z",
+  "venueId": 5,
+  "seat": {
+    "seatId": 200,
+    "venueSeatId": 300,
+    "grade": "VIP",
+    "sectionLabel": "A",
+    "rowLabel": "1",
+    "seatNumber": "3"
+  },
+  "priceAmount": 100000,
+  "status": "ISSUED",
+  "issuedAt": "2026-11-16T01:00:00Z",
+  "usedAt": null,
+  "cancelledAt": null
+}
+```
+
+목록은 같은 구조의 티켓을 content에 담아 아래 메타데이터와 반환한다. Spring Data Page나 엔티티를 직접 응답하지 않는다.
+
+```json
+{
+  "content": [],
+  "page": 0,
+  "size": 20,
+  "totalElements": 0,
+  "totalPages": 0
+}
+```
+
+`TicketQueryApiTest`에 본인 필터·타인/없는 티켓 동일 404·로그인 필수·페이지 정렬/빈 결과·잘못된 입력·발급 금액·회차별 좌석 표시·사용/취소 이력·재판매 후 소유권 검증을 작성했다. 사용자 요청에 따라 테스트는 실행하지 않았다.

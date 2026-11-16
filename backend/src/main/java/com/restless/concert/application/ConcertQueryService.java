@@ -7,6 +7,7 @@ import com.restless.concert.application.dto.ConcertPage;
 import com.restless.concert.application.dto.PerformanceInfo;
 import com.restless.concert.application.dto.PerformanceLayout;
 import com.restless.concert.application.dto.SeatPosition;
+import com.restless.concert.application.dto.TicketSeatDescription;
 import com.restless.common.error.ErrorCode;
 import com.restless.concert.domain.Concert;
 import com.restless.concert.domain.Performance;
@@ -29,6 +30,15 @@ public class ConcertQueryService {
     private final PerformanceRepository performanceRepository;
     private final LayoutSeatRepository layoutSeatRepository;
     private final ConcertRepository concertRepository;
+
+    /** 페이지에 포함된 회차·물리 좌석만 일괄 조회한다. 다른 도메인에 Repository를 노출하지 않는다. */
+    @Transactional(readOnly = true)
+    public List<TicketSeatDescription> getTicketSeatDescriptions(Set<Long> performanceIds, Set<Long> venueSeatIds) {
+        if (performanceIds.isEmpty() || venueSeatIds.isEmpty()) {
+            return List.of();
+        }
+        return performanceRepository.findTicketSeatDescriptions(performanceIds, venueSeatIds);
+    }
 
     @Transactional(readOnly = true)
     public ConcertPage getList(int page, int size) {
