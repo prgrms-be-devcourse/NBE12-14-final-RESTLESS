@@ -194,8 +194,12 @@ TicketPaymentResultHandler를 PayableType.TICKET의 Spring 빈으로 등록했�
 - 다른 시도, 이미 CONFIRMED인 예약, 지원하지 않는 CUSTOMER_REFUND 완료 통지, 좌석 소유권·수량·주문 불일치는 자원을 변경하지 않는다. 오류 로그에 예약·결제 ID와 사유를 남기고 ticketing.payment.compensation.anomalies{reason}을 기록한다. reason은 고정 값이며 ID를 태그로 사용하지 않는다. 이 메트릭은 이상 callback 관측 횟수다.
 - 이 불일치에서 예외로 공통 PG 취소 확정까지 계속 롤백하지 않는다. 공통 취소 기록은 완료되고 티켓팅의 미정리 상태는 운영 복구 대상으로 남는다. 특히 일부 좌석만 반환하거나 새 소유자의 좌석을 덮어쓰지 않는다.
 - 실제 DB/저장 오류는 예외를 전파한다. 결제·환불·예약·좌석·주문 변경이 전체 롤백되고, 공통 대사가 이미 취소된 PG 사실을 재조회해 새 트랜잭션에서 다시 반영한다.
-- 정상 환불 요청은 인터페이스 기본 REFUND_NOT_SUPPORTED, 정상 환불 거절 통지는 기본 no-op을 유지한다. 정상 환불/입장/불명확 운영 알림은 후속이다. 공통 주문 상세의 TICKET payable resolver와 결제창 UI도 별도 범위다.
+- 정상 환불 요청은 인터페이스 기본 REFUND_NOT_SUPPORTED, 정상 환불 거절 통지는 기본 no-op을 유지한다. 정상 환불/입장/불명확 운영 알림은 후속이다. 공통 주문 상세의 TICKET payable resolver는 이후 연결했으며 결제창 UI는 별도 범위다.
 
 ### 검증 범위
 
 기존 checkout fixture·성공/실패/만료 검증을 재사용한다. 추가 검증은 보상 취소 동시 재통지와 새 소유자 보호, 시도·종류·상태·자원 불일치, 공통 PaymentService의 준비·승인·실패·불명확 대사 연결, 취소 응답 유실·거절·DB 반영 롤백과 복구에 집중한다. Fake PG를 사용하며 실제 PG 부하나 운영 결제를 호출하지 않는다.
+
+## 주문 상세와 결제 대상 식별 (2026-11-16)
+
+TicketOrderPayableResolver는 주문 ID로 예약을 조회해 OrderPayable(TICKET, 예약 ID, 최초 payment_expires_at)을 제공한다. 상태·기한에 따라 정보를 숨기지 않으며 결제 자격 조회 load를 재사용하지 않는다. 기존 공통 주문 상세가 소유권을 먼저 확인하고 최근 결제를 조회한다. 이 연결은 승인·취소 callback을 호출하거나 결제 시도를 생성하지 않는다. 기존 공통 API만 사용하며 공통 운영 코드·DB 스키마 변경은 없다.

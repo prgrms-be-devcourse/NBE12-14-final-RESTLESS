@@ -181,10 +181,10 @@ class FanMeetingWithdrawalGuard implements WithdrawalGuard {
 
 - 목록 한 줄과 같은 필드에 `shipping`, `payable`, `payableExpiresAt`, `payment`를 더한다.
 - `shipping`: 주문할 때 복사한 배송지다. 배송이 없는 주문(티켓)은 null이다.
-- `payable`: 결제 준비 `POST /api/payments`에 그대로 넘기는 결제 대상이다. 드롭 주문은 `DROP`과 재고 점유 ID다. 결제 대상을 알려 주는 도메인이 아직 없으면 null이다. 지금 티켓 주문이 그렇다.
-- `payableExpiresAt`: 결제 대상의 결제 기한이다. 드롭은 재고 점유 만료 시각이다. 모르면 null이다.
+- `payable`: 결제 준비 `POST /api/payments`에 그대로 넘기는 결제 대상이다. 드롭 주문은 `DROP`과 재고 점유 ID, 티켓 주문은 `TICKET`과 연결된 티켓팅 예약 ID다. 연결 예약이나 도메인 Resolver가 없으면 null이다.
+- `payableExpiresAt`: 결제 대상의 결제 기한이다. 드롭은 재고 점유 만료 시각, 티켓은 최초 checkout의 payment_expires_at이다. 모르면 null이다.
 - `payment`: 그 결제 대상의 가장 최근 결제 시도다. 실패 뒤 다시 결제했으면 새 시도가 나온다. `status`는 결제 조회와 같은 값이다. 결제를 시작하지 않았으면 null이다. 환불은 이 `paymentId`로 요청한다.
-- 결제 가능 여부와 환불 가능 여부는 주지 않는다. 최종 판단은 결제 준비와 환불 API의 응답이다.
+- 결제 가능 여부와 환불 가능 여부는 주지 않는다. 최종 판단은 결제 준비와 환불 API의 응답이다. 티켓팅은 기한 경과·예약 확정·반환 이후에도 연결 대상과 원래 기한을 제공하며, 이 필드가 존재한다는 사실이 재결제를 허용하지 않는다.
 - 남의 주문이나 없는 주문은 404 `ORDER_NOT_FOUND`다. 숫자가 아닌 ID는 400 `INVALID_REQUEST`다.
 - 토큰이 없으면 401 `UNAUTHORIZED`다. 탈퇴한 회원은 404 `MEMBER_NOT_FOUND`다.
 - 도메인 연결: 주문 모듈의 결제 대상 조회 인터페이스를 각 도메인이 구현한다. 주문 ID를 받아 결제 대상과 기한을 돌려준다. 구현이 없는 주문 종류는 `payable`이 null이다. 최근 결제는 주문 모듈이 결제 모듈의 읽기 메서드로 찾는다.

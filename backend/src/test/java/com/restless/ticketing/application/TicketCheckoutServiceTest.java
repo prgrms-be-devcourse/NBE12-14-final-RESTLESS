@@ -7,6 +7,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mockingDetails;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.restless.TestcontainersConfiguration;
@@ -15,7 +16,10 @@ import com.restless.common.error.ErrorCode;
 import com.restless.concert.domain.*;
 import com.restless.member.domain.Member;
 import com.restless.order.application.OrderService;
+import com.restless.order.application.CreateOrderCommand;
+import com.restless.order.application.OrderPayable;
 import com.restless.order.domain.OrderStatus;
+import com.restless.order.domain.OrderType;
 import com.restless.payment.application.payable.ApprovalDecision;
 import com.restless.payment.application.payable.ApprovedPayment;
 import com.restless.payment.application.payable.PayableSnapshot;
@@ -88,6 +92,7 @@ class TicketCheckoutServiceTest {
     @Autowired TicketCheckoutService checkout;
     @MockitoSpyBean TicketPaymentService paymentService;
     @Autowired TicketPaymentResultHandler handler;
+    @Autowired TicketOrderPayableResolver orderPayables;
     @Autowired PaymentService commonPayments;
     @Autowired PaymentRefundService commonRefunds;
     @Autowired PaymentReconciler reconciler;
@@ -1265,6 +1270,79 @@ class TicketCheckoutServiceTest {
 
         private double anomalyCount() {
             return metrics.find("ticketing.payment.compensation.anomalies").counters().stream().mapToDouble(counter -> counter.count()).sum();
+        }
+    }
+
+    @Nested
+    @DisplayName("주문 상세의 티켓팅 결제 대상 연결")
+    class TicketOrderDetail {
+        @Test
+        @DisplayName("본인 주문에 예약·최초 기한과 가장 최근 결제를 표시하며 결제 완료 후에도 연결을 유지한다")
+        void resolvesReservationAndLatestPayment() throws Exception {
+            var reservation = reserve();
+            // 주문과 예약의 ID 순서가 같다는 가정에 기대지 않도록 별도 주문을 먼저 만든다.
+            unlinkedTicketOrder();
+            var prepared = checkout(reservation);
+            assertThat(orderPayables.resolve(prepared.orderId())).contains(
+                    new OrderPayable("TICKET", reservation.reservationId(), prepared.paymentExpiresAt()));
+            ticketOrderDetail(prepared.orderId(), reservation.reservationId(), prepared.paymentExpiresAt())
+                    .andExpect(jsonPath("$.payment").doesNotExist());
+            mockMvc.perform(get("/api/orders/{id}", prepared.orderId())).andExpect(status().isUnauthorized());
+            for (Long id : List.of(prepared.orderId(), Long.MAX_VALUE)) {
+                mockMvc.perform(get("/api/orders/{id}", id).with(jwt().jwt(token -> token.subject(fixture.secondUserId().toString()))))
+                        .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("ORDER_NOT_FOUND"));
+            }
+            var first = commonPayments.prepare(new PreparePaymentCommand(fixture.firstUserId(), PayableType.TICKET,
+                    reservation.reservationId(), "order-detail-first"));
+            ticketOrderDetail(prepared.orderId(), reservation.reservationId(), prepared.paymentExpiresAt())
+                    .andExpect(jsonPath("$.payment.paymentId").value(first.paymentId()))
+                    .andExpect(jsonPath("$.payment.status").value("READY"));
+            fakePg.willReject(first.pgOrderId(), "REJECT_CARD_COMPANY");
+            assertThatThrownBy(() -> commonPayments.confirm(new ConfirmPaymentCommand(fixture.firstUserId(),
+                    "order-detail-key-" + first.paymentId(), first.pgOrderId(), first.amount())))
+                    .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.PAYMENT_FAILED));
+            var latest = commonPayments.prepare(new PreparePaymentCommand(fixture.firstUserId(), PayableType.TICKET,
+                    reservation.reservationId(), "order-detail-retry"));
+            assertThat(latest.paymentId()).isNotEqualTo(first.paymentId());
+            ticketOrderDetail(prepared.orderId(), reservation.reservationId(), prepared.paymentExpiresAt())
+                    .andExpect(jsonPath("$.payment.paymentId").value(latest.paymentId()))
+                    .andExpect(jsonPath("$.payment.status").value("READY"));
+            fakePg.willApprove(latest.pgOrderId());
+            commonPayments.confirm(new ConfirmPaymentCommand(fixture.firstUserId(), "order-detail-key-" + latest.paymentId(),
+                    latest.pgOrderId(), latest.amount()));
+            ticketOrderDetail(prepared.orderId(), reservation.reservationId(), prepared.paymentExpiresAt())
+                    .andExpect(jsonPath("$.status").value("PAID"))
+                    .andExpect(jsonPath("$.payment.paymentId").value(latest.paymentId()))
+                    .andExpect(jsonPath("$.payment.status").value("APPROVED"));
+        }
+
+        @Test
+        @DisplayName("결제 기한이 지나거나 반환된 예약도 주문 상세에 원래 연결을 표시한다")
+        void expiredReservationRemainsResolvable() throws Exception {
+            var reservation = reserve();
+            var prepared = checkout(reservation);
+            jdbc.update("UPDATE ticket_reservations SET checkout_started_at=DATE_SUB(checkout_started_at,INTERVAL 10 MINUTE), payment_expires_at=DATE_SUB(payment_expires_at,INTERVAL 10 MINUTE) WHERE id=?",
+                    reservation.reservationId());
+            Instant deadline = instantColumn("payment_expires_at", reservation.reservationId());
+            assertThat(orderPayables.resolve(prepared.orderId())).contains(new OrderPayable("TICKET", reservation.reservationId(), deadline));
+            assertThat(paymentService.expirePayment(reservation.reservationId())).isTrue();
+            ticketOrderDetail(prepared.orderId(), reservation.reservationId(), deadline)
+                    .andExpect(jsonPath("$.status").value("CANCELLED"))
+                    .andExpect(jsonPath("$.payment").doesNotExist());
+        }
+
+        private Long unlinkedTicketOrder() {
+            return paymentTransaction(() -> orders.create(new CreateOrderCommand(fixture.firstUserId(), OrderType.TICKET,
+                    List.of(new CreateOrderCommand.OrderLine("TICKET", fixture.seatIds().getFirst(), "Ticket", "VIP", 100000, 1)), null)));
+        }
+
+        private org.springframework.test.web.servlet.ResultActions ticketOrderDetail(Long orderId, Long reservationId, Instant deadline) throws Exception {
+            return mockMvc.perform(get("/api/orders/{id}", orderId).with(jwt().jwt(token -> token.subject(fixture.firstUserId().toString()))))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.orderType").value("TICKET"))
+                    .andExpect(jsonPath("$.shipping").doesNotExist())
+                    .andExpect(jsonPath("$.payable.payableType").value("TICKET"))
+                    .andExpect(jsonPath("$.payable.payableId").value(reservationId))
+                    .andExpect(jsonPath("$.payableExpiresAt").value(deadline.toString()));
         }
     }
 
