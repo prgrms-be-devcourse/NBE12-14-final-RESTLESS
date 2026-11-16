@@ -13,6 +13,11 @@ common:
   # 핫 드롭 판매 기간. 시드 또는 --refresh 시각부터 센다.
   hot_window_hours: 24
   # 주최자 계정 수. 공연마다 돌아가며 판매자가 된다.
+  auction_bg_bids_per: 20
+  auction_bg_pct_unsold: 10
+  auction_start_price: 10000
+  auction_min_increment: 100
+  credit_grant: 100000000
   organizers: 10
   drop_hot_variants: 3
   drop_hot_price: 59000
@@ -26,6 +31,8 @@ common:
 
 # 로컬 확인용
 small:
+  auction_spread: 10
+  auction_bg: 50
   users: 1000
   drop_hot_stock: 100
   drop_bg_drops: 5
@@ -33,6 +40,8 @@ small:
 
 # 기본 실험 (EXP-01~04)
 base:
+  auction_spread: 100
+  auction_bg: 1000
   users: 100000
   drop_hot_stock: 1000
   drop_bg_drops: 100
@@ -40,6 +49,8 @@ base:
 
 # 확장 실험
 large:
+  auction_spread: 1000
+  auction_bg: 10000
   users: 1000000
   drop_hot_stock: 100000
   drop_bg_drops: 1000
