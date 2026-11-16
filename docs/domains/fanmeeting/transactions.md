@@ -87,6 +87,13 @@ COMMIT
 ```text
 Event FOR UPDATE → DrawRun FOR UPDATE
 DrawRun COMPLETED면 종료
+잠금 뒤 Clock으로 now를 읽음
+claim 가능한 상태(PENDING 또는 lease 만료 RUNNING)에서
+  now + 60분 > promotion_closes_at이면 lease를 가져가지 않고 빈 결과
+  Event·DrawRun·attempt_count 변경 없음, compute 호출 없음
+  FANMEETING_DRAW_TOO_LATE 및 fanmeeting.worker.failure{action=draw-too-late}
+  최종화와 같은 행사별 집합으로 서버마다 한 번만 로그·지표 기록
+now + 60분 == promotion_closes_at이면 허용
 PENDING 이거나 (RUNNING + lease_until < now) 이면
   lease_token = 새 UUID, lease_until = now + 2분, attempt_count += 1, status = RUNNING, started_at(처음이면)
   Event CLOSED면 DRAWING
@@ -106,6 +113,12 @@ COMMIT
 Event FOR UPDATE → DrawRun FOR UPDATE
 DrawRun COMPLETED면 아무것도 하지 않고 종료 (이미 최종화됨, 멱등. 정상 종료로 로그만)
 lease_token 일치 확인 (다르면 아무것도 저장하지 않고 종료)
+잠금 뒤 Clock으로 now를 읽음
+now + 60분 > promotion_closes_at이면 저장 없이 종료
+  Event DRAWING과 DrawRun RUNNING 그대로, Selection·Order·알림 없음
+  FANMEETING_DRAW_TOO_LATE eventId=... 및 fanmeeting.worker.failure{action=draw-too-late}
+  서버마다 행사당 한 번만 로그·지표 기록. 재시작하면 다시 한 번 기록. 운영자 처리
+같은 시각(now + 60분 == promotion_closes_at)은 최종화 허용
 Selection 저장 (WINNER = PAYMENT_PENDING, RESERVE = WAITING, user_id = 응모의 user_id)
 WINNER마다 Order 저장 (amount = fee_amount, issued_at = now, user_id = Selection의 user_id)
 DrawRun COMPLETED, candidate_count(탈퇴 제외 후), completed_at
@@ -207,7 +220,7 @@ COMMIT (결제 모듈)
 - 후보는 잠금 없이 찾고(①은 `status`·`issued_at`, ②는 `status`·`review_started_at`), 주문마다 잠근 뒤 다시 확인한다. 승인 시작이 먼저 주문을 잠갔으면 기다리던 만료는 `payment_id`가 채워진 것을 보고 만료하지 않는다.
 - ②는 Order의 `review_warned_at`만 바꾸고 Selection은 바꾸지 않으므로 Selection을 잠그지 않는다. 잠금 순서(Event → Order)는 ①과 같다.
 - ①과 ②는 주문마다 따로 트랜잭션을 쓴다. 하나가 실패해도 나머지는 계속하고, 실패는 오류 로그와 `fanmeeting.worker.failure` 메트릭으로 남긴다. 한 번에 `batch-size`건씩 조회한다.
-- **한 회차에서 대상이 없어질 때까지 묶음을 반복한다.** 당첨자의 주문은 추첨 최종화 때 한꺼번에 발급돼 기한도 같이 끝난다. 한 회차에 한 묶음만 처리하면 만료가 밀리고 승격도 그만큼 늦어진다. 멈추는 때는 ⓐ 묶음이 `batch-size`보다 적을 때 ⓑ 묶음에서 한 건도 처리하지 못했을 때(실패한 주문만 계속 다시 조회되는 것을 막는다) ⓒ 100묶음을 채웠을 때다. 남은 대상은 다음 회차가 이어 간다.
+- **한 회차에서 대상이 없어질 때까지 묶음을 반복한다.** 당첨자의 주문은 추첨 최종화 때 한꺼번에 발급돼 기한도 같이 끝난다. 한 회차에 한 묶음만 처리하면 만료가 밀리고 승격도 그만큼 늦어진다. 만료는 `(issued_at, order_id)`, 보류 경고는 `(review_started_at, order_id)` 순서로 마지막 조회 위치 뒤부터 이어 읽는다. 성공 여부와 무관하게 커서를 전진하므로 실패한 앞 묶음이 뒤 주문을 막지 않는다. 멈추는 때는 묶음이 `batch-size`보다 적거나 100묶음을 채웠을 때다. 처리 0건 종료 조건은 쓰지 않는다. 다음 회차는 커서 없이 처음부터 시작해 실패 건도 다시 시도한다.
 - 확정하지 않은 0원 주문도 ①로 만료한다.
 - 보류는 시간이 지나도 자동으로 확정·탈락시키지 않는다. P0에서는 30분 경고까지만 하고, 운영자 수동 처리는 P1이다.
 
@@ -290,6 +303,9 @@ COMMIT
 - Worker는 결제 진행 중인 행사를 `event_id` 순서로 `batch-size`개씩 끝까지 훑는다. 행사마다 트랜잭션을 따로 쓰고, 실패는 `FANMEETING_PROMOTION_FAILED` 로그와 `fanmeeting.worker.failure{action=promotion}`으로 남긴 뒤 다음 행사로 넘어간다. 설정 `restless.fanmeeting.worker.promotion-fixed-delay-ms`(30000).
 - `REFUND_PENDING`은 모집 완료를 막지 않는다.
 - 야간에도 모집 완료 판정은 한다.
+
+- 승격 preview의 시각은 잠금 전 최적화용이다. `isPromotionAllowed`가 거짓이면 회원 조회 없이 빈 Preview를 반환한다. 실제 승격·완료 판정은 항상 Event 잠금 뒤 새 Clock 시각으로 다시 한다.
+- 잠금 뒤 집계한 WAITING이 0명이면 빈 예비 범위의 FOR UPDATE 조회를 생략하고 모집 완료만 처리한다.
 
 ## 11. 알림 요청 기록
 

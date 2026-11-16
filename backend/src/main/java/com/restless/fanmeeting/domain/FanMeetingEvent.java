@@ -200,6 +200,11 @@ public class FanMeetingEvent {
         return !night && !now.plus(FanMeetingOrder.PAYMENT_WINDOW).isAfter(promotionClosesAt);
     }
 
+    /** 최초 당첨 주문의 결제 기한이 승격 마감을 넘지 않을 때만 추첨을 진행한다. */
+    public boolean isDrawAllowed(Instant now) {
+        return !now.plus(FanMeetingOrder.PAYMENT_WINDOW).isAfter(promotionClosesAt);
+    }
+
     /** 빈자리 = 정원 − (확정 + 결제 대기). */
     public long vacancy(long occupied) {
         return Math.max(0, winnerLimit - occupied);

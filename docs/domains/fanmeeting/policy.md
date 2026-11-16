@@ -68,7 +68,7 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 | 마감 판정 | **커밋 기준.** 공유 잠금 안에서 `now < entry_closes_at`을 확인했고 마감 Worker의 CLOSED 전환보다 먼저 커밋된 응모만 성공·추첨 후보. 서버 도착 시각으로 소급하지 않는다 |
 | 응모 제한 | 회원·행사당 Application 1개. 취소(`WITHDRAWN`) 후 같은 행으로 재응모 |
 | 가입 시각 자격 | 설정 ON이면 가입 시각(`users.created_at`) `>= first_notice_scheduled_at`인 회원은 응모 불가. 기본 OFF(7절) |
-| 추첨 | HMAC-SHA256 순위 키 결정적 추첨. 앞에서 `winner_limit`명 WINNER, 다음 `reserve_limit`명 RESERVE. 탈퇴 회원은 계산 시 제외(응모 행은 유지) |
+| 추첨 | HMAC-SHA256 순위 키 결정적 추첨. 앞에서 `winner_limit`명 WINNER, 다음 `reserve_limit`명 RESERVE. 탈퇴 회원은 계산 시 제외(응모 행은 유지). 최초 당첨도 잠금 뒤 시각 기준 `now + 60분 <= promotion_closes_at`일 때만 최종화. 초과 시 claim도 하지 않고 현재 상태 유지. claim 후 늦어지면 최종화 저장 없이 DRAWING 유지, `FANMEETING_DRAW_TOO_LATE` 오류 로그·지표를 서버마다 행사당 한 번 남기고 운영자 처리 |
 | 결제 금액 | Order 생성 시점 `fee_amount` 스냅샷. 요청 본문의 금액·회원·기한은 무시 |
 | 0원 주문 | 공통 결제를 거치지 않는다. 손님이 기한(60분) 안에 확정 API를 불러야 확정된다. 누르지 않으면 유료 주문처럼 만료되고 예비가 승격된다. 확정 전에는 포기할 수 있다 |
 | 결제 기한 | `issued_at + 60분`. `approvedAt <= 기한`이면 기한 안(같으면 기한 안) |
