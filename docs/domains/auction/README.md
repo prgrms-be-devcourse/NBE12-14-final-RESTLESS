@@ -10,7 +10,7 @@
 | [transactions.md](transactions.md) | 크레딧 지급, 입찰, 시작, 종료, 수정·삭제 트랜잭션과 장애 시나리오 |
 | [phase1-review.md](phase1-review.md) | 1차 구현 평가: 원본 명세·목표 대조, 남은 일 |
 | [mutants.md](mutants.md) | 테스트가 잡아야 하는 버그 목록과 넣어 보는 방법 |
-| [load-test.md](load-test.md) | 부하 테스트 계획: 입찰·관전·조회 기준선, 진단, 개선 후보 |
+| [load-test.md](load-test.md) | 부하 테스트 계획: 입찰·관전·조회·종료 기준선(AU-1~10), 진단, 개선 후보 |
 | [design.md](design.md) | 담당자 설계 원본 (Notion에서 옮김) |
 | [API 계약](../../contracts/api/auction.md) | 1차 API, 오류 코드, SSE 스트림 |
 | [통합 ERD](../../architecture/erd.md) | 도메인 사이 연결 |
