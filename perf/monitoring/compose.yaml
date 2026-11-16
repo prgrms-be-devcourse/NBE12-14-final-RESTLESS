@@ -1,0 +1,41 @@
+# 부하 테스트 중 노트북에서 perf 앱 지표를 본다. 사용법은 perf/monitoring/README.md.
+#   PERF_APP_IP=3.35.88.242 docker compose -f perf/monitoring/compose.yaml up -d
+# 컨테이너는 노트북의 /etc/hosts를 읽지 않으므로 perf-app 이름을 extra_hosts로 붙인다.
+# PERF_APP_IP를 비우면 노트북에서 띄운 앱(host-gateway)을 수집한다.
+name: restless-perf-monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    extra_hosts:
+      - "perf-app:${PERF_APP_IP:-host-gateway}"
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      # 노트북의 127.0.0.1에만 열고 로그인 없이 본다.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/restless-perf.json
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus-data:
+  grafana-data:

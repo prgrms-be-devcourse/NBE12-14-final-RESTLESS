@@ -6,6 +6,7 @@ EXP-01~04([성능 실험 계획](../docs/testing/performance.md))를 실행하�
 |---|---|
 | [seed/](seed/README.md) | 실험 입력 데이터. 빈 스키마에 대량 시드, 토큰 CSV, 정합성 점검 |
 | [scenarios/](scenarios/README.md) | k6 시나리오. EXP-01 드롭 재고 점유 스파이크 |
+| [monitoring/](monitoring/README.md) | 노트북용 Prometheus, Grafana. 서버 지연과 자원 지표 |
 
 ## 원칙
 

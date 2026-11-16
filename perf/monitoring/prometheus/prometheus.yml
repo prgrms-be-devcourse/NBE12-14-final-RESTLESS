@@ -1,0 +1,11 @@
+# perf 앱의 관리 포트만 수집한다. 관리 포트는 perf 프로필에서만 prometheus를 연다.
+global:
+  # 스파이크가 20초라 5초 간격으로 수집한다. Grafana 데이터 소스의 timeInterval도 같은 값이다.
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: perf-app
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["perf-app:8081"]
