@@ -30,7 +30,7 @@
 backend/src/main/java/com/restless/
 ├── auth/ member/
 ├── fanmeeting/ ticketing/ auction/ credit/
-├── concert/ coupon/
+├── concert/
 ├── drop/
 │   ├── api/            # Controller
 │   ├── application/    # 유스케이스, 트랜잭션 경계, 대기열·만료 작업, 결제 Handler, DTO(dto/)

@@ -14,3 +14,4 @@
 | LEGACY-08 | 다중 서버 배포 무조건 진행 | 단일 서버 한계 측정 후 결정 |
 | LEGACY-09 | 실제 배송, 운송장 기능 포함 | 배송지 스냅샷까지만 제공 |
 | LEGACY-10 | Kotlin 중심 | Java |
+| LEGACY-11 | 쿠폰(선착순 발급) 도메인 | 팬미팅 추첨 도메인([fanmeeting](../domains/fanmeeting/README.md)). 쿠폰 코드와 설계 문서는 삭제했다(#156) |
