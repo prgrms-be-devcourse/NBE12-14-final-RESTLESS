@@ -6,7 +6,7 @@
 
 | 폴더 | 내용 |
 |---|---|
-| [product/](product/) | [개요](product/overview.md), [일정](product/roadmap.md), [열린 결정 사항](product/open-questions.md) |
+| [product/](product/) | [기획서](product/proposal.md), [개요](product/overview.md), [일정](product/roadmap.md), [열린 결정 사항](product/open-questions.md) |
 | [domains/](domains/) | 도메인별 정책, 불변식, 상태 머신, 트랜잭션, 데이터 모델 |
 | [architecture/](architecture/) | [기술 결정 현황, 패키지 규칙, 배포](architecture/overview.md), [통합 ERD](architecture/erd.md) |
 | [contracts/](contracts/) | [API 계약 목록과 공통 규칙](contracts/api/README.md), 이벤트 계약([events/](contracts/events/)) |
@@ -27,6 +27,7 @@
 | 팬미팅 응모, 추첨, 결제, 승격 | domains/fanmeeting/ 전체, contracts/api/fanmeeting.md, contracts/events/fanmeeting.md |
 | 테스트 작성 | testing/strategy.md, 해당 도메인 invariants.md (팬미팅은 test-scenarios.md도) |
 | 성능 실험 | testing/performance.md, 관련 ADR |
+| 서비스 의도, 사용자 시나리오, 범위, 역할, 완료기준 | [product/proposal.md](product/proposal.md) |
 | 정책이 애매할 때 | product/open-questions.md (목록에 있으면 임의로 정하지 않는다) |
 
 ## 상태 표기

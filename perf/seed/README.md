@@ -13,7 +13,7 @@ Flyway로 만든 빈 스키마에 실험 데이터를 SQL로 대량 생성한다
 준비: 대상 DB에 앱을 `perf` 프로필로 한 번 띄워 Flyway 마이그레이션을 끝낸다. 실행 머신에는 `mysql` 클라이언트와 `python3`(표준 라이브러리만)이 필요하다.
 
 ```bash
-export DB_HOST=10.0.1.20 DB_NAME=restless DB_USERNAME=restless DB_PASSWORD=...
+export DB_HOST=10.0.1.20 DB_NAME=perf-restless DB_USERNAME=restless DB_PASSWORD=...
 export JWT_SECRET=...                      # 앱의 perf 프로필과 같은 값
 export PERF_ALLOWED_DB_HOSTS=10.0.1.20     # 쉼표로 여러 개
 perf/seed/seed.sh --scale base --profile perf
@@ -33,7 +33,7 @@ perf/seed/seed.sh --scale base --profile perf
 
 1. `--profile perf`가 아니다. 앱의 `application-perf.yml`과 같은 이름이다.
 2. `DB_HOST`가 `PERF_ALLOWED_DB_HOSTS`에 정확히 없다.
-3. 호스트나 DB 이름에 prod가 들어 있다.
+3. DB 이름이 `perf-`로 시작하지 않거나, 호스트나 DB 이름에 prod가 들어 있다. 성능 테스트 DB는 `perf-restless`처럼 `perf-`를 붙이고, 배포 DB에는 붙이지 않는다.
 4. 시드 모드인데 `users`에 행이 있거나 이미 시드한 DB다. 다른 모드인데 `perf_seed_meta`가 없거나 시드한 스케일이 다르다.
 
 토큰은 시드가 직접 서명하므로 만료(`token_ttl_hours`)를 테스트 길이보다 길게 둘 수 있다. perf 환경의 `JWT_SECRET`으로만 서명하므로 다른 환경에서는 통하지 않는다. 앱의 Access Token TTL 설정은 바꾸지 않는다.
@@ -65,7 +65,7 @@ ID를 명시적으로 넣어서 시나리오가 값을 예측할 수 있다. 앱
 
 ## 계정과 이름
 
-모든 계정의 비밀번호는 `perf-password`다. 앱에는 메일 발송 기능이 없어 아래 주소로 메일이 나가지 않는다.
+모든 계정의 비밀번호는 `0000`이다. 앱에는 메일 발송 기능이 없어 아래 주소로 메일이 나가지 않는다.
 
 | 구분 | 이메일 | 닉네임 |
 |---|---|---|
