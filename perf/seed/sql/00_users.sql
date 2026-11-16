@@ -1,6 +1,6 @@
 -- 회원, Refresh Token. 모든 도메인이 같은 계정을 공유한다.
 -- seed.sh가 세션 변수(@users, @t0, @salt 등)를 먼저 정하고 이 파일부터 차례로 실행한다.
--- ID는 명시적으로 넣는다: 일반 회원 1..@users, 관리자 @users+1, 주최자 @users+2.
+-- ID는 명시적으로 넣는다: 일반 회원 1..@users, 관리자 @users+1, 주최자 @users+2..@users+1+@organizers.
 
 -- 숫자 테이블. 모든 대량 INSERT ... SELECT의 행 생성원이다. 95_cleanup.sql이 지운다.
 DROP TABLE IF EXISTS _perf_seq;
@@ -22,6 +22,7 @@ INSERT INTO perf_seed_meta (k, v) VALUES
     ('salt', @salt),
     ('seeded_at', DATE_FORMAT(@t0, '%Y-%m-%dT%H:%i:%s.%fZ')),
     ('users', @users),
+    ('organizers', @organizers),
     ('contention_ratio', @ratio),
     ('drop_hot_id', 1),
     ('drop_hot_stock', @hot_stock),
@@ -30,11 +31,12 @@ INSERT INTO perf_seed_meta (k, v) VALUES
     ('drop_bg_reservations', @bg_reservations);
 
 -- 비밀번호는 모두 perf-password (BCrypt). README 참고.
+-- 앱에는 메일 발송 기능이 없어 이 주소로 메일이 나가지 않는다.
 INSERT INTO users (id, email, password_hash, nickname, role, status, created_at, updated_at)
 SELECT s.n + 1,
-       CONCAT('perf-user-', s.n + 1, '@perf.local'),
+       CONCAT('fanq', s.n + 1, '@fanq.com'),
        @password_hash,
-       CONCAT('perf', s.n + 1),
+       CONCAT(s.n + 1, '번 회원'),
        'USER',
        'ACTIVE',
        @t0 - INTERVAL 30 DAY + INTERVAL s.n SECOND,
@@ -43,10 +45,21 @@ FROM _perf_seq s
 WHERE s.n < @users;
 
 INSERT INTO users (id, email, password_hash, nickname, role, status, created_at, updated_at) VALUES
-    (@users + 1, 'perf-admin@perf.local', @password_hash, 'perf-admin', 'ADMIN', 'ACTIVE',
-     @t0 - INTERVAL 31 DAY, @t0 - INTERVAL 31 DAY),
-    (@users + 2, 'perf-organizer@perf.local', @password_hash, 'perf-organizer', 'ORGANIZER', 'ACTIVE',
+    (@users + 1, 'admin@fanq.com', @password_hash, 'FANQ Administrator', 'ADMIN', 'ACTIVE',
      @t0 - INTERVAL 31 DAY, @t0 - INTERVAL 31 DAY);
+
+-- 주최자 n(1..@organizers): organizer<n>@fanq.com, 닉네임 organizer-<n>. 공연마다 돌아가며 판매자가 된다.
+INSERT INTO users (id, email, password_hash, nickname, role, status, created_at, updated_at)
+SELECT @users + 2 + s.n,
+       CONCAT('organizer', s.n + 1, '@fanq.com'),
+       @password_hash,
+       CONCAT('organizer-', s.n + 1),
+       'ORGANIZER',
+       'ACTIVE',
+       @t0 - INTERVAL 31 DAY,
+       @t0 - INTERVAL 31 DAY
+FROM _perf_seq s
+WHERE s.n < @organizers;
 
 -- 원문은 perf-rt-<salt>-<id>. lib/tokens.py가 같은 규칙으로 CSV에 쓴다.
 INSERT INTO refresh_tokens (id, user_id, token_hash, family_id, expires_at, created_at)

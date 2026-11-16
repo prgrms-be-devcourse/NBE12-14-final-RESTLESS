@@ -30,6 +30,7 @@ def sign(secret: bytes, member_id: int, role: str, issued_at: int, expires_at: i
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--users", type=int, required=True)
+    parser.add_argument("--organizers", type=int, required=True)
     parser.add_argument("--salt", required=True)
     parser.add_argument("--ttl-hours", type=int, required=True)
     parser.add_argument("--out", required=True)
@@ -50,13 +51,14 @@ def main():
         writer = csv.writer(f, lineterminator="\n")
         writer.writerow(header)
         for member_id in range(1, args.users + 1):
-            writer.writerow(row(member_id, f"perf-user-{member_id}@perf.local", "USER"))
+            writer.writerow(row(member_id, f"fanq{member_id}@fanq.com", "USER"))
     with open(os.path.join(args.out, "staff.csv"), "w", newline="") as f:
         writer = csv.writer(f, lineterminator="\n")
         writer.writerow(header)
-        writer.writerow(row(args.users + 1, "perf-admin@perf.local", "ADMIN"))
-        writer.writerow(row(args.users + 2, "perf-organizer@perf.local", "ORGANIZER"))
-    print(f"tokens: {args.users} users + 2 staff, expire at {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(expires_at))}")
+        writer.writerow(row(args.users + 1, "admin@fanq.com", "ADMIN"))
+        for n in range(1, args.organizers + 1):
+            writer.writerow(row(args.users + 1 + n, f"organizer{n}@fanq.com", "ORGANIZER"))
+    print(f"tokens: {args.users} users + 1 admin + {args.organizers} organizers, expire at {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(expires_at))}")
 
 
 if __name__ == "__main__":

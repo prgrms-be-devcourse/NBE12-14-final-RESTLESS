@@ -12,12 +12,13 @@ common:
   token_ttl_hours: 72
   # 핫 드롭 판매 기간. 시드 또는 --refresh 시각부터 센다.
   hot_window_hours: 24
+  # 주최자 계정 수. 공연마다 돌아가며 판매자가 된다.
+  organizers: 10
   drop_hot_variants: 3
   drop_hot_price: 59000
   # 핫 드롭 대기열에 미리 넣을 WAITING 행 수. 0이면 대기열 등록 자체를 측정한다.
   drop_hot_queue_prefill: 0
   drop_bg_variants_per_drop: 3
-  drop_bg_price: 39000
   # 종료된 드롭 점유의 상태 비율(%). 나머지는 EXPIRED. restored가 환불 비율이다.
   drop_bg_pct_confirmed: 80
   drop_bg_pct_restored: 3

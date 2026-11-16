@@ -9,14 +9,35 @@
 
 SET @bg_per_drop = CEIL(@bg_reservations / @bg_drops);
 
+-- 굿즈 종류. 배경 드롭 d는 굿즈 d MOD 10을 판다. 옵션이 3개보다 많으면 Ver.<n>을 쓴다. 95_cleanup.sql이 지운다.
+DROP TABLE IF EXISTS _perf_products;
+CREATE TABLE _perf_products (i INT PRIMARY KEY, name VARCHAR(50), price BIGINT,
+                             opt1 VARCHAR(30), opt2 VARCHAR(30), opt3 VARCHAR(30));
+INSERT INTO _perf_products VALUES
+    (0, '공식 응원봉', 49000, '기본', '스페셜 패키지', '키링 세트'),
+    (1, '투어 후드 티셔츠', 69000, 'M', 'L', 'XL'),
+    (2, '포토카드 세트', 15000, 'A ver.', 'B ver.', 'C ver.'),
+    (3, '슬로건 타월', 25000, '블랙', '화이트', '핑크'),
+    (4, '아크릴 스탠드', 18000, 'Ver.1', 'Ver.2', 'Ver.3'),
+    (5, '투어 키링', 12000, '실버', '골드', '로즈골드'),
+    (6, '리유저블 백', 22000, '블랙', '아이보리', '네이비'),
+    (7, '투어 볼캡', 35000, '블랙', '베이지', '네이비'),
+    (8, '프로그램북', 30000, '일반판', '한정판', '디지털 코드 포함'),
+    (9, '미니 포스터 세트', 20000, 'A ver.', 'B ver.', 'C ver.');
+
 -- ---------------------------------------------------------------- 핫 드롭
 -- 판매 기간은 99_hot_window.sql이 실행 시각 기준으로 다시 맞춘다 (스냅샷 복원 뒤에도 재실행).
 INSERT INTO drops (id, concert_id, title, description, image_url, opens_at, closes_at, status, created_at)
-VALUES (1, 1, 'PERF Hot Drop', 'Load test limited drop', 'https://perf.local/hot.png',
-        @t0 - INTERVAL 1 MINUTE, @t0 + INTERVAL @hot_window_hours HOUR, 'OPEN', @t0 - INTERVAL 7 DAY);
+SELECT 1, 1, CONCAT(a.name, ' <', a.tour, '> 공식 응원봉 한정판'),
+       CONCAT(a.name, ' 2026 투어 기념 한정 수량 응원봉. 1인 1개 구매.'),
+       'https://cdn.fanq.com/drops/hot.png',
+       @t0 - INTERVAL 1 MINUTE, @t0 + INTERVAL @hot_window_hours HOUR, 'OPEN', @t0 - INTERVAL 7 DAY
+FROM _perf_artists a
+WHERE a.i = 0;
 
 INSERT INTO drop_variants (id, drop_id, sku_code, option_name, price_amount, is_active)
-SELECT s.n + 1, 1, CONCAT('HOT-', s.n + 1), CONCAT('Option ', s.n + 1), @hot_price, TRUE
+SELECT s.n + 1, 1, CONCAT('HOT-', s.n + 1),
+       COALESCE(ELT(s.n + 1, '블랙', '화이트', '실버 한정'), CONCAT('Ver.', s.n + 1)), @hot_price, TRUE
 FROM _perf_seq s
 WHERE s.n < @hot_variants;
 
@@ -40,24 +61,27 @@ WHERE s.n < @hot_queue_prefill;
 INSERT INTO drops (id, concert_id, title, description, image_url, opens_at, closes_at, status, created_at)
 SELECT s.n + 2,
        2 + s.n DIV 10,
-       CONCAT('PERF Archive Drop ', s.n + 1),
-       'Closed drop for index depth',
-       CONCAT('https://perf.local/archive-', s.n + 1, '.png'),
+       CONCAT(a.name, ' <', a.tour, '> ', p.name),
+       CONCAT(a.name, ' ', 2026 - (1 + s.n DIV 10) DIV 10, ' 투어 공식 MD. 판매 종료.'),
+       CONCAT('https://cdn.fanq.com/drops/archive-', s.n + 1, '.png'),
        @t0 - INTERVAL ((@bg_drops - s.n) * 48 + 24) HOUR,
        @t0 - INTERVAL ((@bg_drops - s.n) * 48) HOUR,
        'CLOSED',
        @t0 - INTERVAL ((@bg_drops - s.n) * 48 + 24 * 7) HOUR
 FROM _perf_seq s
+JOIN _perf_artists a ON a.i = MOD(1 + s.n DIV 10, 10)
+JOIN _perf_products p ON p.i = MOD(s.n, 10)
 WHERE s.n < @bg_drops;
 
 INSERT INTO drop_variants (id, drop_id, sku_code, option_name, price_amount, is_active)
 SELECT @hot_variants + 1 + s.n,
        2 + s.n DIV @bg_vpd,
        CONCAT('BG', s.n DIV @bg_vpd + 1, '-', MOD(s.n, @bg_vpd) + 1),
-       CONCAT('Option ', MOD(s.n, @bg_vpd) + 1),
-       @bg_price,
+       COALESCE(ELT(MOD(s.n, @bg_vpd) + 1, p.opt1, p.opt2, p.opt3), CONCAT('Ver.', MOD(s.n, @bg_vpd) + 1)),
+       p.price,
        TRUE
 FROM _perf_seq s
+JOIN _perf_products p ON p.i = MOD(s.n DIV @bg_vpd, 10)
 WHERE s.n < @bg_drops * @bg_vpd;
 
 -- 상태 버킷 (n * 37) MOD 100: 연속 100건마다 버킷이 한 번씩 나와 비율이 드롭마다 고르게 퍼진다.

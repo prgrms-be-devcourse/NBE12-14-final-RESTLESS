@@ -34,7 +34,7 @@ WHERE r.drop_id <> 1
 ORDER BY r.order_id;
 
 INSERT INTO order_shipping_snapshots (order_id, recipient, phone, address)
-SELECT r.order_id, CONCAT('perf', r.user_id), '010-0000-0000', 'Seoul'
+SELECT r.order_id, CONCAT(r.user_id, '번 회원'), '010-0000-0000', '서울특별시 중구 세종대로 110'
 FROM drop_reservations r
 WHERE r.drop_id <> 1;
 

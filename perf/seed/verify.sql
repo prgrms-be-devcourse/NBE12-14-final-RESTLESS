@@ -113,17 +113,18 @@ WHERE o.order_type = 'DROP'
 
 -- ---------------------------------------------------------------- 시드 기준값 (seed baseline)
 SET @meta_users = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'users');
+SET @meta_staff = 1 + (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'organizers');
 SET @meta_hot_drop = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'drop_hot_id');
 SET @meta_hot_stock = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'drop_hot_stock');
 SET @meta_bg_reservations = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'drop_bg_reservations');
 
 INSERT INTO _perf_checks
-SELECT 'check', 'seed baseline: user count (members + 2 staff)', ABS(COUNT(*) - (@meta_users + 2))
+SELECT 'check', 'seed baseline: user count (members + admin + organizers)', ABS(COUNT(*) - (@meta_users + @meta_staff))
 FROM users;
 
 INSERT INTO _perf_checks
 SELECT 'check', 'seed baseline: one refresh token per account',
-       ABS((SELECT COUNT(*) FROM refresh_tokens) - (@meta_users + 2));
+       ABS((SELECT COUNT(*) FROM refresh_tokens) - (@meta_users + @meta_staff));
 
 INSERT INTO _perf_checks
 SELECT 'check', 'seed baseline: hot drop total stock', ABS(COALESCE(SUM(i.total_quantity), 0) - @meta_hot_stock)

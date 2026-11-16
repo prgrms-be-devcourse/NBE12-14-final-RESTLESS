@@ -85,11 +85,11 @@ per_drop=$(( (SCALE_drop_bg_reservations + SCALE_drop_bg_drops - 1) / SCALE_drop
 (( SCALE_drop_hot_queue_prefill <= SCALE_users )) || die "drop_hot_queue_prefill exceeds users"
 (( SCALE_drop_bg_pct_confirmed + SCALE_drop_bg_pct_restored + SCALE_drop_bg_pct_released <= 100 )) \
   || die "drop_bg_pct_* sum exceeds 100"
-(( SCALE_drop_hot_variants > 0 && SCALE_drop_bg_drops > 0 && SCALE_drop_bg_variants_per_drop > 0 )) \
+(( SCALE_organizers > 0 && SCALE_drop_hot_variants > 0 && SCALE_drop_bg_drops > 0 && SCALE_drop_bg_variants_per_drop > 0 )) \
   || die "variant and drop counts must be positive"
 
 seq_size=$SCALE_users
-for n in $(( SCALE_users + 2 )) "$SCALE_drop_bg_reservations" \
+for n in $(( SCALE_users + 1 + SCALE_organizers )) "$SCALE_drop_bg_reservations" \
          $(( SCALE_drop_bg_drops * SCALE_drop_bg_variants_per_drop )) "$SCALE_drop_hot_queue_prefill"; do
   (( n > seq_size )) && seq_size=$n
 done
@@ -97,11 +97,11 @@ done
 session_header() {
   cat <<SQL
 SET @scale = '$SCALE', @salt = '$1', @t0 = UTC_TIMESTAMP(6), @password_hash = '$PASSWORD_HASH';
-SET @users = $SCALE_users, @ratio = $SCALE_contention_ratio, @seq_size = $seq_size;
+SET @users = $SCALE_users, @organizers = $SCALE_organizers, @ratio = $SCALE_contention_ratio, @seq_size = $seq_size;
 SET @token_ttl_hours = $SCALE_token_ttl_hours, @hot_window_hours = $SCALE_hot_window_hours;
 SET @hot_variants = $SCALE_drop_hot_variants, @hot_price = $SCALE_drop_hot_price;
 SET @hot_stock = $SCALE_drop_hot_stock, @hot_queue_prefill = $SCALE_drop_hot_queue_prefill;
-SET @bg_drops = $SCALE_drop_bg_drops, @bg_vpd = $SCALE_drop_bg_variants_per_drop, @bg_price = $SCALE_drop_bg_price;
+SET @bg_drops = $SCALE_drop_bg_drops, @bg_vpd = $SCALE_drop_bg_variants_per_drop;
 SET @bg_reservations = $SCALE_drop_bg_reservations;
 SET @pct_confirmed = $SCALE_drop_bg_pct_confirmed, @pct_restored = $SCALE_drop_bg_pct_restored;
 SET @pct_released = $SCALE_drop_bg_pct_released;
@@ -125,7 +125,7 @@ run_files() {
 write_tokens() {
   [[ -n "${JWT_SECRET:-}" ]] || die "JWT_SECRET is required (same value as the perf app)"
   mkdir -p "$OUT" && chmod 700 "$OUT"
-  python3 "$ROOT/lib/tokens.py" --users "$SCALE_users" --salt "$1" \
+  python3 "$ROOT/lib/tokens.py" --users "$SCALE_users" --organizers "$SCALE_organizers" --salt "$1" \
     --ttl-hours "$SCALE_token_ttl_hours" --out "$OUT"
   query "SELECT JSON_PRETTY(JSON_OBJECT(
       'scale', (SELECT v FROM perf_seed_meta WHERE k = 'scale'),

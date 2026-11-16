@@ -44,7 +44,7 @@ perf/seed/seed.sh --scale base --profile perf
 
 | 구분 | base |
 |---|---|
-| 회원 | users 100,000 + 관리자 1 + 주최자 1, refresh_tokens 계정마다 1 |
+| 회원 | users 100,000 + 관리자 1 + 주최자 10, refresh_tokens 계정마다 1 |
 | 핫 드롭 | 1건, SKU 3, 총재고 1,000. 기본 경쟁률 10:1 → 참여자 10,000, 계정이 10만이라 100:1까지 가능 |
 | 배경 드롭 | 종료 100건, SKU 300, 점유 100,000 (CONFIRMED 80%, RESTORED 3%, RELEASED 7%, EXPIRED 10%) |
 | 주문, 결제 | 배경 점유마다 주문 1, 품목 1, 배송 스냅샷 1, 결제 1. 환불 완료 3,000 |
@@ -58,20 +58,33 @@ ID를 명시적으로 넣어서 시나리오가 값을 예측할 수 있다. 앱
 
 | 테이블 | ID |
 |---|---|
-| users | 회원 1..users, 관리자 users+1, 주최자 users+2 |
+| users | 회원 1..users, 관리자 users+1, 주최자 users+2..users+1+organizers |
 | drops | 핫 1, 배경 2.. |
 | drop_variants | 핫 1..3, 배경 4.. |
 | drop_reservations, orders, payments | 배경 점유 n에 대해 모두 n |
+
+## 계정과 이름
+
+모든 계정의 비밀번호는 `perf-password`다. 앱에는 메일 발송 기능이 없어 아래 주소로 메일이 나가지 않는다.
+
+| 구분 | 이메일 | 닉네임 |
+|---|---|---|
+| 회원 | `fanq{ID}@fanq.com` | `{ID}번 회원` |
+| 관리자 | `admin@fanq.com` | FANQ Administrator |
+| 주최자 n | `organizer{n}@fanq.com` | `organizer-{n}` |
+
+공연장은 실제 공연장의 이름과 공개 주소다. KSPO DOME, 고척스카이돔, 잠실실내체육관, 인스파이어 아레나, 장충체육관, 블루스퀘어, 벡스코, 킨텍스를 쓴다.
+아티스트, 투어, 굿즈는 실제 상표와 겹치지 않게 지어낸 이름이다. 핫 드롭은 `NOVA:LINE <AFTERGLOW> 공식 응원봉 한정판`이고, 배경 드롭은 공연의 아티스트와 굿즈 10종을 조합한다.
 
 ## 출력 (`out/`, git에 올리지 않음)
 
 | 파일 | 내용 |
 |---|---|
 | users.csv | user_id, email, role, access_token, refresh_token. 핫 참여자는 앞에서부터 participants 행 |
-| staff.csv | 관리자, 주최자 |
+| staff.csv | 관리자, 주최자 전원 |
 | manifest.json | 핫 드롭 ID, SKU별 재고, 판매 기간, 경쟁률 |
 
-모든 계정의 비밀번호는 `perf-password`다. 로그인 자체를 측정할 때만 쓰고, 나머지는 CSV 토큰을 쓴다.
+비밀번호는 로그인 자체를 측정할 때만 쓰고, 나머지는 CSV 토큰을 쓴다.
 Refresh Token은 한 번 쓰면 교체되므로 같은 행을 다시 쓰려면 스냅샷을 복원한다.
 
 ## 점검
