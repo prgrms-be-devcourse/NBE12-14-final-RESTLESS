@@ -399,3 +399,25 @@ Java 엔티티·Repository는 Performance/PerformanceRepository, DB 테이블은
 ```
 
 `TicketQueryApiTest`에 본인 필터·타인/없는 티켓 동일 404·로그인 필수·페이지 정렬/빈 결과·잘못된 입력·발급 금액·회차별 좌석 표시·사용/취소 이력·재판매 후 소유권 검증을 작성했다. 사용자 요청에 따라 테스트는 실행하지 않았다.
+
+
+## 주문 상세의 티켓팅 결제 대상 연결
+
+기존 `GET /api/orders/{orderId}`에서 본인의 티켓 주문을 조회하면 TicketOrderPayableResolver가 주문 ID와 연결된 예약을 찾아 아래 필드를 채운다. 새 HTTP API는 추가하지 않는다.
+
+```json
+{
+  "payable": { "payableType": "TICKET", "payableId": 10 },
+  "payableExpiresAt": "2026-11-16T01:05:00Z",
+  "payment": { "paymentId": 25, "status": "READY" }
+}
+```
+
+- payableId는 공통 주문 ID나 PG pgOrderId가 아닌 **티켓팅 예약 ID**다. payableExpiresAt은 최초 checkout에 저장된 payment_expires_at이며 hold_expires_at으로 대체하거나 연장하지 않는다.
+- 주문의 본인 소유·활성 회원 검증은 기존 공통 주문 상세가 Resolver 호출 전에 수행한다. 타인/없는 주문은 기존 404 ORDER_NOT_FOUND, 비로그인은 401이다.
+- 최근 결제는 기존 공통 PaymentLookup이 (TICKET, 예약 ID, 회원 ID)로 조회한다. 아직 시도가 없으면 payment는 null이고, 실패 후 새 시도가 생성되면 가장 최근 시도가 표시된다.
+- 만료·CONFIRMED·RELEASED 상태여도 대상 식별은 유지한다. 결제 가능 여부를 판정하는 TicketPaymentService.load와 구분하며, 최종 시작 가능 여부는 공통 결제 준비/승인 API에서 재검증한다.
+- 연결된 예약이 없는 티켓 주문은 기존과 같이 payable/payableExpiresAt/payment가 null이다. Resolver는 읽기만 수행하고 주문·예약·결제 상태, 원래 기한을 바꾸지 않는다.
+- 기존 OrderPayableResolver/OrderPayable 계약만 구현한다. 공통 주문·결제 운영 코드와 DB 스키마 변경은 없다.
+
+TicketCheckoutServiceTest.TicketOrderDetail에 기존 fixture를 재사용해 주문 대상·기한과 최근 재시도 표시, 확정/만료/반환 이후 연결 보존, 본인 주문 접근 범위를 확인하는 테스트를 작성했다. 공통 주문의 기존 빈 연결·일반 조회 검증은 재사용한다. 티켓팅 연결 검증은 로컬 하네스와 전체 백엔드 빌드에서 실행한다.

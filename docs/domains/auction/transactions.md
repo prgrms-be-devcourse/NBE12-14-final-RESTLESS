@@ -1,5 +1,9 @@
 # Auction 트랜잭션 경계
 
+> 관련 코드: `backend/src/main/java/com/restless/auction/application/`, `backend/src/main/java/com/restless/credit/application/`
+>
+> 마지막 확인: 2026-11-15 (#142 잠금 뒤 시각 읽기와 함께 고침)
+
 ## 공통 규칙
 
 - **잠금 순서:** 경매 행 → 지갑 행(지갑 ID 오름차순). 모든 트랜잭션이 이 순서를 지켜 데드락을 막는다.

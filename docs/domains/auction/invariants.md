@@ -1,5 +1,9 @@
 # Auction 불변식
 
+> 관련 코드: `backend/src/main/java/com/restless/auction/domain/`, `backend/src/main/java/com/restless/credit/domain/`, `backend/src/main/resources/db/migration/V*__auction_*.sql`, `backend/src/test/resources/harness/auction-invariants.sql`
+>
+> 마지막 확인: 2026-11-15 (#140 종료 실패 테스트, 불변식 SQL 파일 분리와 함께 고침)
+
 동시 요청이나 재시도가 있어도 반드시 지켜야 하는 조건이다. 단위, 통합, 동시성 테스트의 기준이며, 테스트 이름이나 주석에 `INV-AU-xx`를 붙여 추적한다.
 
 INV-AU-01 ~ 13은 원본([design.md](design.md) 8절)이고, 14 ~ 15는 크레딧 장부를 검증하려고 추가했다.
@@ -29,47 +33,28 @@ INV-AU-01 ~ 13은 원본([design.md](design.md) 8절)이고, 14 ~ 15는 크레�
 | INV-AU-01, 03, 04, 05 | 동시 입찰 테스트: 같은 금액 N건 동시 요청 시 1건만 수락, 판매자·최고 입찰자·금액 부족 요청은 거절되고 아무것도 저장되지 않음 |
 | INV-AU-02 | 종료를 동시에 여러 번 실행해도 결과 행 1건. 결과 행 직접 중복 INSERT가 PK에서 거부됨 |
 | INV-AU-06 | 한 회원이 여러 경매에 동시 입찰해 사용 가능액을 넘기는 테스트. `reserved > balance` 직접 UPDATE가 CHECK에서 거부됨 |
-| INV-AU-07, 08, 14, 15 | 아래 SQL |
+| INV-AU-07, 08, 14, 15 | 불변식 SQL (아래 절) |
 | INV-AU-09 | SSE 연결을 끊은 뒤에도 입찰·확보가 그대로인지 확인 (`AuctionStreamTest`) |
 | INV-AU-10, 11 | 종료 직전 입찰과 종료 스케줄러 경합 테스트. `ends_at`이 줄어들지 않고, `ends_at` 이후 `accepted_at`인 입찰이 없음 |
 | INV-AU-12 | 같은 키 동시 재전송 시 입찰·확보·내역·연장이 1번씩만 반영 |
 | INV-AU-13 | 차감 뒤 결과 저장에서 예외를 넣어 차감·결과·종료가 함께 롤백되고, 다시 종료하면 한 번만 차감되는지 확인 (`AuctionCloseFailureTest.차감_뒤_결과_저장에서_실패하면_차감까지_함께_롤백되고_다시_종료하면_한_번만_차감된다_INV_AU_13`). 정상 종료 뒤에는 `SOLD` 결과의 낙찰 입찰이 마지막 입찰이고 그 확보가 `CAPTURED`인지 `AuctionFixtures.assertInvariants`가 확인한다 |
 
-## 테스트에서 확인하는 SQL
+## 불변식 SQL
 
-아래 쿼리는 **INV-AU-07, 08, 14, 15만** 확인한다. 동시성 테스트 끝에 모두 0건이어야 한다. 나머지 불변식은 위 표의 방법으로 확인한다.
+쿼리는 [`backend/src/test/resources/harness/auction-invariants.sql`](../../../backend/src/test/resources/harness/auction-invariants.sql) 한 곳에만 둔다. 쿼리마다 불변식을 어긴 행의 ID를 돌려주고, 0행이면 지켜진 것이다.
 
-```sql
--- INV-AU-07: 진행 중 경매의 최고 입찰에 HELD 확보가 없음
-SELECT a.auction_id
-FROM auctions a
-JOIN auction_bids b ON b.auction_id = a.auction_id
- AND b.bid_sequence = (SELECT MAX(bid_sequence) FROM auction_bids WHERE auction_id = a.auction_id)
-LEFT JOIN credit_holds h ON h.auction_bid_id = b.auction_bid_id AND h.status = 'HELD'
-WHERE a.status <> 'CLOSED' AND h.credit_hold_id IS NULL;
+| 블록 | 확인하는 것 |
+|---|---|
+| INV-AU-07, 08 | 최고 입찰만 `HELD`이고, 추월된 입찰의 확보는 해제돼 있다 |
+| INV-AU-14, 15 | 지갑의 묶인 금액 = `HELD` 합계, 지갑 금액 = 내역 합계 |
+| INV-AU-03 | 다음 입찰은 이전 입찰 + 최소 인상액 이상 |
+| INV-AU-11 | 종료된 경매에 종료 시각 이후 수락된 입찰이 없다 |
+| INV-AU-13 | `SOLD`는 마지막 입찰이고 그 확보는 `CAPTURED` |
+| 상태 조합 ([state-machines.md](state-machines.md) 6절) | `CLOSED`와 결과 행은 함께 있다, 종료된 경매에 `HELD`가 없다, `UNSOLD`에는 입찰이 없다 |
 
--- INV-AU-08: 최고 입찰이 아닌데 HELD인 확보
-SELECT h.credit_hold_id
-FROM credit_holds h
-JOIN auction_bids b ON b.auction_bid_id = h.auction_bid_id
-WHERE h.status = 'HELD'
-  AND b.bid_sequence < (SELECT MAX(bid_sequence) FROM auction_bids WHERE auction_id = b.auction_id);
-
--- INV-AU-14: 지갑의 묶인 금액과 HELD 합계 불일치
-SELECT w.credit_wallet_id
-FROM credit_wallets w
-LEFT JOIN credit_holds h ON h.credit_wallet_id = w.credit_wallet_id AND h.status = 'HELD'
-GROUP BY w.credit_wallet_id, w.reserved_amount
-HAVING w.reserved_amount <> COALESCE(SUM(h.held_amount), 0);
-
--- INV-AU-15: 지갑 금액과 내역 합계 불일치
-SELECT w.credit_wallet_id
-FROM credit_wallets w
-LEFT JOIN credit_transactions t ON t.credit_wallet_id = w.credit_wallet_id
-GROUP BY w.credit_wallet_id, w.balance_amount, w.reserved_amount
-HAVING w.balance_amount <> COALESCE(SUM(t.balance_delta), 0)
-    OR w.reserved_amount <> COALESCE(SUM(t.reserved_delta), 0);
-```
+- **테스트:** 데이터를 바꾸는 경매 테스트는 끝에 `AuctionFixtures.assertInvariants()`로 모든 블록을 실행한다.
+- **부하 테스트 뒤 점검:** 같은 파일을 MySQL에서 그대로 실행해 모든 쿼리가 0행인지 본다.
+- 불변식을 추가하면 `-- name: <이름>` 블록을 하나 더 붙인다. 테스트는 자동으로 새 블록도 실행한다.
 
 ## AGENTS.md 핵심 불변식과의 관계
 
