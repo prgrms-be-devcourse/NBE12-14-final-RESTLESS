@@ -166,76 +166,78 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" -p 5665:5
 - 무릎 지점은 계단별 k6 지연과 오류율로 판단한다. k6 지연에는 집 네트워크 왕복이 섞이므로 테스트 전 왕복 지연을 같이 기록한다.
 - 계단별 서버 지연이 필요하면 계단을 따로 실행하고 실행마다 `/actuator/prometheus` 전후 값을 저장한다.
 
-## Auction burst testing: AU-1 to AU-5
+## 경매 몰림 부하 테스트: AU-1~AU-5
 
-Run against a perf-profile app with the base seed loaded once. The runner logs in as the organizer and creates fresh auctions as needed. Created auctions remain in the database, so run each k6 scenario against a restored perf database.
+앱을 `perf` 프로필로 실행하고 `base` 시드를 측정 기간 시작에 한 번 넣습니다. 스크립트가 주최자로 로그인하고 필요한 판마다 새 경매를 만듭니다. 판마다 DB를 복원할 필요는 없습니다. 생성한 경매는 DB에 남으므로 독립적인 측정 기간을 시작할 때만 새 시드를 준비합니다.
 
-Use k6 2.4.0 installed on macOS (brew install k6) and Node 24. Set PERF_APP_IP in the shell; the runner maps the address to perf-local and does not write the IP into the repository or result files.
+Mac에는 k6 2.4.0(`brew install k6`)과 Node 24가 필요합니다. `PERF_APP_IP`에 대상 주소를 지정하면 실행기가 이를 `perf-local`에 매핑합니다. 실제 IP는 저장소나 결과에 기록하지 않습니다.
 
-    export PERF_APP_IP=192.0.2.10
-    PHASES=200,300 perf/scenarios/auction-run.sh detail local-detail
-    PHASES=200,300 perf/scenarios/auction-run.sh list local-list
-    PHASES=200,300 LOGIN_RATE=50 perf/scenarios/auction-run.sh bid local-bid
-    PHASES=200,300 LOGIN_RATE=50 PHASE_GAP_SECONDS=240 perf/scenarios/auction-run.sh ending local-ending
-    STEPS=50,100 ACCOUNTS=20 HOLD_SECONDS=20 perf/scenarios/auction-run.sh sse local-sse
+```bash
+export PERF_APP_IP=<perf 서버 IP>
+PHASES=200,300 perf/scenarios/auction-run.sh detail local-detail
+PHASES=200,300 perf/scenarios/auction-run.sh list local-list
+PHASES=200,300 LOGIN_RATE=50 perf/scenarios/auction-run.sh bid local-bid
+PHASES=200,300 LOGIN_RATE=50 PHASE_GAP_SECONDS=240 perf/scenarios/auction-run.sh ending local-ending
+STEPS=50,100 ACCOUNTS=20 HOLD_SECONDS=20 perf/scenarios/auction-run.sh sse local-sse
+```
 
-The default k6 run sends 8,000 requests followed by 10,000 in one run. PHASES can reduce counts for local checks. auction-run.sh starts the Actuator sampler and stops it after the scenario.
+기본 k6 실행은 한 번에 8,000건 판을 보낸 뒤 10,000건 판을 보냅니다. 로컬 확인에는 `PHASES`로 요청 수를 줄일 수 있습니다. 실행기는 Actuator 수집을 시작하고 시나리오 종료 뒤 멈춥니다.
 
-| ID | Runner name | API / authentication | Purpose |
+| ID | 실행 이름 | API / 인증 | 확인 목적 |
 |---|---|---|---|
-| AU-1 | ending | Bid POST, login | Final-second bids, rejections before the deadline, extension and winner correctness |
-| AU-2 | detail | Public detail GET | Burst reads of one auction |
-| AU-3 | list | Public auction-list GET | Burst reads of OPEN auctions |
-| AU-4 | bid | Bid POST, login | Ordinary bid burst |
-| AU-5 | sse | Authenticated SSE GET | Connection lifetime and update delivery delay |
+| AU-1 | `ending` | 입찰 POST, 로그인 | 마감 직전 입찰, 마감 전 발신 후 `AUCTION_CLOSED` 거절, 연장과 낙찰 정합성 |
+| AU-2 | `detail` | 공개 상세 GET | 한 경매 상세 조회 몰림 |
+| AU-3 | `list` | 공개 경매 목록 GET | OPEN 경매 목록 조회 몰림 |
+| AU-4 | `bid` | 입찰 POST, 로그인 | 평시 입찰 몰림 |
+| AU-5 | `sse` | 인증 SSE GET | 연결 유지와 변경 이벤트 전달 지연 |
 
-AU-2 and AU-3 currently use public GET endpoints and send no token. A 401 is reported as the public GET path being blocked.
+AU-2·AU-3은 현재 공개된 GET이므로 토큰 없이 호출합니다. 401이면 공개 GET 경로가 막힌 것으로 기록합니다.
 
-### k6 options
+### k6 옵션
 
-| Variable | Default | Meaning |
+| 변수 | 기본값 | 설명 |
 |---|---|---|
-| TARGET | set by runner | ending, detail, list, or bid |
-| PHASES | 8000,10000 | Two ascending request counts |
-| BIDDER_FIRST_ID, BIDDER_LAST_ALLOWED_ID | 1, 96900 | Consecutive bidder IDs; exceeding the limit stops the run |
-| LOGIN_RATE, LOGIN_MARGIN_SECONDS | 15, 60 | Login rate per second and margin after estimated login completion |
-| PHASE_GAP_SECONDS | 60 ordinary, 240 ending | Delay between phases |
-| AMOUNT_STEPS | 100 | Random minimum-increment multiples above the starting price |
-| ENDING_LEAD_MS | 1000 | Original ending time after the phase start |
-| START_DELAY_SECONDS, AUCTION_DURATION_SECONDS | 20, 7200 | Auction start delay and ordinary auction duration |
-| REQUEST_TIMEOUT_SECONDS, RESULT_WAIT_SECONDS | 60, 300 | Request timeout and result polling limit |
-| ORGANIZER_EMAIL, SEED_PASSWORD | organizer1@fanq.com, 0000 | Seed organizer and password |
+| `TARGET` | 실행기가 지정 | `ending`, `detail`, `list`, `bid` |
+| `PHASES` | `8000,10000` | 오름차순 두 판의 요청 수 |
+| `BIDDER_FIRST_ID`, `BIDDER_LAST_ALLOWED_ID` | `1`, `96900` | 연속 입찰자 ID 범위. 상한을 넘으면 중단 |
+| `LOGIN_RATE`, `LOGIN_MARGIN_SECONDS` | `15`, `60` | 초당 로그인 수와 예상 로그인 완료 후 여유 시간 |
+| `PHASE_GAP_SECONDS` | 일반 60, ending 240 | 판 사이 간격 |
+| `AMOUNT_STEPS` | `100` | 시작가 위 최소 인상액 배수의 무작위 범위 |
+| `ENDING_LEAD_MS` | `1000` | 판 시각부터 원래 종료까지의 시간 |
+| `START_DELAY_SECONDS`, `AUCTION_DURATION_SECONDS` | `20`, `7200` | 경매 시작 지연과 일반 경매 길이 |
+| `REQUEST_TIMEOUT_SECONDS`, `RESULT_WAIT_SECONDS` | `60`, `300` | 요청 제한 시간과 결과 조회 대기 한도 |
+| `ORGANIZER_EMAIL`, `SEED_PASSWORD` | `organizer1@fanq.com`, `0000` | 시드 주최자 계정과 비밀번호 |
 
-ending, bid, and detail create one auction per phase. list creates none. The auction opens at server time plus START_DELAY_SECONDS. ending sets the original end to phase T plus ENDING_LEAD_MS. Each bidder logs in once and sends one request in each phase they join. At 15 logins per second, 10,000 logins take about 11 minutes, plus the configured margin.
+`ending`, `bid`, `detail`은 판마다 경매를 새로 만들고 `list`는 만들지 않습니다. 경매가 모두 OPEN 된 뒤 로그인 시작 시각과 판 시각을 정해 VU 로그인이 한꺼번에 밀리지 않게 합니다. 로그인은 setup 종료 뒤 10초 후 시작합니다. `ending`은 경매 등록에 종료 시각이 필요하므로 예정된 OPEN 시각, 로그인·여유 시간과 1초의 OPEN 전환 여유를 반영해 종료 시각을 먼저 잡습니다. 각 입찰자는 한 번 로그인하고 자신이 참여하는 각 판에서 한 번 요청합니다. 초당 15회로 10,000명을 로그인하면 약 11분이 걸리고, 첫 판 전에 설정한 여유 시간이 더해집니다.
 
-### SSE options
+### SSE 옵션
 
-auction-sse.mjs uses Node 24's built-in fetch. It creates a long-running auction, logs in observer accounts, and reuses their tokens across connections. A separate account places one bid at each connection step. Default cumulative steps are 2,000, 4,000, 6,000, 8,000, and 10,000.
+`auction-sse.mjs`는 Node 24 내장 fetch를 씁니다. 장시간 경매를 만들고 관전자 계정에 로그인한 뒤 토큰을 연결에 재사용합니다. 별도 측정 계정이 연결 단계마다 입찰합니다. 기본 누적 단계는 2,000, 4,000, 6,000, 8,000, 10,000입니다.
 
-| Variable | Default | Meaning |
+| 변수 | 기본값 | 설명 |
 |---|---|---|
-| STEPS | 2000,4000,6000,8000,10000 | Cumulative open connection targets |
-| ACCOUNTS, BIDDER_FIRST_ID, BIDDER_LAST_ALLOWED_ID | 1000, 1, 96900 | Observer account count and range; the next two IDs are alternating measurement bidders |
-| LOGIN_RATE | 15 | Logins per second; 1,000 observers take about 67 seconds |
-| CONNECT_RATE | 200 | New SSE connections per second |
-| HOLD_SECONDS | 60 | Hold time at each connection step |
-| CONNECT_WAIT_SECONDS, PROPAGATION_WAIT_SECONDS | 30, 15 | Wait limits for initial and changed events |
-| POST_RUN_CLOSE_WAIT_SECONDS | 90 | Wait for the scenario auction's final CLOSED event after the last step (includes the 60-second bid extension) |
-| PERF_APP_IP | required | Target IP, supplied only through the environment |
-| PERF_APP_HOST, PERF_ALLOWED_APP_HOSTS | perf-local | Logical Host name and allow-list |
+| `STEPS` | `2000,4000,6000,8000,10000` | 누적 SSE 연결 목표 |
+| `ACCOUNTS`, `BIDDER_FIRST_ID`, `BIDDER_LAST_ALLOWED_ID` | `1000`, `1`, `96900` | 관전자 계정 수와 범위. 다음 두 ID는 번갈아 쓰는 측정 입찰자 |
+| `LOGIN_RATE` | `15` | 초당 로그인 수. 관전자 1,000명은 약 67초 |
+| `CONNECT_RATE` | `200` | 초당 새 SSE 연결 수 |
+| `HOLD_SECONDS` | `60` | 각 연결 단계 유지 시간 |
+| `CONNECT_WAIT_SECONDS`, `PROPAGATION_WAIT_SECONDS` | `30`, `15` | 첫 이벤트와 입찰 뒤 이벤트 대기 한도 |
+| `POST_RUN_CLOSE_WAIT_SECONDS` | `90` | 마지막 단계 뒤 최종 CLOSED 이벤트 대기 시간. 60초 연장 포함 |
+| `PERF_APP_IP` | 필수 | 환경 변수로만 지정하는 대상 IP |
+| `PERF_APP_HOST`, `PERF_ALLOWED_APP_HOSTS` | `perf-local` | 논리 Host 이름과 허용 목록 |
 
-Each step reports attempted, successful (HTTP 200 and first event), failed by status, disconnected, active, updated connections, and event-delivery p50/p95/max. Two measurement accounts, separate from observer IDs, alternate bids because the auction rejects consecutive bids from the current highest bidder. The script sizes the auction lifetime to the login and connection plan, then waits for the final CLOSED event. If connections remain, it closes the clients and sends one separately reported cleanup bid so the server attempts a final event and can remove disconnected emitters. The bid response has no revision field, so the expected revision is the OPEN revision plus the number of successful measurement bids.
+각 단계는 시도·성공(HTTP 200 및 첫 이벤트)·상태별 실패·끊김·활성·변경 이벤트 수신 연결 수와 이벤트 지연 p50/p95/최대를 기록합니다. 최고 입찰자 연속 입찰은 거절되므로 관전자와 별도인 두 측정 계정이 번갈아 입찰합니다. 스크립트는 로그인·연결 계획에 입찰 연장 시간을 더해 경매 수명을 정하고 마지막 CLOSED 이벤트를 기다립니다. 연결이 남으면 클라이언트 연결을 닫고, 서버가 끊긴 emitter를 정리하도록 별도 정리 입찰을 보냅니다. 입찰 응답에는 revision이 없으므로 OPEN revision에 성공한 측정 입찰 수를 더해 기대 revision을 계산합니다.
 
-### Results and interpretation
+### 결과와 해석
 
-auction-run.sh ending|detail|list|bid|sse [name] writes results under .ai-output/perf/auction/. JSON contains conditions, per-phase sends/responses/connection failures, status and error counts, latency, bid reconciliation, and ending or SSE results. k6 runs also produce an HTML dashboard. All runs save a log and a two-second Actuator CSV.
+`auction-run.sh ending|detail|list|bid|sse [name]`은 `.ai-output/perf/auction/` 아래에 결과를 씁니다. JSON에는 조건, 판별 전송·응답·연결 실패, 상태·오류 코드 수, 지연, 입찰 대조 및 종료/SSE 결과가 들어갑니다. k6 실행은 HTML 대시보드도 만들고, 모든 실행은 로그와 2초 간격 Actuator CSV를 남깁니다.
 
-Each phase records sent and received requests, connection failures, 5xx, response codes, latency p50/p95/p99/max, responses within one second of T, last response time from T, and send-time spread. Bid runs compare 201 responses with server-accepted bids. Non-zero 5xx, connection failures, bid-count differences, winner mismatch, or AUCTION_CLOSED before the original deadline are prominently marked. There is no pass threshold.
+각 판은 전송·응답·연결 실패·5xx·상태 코드, 지연 p50/p95/p99/최대, T부터 1초 안에 응답한 비율, 마지막 응답 시각, 전송 시각 퍼짐을 기록합니다. 입찰은 201 응답 수와 서버 수락 수를 대조합니다. 비영(非零) 5xx·연결 실패·입찰 수 차이·낙찰자 불일치·최종 종료 시각 뒤 수락(INV-AU-11)은 눈에 띄게 표시합니다. 원래 마감 뒤 수락은 연장 정책상 정상일 수 있습니다. 별도로 원래 마감 전에 보냈는데 `AUCTION_CLOSED`로 거절된 수를 기록합니다. 지연·처리량 합격선은 두지 않습니다.
 
-The CSV samples Hikari active, pending and timeout, Tomcat busy threads and current connections, process and system CPU, auction_stream_connections, and the sum of http_server_requests_active_seconds_gcount. Missing metrics or an unavailable response are blank.
+CSV는 Hikari 활성·대기·타임아웃, Tomcat busy thread·현재 연결, 프로세스·시스템 CPU, `auction_stream_connections`, `http_server_requests_active_seconds_gcount` 합계를 샘플링합니다. 없는 지표나 응답은 빈 칸입니다.
 
-### Safety and correctness
+### 안전과 정합성
 
-The application host must start with perf-, appear in PERF_ALLOWED_APP_HOSTS, and contain no prod text. Before the run, the management endpoint must return 200 for /actuator/prometheus. Passwords and tokens are never written to logs or summaries.
+앱 호스트는 `perf-`로 시작하고 `PERF_ALLOWED_APP_HOSTS`에 있어야 하며 `prod`를 포함하면 안 됩니다. 실행 전에 관리 endpoint의 `/actuator/prometheus`가 200인지 확인합니다. 비밀번호와 토큰은 로그나 요약에 남기지 않습니다.
 
-After the day's experiments, run perf/ec2/perf-ec2.sh verify base once to inspect invariants. Seed-baseline checks can fail after load has changed data. For an ending auction, server accepted bids equal revision minus 2 (OPEN +1, each bid +1, close +1); for a still-open bid auction, use revision minus 1.
+측정 기간이 끝나면 필요에 따라 `perf/ec2/perf-ec2.sh verify base`를 한 번 실행해 불변식을 확인합니다. 부하로 데이터가 바뀌었으므로 seed baseline 일부는 달라질 수 있습니다. 종료된 경매는 revision에서 OPEN 전환 +1, 입찰당 +1, 종료 전환 +1을 반영해 수락 수를 `revision - 2`로 구합니다. 열린 입찰 경매는 `revision - 1`을 씁니다.

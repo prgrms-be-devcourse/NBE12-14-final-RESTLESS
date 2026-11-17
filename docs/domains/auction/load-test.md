@@ -1,81 +1,79 @@
-# Auction load test plan
+# 경매 부하 테스트 계획
 
-> Related implementation: perf/scenarios/auction-burst.js, auction-sse.mjs, auction-run.sh
+> 관련 구현: `perf/scenarios/auction-burst.js`, `auction-sse.mjs`, `auction-run.sh`
 >
-> Last reviewed: 2026-11-17 (8,000 → 10,000 burst scenario design)
+> 마지막 확인: 2026-11-17 (8,000 → 10,000 몰림 시나리오)
 
-This plan measures a concentrated load on a single popular auction. It does not generate the background traffic of the other 90,000 concurrent users.
+이 계획은 인기 경매 하나에 부하가 집중되는 상황을 측정합니다. 나머지 9만 명의 배경 트래픽은 만들지 않습니다.
 
-## 1. Goal and assumptions
+## 1. 목표와 가정
 
-- Assume 100,000 concurrent service users, with 10,000 converging on one popular auction.
-- Reproduce approximately 10,000 requests within one second. Each k6 run sends an 8,000-request phase followed by a 10,000-request phase.
-- Do not define a pass threshold before observing the results. Record the measurements for human review.
-- Correctness is mandatory: 5xx, lost accepted bids, incorrect winner, or a bid accepted after the original deadline must be zero.
-- The tester does not operate the server or copy seed tokens. Scripts log in seeded accounts and register test auctions.
-- AU-5 uses its own connection ladder because a progressive SSE connection ramp is needed to observe the number of sustainable connections.
+- 서비스 동시접속 10만 명 중 1만 명이 인기 경매 하나에 몰린다고 가정합니다.
+- 약 1초 안에 1만 건이 들어오는 상황을 재현합니다. k6 한 번 실행에서 8,000건 판 다음 10,000건 판을 이어서 보냅니다.
+- 결과를 보기 전에 합격선을 정하지 않습니다. 사람이 판단할 수 있도록 측정값을 기록합니다.
+- 정확성 조건은 0이어야 합니다. 5xx, 응답받지 못한 수락 입찰, 잘못된 낙찰, 최종 종료 시각 뒤 수락(INV-AU-11)은 허용하지 않습니다.
+- 측정자가 서버를 조작하거나 시드 토큰을 복사하지 않습니다. 스크립트가 시드 계정으로 로그인하고 측정 경매를 등록합니다.
+- AU-5는 지속 가능한 SSE 연결 수를 보기 위해 별도 연결 계단을 사용합니다.
 
-## 2. Scenarios
+## 2. 시나리오
 
-| ID | Situation | API | Authentication |
+| ID | 상황 | API | 인증 |
 |---|---|---|---|
-| AU-1 | Burst immediately before the deadline | POST /api/auctions/{id}/bids | Required |
-| AU-2 | Burst reads of one popular auction | GET /api/auctions/{id} | Public in current implementation |
-| AU-3 | Burst reads of the auction list | GET /api/auctions?status=OPEN&page=0&size=20 | Public in current implementation |
-| AU-4 | Ordinary bid burst | POST /api/auctions/{id}/bids | Required |
-| AU-5 | Hold real-time watcher connections | GET /api/auctions/{id}/stream | Required |
+| AU-1 | 마감 직전 입찰 몰림 | `POST /api/auctions/{id}/bids` | 필요 |
+| AU-2 | 인기 경매 상세 조회 몰림 | `GET /api/auctions/{id}` | 현재 구현에서 공개 |
+| AU-3 | 경매 목록 조회 몰림 | `GET /api/auctions?status=OPEN&page=0&size=20` | 현재 구현에서 공개 |
+| AU-4 | 평시 입찰 몰림 | `POST /api/auctions/{id}/bids` | 필요 |
+| AU-5 | 실시간 관전 연결 유지 | `GET /api/auctions/{id}/stream` | 필요 |
 
-AU-1 places the original end at phase T + 1,000 ms by default. Every accepted bid extends the end to max(current end, acceptedAt + 60 seconds). Measure rejections as AUCTION_CLOSED when the client sent before the original end, the final end time, and finalization lag. The auction must have exactly one winner, who is the latest accepted bidder.
+AU-1은 기본적으로 판 시각 T에서 1,000ms 뒤를 원래 종료 시각으로 둡니다. 수락된 입찰은 `max(현재 종료 시각, acceptedAt + 60초)`까지 종료 시각을 연장합니다. 원래 마감 전에 보냈는데 `AUCTION_CLOSED`로 거절된 수, 최종 종료 시각, 종료 처리 지연을 기록합니다. 최종 결과는 낙찰자가 한 명이어야 하며 마지막 수락 입찰자가 낙찰되어야 합니다.
 
-AU-2 and AU-3 send no token because the current SecurityConfig exposes these GETs. A 401 is recorded as a public GET route being blocked.
+AU-2·AU-3은 현재 `SecurityConfig`가 공개한 GET이므로 토큰 없이 호출합니다. 401이면 공개 GET 경로가 막힌 것으로 표시합니다.
 
-AU-4 uses one new auction for each phase. Each bidder logs in once and bids once in each phase. AU-5 progressively opens SSE connections and places one measurement bid per step. Two measurement accounts alternate because the auction rejects a bid from its current highest bidder. The scenario sizes the auction lifetime to the planned run plus the 60-second bid extension, then waits for the final CLOSED event so the server closes connections. If that does not happen within the configured wait, it closes client streams and sends a separately reported cleanup bid. The scenario records how many connections receive each measured revision and the server's connection gauge before and after closure.
+AU-4는 각 판마다 새 경매를 사용합니다. 각 입찰자는 한 번 로그인하고 참여하는 각 판에서 한 번 입찰합니다. AU-5는 SSE 연결을 단계적으로 늘리고 각 단계에서 측정 입찰을 한 번 보냅니다. 현재 최고 입찰자의 연속 입찰이 거절되므로 측정 계정 두 개를 번갈아 씁니다. 스크립트는 예정된 로그인·연결 시간과 60초 입찰 연장을 고려해 경매 수명을 잡고 마지막 CLOSED 이벤트를 기다립니다. 제한 시간 안에 종료 이벤트가 오지 않으면 클라이언트 스트림을 닫고, 정리 입찰을 별도로 기록해 끊긴 emitter 정리를 유도합니다. 측정 revision을 받은 연결 수와 종료 전후 서버 연결 게이지를 기록합니다.
 
-## 3. Common and scenario-specific records
+## 3. 공통 기록과 시나리오별 기록
 
-Record per phase:
+각 판에서 다음을 기록합니다.
 
-- Request count, received responses, connection failures, 5xx, and status or business-error counts.
-- Response latency p50/p95/p99/max, fraction received within one second after T, time from T to the last response, and request-send time spread.
-- Conditions: target, phase size, auction IDs, bidder ID range, login requested/succeeded/duration, and options.
-- Bid runs: 201 count versus accepted count derived from auction revision and their difference.
-- AU-1: original and final endsAt, extension duration, AUCTION_CLOSED total, AUCTION_CLOSED sent before the original deadline, accepted count, SOLD/UNSOLD, winning amount, finalization lag, and whether winner amount matches the latest accepted response.
-- AU-5: connection attempts, successful 200 plus initial event, failures by status, disconnects, open connections, streams receiving the changed revision, delivery delay p50/p95/max, and auction_stream_connections.
+- 보낸 요청, 받은 응답, 연결 실패, 5xx, 상태 및 업무 오류 코드별 수
+- 응답 지연 p50/p95/p99/최대, T부터 1초 안에 응답한 비율, T부터 마지막 응답까지의 시간, 요청 전송 시각 퍼짐
+- 조건: 대상, 판 크기, 경매 ID, 입찰자 ID 범위, 로그인 요청·성공·시간, 실행 옵션
+- 입찰: 201 응답 수와 revision으로 계산한 서버 수락 수 및 차이
+- AU-1: 원래·최종 `endsAt`, 연장 시간, `AUCTION_CLOSED` 총수, **원래 마감 전에 보냈는데 `AUCTION_CLOSED`로 거절된 수**, 수락 수, SOLD/UNSOLD, 낙찰가, 종료 처리 지연, 마지막 수락 입찰과 낙찰가 일치 여부
+- AU-5: 연결 시도, 성공(HTTP 200 및 초기 이벤트), 상태별 실패, 끊김, 열린 연결, 변경 revision 수신 연결 수, 이벤트 지연 p50/p95/최대, `auction_stream_connections`
 
-Any non-zero 5xx, connection failure, accepted-bid mismatch, winner mismatch, or AUCTION_CLOSED before the original deadline is highlighted in the output. No latency or throughput pass line is defined.
+5xx, 연결 실패, 수락 입찰 수 불일치, 낙찰자 불일치, **최종 종료 시각 뒤 수락(INV-AU-11)**은 하나라도 있으면 결과에 경고합니다. 원래 마감 뒤 수락은 입찰에 따른 연장 정책상 정상일 수 있으므로 오류로 세지 않습니다. 합격 지연이나 처리량 기준은 두지 않습니다.
 
-The bid API response does not contain revision. For an OPEN auction the expected revision is initial OPEN revision + accepted bids; for a CLOSED auction it is initial OPEN revision + accepted bids + close transition. Auction.openIfDue(), Auction.acceptBid(), and Auction.close() each increment revision once, so server accepted counts are revision - 1 while OPEN and revision - 2 after close. The latest acceptedAt and greatest accepted response amount are recorded separately; accepted prices must rise by at least one increment, so the greatest amount belongs to the latest accepted bid. That amount is compared with the SOLD result.
+입찰 API 응답에는 revision이 없습니다. OPEN 경매에서는 최초 OPEN revision에 수락 입찰 수를 더하고, CLOSED 경매에서는 최초 OPEN revision에 수락 입찰 수와 종료 전환을 더합니다. `Auction.openIfDue()`, `Auction.acceptBid()`, `Auction.close()`가 각각 한 번씩 revision을 올리므로 OPEN일 때 수락 수는 `revision - 1`, 종료 뒤에는 `revision - 2`입니다. 마지막 `acceptedAt`과 가장 큰 수락 응답 금액을 기록합니다. 입찰가가 최소 인상액 이상씩 올라가므로 가장 큰 금액은 마지막 수락 입찰에 해당하고 SOLD 결과 금액과 대조합니다.
 
-## 4. Server-side observations
+## 4. 서버에서 확인할 값
 
-The client stores the k6 JSON, k6 HTML dashboard, logs, and two-second Actuator samples. Server-only checks are used when needed:
+클라이언트는 k6 JSON, k6 HTML, 로그, 2초 간격 Actuator 샘플을 저장합니다. 필요한 경우 서버에서 별도로 확인합니다.
 
-- Auction invariant verification: perf/ec2/perf-ec2.sh verify base, once after the day's runs.
-- EC2 CPU credit mode: inspect or enable unlimited before a run when required.
-- Database lock statistics, RDS CPU, netstat, and server logs: inspect when the measurements point to those causes.
+- 경매 불변식: 하루 측정 뒤 필요하면 `perf/ec2/perf-ec2.sh verify base`로 확인
+- EC2 CPU credit 모드: 필요할 때 실행 전에 확인 또는 unlimited 설정
+- DB 행 잠금 통계, RDS CPU, `netstat`, 서버 로그: 결과에서 원인이 필요할 때 확인
 
-The scripts do not change server settings or create load on other domains.
+시나리오는 서버 설정을 바꾸거나 다른 도메인 부하를 만들지 않습니다.
 
-## 5. Run order
+## 5. 진행 순서
 
-Run one scenario per restored perf database because each load scenario creates auctions or changes bids.
+시드는 측정 기간 시작에 한 번 준비합니다. 스크립트가 각 판에 새 경매를 등록하므로 판 사이에 perf DB를 복원할 필요는 없습니다. 하루의 측정이 끝나면 불변식을 확인하고 결과를 정리합니다.
 
-1. AU-2 detail reads.
-2. AU-3 list reads.
-3. AU-4 ordinary bid burst.
-4. AU-1 ending bid burst.
-5. AU-5 SSE connection hold.
+1. AU-2 상세 조회
+2. AU-3 목록 조회
+3. AU-4 평시 입찰 몰림
+4. AU-1 마감 직전 입찰 몰림
+5. AU-5 SSE 연결 유지
 
-For each k6 run, execute the 8,000 phase and then the 10,000 phase in the same run. Use the scenario runner to record .json, .html (k6 only), .log, and -metrics.csv under .ai-output/perf/auction/. Write one reviewed experiment report per run under docs/reports/.
+각 k6 실행은 8,000건 판 다음 10,000건 판을 이어서 수행합니다. 실행기로 `.ai-output/perf/auction/`에 `.json`, `.html`(k6), `.log`, `-metrics.csv`를 저장합니다. 실험 보고서는 `docs/reports/`에 실험별로 작성합니다.
 
-Before the day starts, restore a perf database seeded once at base scale and start the app with the perf profile. Scripts create fresh auctions as needed. After the day's experiments, run the seed verification once and record the result with the experiment reports.
+## 6. 알려진 한계
 
-## 6. Known limitations
-
-- The load generator is one Mac, so its CPU, file descriptors, network stack, and home network can become the bottleneck.
-- The current Tomcat maximum connection count is 8,192, below AU-5's 10,000 connection target.
-- No background traffic is generated for the other assumed 90,000 concurrent users.
-- Login is paced at 15 requests per second by default; 10,000 bidder logins take about 11 minutes before the first phase.
-- AU-2 and AU-3 are public only in the current implementation. A later auth change may require revising the scenario.
-- SSE uses Node 24's built-in fetch and the server IP is supplied through PERF_APP_IP. The runner sets Host to perf-local and only allows configured perf- hosts.
-- Each run creates test auctions which remain in the database. Use a fresh restored DB for independent runs.
+- 부하 생성기는 Mac 한 대이므로 CPU, 파일 디스크립터, 네트워크 스택과 가정용 회선이 병목일 수 있습니다.
+- 현재 Tomcat 최대 연결 수는 8,192로 AU-5 목표 10,000보다 낮습니다.
+- 가정한 나머지 9만 명의 배경 부하는 만들지 않습니다.
+- 로그인은 기본 초당 15회로 제한합니다. 입찰자 10,000명은 첫 판 전 여유 시간을 제외하고 약 11분이 걸립니다.
+- AU-2·AU-3 GET은 현재 구현에서만 공개입니다. 인증 정책이 바뀌면 시나리오를 조정해야 합니다.
+- SSE는 Node 24 내장 fetch를 사용합니다. `PERF_APP_IP`로 서버 주소를 전달하고 `Host: perf-local`을 보냅니다. 허용 목록에 든 perf 호스트만 허용합니다.
+- 실행할 때마다 측정용 경매가 DB에 추가됩니다. 독립적인 측정 기간 사이에는 새 시드를 준비합니다.

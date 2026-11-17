@@ -1,7 +1,7 @@
 // AU-1 to AU-4: two synchronized one-request-per-VU bursts (default 8k, then 10k).
 import http from 'k6/http';
 import exec from 'k6/execution';
-import { sleep } from 'k6';
+import { fail, sleep } from 'k6';
 import { Trend, Counter } from 'k6/metrics';
 import {
   BASE_URL, SUMMARY_PATH, checkTarget, detail, tryLogin, createAuction, waitUntilOpen,
@@ -54,9 +54,8 @@ export function setup() {
   let offsetMs = 0;
   let targets = [];
   let serverNowMs = Date.now();
-  const loginStart = Date.now() + LOGIN_START_DELAY_MS;
-  const firstPhaseAt = loginStart + loginSecondsEstimate * 1000 + LOGIN_MARGIN_SECONDS * 1000;
-  const phaseTimes = PHASES.map((_, index) => firstPhaseAt + index * PHASE_GAP_MS);
+  let loginStart = null;
+  let phaseTimes = [];
   let organizerToken = null;
   if (TARGET !== 'list') {
     const organizer = tryLogin(ORGANIZER_EMAIL, PASSWORD);
@@ -80,8 +79,12 @@ export function setup() {
     const pendingTargets = [];
     for (let i = 0; i < PHASES.length; i++) {
       const phase = PHASES[i];
+      // Predict the phase from the scheduled opening; the actual VU schedule is
+      // recalculated after auction creation and OPEN polling complete.
+      const expectedPhaseAt = startsAtMs + 1000 + LOGIN_START_DELAY_MS + loginSecondsEstimate * 1000
+        + LOGIN_MARGIN_SECONDS * 1000 + i * PHASE_GAP_MS;
       const endsAtMs = TARGET === 'ending'
-        ? phaseTimes[i] + offsetMs + ENDING_LEAD_MS
+        ? expectedPhaseAt + ENDING_LEAD_MS
         : startsAtMs + AUCTION_DURATION_SECONDS * 1000;
       const startsAt = new Date(startsAtMs).toISOString();
       const endsAt = new Date(endsAtMs).toISOString();
@@ -101,6 +104,11 @@ export function setup() {
     }
   }
 
+  // Start paced logins only after all auctions are OPEN. This prevents setup
+  // duration from making scheduled login requests bunch up at VU startup.
+  loginStart = AUTH_REQUIRED ? Date.now() + LOGIN_START_DELAY_MS : Date.now();
+  const firstPhaseAt = loginStart + loginSecondsEstimate * 1000 + LOGIN_MARGIN_SECONDS * 1000;
+  phaseTimes = PHASES.map((_, index) => firstPhaseAt + index * PHASE_GAP_MS);
   const loginStartAt = AUTH_REQUIRED ? loginStart : null;
   const firstT = phaseTimes[0];
   const data = { target: TARGET, phases: PHASES, vus: VUS, targets, phaseTimes, offsetMs, loginStartAt,
@@ -121,7 +129,7 @@ export default function (data) {
     if (Date.now() < scheduledLoginAt) sleep((scheduledLoginAt - Date.now()) / 1000);
     const started = Date.now();
     const res = http.post(`${BASE_URL}/api/auth/login`, JSON.stringify({ email: `fanq${FIRST + vuIndex}@fanq.com`, password: PASSWORD }), {
-      headers: { 'Content-Type': 'application/json' }, tags: { name: 'setup/login' }, timeout: '10s',
+      headers: { 'Content-Type': 'application/json' }, tags: { name: 'setup/login' }, timeout: '30s',
     });
     let accessToken;
     try { accessToken = res.json('accessToken'); } catch (_) { /* invalid account/password */ }
@@ -158,6 +166,7 @@ export default function (data) {
 export function teardown(data) {
   if (!data || !data.targets.length) return;
   if (TARGET === 'bid') {
+    sleep(15);
     for (const target of data.targets) {
       const d = detail(target.id);
       const serverAccepted = d.revision - 1; // OPEN transition is +1; each accepted bid is +1.
@@ -251,12 +260,16 @@ export function handleSummary(data) {
       const latestAcceptedAt = metric(phase, '_latest_accepted_at_ms').max;
       const latestAmount = metric(phase, '_latest_accepted_amount').max;
       const amountMetric = metric(phase, '_result_amount').min;
+      const finalEndMs = metric(phase, '_result_final_end_ms').min;
+      const acceptedAfterFinalEnd = latestAcceptedAt !== undefined && finalEndMs !== undefined
+        ? latestAcceptedAt > finalEndMs : null;
       const sold = (metric(phase, '_result_sold').count || 0) > 0;
       const unsold = (metric(phase, '_result_unsold').count || 0) > 0;
       const result = { type: sold ? 'SOLD' : unsold ? 'UNSOLD' : 'UNKNOWN', amount: amountMetric ?? null,
         latestAcceptedResponseAt: latestAcceptedAt === undefined ? null : new Date(latestAcceptedAt).toISOString(),
         latestAcceptedResponseAmount: latestAmount ?? null,
         winnerMatchesLatestAcceptedResponse: sold && latestAmount !== null ? amountMetric === latestAmount : null,
+        acceptedAfterFinalEnd,
         winnerMatchesCurrentHighestBid: metric(phase, '_result_matches_highest').rate ?? null,
         currentHighestBidAmount: metric(phase, '_result_highest_bid_amount').min ?? null,
         resultMissing: metric(phase, '_result_missing').count || 0,
@@ -269,7 +282,7 @@ export function handleSummary(data) {
       if (result.winnerMatchesLatestAcceptedResponse === false || result.winnerMatchesCurrentHighestBid === 0
         || (phaseSummary.bidReconciliation.difference !== null && phaseSummary.bidReconciliation.difference !== 0)
         || phaseSummary.bidReconciliation.difference === null || result.type === 'UNKNOWN'
-        || result.resultMissing > 0 || phaseSummary.closedBeforeOriginalEnd > 0) {
+        || result.resultMissing > 0 || phaseSummary.closedBeforeOriginalEnd > 0 || acceptedAfterFinalEnd !== false) {
         summary.correctnessWarnings.push(`phase ${phase}: ending correctness check needs attention`);
       }
     }
