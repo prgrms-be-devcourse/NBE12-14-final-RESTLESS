@@ -151,9 +151,22 @@ SET @auction_bg = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auc
 SET @auction_unsold_pct = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_bg_pct_unsold');
 INSERT INTO _perf_checks SELECT 'check', 'seed baseline: hot and spread auction count', ABS(COUNT(*) - (1 + @auction_spread)) FROM auctions WHERE auction_id BETWEEN 1 AND 1 + @auction_spread AND status = 'OPEN';
 INSERT INTO _perf_checks SELECT 'check', 'seed baseline: hot and spread no bids', COUNT(*) FROM auction_bids WHERE auction_id BETWEEN 1 AND 1 + @auction_spread;
-INSERT INTO _perf_checks SELECT 'check', 'seed baseline: background closed count', ABS(COUNT(*) - @auction_bg) FROM auctions WHERE auction_id > 1 + @auction_spread AND status = 'CLOSED';
-INSERT INTO _perf_checks SELECT 'check', 'seed baseline: background unsold count', ABS(COUNT(*) - FLOOR(@auction_bg * @auction_unsold_pct / 100)) FROM auction_results WHERE auction_id > 1 + @auction_spread AND result_type = 'UNSOLD';
+INSERT INTO _perf_checks SELECT 'check', 'seed baseline: background closed count', ABS(COUNT(*) - @auction_bg) FROM auctions WHERE auction_id BETWEEN 2 + @auction_spread AND 1 + @auction_spread + @auction_bg AND status = 'CLOSED';
+INSERT INTO _perf_checks SELECT 'check', 'seed baseline: background unsold count', ABS(COUNT(*) - FLOOR(@auction_bg * @auction_unsold_pct / 100)) FROM auction_results WHERE auction_id BETWEEN 2 + @auction_spread AND 1 + @auction_spread + @auction_bg AND result_type = 'UNSOLD';
 INSERT INTO _perf_checks SELECT 'check', 'seed baseline: wallet count', ABS((SELECT COUNT(*) FROM credit_wallets) - (SELECT COUNT(*) FROM users WHERE role = 'USER'));
+
+SET @extra_first = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_extra_first');
+SET @ending_first = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_ending_first');
+SET @ending_count = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_ending_count');
+SET @mass_first = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_mass_first');
+SET @mass_count = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_mass_count');
+SET @mass_bids = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_mass_bids');
+SET @heavy_users = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_heavy_users');
+SET @heavy_per = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_heavy_per_user');
+INSERT INTO _perf_checks SELECT 'check', 'seed baseline: heavy users history', COUNT(*) FROM users u WHERE u.id BETWEEN @meta_users - @heavy_users + 1 AND @meta_users AND (SELECT COUNT(DISTINCT b.auction_id) FROM auction_bids b WHERE b.bidder_user_id = u.id AND b.auction_id BETWEEN @extra_first AND @ending_first - 1) < @heavy_per;
+INSERT INTO _perf_checks SELECT 'check', 'seed baseline: ending auction count and state', ABS(CAST(COUNT(*) AS SIGNED) - CAST(@ending_count AS SIGNED)) FROM auctions a WHERE a.auction_id BETWEEN @ending_first AND @ending_first + @ending_count - 1 AND a.status = 'OPEN' AND NOT EXISTS (SELECT 1 FROM auction_bids b WHERE b.auction_id = a.auction_id);
+INSERT INTO _perf_checks SELECT 'check', 'seed baseline: mass close auctions and time', ABS(CAST(COUNT(*) AS SIGNED) - CAST(@mass_count AS SIGNED)) + IF(COUNT(DISTINCT ends_at) = 1, 0, 1) FROM auctions WHERE auction_id BETWEEN @mass_first AND @mass_first + @mass_count - 1 AND status = 'OPEN';
+INSERT INTO _perf_checks SELECT 'check', 'seed baseline: mass close bids and held', COUNT(*) FROM auctions a WHERE a.auction_id BETWEEN @mass_first AND @mass_first + @mass_count - 1 AND ((SELECT COUNT(*) FROM auction_bids b WHERE b.auction_id = a.auction_id) <> @mass_bids OR (SELECT COUNT(*) FROM auction_bids b JOIN credit_holds h ON h.auction_bid_id = b.auction_bid_id WHERE b.auction_id = a.auction_id AND h.status = 'HELD') <> 1);
 
 -- ---------------------------------------------------------------- 참고값
 INSERT INTO _perf_checks
