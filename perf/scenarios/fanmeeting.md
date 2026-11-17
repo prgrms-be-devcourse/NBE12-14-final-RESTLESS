@@ -39,6 +39,11 @@ export DB_HOST=<perf DB 호스트> DB_NAME=perf-restless DB_USERNAME=... DB_PASS
 PARTICIPANTS=1000 PEAK_RATE=200 perf/scenarios/fanmeeting-s1.sh
 ```
 
+EC2에서 빌려 쓸 때는 [perf/ec2](../ec2/README.md) 순서를 따른다.
+
+- 토큰은 `perf-ec2.sh seed base` → `serve-tokens`로 받는다. 묶음에 `users.csv`와 주최자 토큰 `staff.csv`가 같이 들어 있다.
+- 노트북에서 RDS에 닿지 않으면 `DB_HOST` 없이 돌린다. 점검은 실행마다 EC2에서 `backend/src/test/resources/harness/fanmeeting-invariants.sql`을 perf DB에 실행해 모든 값이 0인지 본다.
+
 ### 변수 (나머지는 각 스크립트와 같음)
 
 | 변수 | 기본값 | 뜻 |
