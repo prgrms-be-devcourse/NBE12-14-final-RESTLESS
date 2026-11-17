@@ -1,5 +1,6 @@
-// 드롭 재고 점유 시나리오가 함께 쓰는 부분: 호스트 안전장치, 시드 입력, 요청 한 번과 결과 분류, 요약.
+// 드롭 시나리오가 함께 쓰는 부분: 호스트 안전장치, 시드 입력, 요청 한 번과 결과 분류, 집계, 요약.
 // 시나리오마다 다른 것은 부하 모델(options.scenarios)과 추가 태그뿐이다. 사용법은 perf/scenarios/README.md.
+// 집계 규칙은 docs/testing/drop-performance-measurement.md를 따른다.
 import http from 'k6/http';
 import { check, fail } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
@@ -27,6 +28,18 @@ export const DROP_ID = manifest.drop.hot_drop_id;
 export const VARIANT_IDS = manifest.drop.variants.map((v) => v.variant_id);
 export const TOTAL_STOCK = manifest.drop.total_stock;
 
+// "30s", "2m", "7500ms" 형식을 밀리초로 바꾼다.
+export function durationMs(d) {
+  const m = /^(\d+(?:\.\d+)?)(ms|s|m)$/.exec(String(d));
+  if (!m) throw new Error(`duration must look like 500ms, 30s or 2m: ${d}`);
+  return Math.round(Number(m[1]) * { ms: 1, s: 1000, m: 60000 }[m[2]]);
+}
+
+// 재고·대기열 요청의 제한 시간. 제한 시간에 걸린 요청은 이 값으로 평가 지연에 넣는다 (우측 절단).
+export const HTTP_TIMEOUT = __ENV.HTTP_TIMEOUT || '5s';
+export const HTTP_TIMEOUT_MS = durationMs(HTTP_TIMEOUT);
+const K6_REQUEST_TIMEOUT = 1050; // k6 error_code: request timeout
+
 // users.csv에서 ROW_OFFSET행을 건너뛰고 count행을 읽는다. 행이 모자라면 시작하지 않는다.
 // 같은 시드로 여러 번 실행할 때 앞 실행이 쓴 계정을 건너뛰려고 ROW_OFFSET을 쓴다. 다시 쓰면 같은 키 재요청이 된다.
 export const ROW_OFFSET = Number(__ENV.ROW_OFFSET || 0);
@@ -51,8 +64,8 @@ export function loadUsers(count) {
   return users;
 }
 
-// 정상 품절과 업무 거절(409/403)은 http_req_failed에 넣지 않는다. 5xx와 연결 오류만 실패다.
-// 지연 목표 수치는 미측정이라 임계값을 두지 않는다. 아래는 정합성과 전제 조건 검사다.
+// 정상 품절과 업무 거절(409/403), 대기열의 종료된 대기(404)는 http_req_failed에 넣지 않는다.
+// 아래는 정합성과 전제 조건 검사다. 지연 목표는 시나리오 요약에서 따로 본다.
 export const baseThresholds = {
   drop_reservation_created: [`count<=${TOTAL_STOCK}`],
   drop_reservation_replayed: ['count==0'],
@@ -61,11 +74,13 @@ export const baseThresholds = {
   // 판정 없이 결과별 지연을 요약에 남기려고 빈 임계값으로 서브 지표를 만든다.
   'drop_reservation_duration{outcome:created}': [],
   'drop_reservation_duration{outcome:sold_out}': [],
+  'drop_eval_latency{api:reserve}': [],
+  'drop_unexpected_error{api:reserve}': [],
 };
 
-export const summaryTrendStats = ['min', 'med', 'avg', 'p(90)', 'p(95)', 'p(99)', 'max'];
+export const summaryTrendStats = ['min', 'med', 'avg', 'p(90)', 'p(95)', 'p(99)', 'max', 'count'];
 
-http.setResponseCallback(http.expectedStatuses(200, 201, 403, 409));
+http.setResponseCallback(http.expectedStatuses(200, 201, 202, 403, 404, 409));
 
 const created = new Counter('drop_reservation_created');
 const replayed = new Counter('drop_reservation_replayed');
@@ -76,10 +91,57 @@ const notOnSale = new Counter('drop_not_on_sale');
 const otherClientError = new Counter('drop_other_client_error');
 const serverError = new Counter('drop_server_error');
 const transportError = new Counter('drop_transport_error');
+const timeoutError = new Counter('drop_timeout');
 export const skipped = new Counter('skipped_no_account');
 // 5xx와 연결 오류, 타임아웃의 비율. 계단식 시나리오가 무릎을 넘으면 멈추는 데 쓴다.
 const errorRate = new Rate('drop_error_rate');
+// 응답을 받은 요청의 지연. 연결 실패와 타임아웃은 넣지 않는다.
 const duration = new Trend('drop_reservation_duration', true);
+
+// 시작한 작업 S와 끝난 작업 F. 미완료 I = S - F. k6 기본 iterations는 시작 수가 아니다.
+const iterationStarted = new Counter('iteration_started');
+const iterationFinished = new Counter('iteration_finished');
+// API별 평가 지연: 응답을 받은 요청(오류 포함)의 지연과, 제한 시간에 걸린 요청의 제한 시간 값.
+const evalLatency = new Trend('drop_eval_latency', true);
+// API별 예상 밖 오류율: 5xx, 연결 실패, 타임아웃, 예상하지 않은 4xx. 분모는 그 API의 시작한 요청이다.
+const unexpectedError = new Rate('drop_unexpected_error');
+// 타임아웃이 아닌 전송 실패가 실패하기까지 걸린 시간. 평가 지연에는 넣지 않는다.
+const transportFailureTime = new Trend('drop_transport_failure_time', true);
+
+// iteration 본문을 감싼다. 첫 줄에서 시작을 세고 어떤 경로로 끝나든 종료를 센다.
+export function tracked(tags, body) {
+  iterationStarted.add(1, tags);
+  try {
+    return body();
+  } finally {
+    iterationFinished.add(1, tags);
+  }
+}
+
+// 지금 시각이 시작 시각에서 몇 번째 창인지. 요청은 시작한 창에 귀속한다.
+export function windowTag(startMs, sizeSeconds) {
+  return String(Math.max(0, Math.floor((Date.now() - startMs) / 1000 / sizeSeconds)));
+}
+
+// 전송 결과 종류: response(HTTP 응답 받음), timeout(제한 시간 도달), transport(그 밖의 전송 실패).
+export function transportKind(res) {
+  if (res.status !== 0) return 'response';
+  return res.error_code === K6_REQUEST_TIMEOUT ? 'timeout' : 'transport';
+}
+
+// 요청 하나를 평가 지연과 예상 밖 오류율에 기록한다. tags에는 api를 넣는다.
+export function observe(res, unexpected, tags, timeoutMs = HTTP_TIMEOUT_MS) {
+  const kind = transportKind(res);
+  if (kind === 'response') evalLatency.add(res.timings.duration, tags);
+  else if (kind === 'timeout') evalLatency.add(timeoutMs, tags);
+  else transportFailureTime.add(res.timings.duration, tags);
+  unexpectedError.add(unexpected || kind !== 'response', tags);
+  return kind;
+}
+
+export function authHeaders(user, extra = {}) {
+  return { Authorization: `Bearer ${user.token}`, 'Content-Type': 'application/json', ...extra };
+}
 
 export function checkTarget() {
   // perf 프로필만 관리 포트에 prometheus를 연다. 응답하지 않으면 perf 앱이 아니므로 멈춘다.
@@ -92,73 +154,89 @@ export function checkTarget() {
 }
 
 // 계정 하나가 SKU 하나에 재고 점유를 한 번 요청한다. Idempotency-Key는 계정마다 하나다.
-// tags는 요청과 지연 지표에 함께 붙는다 (예: 계단식의 stage).
+// tags는 요청과 지표에 함께 붙는다 (예: 계단식의 stage, 창 번호 win).
+// 결과 이름, 성공이면 응답 본문({reservationId, orderId, amount, ...}), k6 응답을 돌려준다.
 export function reserve(user, n, tags = {}) {
   const variantId = VARIANT_IDS[n % VARIANT_IDS.length];
   const res = http.post(
     `${BASE_URL}/api/drops/${DROP_ID}/reservations`,
     JSON.stringify({ variantId, recipient: `회원${user.id}`, phone: '010-0000-0000', address: '서울시 송파구 올림픽로 424' }),
     {
-      headers: {
-        Authorization: `Bearer ${user.token}`,
-        'Content-Type': 'application/json',
-        'Idempotency-Key': `perf-${DROP_ID}-${user.id}`,
-      },
+      headers: authHeaders(user, { 'Idempotency-Key': `perf-${DROP_ID}-${user.id}` }),
       tags: { name: 'POST /api/drops/{id}/reservations', ...tags },
+      timeout: HTTP_TIMEOUT,
     },
   );
 
-  const outcome = classify(res);
-  const failed = outcome === 'server_error' || outcome === 'transport_error';
-  duration.add(res.timings.duration, { outcome, ...tags });
+  const outcome = classify(res, tags);
+  const failed = outcome === 'server_error' || outcome === 'transport_error' || outcome === 'timeout';
+  // 정상 결과는 신규 점유와 품절뿐이다. 계정은 한 번만 쓰므로 나머지 거절은 구성이 틀렸다는 뜻이다.
+  const unexpected = failed || (outcome !== 'created' && outcome !== 'sold_out');
+  if (res.status !== 0) duration.add(res.timings.duration, { outcome, ...tags });
+  observe(res, unexpected, { api: 'reserve', ...tags });
   errorRate.add(failed, tags);
   check(res, { 'no server error': () => !failed });
-  return outcome;
+  let body = null;
+  if (outcome === 'created') {
+    try { body = res.json(); } catch (e) { /* 본문이 없으면 결제로 이어 가지 않는다 */ }
+  }
+  return { outcome, body, res };
 }
 
-function classify(res) {
-  if (res.status === 0) return count(transportError, 'transport_error');
-  if (res.status === 201) return count(created, 'created');
-  if (res.status === 200) return count(replayed, 'replayed');
-  if (res.status >= 500) return count(serverError, 'server_error');
+function classify(res, tags) {
+  if (res.status === 0) {
+    return transportKind(res) === 'timeout' ? count(timeoutError, 'timeout', tags) : count(transportError, 'transport_error', tags);
+  }
+  if (res.status === 201) return count(created, 'created', tags);
+  if (res.status === 200) return count(replayed, 'replayed', tags);
+  if (res.status >= 500) return count(serverError, 'server_error', tags);
   let code = '';
   try { code = res.json('code'); } catch (e) { /* 본문이 JSON이 아니면 기타로 센다 */ }
   switch (code) {
-    case 'DROP_SOLD_OUT': return count(soldOut, 'sold_out');
-    case 'DROP_ACTIVE_PURCHASE_EXISTS': return count(activePurchase, 'active_purchase');
-    case 'DROP_ADMISSION_REQUIRED': return count(admissionRequired, 'admission_required');
-    case 'DROP_NOT_ON_SALE': return count(notOnSale, 'not_on_sale');
-    default: return count(otherClientError, 'other_client_error');
+    case 'DROP_SOLD_OUT': return count(soldOut, 'sold_out', tags);
+    case 'DROP_ACTIVE_PURCHASE_EXISTS': return count(activePurchase, 'active_purchase', tags);
+    case 'DROP_ADMISSION_REQUIRED': return count(admissionRequired, 'admission_required', tags);
+    case 'DROP_NOT_ON_SALE': return count(notOnSale, 'not_on_sale', tags);
+    default: return count(otherClientError, 'other_client_error', tags);
   }
 }
 
-function count(counter, outcome) {
-  counter.add(1);
+function count(counter, outcome, tags) {
+  counter.add(1, tags);
   return outcome;
 }
 
 const OUTCOME_METRICS = [
   'drop_reservation_created', 'drop_sold_out', 'drop_active_purchase_exists', 'drop_admission_required',
   'drop_not_on_sale', 'drop_reservation_replayed', 'drop_other_client_error', 'drop_server_error',
-  'drop_transport_error', 'skipped_no_account', 'dropped_iterations',
+  'drop_transport_error', 'drop_timeout', 'skipped_no_account', 'dropped_iterations',
+  'iteration_started', 'iteration_finished',
 ];
 
-const fmt = (v) => (v === undefined ? '-' : `${v.toFixed(1)}ms`);
-const latencyLine = (label, v) => `  ${label.padEnd(20)} med ${fmt(v.med)}  p95 ${fmt(v['p(95)'])}  p99 ${fmt(v['p(99)'])}  max ${fmt(v.max)}`;
+export const fmt = (v) => (v === undefined || v === null ? '-' : `${v.toFixed(1)}ms`);
+export const pct = (v) => (v === undefined || v === null ? '-' : `${(v * 100).toFixed(2)}%`);
+export const latencyLine = (label, v) => `  ${label.padEnd(24)} n ${String(v.count === undefined ? '-' : v.count).padStart(7)}  med ${fmt(v.med)}  p95 ${fmt(v['p(95)'])}  p99 ${fmt(v['p(99)'])}  max ${fmt(v.max)}`;
 
 // 화면 요약과 JSON 요약. headline은 첫 줄, extraLatency는 [이름, 지표 키] 목록으로 지연 줄을 더한다.
-export function summarize(data, { headline, conditions, extraLatency = [] }) {
-  const value = (name) => (data.metrics[name] ? data.metrics[name].values.count : 0);
+// extraLines는 시나리오가 만든 줄, extraOutcomes는 요약 JSON과 화면에 더할 카운터 이름이다.
+export function summarize(data, { headline, conditions, extraLatency = [], extraLines = [], extraOutcomes = [] }) {
+  const value = (name) => (data.metrics[name] ? data.metrics[name].values.count || 0 : 0);
   const trend = (key) => (data.metrics[key] ? data.metrics[key].values : {});
   const failedThresholds = Object.entries(data.metrics)
     .filter(([, m]) => m.thresholds && Object.values(m.thresholds).some((t) => !t.ok))
     .map(([name]) => name);
+  const outcomes = [...OUTCOME_METRICS, ...extraOutcomes];
+  const started = value('iteration_started');
   const lines = [
     '',
     headline,
-    ...OUTCOME_METRICS.map((m) => `  ${m.padEnd(30)} ${value(m)}`),
-    latencyLine('reservation latency', trend('drop_reservation_duration')),
+    ...outcomes.map((m) => `  ${m.padEnd(30)} ${value(m)}`),
+    // 미완료 I = S - F. 종료 로그의 interrupted iterations와 대조한다.
+    ...(started ? [`  ${'unfinished (started-finished)'.padEnd(30)} ${started - value('iteration_finished')}`] : []),
+    latencyLine('reservation responses', trend('drop_reservation_duration')),
+    latencyLine('reservation eval latency', trend('drop_eval_latency{api:reserve}')),
     ...extraLatency.map(([label, key]) => latencyLine(label, trend(key))),
+    ...extraLines,
     `  http_req_connecting p95 ${fmt(trend('http_req_connecting')['p(95)'])}, http_req_blocked p95 ${fmt(trend('http_req_blocked')['p(95)'])}`,
     `  http_reqs ${value('http_reqs')}, iterations ${value('iterations')}`,
     `  thresholds ${failedThresholds.length ? `FAILED: ${failedThresholds.join(', ')}` : 'ok'}`,
@@ -168,11 +246,16 @@ export function summarize(data, { headline, conditions, extraLatency = [] }) {
   const out = { stdout: lines.join('\n') };
   if (SUMMARY_PATH) {
     out[SUMMARY_PATH] = JSON.stringify({
-      conditions: { dropId: DROP_ID, totalStock: TOTAL_STOCK, baseUrl: BASE_URL, rowOffset: ROW_OFFSET, ...conditions },
-      outcomes: Object.fromEntries(OUTCOME_METRICS.map((m) => [m, value(m)])),
+      conditions: { dropId: DROP_ID, totalStock: TOTAL_STOCK, baseUrl: BASE_URL, rowOffset: ROW_OFFSET, httpTimeout: HTTP_TIMEOUT, ...conditions },
+      outcomes: Object.fromEntries(outcomes.map((m) => [m, value(m)])),
       failedThresholds,
       metrics: data.metrics,
     }, null, 2);
   }
   return out;
+}
+
+// 요약에 서브 지표를 남기려고 빈 임계값을 만든다. keys는 "지표{태그:값}" 목록이다.
+export function emptyThresholds(keys) {
+  return Object.fromEntries(keys.map((k) => [k, []]));
 }

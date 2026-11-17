@@ -6,7 +6,7 @@
 import exec from 'k6/execution';
 import {
   DROP_ID, VARIANT_IDS, TOTAL_STOCK, loadUsers, baseThresholds, summaryTrendStats,
-  checkTarget, reserve, skipped, summarize, ROW_OFFSET,
+  checkTarget, reserve, skipped, summarize, tracked, ROW_OFFSET,
 } from './lib/drop-reservation.js';
 
 const STEPS = (__ENV.STEPS || '50,100,200,400,800').split(',').map((s) => Number(s.trim()));
@@ -94,7 +94,8 @@ export default function () {
     skipped.add(1);
     return;
   }
-  reserve(users[n], n, { stage: stageTag() });
+  const tags = { stage: stageTag() };
+  tracked(tags, () => reserve(users[n], n, tags));
 }
 
 export function handleSummary(data) {

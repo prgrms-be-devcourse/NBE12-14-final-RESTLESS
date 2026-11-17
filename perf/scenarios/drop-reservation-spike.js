@@ -5,7 +5,7 @@
 import exec from 'k6/execution';
 import {
   DROP_ID, VARIANT_IDS, TOTAL_STOCK, manifest, loadUsers, baseThresholds, summaryTrendStats,
-  checkTarget, reserve, skipped, summarize,
+  checkTarget, reserve, skipped, summarize, tracked,
 } from './lib/drop-reservation.js';
 
 // 경쟁률 N:1 → 참여자 = 총재고 x N. CSV 앞에서부터 그만큼만 쓴다.
@@ -51,7 +51,7 @@ export default function () {
     skipped.add(1);
     return;
   }
-  reserve(users[n], n);
+  tracked({}, () => reserve(users[n], n));
 }
 
 export function handleSummary(data) {

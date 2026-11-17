@@ -24,13 +24,18 @@ perf/scenarios/run-ticketing.sh simultaneous 100
 |---|---|---|
 | [drop-reservation-spike.js](drop-reservation-spike.js) | EXP-01 쓰기 기준선 | 판매 시작 순간 핫 드롭 재고 점유 스파이크. 대기열 없음 |
 | [drop-reservation-step.js](drop-reservation-step.js) | EXP-01 용량 측정 | 도착률을 계단식으로 올려 무릎 지점과 최대 지속 처리량을 찾는다. 대기열 없음 |
+| [drop-sale.js](drop-sale.js) | 드롭 H, EXP-02 | 한정 재고 판매. 대기열 off/on을 같은 도착 시간표로 비교하고 결제까지 잇는다 |
+| [drop-reservation-capacity.js](drop-reservation-capacity.js) | 드롭 B1·B2, EXP-01·04 | 성공 점유 경로의 연속 증가 탐색과 고정 도착률 유지 |
+| [drop-queue-poll.js](drop-queue-poll.js) | 드롭 Q | 대기자 N명을 고정하고 상태 조회 비용을 잰다 |
+| [prom-collect.sh](prom-collect.sh) | 드롭 H·B·Q | 관리 포트의 Prometheus 텍스트를 5초 간격으로 파일에 남긴다 |
 | [auction-burst.js](auction-burst.js) | AU-1~4 | 두 판(기본 8,000건 → 10,000건)을 한 번에 보내는 경매 API 부하 |
 | [auction-sse.mjs](auction-sse.mjs) | AU-5 | SSE 연결 계단, 유지, 가격 변경 전달 지연 |
 | [auction-run.sh](auction-run.sh) | AU-1~5 | 서버 지표 수집과 시나리오 실행, 결과 파일 관리 |
 | [sample-actuator.sh](sample-actuator.sh) | AU-1~5 | Actuator Prometheus 지표를 2초 간격으로 CSV 수집 |
 | `fanmeeting-*` ([설명](fanmeeting.md)) | 팬미팅 S1, FM-EXP-05 | 오픈·마감 응모 몰림, 추첨, 결과 조회 폭주. `fanmeeting-s1.sh` 하나로 한 회 실행 |
 
-두 시나리오는 [lib/drop-reservation.js](lib/drop-reservation.js)의 호스트 안전장치, 요청, 결과 분류, 요약을 같이 쓴다. 다른 것은 부하 모델뿐이다.
+드롭 시나리오는 [lib/drop-reservation.js](lib/drop-reservation.js)의 호스트 안전장치, 요청, 결과 분류, 집계, 요약을 같이 쓴다. 대기열과 결제 요청은 [lib/drop-flow.js](lib/drop-flow.js)에 있다.
+H·B·Q 시나리오는 [드롭 성능 실험 계획](../../docs/testing/drop-performance-plan.md)의 실험이다. 아래 [드롭 성능 실험 시나리오](#드롭-성능-실험-시나리오)에 사용법이 있다.
 
 ## drop-reservation-spike.js
 
@@ -100,9 +105,9 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
 | `drop_reservation_replayed` | 200 같은 키 재요청 | 0. 나오면 임계값 실패 |
 | `drop_admission_required`, `drop_not_on_sale` | 403, 409 | 0. 나오면 바로 멈춘다 |
 | `drop_other_client_error` | 그 밖의 4xx | 0 |
-| `drop_server_error`, `drop_transport_error` | 5xx, 연결 오류와 타임아웃 | 0 |
+| `drop_server_error`, `drop_transport_error`, `drop_timeout` | 5xx, 연결 오류, 제한 시간(기본 5초) 도달 | 0 |
 
-- 지연은 `drop_reservation_duration`에 있고 `outcome:created`, `outcome:sold_out`으로 나눠 볼 수 있다. 지연 목표 수치는 아직 정하지 않아서 임계값을 두지 않는다.
+- 지연은 `drop_reservation_duration`에 있고 `outcome:created`, `outcome:sold_out`으로 나눠 볼 수 있다. 응답을 받은 요청만 들어간다. 타임아웃을 제한 시간 값으로 넣은 평가 지연은 `drop_eval_latency{api:reserve}`다.
 - `dropped_iterations`는 VU가 모자라 k6가 시작하지 못한 반복이다. 결과 합계가 참여자보다 적으면 `MAX_VUS`를 늘리거나 부하 발생기가 한계인지 본다.
 - 측정이 끝나면 `seed.sh --verify`를 실행한다. 드롭 불변식, 금액, FK 고아 행 검사는 0이어야 한다. `seed baseline` 검사는 부하 뒤에 실패하는 것이 정상이다.
 - 앱 지표는 관리 포트의 `/actuator/prometheus`에서 본다. `drop.reservation.duration`, HikariCP, 톰캣 스레드 지표가 있다.
@@ -165,6 +170,110 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" -p 5665:5
 - 결과 분류와 정합성 판정은 스파이크와 같다. 측정 뒤 `seed.sh --verify`를 실행한다.
 - 무릎 지점은 계단별 k6 지연과 오류율로 판단한다. k6 지연에는 집 네트워크 왕복이 섞이므로 테스트 전 왕복 지연을 같이 기록한다.
 - 계단별 서버 지연이 필요하면 계단을 따로 실행하고 실행마다 `/actuator/prometheus` 전후 값을 저장한다.
+
+## 드롭 성능 실험 시나리오
+
+[목표](../../docs/testing/drop-performance-plan.md), [실행 절차](../../docs/testing/drop-performance-procedure.md), [측정 규약](../../docs/testing/drop-performance-measurement.md)의 실험 H·B·Q를 돌린다.
+실행 명령은 위 스파이크와 같고 스크립트 이름과 `-e` 값만 다르다. 원자료를 남기려면 `run --out json=/out/<이름>.raw.json`을 붙인다.
+
+### 공통 집계
+
+| 지표 | 뜻 |
+|---|---|
+| `iteration_started`, `iteration_finished` | 시작한 작업 S와 끝난 작업 F. 미완료 I는 S - F다. 요약의 `unfinished` 줄을 종료 로그의 interrupted와 대조한다 |
+| `drop_eval_latency{api:...}` | API별 평가 지연. 응답을 받은 요청의 지연과, 제한 시간에 걸린 요청의 제한 시간 값이 들어간다 |
+| `drop_unexpected_error{api:...}` | API별 예상 밖 오류율. 5xx, 연결 실패, 타임아웃, 예상하지 않은 4xx다. 분모는 그 API의 시작한 요청이다 |
+| `drop_timeout`, `drop_transport_error` | 제한 시간 도달과 그 밖의 전송 실패. 전송 실패는 평가 지연에 넣지 않고 `drop_transport_failure_time`에 남긴다 |
+| 태그 `win` | 요청이 시작한 창 번호. 요약에 창별 지연이 나온다 |
+
+- 제한 시간은 `HTTP_TIMEOUT`(기본 5s)이고 결제는 `PAY_TIMEOUT`(기본 10s)이다.
+- k6는 예정 도착 시각을 주지 않는다. 원자료에는 실제 시작 시각만 있다. 계획 대비 빠진 수는 `dropped_iterations`와 시작 수로 본다.
+- arrival-rate는 첫 작업을 1/도착률 초 뒤에 시작한다. 계획보다 한 건 적게 시작하는 것은 정상이다.
+- 창 기준 중단은 k6가 실행 중에 판정하지 못한다. 실행 중에는 사람이 보고, 판정은 끝난 뒤 요약과 원자료로 한다.
+
+### drop-sale.js (H)
+
+회원 한 명이 iteration 하나다. off는 도착 즉시 재고를 점유한다. on은 대기 진입 뒤 `POLL_SECONDS`마다 상태를 조회하고 입장하면 점유한다. 점유에 성공하면 결제 준비와 승인까지 보낸다.
+앱의 `RESTLESS_DROP_QUEUE_REQUIRED`가 `QUEUE`와 같아야 한다. 시드는 base다.
+
+| 변수 | 기본값 | 뜻 |
+|---|---|---|
+| `QUEUE` | off | off 또는 on |
+| `PARTICIPANTS` / `RATIO` | 총재고 x manifest 경쟁률 | 참여자 수. base는 1,000 x 10 |
+| `PEAK_RATE`, `RAMP` | 1000, 5s | 최고 도착률과 0에서 오르는 시간. 유지 시간은 참여자 수에 맞춰 계산한다. 기본값이면 7.5초 |
+| `MARGIN` | 200ms | 마지막 몇 명이 빠지지 않게 유지 구간에 더하는 시간. 넘친 작업은 `skipped_no_account`로 끝난다 |
+| `OBSERVE` | 300s | 신규 유입이 끝난 뒤 관측 시간. 이 시각까지 입장하지 못한 회원은 `unfinished`다 |
+| `POLL_SECONDS` | 2 | 상태 조회 간격. 실험 가정이고 API 계약의 값이 아니다 |
+| `PAY` | 1 | 0이면 점유까지만 한다 |
+| `WINDOW_SECONDS` | 10 | 창 길이 |
+| `MAX_VUS`, `PRE_VUS` | on은 참여자 수, off는 3000 | on은 대기 중인 회원마다 VU 하나를 쓴다 |
+
+- 축소 조건은 시드 재고와 `PEAK_RATE`를 함께 줄인다. H-small은 재고 500에 `PEAK_RATE=500`, H-mini는 재고 200에 `PEAK_RATE=200`이다. 축소 시드 스케일은 아직 없다.
+- 요약의 `member results`가 회원별 최종 결과다. `paid`, `sold_out`, `unfinished`, `queue_closed`, `admission_expired`, `payment_pending`, `payment_failed`, `error`로 나뉜다.
+- `first response`는 도착 뒤 첫 API의 평가 지연이다. `queue wait`는 진입 응답부터 입장을 확인한 시각까지다. `arrival to paid`는 도착부터 결제 승인까지다.
+- on에서 생성기가 참여자만큼 VU를 만들지 못하면 `dropped_iterations`가 생긴다. 그 실행은 원래 조건을 만들지 못한 것이다.
+
+### drop-reservation-capacity.js (B1, B2)
+
+대기열을 끄고 점유 TTL을 실행 시간보다 길게 둔다(`RESTLESS_DROP_RESERVATION_TTL=PT30M`). 시드는 capacity다.
+워밍업과 측정은 별도 시나리오다. 워밍업은 `users.csv` 앞 `WARM_RATE` x `WARM` 행을 쓰고 측정은 그 뒤 행을 쓴다.
+
+| 변수 | 기본값 | 뜻 |
+|---|---|---|
+| `MODE` | ramp | ramp는 연속 증가 탐색, hold는 고정 도착률 유지 |
+| `WARM_RATE`, `WARM` | 30, 60s | 워밍업 도착률과 시간. 판정에서 빼지만 계정과 재고는 쓴다 |
+| `FROM`, `TO`, `RAMP` | 50, 350, 480s | ramp의 시작·끝 도착률과 오르는 시간 |
+| `DOWN`, `TAIL_RATE`, `TAIL` | 30s, 30, 90s | ramp 뒤 내리는 시간, 회복 관측 도착률과 시간 |
+| `RATE`, `HOLD` | 없음(필수), 180s | hold의 도착률과 유지 시간 |
+| `WINDOW_SECONDS` | 30 | 창 길이 |
+| `ABORT_ERROR_RATE` | 0.05 | 예상 밖 오류의 누적 비율이 넘으면 멈춘다. 30초 뒤부터 판정한다 |
+| `SPARE_ACCOUNTS` | 50 | 스케줄링 오차에 대비해 더 읽는 계정 수 |
+
+기본 ramp의 계획 도착 수는 106,200건이다. 요약의 창 표는 계획 수, 시작 수, 신규 점유 수, 평가 지연, 예상 밖 오류율을 보여 준다. 신규 성공률의 분모는 계획 수다.
+
+```bash
+-e MODE=ramp                    # B1 연속 증가 탐색
+-e MODE=hold -e RATE=300        # B2 300건/초 3분 유지
+```
+
+### drop-queue-poll.js (Q)
+
+대기열을 켜고 입장 작업을 끈다(`RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED=false`). 시드는 대기열을 미리 채우지 않는다.
+회원은 `ENTER_RATE`로 진입하고 진입하자마자 조회를 시작해 측정이 끝날 때까지 이어 간다. 구간은 fill, settle, warmup, measure 순서다.
+
+| 변수 | 기본값 | 뜻 |
+|---|---|---|
+| `WAITERS` | 없음(필수) | 고정할 대기 인원. 절차는 100, 500, 1000, 2000, 5000, 10000 순서다 |
+| `ENTER_RATE` | 50 | 초당 진입 인원 |
+| `SETTLE`, `WARM`, `MEASURE` | 10s, 60s, 120s | 인원 안정화, 워밍업, 측정 시간 |
+| `POLL_SECONDS` | 2 | 상태 조회 간격 |
+
+- 요약의 `fixed-N experiment held`는 모든 대기자가 측정 끝까지 WAITING이었다는 뜻이다. 한 명이라도 잃으면 `FAILED`다.
+- 입장 작업이 켜져 있어 ADMITTED가 보이면 `drop_queue_unexpected_admission` 임계값이 실행을 멈춘다.
+- 끝난 직후 서버의 `drop_queue_waiting` 값을 로그에 남긴다. 목표 인원과 같아야 한다.
+
+### prom-collect.sh
+
+```bash
+perf/scenarios/prom-collect.sh http://perf-app:8081 .ai-output/perf/<실행>/prom 5 &
+```
+
+수집 시각(UTC)을 이름으로 한 `.prom` 파일을 남긴다. 실패한 수집은 `.failed` 파일로 표시한다. 네 번째 인자로 프로세스 ID를 주면 그 프로세스가 끝날 때 같이 끝난다.
+
+### 로컬 확인 (2026-11-18, 측정 결과 아님)
+
+스크립트가 도는지만 확인했다. 앱, MySQL, k6를 맥북 한 대에서 돌렸고 small 시드(재고 100, 계정 1,000)를 썼다. 지연은 기준선이 아니다.
+
+| 실행 | 결과 | `--verify` |
+|---|---|---|
+| capacity hold, 10/s 6초 | 계획 80, 신규 점유 79, 오류 0 | 시드 기준값 외 0 |
+| capacity ramp, 5→15/s | 계획 80, 신규 점유 79, 오류 0 | 시드 기준값 외 0 |
+| sale off, 100/s | 결제 100, 품절 900 | 시드 기준값 외 0, 판매 수량 100 |
+| sale on, 입장 100명/회 | 결제 100, 품절 900, 소비된 구매권 100 | 시드 기준값 외 0 |
+| sale on, 입장 10명/회, 관측 12초 | 결제 100, 품절 113, 미완료 787 | 판매 수량 100, 승인 결제 100 대조 |
+| queue poll, 200명 | 200명 유지, 측정 구간 조회 99.6/s, 서버 대기 인원 200 | 해당 없음 |
+| queue poll, 입장 작업 켬 | 임계값으로 중단 | 해당 없음 |
+| `HTTP_TIMEOUT=1ms` | 타임아웃 34건이 평가 지연에 1ms로 들어가고 응답 지연에는 0건 | 해당 없음 |
 
 ## 경매 몰림 부하 테스트: AU-1~AU-5
 
