@@ -42,4 +42,4 @@ Observe → Hypothesize → Change → Verify Correctness → Benchmark → Comp
 | EXP-05 | DBMS (EXPERIMENTAL) | MySQL, PostgreSQL | 같은 스키마, 인덱스, 트랜잭션 조건 |
 | EXP-06 | 수평 확장 (EXPERIMENTAL) | 단일, 다중 서버 | 공유 DB 병목 분석 포함 |
 | EXP-07 | 이벤트 유실 ([ADR-0001](../decisions/0001-event-handling.md)) | Spring Event, (조건 충족 시) Outbox | 강제 종료 시 누락 건수, 구매 확정 p95 |
-| EXP-AU | 경매 입찰·관전·조회·종료 ([상세](../domains/auction/load-test.md)) | 핫 경매와 분산 경매, 종료 직전 몰림, 동시 종료 수, 관전자 수와 재접속, 장시간 유지, 조회 대상 | 수락 TPS, p95/p99, 전달 지연, 종료 처리 지연, 누수, 경매 불변식 위반 0 |
+| EXP-AU | 경매 1초 몰림 ([상세](../domains/auction/load-test.md)) | 8,000 → 10,000건의 마감 직전 입찰, 상세·목록 조회, 평시 입찰, SSE 유지 | 응답·오류 코드, 지연, 입찰 수락 대조, 낙찰 정확성, 종료 전 거절, SSE 전달 지연, 경매 불변식 위반 0 |

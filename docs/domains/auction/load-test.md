@@ -1,175 +1,81 @@
-# Auction 부하 테스트 계획
+# Auction load test plan
 
-> 관련 코드: `perf/seed/sql/30_auction.sql`, `perf/seed/sql/31_credit.sql`, `backend/src/main/java/com/restless/auction/`, `backend/src/main/java/com/restless/credit/`
+> Related implementation: perf/scenarios/auction-burst.js, auction-sse.mjs, auction-run.sh
 >
-> 마지막 확인: 2026-11-17 (AU-1·2·7 k6 시나리오와 AU-8 종료 집계 반영)
+> Last reviewed: 2026-11-17 (8,000 → 10,000 burst scenario design)
 
-경매의 입찰, 실시간 전달, 조회가 몰릴 때 어디서 무너지는지 찾고, 원인에 맞는 개선을 하나씩 적용해 다시 재는 계획이다. 팀 공통 원칙과 실험 목록은 [성능 실험 계획](../../testing/performance.md), 실행 환경과 도구는 [perf/README.md](../../../perf/README.md)를 따른다. 결과는 [docs/reports/](../../reports/README.md)에 실험 하나당 파일 하나로 남긴다.
+This plan measures a concentrated load on a single popular auction. It does not generate the background traffic of the other 90,000 concurrent users.
 
-## 1. 답할 질문
+## 1. Goal and assumptions
 
-| 질문 | 가설 | 근거 |
-|---|---|---|
-| 경매 하나에 입찰이 몰릴 때 정합성을 지키며 초당 몇 건까지 수락하나, 넘으면 어떻게 무너지나 | 입찰은 경매 행 → 지갑 행 순으로 잠그고 한 줄로 처리하므로, 처리량 상한은 대략 "1 ÷ 입찰 트랜잭션 시간"이다. 넘으면 잠금을 기다리는 요청이 DB 커넥션(기본 10개)을 붙잡아 지연이 급증하고, 커넥션 대기 시간(기본 30초)을 넘기면 5xx가 난다 | [transactions.md](transactions.md) TX-AU-2, 공통 규칙(잠금 순서) |
-| 같은 양을 여러 경매로 나누면 얼마나 나아지나 | 경매 행 잠금이 병목이면 크게 나아진다. 나아지지 않으면 커넥션 풀이나 DB 자체가 병목이다 | 같은 입찰 경로, 경합만 다름 |
-| 관전자가 늘어도 실시간 전달과 입찰 속도가 유지되나 | SSE 연결은 비동기라 요청 스레드를 잡지 않는다. 대신 변경마다 모든 관전자에게 보내는 비용이 관전자 수에 비례해 CPU나 네트워크가 먼저 한계에 닿는다 | [policy.md](policy.md) 8절 (0.2초 묶음 전송) |
-| 조회가 몰리면 어디가 느려지나 | 상세는 DB 읽기, 내 입찰은 회원별로 경매를 묶는 쿼리가 병목 후보다 | AU-4~6에서 확인 |
-| 종료 직전에 입찰이 몰려도 낙찰자가 정확히 한 명인가 | 마지막 순간 입찰은 종료 시각을 늘리고 종료 스케줄러와 경합한다. 잠금 순서와 "잠금 뒤 시각 읽기"(L-01)로 정합성은 지켜지지만, 연장이 이어지는 동안 지연과 종료 처리 지연이 커질 수 있다 | [policy.md](policy.md) 6절, [transactions.md](transactions.md) TX-AU-2, TX-AU-4 |
-| 여러 경매가 같은 시각에 끝나면 종료가 얼마나 밀리나 | 종료 스케줄러는 1초 간격으로 100건씩 처리하고, 스케줄러 스레드 하나를 모든 도메인이 함께 쓴다. 종료가 밀리는 만큼 다른 도메인의 스케줄 작업도 밀린다 | `application.yml`의 `restless.auction.scheduler`, `@Scheduled` 공용 스레드 |
-| 오래 돌려도 느려지거나 새는 것이 없나 | SSE 연결은 최대 30분 뒤 끊기고 다시 붙는다. 구독 정리가 틀리면 메모리와 연결 수가 계속 는다. t3는 CPU 크레딧이 바닥나면 성능이 떨어진다 | [policy.md](policy.md) 8절 |
-| 관전자가 한꺼번에 다시 붙으면 버티나 | 서버 재시작·배포 때 관전자 전원이 동시에 끊기고 "상세 다시 받기 → 다시 연결"을 함께 한다. 상세 조회와 연결 요청이 순간적으로 몰린다 | [API 계약](../../contracts/api/auction.md) 실시간 스트림 |
+- Assume 100,000 concurrent service users, with 10,000 converging on one popular auction.
+- Reproduce approximately 10,000 requests within one second. Each k6 run sends an 8,000-request phase followed by a 10,000-request phase.
+- Do not define a pass threshold before observing the results. Record the measurements for human review.
+- Correctness is mandatory: 5xx, lost accepted bids, incorrect winner, or a bid accepted after the original deadline must be zero.
+- The tester does not operate the server or copy seed tokens. Scripts log in seeded accounts and register test auctions.
+- AU-5 uses its own connection ladder because a progressive SSE connection ramp is needed to observe the number of sustainable connections.
 
-## 2. 진행 방식
+## 2. Scenarios
 
-한 번에 변수 하나만 바꾸고, 같은 실험을 반복해 문제가 생기는 지점을 찾은 뒤 원인에 맞는 처방을 고른다.
-
-```text
-기준선: 부하를 계단식으로 올려 꺾이는 지점을 찾는다
-  → 진단: 그 지점에서 원인을 가린다 (4절)
-  → 개선: 원인에 맞는 처방 하나만 적용한다 (5절)
-  → 같은 실험을 다시 돌려 꺾이는 지점이 옮겨졌는지 본다
-  → 다음 병목으로
-```
-
-- 구성 하나를 2회씩 잰다. 두 번의 차이가 개선 폭보다 크면 그 결과는 쓰지 않는다.
-- 매 실행 뒤 경매 불변식 10개(`backend/src/test/resources/harness/auction-invariants.sql`)가 모두 0이어야 한다. 빨라져도 불변식이 깨지면 실패다.
-- 업무 거절(409 `BID_AMOUNT_TOO_LOW`, `BID_ALREADY_HIGHEST` 등)은 실패가 아니다. 몰리면 거절이 많은 것이 정상이며 따로 센다. 5xx와 타임아웃이 실패다.
-- 측정 전에는 합격 기준(P95 몇 ms 등)을 정하지 않는다. 첫 기준선을 보고 정한다.
-
-## 3. 기준선 실험
-
-입력 데이터는 [시드](../../../perf/seed/README.md)의 경매·크레딧 데이터다. 핫 경매 1건, 분산 경매 100건(base), 종료된 배경 경매 1,000건, 회원마다 크레딧 1억이 들어 있다.
-
-| ID | 하나만 바꿔 몰리는 것 | 종류 |
-|---|---|---|
-| AU-1 | 핫 경매 입찰 | 쓰기, 한 행 잠금 경합 |
-| AU-2 | 같은 양을 분산 경매 100건에 나눠 입찰 | 쓰기, 경합 없음 |
-| AU-3 | 핫 경매 관전자 SSE 연결 | 연결 수, 전송 |
-| AU-4 | 경매 상세 조회 (SSE 대신 새로고침하는 사용자) | 읽기 |
-| AU-5 | 경매 목록 조회 | 읽기 (정렬, 페이지) |
-| AU-6 | 내 입찰 조회 | 읽기 (회원별 경매 묶음 쿼리) |
-| AU-7 | 종료 직전 입찰 (마감 스나이핑) | 쓰기, 연장과 종료 경합 |
-| AU-8 | 같은 시각에 끝나는 경매 수 | 스케줄러 처리량 |
-| AU-9 | 중간 부하를 오래 유지 (soak) | 누수, 시간에 따른 저하 |
-| AU-10 | 관전자 동시 재접속 | 연결·조회 순간 폭주 |
-
-### AU-1. 핫 경매 입찰 집중
-- **입찰자 행동:** 시드 회원을 한 줄씩 쓴다. 상세의 `minimumBidAmount`에 인상액 0~2배를 더해 입찰한다. `BID_AMOUNT_TOO_LOW`를 받으면 응답의 `details.minimumBidAmount`로 한 번만 다시 시도한다. 시도마다 새 `Idempotency-Key`를 쓴다.
-- **부하 모양:** 계단식 도착률(`ramping-arrival-rate`). 단계마다 60초 유지한다. 예: 10 → 25 → 50 → 100 → 200 → 400/s. 실제 계단은 로컬 스모크를 보고 정한다. 5xx와 타임아웃 누적 비율이 5%를 넘으면 멈춘다 (드롭 계단식 시나리오와 같은 기준).
-- **보는 것:** 계단별 초당 수락(201), 거절 코드별 건수, 5xx·타임아웃, 서버 P95·P99, DB 커넥션 대기, 톰캣 스레드, EC2·RDS CPU와 CPU 크레딧, 부하 발생기의 `dropped_iterations`
-- **결과물:** 5xx 0건이면서 서버 P95가 기준 이하인 최대 지속 수락률
-
-### AU-2. 분산
-- AU-1과 같은 계단을 분산 경매 100건에 고르게 나눈다. 바꾸는 것은 경매 수 하나다.
-- 같은 도착률에서 AU-1과 수락률, P95, 5xx를 나란히 비교한다.
-
-### AU-3. 관전자 급증
-- 입찰은 AU-1에서 안전했던 도착률의 절반으로 고정한다.
-- 핫 경매 SSE 연결만 계단식으로 늘린다. 예: 0 → 500 → 1,000 → 2,000. 상한은 노트북의 동시 연결 한계를 보고 정한다.
-- k6는 SSE를 기본 지원하지 않으므로 관전자는 작은 Node 스크립트로 띄우고, 입찰은 k6로 보낸다.
-- **전달 지연:** 측정용 클라이언트 하나가 직접 입찰하고 같은 경매의 SSE를 듣는다. 입찰 응답을 받은 시각부터 그 `revision`이 SSE로 도착한 시각까지를 같은 시계로 잰다.
-- **보는 것:** 연결 성공·실패 수, 전달 지연 P95, 서버 `auction.stream.connections`, `auction.stream.failure`, 관전자 0명일 때 대비 입찰 P95 변화
-
-### AU-4~6. 조회
-- 대상 API 하나만 계단식 도착률로 친다. 쓰기는 보내지 않는다.
-- AU-4는 핫 경매 상세(`GET /api/auctions/{id}`), AU-5는 목록(`GET /api/auctions`), AU-6은 내 입찰(`GET /api/me/bids`)이다.
-- **AU-6 준비:** 지금 시드는 배경 입찰이 회원당 1건이라 회원마다 결과가 한두 줄이다. 묶음 쿼리의 비용을 보려면 경매 수십 건에 입찰한 회원이 필요하다. AU-6 전에 시드에 이런 회원을 일부 더한다.
-
-### AU-7. 종료 직전 입찰
-- **대상:** 몇 분 뒤 끝나는 경매 1건 (연장 시간 60초). 지금 시드의 핫 경매는 24시간짜리라 쓸 수 없으므로 시드에 "곧 끝나는 경매"를 더한다.
-- **부하 모양:** 종료 2분 전부터 입찰 도착률을 올려 마지막 60초에 가장 많이 몰리게 한다. 입찰자 행동은 AU-1과 같다. 입찰이 들어올 때마다 종료 시각이 늘어나므로, 연장이 멈추고 경매가 실제로 끝날 때까지 돌린다.
-- **보는 것:** 연장 횟수와 최종 종료 시각, 종료 처리 지연(`finalizedAt − endsAt`), 마지막 구간의 지연과 5xx, 종료 뒤 입찰이 모두 `AUCTION_CLOSED`로 거절되는지, SSE로 `CLOSED`가 전달되기까지의 시간
-- **정합성:** 낙찰자는 정확히 한 명이고 낙찰은 마지막 입찰이다 (INV-AU-13). 종료 시각 뒤에 수락된 입찰이 없다 (INV-AU-11). 경매 불변식 10개 전체 0
-- **결과물:** 마감 몰림에서 정합성이 지켜지는지, 연장이 이어질 때 지연이 어떻게 변하는지
-
-### AU-8. 동시 종료
-- **대상:** 같은 시각에 끝나는 경매 N건 (예: 100 → 500 → 1,000건, 각각 입찰 몇 건). 시드에 "같은 시각에 끝나는 경매 묶음"을 더한다.
-- **부하:** 사용자 요청은 거의 없다. 종료 스케줄러가 한꺼번에 처리해야 하는 양만 바꾼다.
-- **보는 것:** 첫 경매와 마지막 경매의 종료 처리 지연, 초당 종료 건수, `auction.scheduler.failure`, 같은 시간에 다른 스케줄 작업(드롭 대기열 입장, 결제 대사 등)이 얼마나 밀렸는지(각 작업의 로그 시각)
-- **결과물:** 종료 처리량과, 스케줄러 스레드를 함께 쓰는 비용. 이 결과는 도메인 사이 영향을 팀에 제안할 때 근거로 쓴다
-
-### AU-9. 장시간 유지
-- **부하:** AU-1 안전 구간의 절반 입찰 + 관전자 수백 명 + 상세 조회를 30~60분 유지한다. 관전자 연결이 30분 제한에 걸려 다시 붙는 구간을 포함한다.
-- **보는 것:** 시간에 따른 지연 추이, 힙과 GC, `auction.stream.connections`가 실제 관전자 수와 맞는지, DB 커넥션 사용 수, EC2 CPU 크레딧 잔량
-- **결과물:** 누수나 시간에 따른 저하가 없는지. 있다면 어느 지표가 계속 오르는지
-
-### AU-10. 관전자 동시 재접속
-- **대상:** 핫 경매에 관전자 N명을 붙여 둔 뒤 앱을 재시작해 전원을 한꺼번에 끊는다. 관전자 스크립트는 API 계약대로 "상세 다시 받기 → 다시 연결"을 한다.
-- **보는 것:** 전원이 다시 붙기까지 걸린 시간, 그 순간의 상세 조회 지연과 오류, 재연결 실패율
-- **결과물:** 배포나 재시작 때 관전자가 몰려 다시 들어와도 버티는지
-- **주의:** 데모 서버를 재시작하므로 팀 perf 환경 사용 시간에 맞춰 진행한다
-
-## 4. 진단
-
-꺾이는 지점에서 원인을 아래로 가린다.
-
-| 의심 | 확인 방법 |
-|---|---|
-| 요청 하나에 쿼리가 많음 (N+1) | 로컬에서 요청 하나당 실행 쿼리 수를 센다 (Hibernate 통계, SQL 로그) |
-| 느린 쿼리, 인덱스 없음 | MySQL 슬로 쿼리 로그, `EXPLAIN` |
-| 행 잠금 대기 | RDS Performance Insights의 잠금 대기, `performance_schema` |
-| DB 커넥션 부족 | 서버 지표의 Hikari 대기 수, 커넥션 대기 시간 초과 오류 |
-| CPU, 디스크 | EC2·RDS CPU, IOPS, CPU 크레딧 (CloudWatch) |
-| 메모리·연결 누수 | 시간에 따라 힙, GC 시간, `auction.stream.connections`, DB 커넥션 사용 수가 계속 오르는지 (AU-9) |
-| 스케줄러 밀림 | 종료 처리 지연(`finalizedAt − endsAt`)과 다른 스케줄 작업의 실행 간격 (AU-8) |
-| 부하 발생기 한계 | `dropped_iterations`, 노트북 CPU, k6 지연만 오르고 서버 지연은 낮음 |
-
-## 5. 개선 후보
-
-진단 결과에 맞는 것만 고른다. 한 번에 하나만 적용하고 같은 기준선 실험으로 전후를 비교한다.
-
-| ID | 바꾸는 것 하나 | 언제 | 다시 돌릴 실험 |
+| ID | Situation | API | Authentication |
 |---|---|---|---|
-| IM-1 | DB 커넥션 풀 10 → 20 → 30 | 커넥션 대기가 병목 | AU-1, AU-2 |
-| IM-2 | 커넥션 대기 시간 30초 → 2초 | 한계를 넘었을 때 5xx와 긴 지연 (안정성) | AU-1 한계 너머 |
-| IM-3 | 입찰 트랜잭션의 쿼리 줄이기 | 입찰 하나에 쿼리가 많음 | AU-1 |
-| IM-4 | 내 입찰 쿼리와 인덱스 | AU-6에서 N+1이나 풀 스캔 | AU-6 |
-| IM-5 | 경매 상세 캐시 (짧은 TTL, `revision` 기준) | AU-4에서 DB 읽기가 병목 | AU-4 |
-| IM-6 | 입찰 입구 제한 (초과분은 빨리 429) | 한계를 넘는 몰림에서의 안정성 | AU-1 한계 너머 |
-| IM-7 | SSE 묶음 간격 200ms → 500ms | AU-3에서 CPU가 병목 (전달 지연과 맞바꿈) | AU-3 |
-| IM-8 | 앱 서버 t3.small → t3.medium | CPU 포화 (팀 AWS 한도 안의 최대) | 병목이 CPU였던 실험 |
-| IM-9 | 종료 스케줄러 배치 크기·간격 (`restless.auction.scheduler`) | AU-8에서 종료가 오래 밀림 | AU-8 |
-| IM-10 | 스케줄러 스레드 1 → N | AU-8에서 다른 도메인 스케줄 작업이 함께 밀림 | AU-8 |
-| IM-11 | 재연결 대기에 무작위 지연 더하기 (클라이언트) | AU-10에서 재접속이 한순간에 몰림 | AU-10 |
+| AU-1 | Burst immediately before the deadline | POST /api/auctions/{id}/bids | Required |
+| AU-2 | Burst reads of one popular auction | GET /api/auctions/{id} | Public in current implementation |
+| AU-3 | Burst reads of the auction list | GET /api/auctions?status=OPEN&page=0&size=20 | Public in current implementation |
+| AU-4 | Ordinary bid burst | POST /api/auctions/{id}/bids | Required |
+| AU-5 | Hold real-time watcher connections | GET /api/auctions/{id}/stream | Required |
 
-처방은 병목에 맞아야 효과가 있다.
-- 캐시는 반복 읽기에만 효과가 있다. 핫 경매 입찰은 쓰기와 행 잠금 대기라 캐시로 풀리지 않는다.
-- 대기열과 입구 제한은 무너지지 않게 할 뿐 처리량을 늘리지 않는다.
-- 서버 증설은 CPU 병목에만 효과가 있다. 한 행을 한 줄로 처리하는 잠금 병목은 그대로다.
-- IM-1, IM-2, IM-6, IM-10은 다른 도메인과 함께 쓰는 설정이다. 경매 결과만으로 바꾸지 않고 팀에 근거와 함께 제안한다.
-- IM-11은 클라이언트 동작이다. 효과가 있으면 [API 계약](../../contracts/api/auction.md)의 재연결 안내에 권장 사항으로 더한다.
+AU-1 places the original end at phase T + 1,000 ms by default. Every accepted bid extends the end to max(current end, acceptedAt + 60 seconds). Measure rejections as AUCTION_CLOSED when the client sent before the original end, the final end time, and finalization lag. The auction must have exactly one winner, who is the latest accepted bidder.
 
-## 6. 실행 절차
+AU-2 and AU-3 send no token because the current SecurityConfig exposes these GETs. A 401 is recorded as a public GET route being blocked.
 
-환경, 시드, 모니터링, k6 실행법은 [perf/README.md](../../../perf/README.md)와 [시드 README](../../../perf/seed/README.md)를 따른다. 1차 측정은 k6 결과(요약 JSON, 웹 대시보드 HTML)와 실행 뒤 정합성 점검, CloudWatch로 본다. 서버 내부 지표는 필요해지면 다시 정한다.
+AU-4 uses one new auction for each phase. Each bidder logs in once and bids once in each phase. AU-5 progressively opens SSE connections and places one measurement bid per step. Two measurement accounts alternate because the auction rejects a bid from its current highest bidder. The scenario sizes the auction lifetime to the planned run plus the 60-second bid extension, then waits for the final CLOSED event so the server closes connections. If that does not happen within the configured wait, it closes client streams and sends a separately reported cleanup bid. The scenario records how many connections receive each measured revision and the server's connection gauge before and after closure.
 
-실행 전:
-1. 스냅샷 복원 → `seed.sh --refresh`. 핫·분산 경매는 입찰 0건일 때만 시각이 다시 맞춰지므로 복원을 빼먹지 않는다
-2. 앱을 `perf` 프로필로 재시작
-3. EC2 CPU 크레딧을 무제한으로, 세부 모니터링을 켠다
-4. 노트북에서 서버까지 왕복 지연을 기록한다
+## 3. Common and scenario-specific records
 
-실행 뒤:
-1. k6 요약 JSON과 웹 대시보드 HTML 저장 (`.ai-output/perf/`)
-2. `seed.sh --verify` (경매 불변식 10개 포함)
-3. 결과를 `docs/reports/AU-<번호>-<날짜>.md`에 측정 조건과 함께 기록. 조건이 없는 숫자는 남기지 않는다
+Record per phase:
 
-## 7. 준비와 순서
+- Request count, received responses, connection failures, 5xx, and status or business-error counts.
+- Response latency p50/p95/p99/max, fraction received within one second after T, time from T to the last response, and request-send time spread.
+- Conditions: target, phase size, auction IDs, bidder ID range, login requested/succeeded/duration, and options.
+- Bid runs: 201 count versus accepted count derived from auction revision and their difference.
+- AU-1: original and final endsAt, extension duration, AUCTION_CLOSED total, AUCTION_CLOSED sent before the original deadline, accepted count, SOLD/UNSOLD, winning amount, finalization lag, and whether winner amount matches the latest accepted response.
+- AU-5: connection attempts, successful 200 plus initial event, failures by status, disconnects, open connections, streams receiving the changed revision, delivery delay p50/p95/max, and auction_stream_connections.
 
-| 순서 | 일 | 상태 |
-|---|---|---|
-| 1 | 경매·크레딧 시드 | 완료 (#175) |
-| 2 | 시드 보강: 곧 끝나는 경매(AU-7), 같은 시각에 끝나는 경매 묶음(AU-8), 입찰 기록이 많은 회원(AU-6) | 완료 (#194) |
-| 3 | k6 입찰: `perf/scenarios/auction-bid-step.js` (AU-1·2·7), 종료 집계: `auction-close-report.sql` (AU-8); 조회(AU-4~6)는 별도 | 입찰·종료 집계 구현, 조회 예정 |
-| 4 | 관전자 Node 스크립트(AU-3·9·10, 재연결 포함), 전달 지연 측정 클라이언트(AU-3) | 예정 |
-| 5 | 로컬 스모크 (`small` 시드)로 스크립트와 점검 확인, 계단 상한 결정 | 예정 |
-| 6 | EC2 기준선: AU-1 → AU-2 → AU-7 → AU-3 → AU-8 → AU-4~6 → AU-9 → AU-10, 각 2회 (AU-9는 시간이 길어 1회부터) | 예정 |
-| 7 | 진단과 개선 (4, 5절) | 기준선 뒤 |
+Any non-zero 5xx, connection failure, accepted-bid mismatch, winner mismatch, or AUCTION_CLOSED before the original deadline is highlighted in the output. No latency or throughput pass line is defined.
 
-## 8. 아직 정하지 않은 것
+The bid API response does not contain revision. For an OPEN auction the expected revision is initial OPEN revision + accepted bids; for a CLOSED auction it is initial OPEN revision + accepted bids + close transition. Auction.openIfDue(), Auction.acceptBid(), and Auction.close() each increment revision once, so server accepted counts are revision - 1 while OPEN and revision - 2 after close. The latest acceptedAt and greatest accepted response amount are recorded separately; accepted prices must rise by at least one increment, so the greatest amount belongs to the latest accepted bid. That amount is compared with the SOLD result.
 
-- 계단 상한과 단계 길이: 로컬 스모크 뒤
-- 합격 기준(P95, 전달 지연): 첫 기준선 뒤
-- AU-6, AU-7, AU-8용 시드 보강의 규모
-- AU-9 유지 시간 (30분 또는 60분), AU-10 관전자 수
-- 도메인끼리의 영향(한 기능이 몰릴 때 다른 기능이 느려지는지)은 이 계획의 범위 밖이다. DB 커넥션 풀과 스케줄러 스레드를 모든 도메인이 함께 쓰므로, 혼합 부하 실험은 팀에 따로 제안한다
+## 4. Server-side observations
+
+The client stores the k6 JSON, k6 HTML dashboard, logs, and two-second Actuator samples. Server-only checks are used when needed:
+
+- Auction invariant verification: perf/ec2/perf-ec2.sh verify base, once after the day's runs.
+- EC2 CPU credit mode: inspect or enable unlimited before a run when required.
+- Database lock statistics, RDS CPU, netstat, and server logs: inspect when the measurements point to those causes.
+
+The scripts do not change server settings or create load on other domains.
+
+## 5. Run order
+
+Run one scenario per restored perf database because each load scenario creates auctions or changes bids.
+
+1. AU-2 detail reads.
+2. AU-3 list reads.
+3. AU-4 ordinary bid burst.
+4. AU-1 ending bid burst.
+5. AU-5 SSE connection hold.
+
+For each k6 run, execute the 8,000 phase and then the 10,000 phase in the same run. Use the scenario runner to record .json, .html (k6 only), .log, and -metrics.csv under .ai-output/perf/auction/. Write one reviewed experiment report per run under docs/reports/.
+
+Before the day starts, restore a perf database seeded once at base scale and start the app with the perf profile. Scripts create fresh auctions as needed. After the day's experiments, run the seed verification once and record the result with the experiment reports.
+
+## 6. Known limitations
+
+- The load generator is one Mac, so its CPU, file descriptors, network stack, and home network can become the bottleneck.
+- The current Tomcat maximum connection count is 8,192, below AU-5's 10,000 connection target.
+- No background traffic is generated for the other assumed 90,000 concurrent users.
+- Login is paced at 15 requests per second by default; 10,000 bidder logins take about 11 minutes before the first phase.
+- AU-2 and AU-3 are public only in the current implementation. A later auth change may require revising the scenario.
+- SSE uses Node 24's built-in fetch and the server IP is supplied through PERF_APP_IP. The runner sets Host to perf-local and only allows configured perf- hosts.
+- Each run creates test auctions which remain in the database. Use a fresh restored DB for independent runs.
