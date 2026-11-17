@@ -159,7 +159,7 @@ perf/scenarios/fanmeeting-check.sh
 | `WINNER_LIMIT`, `RESERVE_LIMIT`, `FEE_AMOUNT` | 300, 100, 50000 | 행사 설정 |
 | `TITLE`, `OPENS_AT_PUBLIC` | `perf S1 응모 <월일-시각>`, `true` | 제목, 예고 오픈 여부 |
 | `EVENT_FILE` | `.ai-output/perf/fanmeeting-event.env` | 출력 파일 |
-| `PERF_APP_ADDR` | 없음 | `/etc/hosts` 대신 perf- 이름을 이 IP로 연결한다. 로컬 리허설에서 `127.0.0.1` |
+| `PERF_APP_ADDR` | 없음 | `/etc/hosts` 대신 perf- 이름을 이 IP로 연결한다. 로컬 실행이면 `127.0.0.1` |
 
 시각은 정책 3절을 만족하게 계산한다. `firstNoticeScheduledAt` = 지금, `entryOpensAt` = 지금 + `OPEN_IN`, 마감은 서버가 오픈 + 10분으로 정한다. `meetingAt` = 마감 + 72시간, `promotionClosesAt`은 비워서 기본값(`meetingAt` - 24시간)을 쓴다.
 
@@ -217,19 +217,6 @@ perf/scenarios/fanmeeting-check.sh
 - 요약에 `dropped_iterations`, `http_req_connecting`, `http_req_blocked`를 남긴다. 노트북이 병목인지는 [부하 발생기를 EC2로 옮기는 기준](../README.md#부하-발생기를-ec2로-옮기는-기준)으로 판단한다.
 - 불변식 SQL은 `backend/src/test/resources/harness/fanmeeting-invariants.sql`이다. 테스트와 같은 파일을 쓴다.
 
-### 로컬 리허설 (2026-11-16, 측정 결과 아님)
-
-스크립트가 끝까지 도는지만 확인했다. 앱(perf 프로필), MySQL 8.4, k6를 맥북 한 대에서 같이 돌렸으므로 지연은 기준선이 아니다. small 시드(회원 1,000명), 도착률 200/s다.
-
-| 실행 | 201 | `WINDOW_CLOSED` | `BUSY`·5xx·연결 오류 | 점검 |
-|---|---|---|---|---|
-| A, `START_OFFSET=0s`, 1,000명 | 997 | 3 (모두 오픈 뒤 0~1초) | 0 | 불변식 0, 201 = APPLIED |
-| A, `START_OFFSET=2s`, 1,000명 | 1,000 | 0 | 0 | 불변식 0, 201 = APPLIED |
-| B, `START_OFFSET=-2s`, 500명 | 394 | 오픈 전 75, 0~1초 31, 그 뒤 0 | 0 | 불변식 0 |
-| C, `MODE=close`, 다른 500명 | 164 (모두 마감 전) | 336 (마감 전 1) | 0 | 마감 뒤 201 0 |
-
-D: 세 행사 모두 마감 뒤 1초 안에 추첨이 끝났다(`closed→completed` 814~1,031ms, `started→completed` 38~140ms, `attempt_count` 1, `candidate_count` = APPLIED). 안전장치는 `localhost`, `prod-app`, `perf-prod`, 허용 목록에 없는 호스트, `perf-prod`·`restless` DB에서 모두 시작 전에 멈췄다.
-
 ## 팬미팅 결과 조회 폭주 (FM-EXP-05)
 
 추첨이 확정되면 응모자 대부분이 동시에 결과를 새로고침한다. S1에서 응모한 **같은 행사, 같은 회원**으로 이어서 잰다. 읽기만 하므로 DB에 데이터를 남기지 않는다.
@@ -279,16 +266,6 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
 - k6 지연(`fm_read_duration{endpoint:result|order}`)은 체감값이다.
 
 
-### 로컬 리허설 (2026-11-17, 측정 결과 아님)
-
-S1 리허설의 행사 2(응모 1,000명, 당첨 300·예비 100, `RECRUITMENT_COMPLETED`)에 도착률 200/s로 돌렸다. 앱, MySQL, k6를 맥북 한 대에서 같이 돌렸으므로 지연은 기준선이 아니다.
-
-| 첫 바퀴 | 당첨 300, 예비 100, 미선발 600, `PENDING` 0, `NOT_APPLIED` 0, 주문 있음 400 → DB의 Selection·Order 수와 같음 |
-|---|---|
-| 전체 | 반복 2,999, 요청 4,201, `orders/me` 1,200건 모두 200, 주문 불일치 0, 오류 0, `dropped_iterations` 0 |
-
-안전장치는 `localhost`, `perf-prod` 호스트에서 시작 전에 멈췄다.
-
 ## 팬미팅 서버 지표 기록 (`fanmeeting-metrics.sh`)
 
 Grafana가 없어도 서버 쪽 숫자를 남긴다. 관리 포트의 `/actuator/prometheus`를 `INTERVAL`초마다 파일로 저장하고, 끝나면 구간 차이로 계산한다. 앱에는 읽기 요청만 보낸다. `curl`과 `python3`만 있으면 된다.
@@ -328,8 +305,6 @@ FROM=2026-11-17T05:03:00Z UNTIL=2026-11-17T05:04:00Z \
 - `max`, `pending` 같은 순간값은 스냅샷 시각의 값이라 `INTERVAL`보다 짧은 스파이크는 놓칠 수 있다.
 - 기록 중 앱이 재시작되면 경고가 나온다. 그 구간 숫자는 쓰지 않는다.
 - EC2 CPU 크레딧과 RDS CPU는 AWS 콘솔(CloudWatch, RDS 모니터링)에서 같은 시간대로 본다.
-
-로컬 리허설(2026-11-17): 조회 폭주(1,000명, 200/s)와 같이 돌려 서버 수가 k6 수와 같았다(`result/me` 2,999, `orders/me` 1,200). 서버 p95 16.4ms, k6 체감 p95 18.2ms. 안전장치는 `localhost`, `perf-prod`, 허용 목록에 없는 호스트에서 멈췄다.
 
 ## 팬미팅 S1 한 회를 명령 하나로 (`fanmeeting-s1.sh`)
 
@@ -372,7 +347,7 @@ PARTICIPANTS=1000 PEAK_RATE=200 perf/scenarios/fanmeeting-s1.sh
 | `DRAW_TIMEOUT` | 600 | 마감 뒤 추첨 확정을 기다리는 최대 초. 넘으면 조회를 건너뛴다 |
 | `METRICS_INTERVAL` | 5 | 지표 저장 간격(초) |
 | `OPEN_IN`, `WINNER_LIMIT`, `RESERVE_LIMIT`, `FEE_AMOUNT` | prepare와 같음 | 행사 설정 |
-| `K6`, `K6_IMAGE`, `K6_ADD_HOST` | `docker`, `grafana/k6:2.4.0`, 자동 | `K6=local`이면 설치된 k6. `K6_ADD_HOST`는 컨테이너 안에서 `perf-app`이 가리킬 주소(로컬 리허설은 `host-gateway`) |
+| `K6`, `K6_IMAGE`, `K6_ADD_HOST` | `docker`, `grafana/k6:2.4.0`, 자동 | `K6=local`이면 설치된 k6. `K6_ADD_HOST`는 컨테이너 안에서 `perf-app`이 가리킬 주소(로컬 실행이면 `host-gateway`) |
 | `INVARIANTS_SQL` | `backend/src/test/resources/harness/fanmeeting-invariants.sql` | DB 점검을 할 때만 필요 |
 | `RUN_DIR` | `.ai-output/perf/s1-<월일-시각>-p<참여자>-r<도착률>` | 결과 폴더. 이미 있으면 시작하지 않는다 |
 
@@ -393,7 +368,7 @@ PARTICIPANTS=1000 PEAK_RATE=200 perf/scenarios/fanmeeting-s1.sh
 
 | 회차 | 명령 | 목적 |
 |---|---|---|
-| 1 | `PARTICIPANTS=1000 PEAK_RATE=200` | 환경 확인. 리허설과 같은 조건 |
+| 1 | `PARTICIPANTS=1000 PEAK_RATE=200` | 환경 확인 |
 | 2 | `PARTICIPANTS=10000 PEAK_RATE=500` | 한계 찾기 시작 |
 | 3 | `PARTICIPANTS=10000 PEAK_RATE=1000` | 〃. BUSY·p99·Hikari pending이 오르기 시작하면 그 직전이 한계 |
 | 4 | `PARTICIPANTS=10000 PEAK_RATE=2000` | 〃 (3에서 이미 무너졌으면 생략) |
@@ -402,17 +377,3 @@ PARTICIPANTS=1000 PEAK_RATE=200 perf/scenarios/fanmeeting-s1.sh
 
 - 회차 사이에는 다른 측정과 겹치지 않게 한다. 한 회 안에서 행사는 하나만 연다.
 - 노트북이 먼저 막혔는지 `summary.txt`의 `dropped`와 k6 요약의 `http_req_connecting`으로 확인한다([기준](../README.md#부하-발생기를-ec2로-옮기는-기준)).
-
-### 로컬 리허설 (2026-11-17, 측정 결과 아님)
-
-`OPEN_IN=40s PARTICIPANTS=600 PEAK_RATE=200 CLOSE_PARTICIPANTS=300`으로 한 회를 끝까지 돌렸다(약 11분, 맥북 한 대).
-
-| 단계 | 결과 |
-|---|---|
-| A | 201 600/600, BUSY·5xx·연결 오류 0. 점검: APPLIED 600 = k6 201, 중복 0, 불변식 0 |
-| C (도착률 자동 50/s) | 마감 전 201 121, 마감 뒤 201 0, 거절 179(0~1초 50, 1~2초 50, 그 뒤 79). 서버 p95 246ms, p99 483ms로 A(p95 14ms)보다 커졌다 → 마감 순간 잠금 대기(FM-EXP-02)로 보이며 실제 환경에서 확인한다 |
-| D | 후보 721(= 600 + 121), 마감→확정 570ms, 추첨 147ms, 시도 1회, 당첨 300·예비 100 |
-| 조회 | 첫 바퀴 600명 완료, `PENDING` 0, 주문 불일치 0, 서버 p95 25.6ms |
-
-첫 리허설에서 C를 200/s로 보내 마감 3초 전에 계정이 바닥나 마감을 넘지 못했다. 그래서 C 도착률 기본값을 자동(참여자/6)으로 바꿨다.
-
