@@ -1,7 +1,8 @@
 // AU-1/2/7: stepped auction bidding. See perf/scenarios/README.md.
 import exec from 'k6/execution';
 import { sleep, fail } from 'k6';
-import { auction, users, ROW_OFFSET, checkTarget, detail, get, bid, summarize, summaryTrendStats,
+import { Trend } from 'k6/metrics';
+import { SETUP, auction, users, ROW_OFFSET, checkTarget, detail, get, bid, summarize, summaryTrendStats, loginOrganizer, loginBidders, createAuction,
   initialEnd, finalEnd, finalizedAt, resultAmount, resultSold, resultUnsold, resultMissing } from './lib/auction.js';
 
 const MODE = __ENV.MODE || 'hot';
@@ -21,8 +22,23 @@ if (!Number.isInteger(LEAD) || LEAD < 2 || !Number.isFinite(PEAK) || PEAK <= 0) 
 const PRE_VUS = Number(__ENV.PRE_VUS || 200), MAX_VUS = Number(__ENV.MAX_VUS || 3000);
 const ABORT_ERROR_RATE = Number(__ENV.ABORT_ERROR_RATE || 0.05);
 if (!(ABORT_ERROR_RATE > 0 && ABORT_ERROR_RATE <= 1) || !Number.isInteger(PRE_VUS) || !Number.isInteger(MAX_VUS) || PRE_VUS < 1 || MAX_VUS < PRE_VUS) throw new Error('invalid VU limits or ABORT_ERROR_RATE');
-const targets = MODE === 'hot' ? [auction.hot_auction_id] : MODE === 'ending' ? [auction.ending_first_id] : Array.from({ length: auction.spread_last_id - auction.spread_first_id + 1 }, (_, i) => auction.spread_first_id + i);
-if (!targets.length || targets.some((n) => !Number.isSafeInteger(n) || n < 1)) throw new Error('invalid auction IDs in manifest');
+const BIDDERS = Number(__ENV.BIDDERS || 1000), FIRST = Number(__ENV.BIDDER_FIRST_ID || 1), LAST = Number(__ENV.BIDDER_LAST_ALLOWED_ID || 96900);
+const SPREAD_COUNT = Number(__ENV.SPREAD_COUNT || 100), LOGIN_BATCH = Number(__ENV.LOGIN_BATCH || 50);
+const ORGANIZER_EMAIL = __ENV.ORGANIZER_EMAIL || 'organizer1@fanq.com', PASSWORD = __ENV.SEED_PASSWORD || '0000';
+function setupSeconds(value) {
+  const match = /^(\d+)(s|m|h)$/.exec(value);
+  if (!match || Number(match[1]) < 1) throw new Error(`invalid duration: ${value}`);
+  return Number(match[1]) * ({ s: 1, m: 60, h: 3600 })[match[2]];
+}
+const START_DELAY = setupSeconds(__ENV.START_DELAY || '20s'), AUCTION_DURATION = setupSeconds(__ENV.AUCTION_DURATION || '2h');
+if (SETUP === 'self' && (![BIDDERS, FIRST, LAST, SPREAD_COUNT, LOGIN_BATCH].every((n) => Number.isSafeInteger(n) && n > 0) || FIRST + BIDDERS - 1 > LAST)) throw new Error('invalid bidder range or setup counts; requested IDs must not exceed BIDDER_LAST_ALLOWED_ID');
+const setupAuctionId = new Trend('auction_setup_id');
+const setupLoginSeconds = new Trend('auction_setup_login_seconds');
+const setupLoginSucceeded = new Trend('auction_setup_login_succeeded');
+const setupFirstId = new Trend('auction_setup_first_user_id');
+const setupLastId = new Trend('auction_setup_last_user_id');
+const manifestTargets = SETUP === 'self' ? [] : MODE === 'hot' ? [auction.hot_auction_id] : MODE === 'ending' ? [auction.ending_first_id] : Array.from({ length: auction.spread_last_id - auction.spread_first_id + 1 }, (_, i) => auction.spread_first_id + i);
+if (SETUP === 'manifest' && (!manifestTargets.length || manifestTargets.some((n) => !Number.isSafeInteger(n) || n < 1))) throw new Error('invalid auction IDs in manifest');
 const stages = [];
 let planned = 0, previous = 0;
 if (MODE === 'ending') {
@@ -41,22 +57,54 @@ for (const rate of (MODE === 'ending' ? [PEAK] : STEPS)) {
   thresholds[`auction_error_rate{stage:${rate}}`] = [];
   thresholds[`http_reqs{stage:${rate}}`] = [];
 }
+if (SETUP === 'self') for (let i = 0; i < (MODE === 'spread' ? SPREAD_COUNT : 1); i++) thresholds[`auction_setup_id{index:${i}}`] = [];
 export const options = {
+  batch: SETUP === 'self' ? LOGIN_BATCH : 20, batchPerHost: SETUP === 'self' ? LOGIN_BATCH : 6,
   setupTimeout: __ENV.SETUP_TIMEOUT || '1h', teardownTimeout: __ENV.TEARDOWN_TIMEOUT || '15m',
   scenarios: { auction_step: { executor: 'ramping-arrival-rate', startRate: 0, timeUnit: '1s', preAllocatedVUs: PRE_VUS, maxVUs: MAX_VUS, stages } },
   thresholds, summaryTrendStats,
 };
 export function setup() {
   checkTarget();
+  let targets = manifestTargets, bidders = users;
+  let loginInfo = null;
+  if (SETUP === 'self') {
+    const organizerToken = loginOrganizer(ORGANIZER_EMAIL, PASSWORD);
+    loginInfo = loginBidders(FIRST, BIDDERS, LOGIN_BATCH, PASSWORD);
+    bidders = loginInfo.users;
+    setupLoginSeconds.add(loginInfo.seconds); setupLoginSucceeded.add(loginInfo.succeeded);
+    setupFirstId.add(bidders[0].id); setupLastId.add(bidders[bidders.length - 1].id);
+    const clock = detail(1, organizerToken), serverTime = Date.parse(clock.serverTime);
+    if (!Number.isFinite(serverTime)) fail('cannot obtain valid serverTime from seeded auction 1');
+    const offset = serverTime - Date.now();
+    const starts = new Date(Date.now() + offset + START_DELAY * 1000);
+    const ends = new Date(starts.getTime() + (MODE === 'ending' ? LEAD + 30 : AUCTION_DURATION) * 1000);
+    targets = [];
+    for (let i = 0; i < (MODE === 'spread' ? SPREAD_COUNT : 1); i++) {
+      const id = createAuction(organizerToken, { title: `perf ${MODE} ${starts.toISOString()} ${i + 1}`,
+        itemName: 'Performance test item', itemDescription: 'Performance test auction',
+        startingPriceAmount: 10000, minimumIncrementAmount: 100, extensionDurationSeconds: 60,
+        startsAt: starts.toISOString(), endsAt: ends.toISOString() });
+      targets.push(id); setupAuctionId.add(id, { index: String(i) });
+    }
+    console.log(`created ${targets.length} auctions, startsAt=${starts.toISOString()}, endsAt=${ends.toISOString()}`);
+    let pending = targets.slice();
+    while (pending.length) {
+      pending = pending.filter((id) => detail(id, organizerToken).status !== 'OPEN');
+      if (!pending.length) break;
+      if (Date.now() + offset > starts.getTime() + 60000) fail(`auctions did not open; check the auction scheduler (pending ${pending.length})`);
+      sleep(1);
+    }
+  }
   const initial = {};
   let endingDetail;
   for (const id of targets) {
-    const d = detail(id, users[0].token);
+    const d = detail(id, bidders[0].token);
     if (d.status !== 'OPEN') fail(`auction ${id} is ${d.status}; restore seed and refresh`);
     initial[id] = { minimum: d.minimumBidAmount, increment: d.minimumIncrementAmount };
     if (MODE === 'ending') endingDetail = d;
   }
-  console.log(`mode=${MODE} auctions=${targets[0]}..${targets[targets.length - 1]} accounts=${users.length} userIds=${users[0].id}..${users[users.length - 1].id} rowOffset=${ROW_OFFSET} planned=${planned}`);
+  console.log(`mode=${MODE} setup=${SETUP} auctions=${targets[0]}..${targets[targets.length - 1]} accounts=${bidders.length} userIds=${bidders[0].id}..${bidders[bidders.length - 1].id} rowOffset=${ROW_OFFSET} planned=${planned}`);
   if (MODE === 'ending') {
     const ends = Date.parse(endingDetail.endsAt), server = Date.parse(endingDetail.serverTime);
     if (!Number.isFinite(ends) || !Number.isFinite(server)) fail('invalid serverTime or endsAt');
@@ -66,7 +114,7 @@ export function setup() {
     console.log(`initial endsAt=${endingDetail.endsAt}; waiting ${wait.toFixed(1)}s until LEAD`);
     sleep(wait);
   }
-  return { initial };
+  return SETUP === 'self' ? { initial, targets, bidders } : { initial };
 }
 let minimums;
 function stageTag() {
@@ -77,7 +125,8 @@ function stageTag() {
 }
 export default function (setupData) {
   minimums ||= {};
-  const n = exec.scenario.iterationInTest, id = targets[n % targets.length], user = users[n % users.length];
+  const targets = setupData.targets || manifestTargets, bidders = setupData.bidders || users;
+  const n = exec.scenario.iterationInTest, id = targets[n % targets.length], user = bidders[n % bidders.length];
   const increment = setupData.initial[id].increment;
   const min = minimums[id] || setupData.initial[id].minimum;
   let result = bid(user, id, min + increment * Math.floor(Math.random() * 3), { stage: stageTag(), retry: 'false' });
@@ -89,15 +138,16 @@ export default function (setupData) {
     else if (result.outcome === 'too_low' && Number.isFinite(result.body.details?.minimumBidAmount)) minimums[id] = Math.max(minimums[id], result.body.details.minimumBidAmount);
   }
 }
-export function teardown() {
-  if (MODE !== 'ending') return;
+export function teardown(setupData) {
+  if (MODE !== 'ending' || !setupData) return;
+  const targets = setupData.targets || manifestTargets, bidders = setupData.bidders || users;
   const limit = Number(__ENV.RESULT_WAIT_SECONDS || 600), interval = Number(__ENV.RESULT_POLL_SECONDS || 3);
   if (!(limit > 0 && interval > 0)) { resultMissing.add(1); return; }
   const until = Date.now() + limit * 1000;
   while (Date.now() < until) {
-    const res = get(`/api/auctions/${targets[0]}/result`, users[0].token);
+    const res = get(`/api/auctions/${targets[0]}/result`, bidders[0].token);
     if (res.status === 200) {
-      const result = res.json(), d = detail(targets[0], users[0].token);
+      const result = res.json(), d = detail(targets[0], bidders[0].token);
       finalEnd.add(Date.parse(d.endsAt)); finalizedAt.add(Date.parse(result.finalizedAt));
       if (result.type === 'SOLD') { resultSold.add(1); resultAmount.add(result.amount); }
       else if (result.type === 'UNSOLD') resultUnsold.add(1);
@@ -119,14 +169,19 @@ export function handleSummary(data) {
     accepted: values(`auction_bid_accepted{stage:${rate}}`).count || 0,
     acceptedRate: aborted ? null : Number(((values(`auction_bid_accepted{stage:${rate}}`).count || 0) / secondsHeld).toFixed(1)),
     errorRate: values(`auction_error_rate{stage:${rate}}`).rate, latency: values(`auction_bid_duration{stage:${rate}}`) }));
+  const targets = SETUP === 'self' ? Array.from({ length: MODE === 'spread' ? SPREAD_COUNT : 1 }, (_, i) => values(`auction_setup_id{index:${i}}`).min).filter((id) => id !== undefined) : manifestTargets;
+  const accounts = SETUP === 'self' ? (values('auction_setup_login_succeeded').min ?? 0) : users.length;
+  const firstUserId = SETUP === 'self' ? (values('auction_setup_first_user_id').min ?? null) : users[0].id;
+  const lastUserId = SETUP === 'self' ? (values('auction_setup_last_user_id').min ?? null) : users[users.length - 1].id;
   const first = values('auction_initial_end_ms').min, last = values('auction_final_end_ms').min, completed = values('auction_finalized_at_ms').min;
   const ending = MODE === 'ending' ? { initialEndsAt: first === undefined ? null : new Date(first).toISOString(), finalEndsAt: last === undefined ? null : new Date(last).toISOString(),
     extensionSeconds: first === undefined || last === undefined ? null : (last - first) / 1000, result: (values('auction_result_sold').count || 0) ? 'SOLD' : (values('auction_result_unsold').count || 0) ? 'UNSOLD' : 'UNKNOWN',
     amount: values('auction_result_amount').min ?? null, closeLagSeconds: last === undefined || completed === undefined ? null : (completed - last) / 1000, closedResponses: values('auction_bid_closed').count || 0 } : null;
   const out = summarize(data, { headline: `auction ${MODE} targets ${targets[0]}..${targets[targets.length - 1]}, planned ${planned}`,
-    conditions: { mode: MODE, targets, planned, accounts: users.length, firstUserId: users[0].id, lastUserId: users[users.length - 1].id, steps: STEPS, stepRamp: RAMP, stepHold: HOLD, lead: LEAD, peak: PEAK, hold: END_HOLD, preVUs: PRE_VUS, maxVUs: MAX_VUS, abortErrorRate: ABORT_ERROR_RATE, stepResults: steps, ending },
+    conditions: { mode: MODE, ...(SETUP === 'self' ? { setup: SETUP, organizer: ORGANIZER_EMAIL, loginRequested: BIDDERS, loginSucceeded: accounts, loginSeconds: values('auction_setup_login_seconds').min ?? null } : {}), targets, planned, accounts, firstUserId, lastUserId, steps: STEPS, stepRamp: RAMP, stepHold: HOLD, lead: LEAD, peak: PEAK, hold: END_HOLD, preVUs: PRE_VUS, maxVUs: MAX_VUS, abortErrorRate: ABORT_ERROR_RATE, stepResults: steps, ending },
     extraLatency: rates.map((r) => [`step ${r}/s`, `auction_bid_duration{stage:${r}}`]) });
   out.stdout += steps.map((s) => `  step ${s.targetRate}/s accepted ${s.accepted} (${s.acceptedRate === null ? "incomplete" : `${s.acceptedRate}/s`}) requests ${s.requests} errors ${s.errorRate === undefined ? '-' : (s.errorRate * 100).toFixed(2)}%`).join('\n') + '\n';
   if (ending) out.stdout += `  ending ${JSON.stringify(ending)}\n`;
+  if (SETUP === 'self') out.stdout += '  정합성은 서버에서 perf/ec2/perf-ec2.sh verify base로 확인 (그날 돌린 모든 판을 한 번에)\n';
   return out;
 }
