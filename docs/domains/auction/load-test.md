@@ -2,7 +2,7 @@
 
 > 관련 코드: `perf/seed/sql/30_auction.sql`, `perf/seed/sql/31_credit.sql`, `backend/src/main/java/com/restless/auction/`, `backend/src/main/java/com/restless/credit/`
 >
-> 마지막 확인: 2026-11-16 (계획 작성, AU-7~10 추가. 경매 시드 #175까지 반영, 시나리오는 아직 없음)
+> 마지막 확인: 2026-11-17 (AU-1·2·7 k6 시나리오와 AU-8 종료 집계 반영)
 
 경매의 입찰, 실시간 전달, 조회가 몰릴 때 어디서 무너지는지 찾고, 원인에 맞는 개선을 하나씩 적용해 다시 재는 계획이다. 팀 공통 원칙과 실험 목록은 [성능 실험 계획](../../testing/performance.md), 실행 환경과 도구는 [perf/README.md](../../../perf/README.md)를 따른다. 결과는 [docs/reports/](../../reports/README.md)에 실험 하나당 파일 하나로 남긴다.
 
@@ -141,7 +141,7 @@
 
 ## 6. 실행 절차
 
-환경, 시드, 모니터링, k6 실행법은 [perf/README.md](../../../perf/README.md)와 [시드 README](../../../perf/seed/README.md)를 따른다. 서버 지표는 팀의 노트북 모니터링(Prometheus, Grafana, #184)으로 본다.
+환경, 시드, 모니터링, k6 실행법은 [perf/README.md](../../../perf/README.md)와 [시드 README](../../../perf/seed/README.md)를 따른다. 1차 측정은 k6 결과(요약 JSON, 웹 대시보드 HTML)와 실행 뒤 정합성 점검, CloudWatch로 본다. 서버 내부 지표는 필요해지면 다시 정한다.
 
 실행 전:
 1. 스냅샷 복원 → `seed.sh --refresh`. 핫·분산 경매는 입찰 0건일 때만 시각이 다시 맞춰지므로 복원을 빼먹지 않는다
@@ -150,7 +150,7 @@
 4. 노트북에서 서버까지 왕복 지연을 기록한다
 
 실행 뒤:
-1. Grafana 화면과 k6 리포트 저장
+1. k6 요약 JSON과 웹 대시보드 HTML 저장 (`.ai-output/perf/`)
 2. `seed.sh --verify` (경매 불변식 10개 포함)
 3. 결과를 `docs/reports/AU-<번호>-<날짜>.md`에 측정 조건과 함께 기록. 조건이 없는 숫자는 남기지 않는다
 
@@ -159,8 +159,8 @@
 | 순서 | 일 | 상태 |
 |---|---|---|
 | 1 | 경매·크레딧 시드 | 완료 (#175) |
-| 2 | 시드 보강: 곧 끝나는 경매(AU-7), 같은 시각에 끝나는 경매 묶음(AU-8), 입찰 기록이 많은 회원(AU-6) | 예정 |
-| 3 | k6 시나리오: 입찰(AU-1·2·7 겸용), 조회(AU-4~6 겸용) | 예정 |
+| 2 | 시드 보강: 곧 끝나는 경매(AU-7), 같은 시각에 끝나는 경매 묶음(AU-8), 입찰 기록이 많은 회원(AU-6) | 완료 (#194) |
+| 3 | k6 입찰: `perf/scenarios/auction-bid-step.js` (AU-1·2·7), 종료 집계: `auction-close-report.sql` (AU-8); 조회(AU-4~6)는 별도 | 입찰·종료 집계 구현, 조회 예정 |
 | 4 | 관전자 Node 스크립트(AU-3·9·10, 재연결 포함), 전달 지연 측정 클라이언트(AU-3) | 예정 |
 | 5 | 로컬 스모크 (`small` 시드)로 스크립트와 점검 확인, 계단 상한 결정 | 예정 |
 | 6 | EC2 기준선: AU-1 → AU-2 → AU-7 → AU-3 → AU-8 → AU-4~6 → AU-9 → AU-10, 각 2회 (AU-9는 시간이 길어 1회부터) | 예정 |

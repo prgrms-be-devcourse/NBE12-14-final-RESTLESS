@@ -1,12 +1,14 @@
 # k6 시나리오
 
 [성능 실험 계획](../../docs/testing/performance.md)의 실험을 돌리는 k6 스크립트다. 입력 데이터는 [시드](../seed/README.md)가 만든다.
-드롭, 주문, 결제 시나리오만 둔다. 다른 도메인 시나리오는 각 담당자가 준비한다.
+드롭과 경매 시나리오를 둔다. 다른 도메인 시나리오는 각 담당자가 준비한다.
 
 | 파일 | 실험 | 내용 |
 |---|---|---|
 | [drop-reservation-spike.js](drop-reservation-spike.js) | EXP-01 쓰기 기준선 | 판매 시작 순간 핫 드롭 재고 점유 스파이크. 대기열 없음 |
 | [drop-reservation-step.js](drop-reservation-step.js) | EXP-01 용량 측정 | 도착률을 계단식으로 올려 무릎 지점과 최대 지속 처리량을 찾는다. 대기열 없음 |
+| [auction-bid-step.js](auction-bid-step.js) | AU-1·2·7 | 핫·분산·종료 직전 입찰 계단식 측정 |
+| [auction-close-report.sql](auction-close-report.sql) | AU-8 | 동시 종료 지연과 결과 집계 |
 
 두 시나리오는 [lib/drop-reservation.js](lib/drop-reservation.js)의 호스트 안전장치, 요청, 결과 분류, 요약을 같이 쓴다. 다른 것은 부하 모델뿐이다.
 
@@ -143,3 +145,64 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" -p 5665:5
 - 결과 분류와 정합성 판정은 스파이크와 같다. 측정 뒤 `seed.sh --verify`를 실행한다.
 - 무릎 지점은 계단별 k6 지연과 오류율로 판단한다. k6 지연에는 집 네트워크 왕복이 섞이므로 테스트 전 왕복 지연을 같이 기록한다.
 - 계단별 서버 지연이 필요하면 계단을 따로 실행하고 실행마다 `/actuator/prometheus` 전후 값을 저장한다.
+
+## 경매: AU-1·2·7 계단식 입찰
+
+`auction-bid-step.js`는 `MODE=hot`(AU-1), `spread`(AU-2), `ending`(AU-7)을 지원한다. 별도 조회 부하를 섞지 않도록 setup에서 대상의 최소 입찰가만 가져오며, 각 VU는 경매별 최소가를 기억한다. `BID_AMOUNT_TOO_LOW`는 새 키로 한 번 재시도한다. 409 업무 거절은 오류율에서 제외한다. 동일 계정도 재사용하며 `users.csv`의 1번부터 manifest `auction.mass_first_user_id` 직전까지만 사용한다. `ROW_OFFSET`은 앞의 회원 ID 수를 건너뛴다. AU-6·8용 계정은 사용하지 않는다.
+
+**AU-7·8은 실행마다 DB를 새로 만들고 시드한 뒤 `AUCTION_CLOSE_IN_MINUTES`로 refresh한다.** 종료됐거나 추가 입찰이 생긴 경매는 refresh가 초기화하지 않는다. AU-7은 setup이 종료 `LEAD`초 전까지 기다리므로 종료 시각을 LEAD보다 충분히 뒤로 잡는다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `MODE` | `hot` | `hot`, `spread`, `ending` |
+| `STEPS`, `STEP_RAMP`, `STEP_HOLD` | `10,25,50,100,200,400`, `10s`, `60s` | hot/spread 도착률과 계단 길이 |
+| `LEAD`, `PEAK`, `HOLD` | `120`, `50`, `120s` | ending 시작 전 남은 초, 최대 도착률, 유지 시간 |
+| `PRE_VUS`, `MAX_VUS`, `ABORT_ERROR_RATE` | `200`, `3000`, `0.05` | VU 수와 5xx·통신 오류의 누적 중단 비율 |
+| `ROW_OFFSET` | `0` | 앞쪽에서 제외할 회원 ID 수 |
+| `RESULT_WAIT_SECONDS`, `RESULT_POLL_SECONDS` | `600`, `3` | 종료 결과 조회 제한과 간격 |
+| `SETUP_TIMEOUT`, `TEARDOWN_TIMEOUT` | `1h`, `15m` | 시작 대기·종료 조회의 k6 제한 시간 |
+| `BASE_URL`, `MANAGEMENT_URL`, `PERF_ALLOWED_APP_HOSTS`, `SEED_OUT`, `SUMMARY_PATH` | 드롭과 동일 | 대상, 허용 호스트, 시드, JSON 결과 |
+
+로컬과 EC2 대상 모두 노트북에서 실행한다. 로컬 앱 포트에 맞게 주소를 바꾸고, EC2 IP는 `--add-host perf-app:<EC2 IP>`로 지정한다. 아래 `MODE`를 `hot`, `spread`, `ending`으로 바꾼다.
+
+```bash
+mkdir -p .ai-output/perf
+docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
+  --add-host perf-app:host-gateway \
+  -e BASE_URL=http://perf-app:8080 -e MANAGEMENT_URL=http://perf-app:8081 \
+  -e PERF_ALLOWED_APP_HOSTS=perf-app -e SEED_OUT=/perf/seed/out \
+  -e MODE=hot -e SUMMARY_PATH=/out/auction-hot.json \
+  -e K6_WEB_DASHBOARD=true -e K6_WEB_DASHBOARD_EXPORT=/out/auction-hot.html \
+  grafana/k6:2.4.0 run /perf/scenarios/auction-bid-step.js
+```
+
+모드별로 위 Docker 명령의 `-e MODE`와 출력 파일을 바꾼다:
+
+| 실행 | 옵션 예시 |
+|---|---|
+| 로컬 AU-1 | `-e MODE=hot -e SUMMARY_PATH=/out/auction-hot.json` |
+| 로컬 AU-2 | `-e MODE=spread -e SUMMARY_PATH=/out/auction-spread.json` |
+| 로컬 AU-7 | `-e MODE=ending -e LEAD=120 -e SUMMARY_PATH=/out/auction-ending.json` |
+| EC2 AU-1·2·7 | `--add-host perf-app:<EC2 IP>`와 위 각 MODE 옵션 |
+
+EC2 실행은 위의 `--add-host` 주소를 EC2 IP로 바꾼다. EC2에서는 `perf/ec2/README.md`의 DB 생성·시드·토큰 전달과 앱 기동 절차를 따른다. `ending` 전에 앱을 멈춘 상태에서 서버의 perf 환경 변수로 `AUCTION_CLOSE_IN_MINUTES=4 perf/seed/seed.sh --scale small --profile perf --refresh`를 실행하고 토큰을 다시 전달한다.
+
+계단별 결과는 입찰 요청 지연, 오류율과 초당 수락 건수다. 5xx·연결 오류만 누적 오류율 중단에 포함하고 수락·금액 부족·이미 최고·경매 종료·시작 전·크레딧 부족·기타 4xx를 따로 센다. 각 요청의 `retry` 태그는 재시도 여부를 나타낸다. `ending`은 종료 결과와 최초/최종 종료 시각, 연장 시간, 종료 처리 지연을 요약한다. 실행 후 `perf/seed/seed.sh --scale <scale> --profile perf --verify`에서 경매 불변식 10개가 0인지 본다. 시드 기준값 실패는 입찰 또는 종료 뒤 정상이다.
+
+### AU-8 동시 종료 집계
+
+새 DB를 시드하고 `AUCTION_CLOSE_IN_MINUTES=2 ... --refresh` 후 앱을 기동한다. 모두 종료된 뒤 manifest의 범위를 변수로 전달한다. 아래는 로컬에서 `seed.sh`와 같은 DB 환경 변수와 `MYSQL` 명령을 사용하는 예다. 비밀번호는 `MYSQL_PWD`로 전달한다.
+
+```bash
+export MYSQL_PWD="$DB_PASSWORD"
+MYSQL=${MYSQL:-mysql}
+read -r first last <<EOF_IDS
+$(python3 -c 'import json; a=json.load(open("perf/seed/out/manifest.json"))["auction"]; print(a["mass_first_id"], a["mass_last_id"])')
+EOF_IDS
+{ printf 'SET @auction_mass_first=%s, @auction_mass_last=%s;\n' "$first" "$last"; cat perf/scenarios/auction-close-report.sql; } |
+  $MYSQL -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USERNAME" "$DB_NAME"
+```
+
+`closed_count`, `open_count`, 지연 min/p50/p95/max(최근접 순위), 첫 종료부터 마지막 종료까지 초, 그 구간의 초당 종료 수, SOLD/UNSOLD와 HELD 수를 출력한다. 종료가 한 건뿐이면 처리 구간이 0초여서 초당 종료 수는 NULL이다. 다른 도메인의 스케줄 지연은 로그에서 따로 확인한다.
+
+EC2에서는 `perf/ec2/perf-ec2.sh`에 SQL 실행 명령이 없으므로 서버에서 `/opt/restless/perf.env`의 DB 접속값을 안전하게 환경 변수로 설정한 뒤 위 명령을 실행한다. DB 이름이 `perf-`로 시작하는지 확인하고, EC2에 mysql 클라이언트가 없으면 `MYSQL='docker run --rm -i --network host -e MYSQL_PWD mysql:8.4 mysql'`을 쓴다. 자격 증명은 출력하거나 노트북으로 옮기지 않는다.
