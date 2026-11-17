@@ -150,7 +150,7 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" -p 5665:5
 
 `auction-bid-step.js`는 `MODE=hot`(AU-1), `spread`(AU-2), `ending`(AU-7)을 지원한다. 별도 조회 부하를 섞지 않도록 setup에서 대상의 최소 입찰가만 가져오며, 각 VU는 경매별 최소가를 기억한다. `BID_AMOUNT_TOO_LOW`는 새 키로 한 번 재시도한다. 409 업무 거절은 오류율에서 제외한다. 동일 계정도 재사용하며 `users.csv`의 1번부터 manifest `auction.mass_first_user_id` 직전까지만 사용한다. `ROW_OFFSET`은 앞의 회원 ID 수를 건너뛴다. AU-6·8용 계정은 사용하지 않는다.
 
-**AU-7·8은 실행마다 DB를 새로 만들거나 스냅샷을 복원하고 `AUCTION_CLOSE_IN_MINUTES`로 refresh한다.** 종료됐거나 추가 입찰이 생긴 경매는 refresh가 초기화하지 않는다. AU-7은 setup이 종료 `LEAD`초 전까지 기다리므로 종료 시각을 LEAD보다 충분히 뒤로 잡는다.
+**AU-7·8은 실행마다 DB를 새로 만들고 시드한 뒤 `AUCTION_CLOSE_IN_MINUTES`로 refresh한다.** 종료됐거나 추가 입찰이 생긴 경매는 refresh가 초기화하지 않는다. AU-7은 setup이 종료 `LEAD`초 전까지 기다리므로 종료 시각을 LEAD보다 충분히 뒤로 잡는다.
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
