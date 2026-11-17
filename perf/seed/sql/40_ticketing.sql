@@ -1,4 +1,4 @@
--- perf/seed/seed.sh로 준비한 별도 DB에서만 실행한다. 기존 공연 1과 회원을 사용한다.
+-- 공통 성능 시드에서 계정·공연 생성 후 실행한다. 기존 공연 1과 회원을 사용한다.
 -- 회차 및 좌석은 자동 생성 ID를 사용하고 결과의 performance_id를 기록한다.
 START TRANSACTION;
 SET @venue = (SELECT venue_id FROM concerts WHERE id = 1);

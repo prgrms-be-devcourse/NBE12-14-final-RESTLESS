@@ -8,12 +8,6 @@ Flyway로 만든 빈 스키마에 실험 데이터를 SQL로 대량 생성한다
 회원, 드롭, 주문, 결제, 경매와 크레딧 데이터를 만든다. 다른 도메인의 데이터와 테스트는 각 담당자가 준비한다.
 드롭이 FK로 참조하는 공연장 1개와 공연만 `10_concert.sql`로 함께 넣는다.
 
-## 티켓팅 데이터와 점검
-
-티켓팅 회차·좌석은 공통 시드에 포함되지 않는다. 격리된 성능 DB에서 공통 시드 후, 공연 1과 회원 1~1000이 있고 기존 회차가 없으면 `SPRING_PROFILES_ACTIVE=perf perf/seed/ticketing.sh seed`가 1,000석 회차를 추가한다. 기존 데이터가 있거나 팀원이 이미 준비한 DB에는 실행하지 않는다. 출력된 회차 ID를 기록한다. 로컬 개발용 [100석 샘플](../../local/ticketing/README.md)은 별도다.
-
-부하 실험 후 동일 DB 환경변수로 `perf/seed/ticketing.sh verify <performance_id>`를 실행한다. 14개 정합성 검사는 읽기 전용의 일관된 스냅샷에서 수행되며, 모든 결과가 0일 때만 성공한다. 자세한 범위와 한계는 [티켓팅 시나리오 안내](../scenarios/ticketing.md#결과와-검증)를 따른다. 공통 `seed.sh --verify`는 이 검사를 대신 실행하지 않는다.
-
 ## 실행
 
 준비: 대상 DB에 앱을 `perf` 프로필로 한 번 띄워 Flyway 마이그레이션을 끝낸다. 실행 머신에는 `mysql` 클라이언트와 `python3`(표준 라이브러리만)이 필요하다.
@@ -137,3 +131,13 @@ Refresh Token은 한 번 쓰면 교체되므로 같은 행을 다시 쓰려면 �
 | 로컬 macOS, Docker MySQL 8.4 | capacity | 31초 (토큰과 점검 포함) |
 
 EC2와 RDS에서는 아직 재지 않았다.
+
+## 티켓팅 데이터 위치
+
+공통 `seed.sh`는 `sql/40_ticketing.sql`도 실행하여 회차 1개와 좌석 1,000개를 생성한다. 결과 회차 ID와 좌석 수는 `out/manifest.json`의 `ticketing`에 기록된다. 새 성능 DB를 준비할 때 별도 티켓팅 시드 명령은 필요 없다.
+
+기존에 공통 시드만 적용한 DB에는 파일을 배포하는 것만으로 데이터가 추가되지 않는다. 회차가 전혀 없는지 확인한 뒤 `ticketing.sh seed`로 추가할 수 있다. 이미 사용 중인 DB에서 공통 시드를 다시 실행하거나 초기화하지 않는다.
+
+`ticketing.sh`는 기존 DB에 대한 추가 적재와 `ticketing-verify.sql` 점검용이다. `backend/scripts/seed/ticketing/`은 로컬 개발 DB에 반원형 100석 샘플을 추가하는 별도 도구이며 AWS 성능 데이터와 용도가 다르다. 부하 발생 코드는 `perf/scenarios/ticketing/`에 둔다.
+
+백엔드 이미지 배포는 시드를 실행하지 않는다. AWS 성능 환경 준비 과정에서 공통 시드를 실행하면 티켓팅 데이터도 함께 생성된다.

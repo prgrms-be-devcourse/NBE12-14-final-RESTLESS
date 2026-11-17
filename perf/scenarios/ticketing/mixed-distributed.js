@@ -1,4 +1,4 @@
-// mixed-distributed 시나리오. 실행 방법: ../ticketing.md
+// mixed-distributed 시나리오. 실행 방법: ../README.md
 import { createRuntime } from './common.js';
 
 const scenario = createRuntime("mixed", null, "distributed");

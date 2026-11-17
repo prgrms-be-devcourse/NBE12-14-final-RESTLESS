@@ -1,4 +1,4 @@
-// distributed 시나리오. 실행 방법: ../ticketing.md
+// distributed 시나리오. 실행 방법: ../README.md
 import { createRuntime } from './common.js';
 
 const scenario = createRuntime("distributed", null, null);

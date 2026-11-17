@@ -1,4 +1,4 @@
-// overlap 시나리오. 실행 방법: ../ticketing.md
+// overlap 시나리오. 실행 방법: ../README.md
 import { createRuntime } from './common.js';
 
 const scenario = createRuntime("overlap", null, null);

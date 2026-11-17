@@ -1,4 +1,4 @@
-// replay 시나리오. 실행 방법: ../ticketing.md
+// replay 시나리오. 실행 방법: ../README.md
 import { createRuntime } from './common.js';
 
 const scenario = createRuntime("replay", null, null);

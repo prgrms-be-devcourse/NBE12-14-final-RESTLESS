@@ -1,4 +1,4 @@
-// simultaneous 시나리오. 실행 방법: ../ticketing.md
+// 좌석 조회: 동시 진입한다.
 import { createRuntime } from './common.js';
 
 const scenario = createRuntime("poll", "simultaneous", null);

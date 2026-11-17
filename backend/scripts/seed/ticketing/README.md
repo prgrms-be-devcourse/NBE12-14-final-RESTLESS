@@ -5,7 +5,7 @@
 ## 준비와 실행
 
 1. `backend/`에서 `PG_PROVIDER=fake ./gradlew bootRun`으로 앱을 실행한다. Java 21과 Docker가 필요하며, 앱 시작 시 Flyway가 현재 스키마를 적용한다. 기존 DB의 마이그레이션 오류는 해결한 뒤 진행한다.
-2. 저장소 루트에서 `bash local/ticketing/seed.sh`를 실행한다. 저장소 `backend/compose.yaml`의 개발용 MySQL만 사용한다. 별도 `DB_URL`로 앱을 실행했다면 그 DB에는 적재되지 않는다.
+2. 저장소 루트에서 `bash backend/scripts/seed/ticketing/seed.sh`를 실행한다. 저장소 `backend/compose.yaml`의 개발용 MySQL만 사용한다. 별도 `DB_URL`로 앱을 실행했다면 그 DB에는 적재되지 않는다.
 3. 출력된 `concert_id`, `performance_id`, `seat_id`를 사용한다. ID를 고정하거나 추측하지 않는다.
 
 기존 공연·회원·예약을 지우거나 덮어쓰지 않는다. 한 번 실행할 때 아래 샘플 묶음을 새로 추가한다. 재실행은 같은 샘플 초기화가 아니라 **별도 샘플 생성**이다. 중간 SQL 오류 시 첫 오류에서 종료하고, 커밋 전 데이터는 연결 종료 시 롤백한다. DB 클라이언트의 `--force`로 직접 실행하지 않는다.
@@ -51,8 +51,8 @@ Postman 또는 HTTP 클라이언트로 아래 순서대로 호출한다. 구매�
 
 프론트는 **`frontend-test/`에서만** 수정하고 실행한다. `frontend/`는 사용하지 않는다. `frontend-test/`에서 `npm run dev` 후 표시된 주소(기본 http://localhost:3000)의 `/performances/{performanceId}?max=4&concert={concertId}`를 연다. 로그인 후 기존 백엔드 API가 반환한 좌석 좌표·구역·열·번호·가격으로 배치를 표시한다. 백엔드 기본 주소는 `next.config.ts`의 http://localhost:8080이다.
 
-DB 시드는 `local/ticketing/layout.json`을 사용하고, 프론트는 DB를 조회하는 API 응답을 사용하므로 별도 하드코딩 좌석 목록을 두지 않는다. 구역별 경계는 API 좌표를 감싸는 외곽선이며 공식 도면의 통로 경계가 아니다. 하단 구역 목록을 클릭하면 해당 구역을 강조·확대하고, 전체 보기로 돌아갈 수 있다. 구역 이동 시 선택 좌석을 유지하며 기존 선점·checkout·결제 흐름을 사용한다. 기존 FANQ 테마 토큰·그라데이션·카드·장바구니를 유지한다.
+DB 시드는 `backend/scripts/seed/ticketing/layout.json`을 사용하고, 프론트는 DB를 조회하는 API 응답을 사용하므로 별도 하드코딩 좌석 목록을 두지 않는다. 구역별 경계는 API 좌표를 감싸는 외곽선이며 공식 도면의 통로 경계가 아니다. 하단 구역 목록을 클릭하면 해당 구역을 강조·확대하고, 전체 보기로 돌아갈 수 있다. 구역 이동 시 선택 좌석을 유지하며 기존 선점·checkout·결제 흐름을 사용한다. 기존 FANQ 테마 토큰·그라데이션·카드·장바구니를 유지한다.
 
 좌석 클릭만으로 DB 선점이 되지는 않는다. ‘이 좌석 잡기!’가 기존 선점 API를 호출한다. 잔여석은 API로 주기 갱신하며 선점 트랜잭션에서 최종 확인한다. 공식 좌석배치·구역명·좌석번호·시야와 구분해 안내한다. 구역은 위치(A/B/C), VIP/R은 가격 등급이며 서로 다른 개념이다.
 
-반원형 변경 전 생성한 사각형 샘플·기존 예매는 그대로 보존한다. 새 배치는 `bash local/ticketing/seed.sh`로 별도 생성하고 출력된 새 ID를 사용한다. 기존 회차의 배치나 좌석을 덮어쓰지 않는다. 공식 참고: https://www.ksponco.or.kr/menu.es?mid=a20301031000
+반원형 변경 전 생성한 사각형 샘플·기존 예매는 그대로 보존한다. 새 배치는 `bash backend/scripts/seed/ticketing/seed.sh`로 별도 생성하고 출력된 새 ID를 사용한다. 기존 회차의 배치나 좌석을 덮어쓰지 않는다. 공식 참고: https://www.ksponco.or.kr/menu.es?mid=a20301031000

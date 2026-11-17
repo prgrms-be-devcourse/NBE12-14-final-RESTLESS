@@ -1,4 +1,4 @@
-// hot 시나리오. 실행 방법: ../ticketing.md
+// hot 시나리오. 실행 방법: ../README.md
 import { createRuntime } from './common.js';
 
 const scenario = createRuntime("hot", null, null);

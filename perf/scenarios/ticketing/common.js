@@ -1,7 +1,7 @@
 // 티켓팅 시나리오 공통 실행 로직. 시나리오 파일에서 종류를 지정한다.
 import http from 'k6/http';
 import exec from 'k6/execution';
-import { fail } from 'k6';
+import { fail, sleep } from 'k6';
 import { runPoll } from './poll-logic.js';
 import { runHold } from './hold-logic.js';
 import { SharedArray } from 'k6/data';
@@ -10,11 +10,9 @@ import { Counter, Trend, Rate } from 'k6/metrics';
 export function createRuntime(mode, fixedEntry = null, fixedMixedHold = null) {
 const base = (__ENV.BASE_URL || '').replace(/\/$/, '');
 const management = (__ENV.MANAGEMENT_URL || '').replace(/\/$/, '');
-const allowed = (__ENV.PERF_ALLOWED_APP_HOSTS || '').split(',').map(x => x.trim());
-for (const value of [base, management]) {
-  const match = /^https?:\/\/([^/:]+)(?::\d+)?$/.exec(value);
-  if (!match || !/^perf-/i.test(match[1]) || /prod/i.test(match[1]) || !allowed.includes(match[1]))
-    throw new Error('BASE_URL and MANAGEMENT_URL must use allowlisted perf- hosts');
+for (const value of [base, ...(management ? [management] : [])]) {
+  if (!/^https?:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(value))
+    throw new Error('BASE_URL and MANAGEMENT_URL must be HTTP or HTTPS origins');
 }
 function positive(name, fallback) {
   const n = Number(__ENV[name] || fallback);
@@ -31,22 +29,26 @@ const holdDelay = mode === 'mixed' ? positive('HOLD_DELAY_SECONDS', 3) : 0;
 const mixedHold = fixedMixedHold || __ENV.MIXED_HOLD || 'hot';
 if (mode === 'mixed' && !['hot', 'distributed'].includes(mixedHold)) throw new Error('MIXED_HOLD must be hot or distributed');
 const totalUsers = participants + holdParticipants;
+const setupMode = __ENV.SETUP || 'csv';
+if (!['csv', 'self'].includes(setupMode)) throw new Error('SETUP must be csv or self');
+if (setupMode === 'self' && totalUsers > 1000) throw new Error('self setup supports at most 1000 seeded users');
 const duration = __ENV.DURATION || '2m';
 const entry = fixedEntry || __ENV.POLL_ENTRY || 'spread';
 if (!['spread', 'simultaneous'].includes(entry)) throw new Error('POLL_ENTRY must be spread or simultaneous');
 const runId = __ENV.RUN_ID;
 if (!runId || !/^[a-zA-Z0-9_-]{1,40}$/.test(runId)) throw new Error('RUN_ID is required (1-40 letters, numbers, _ or -)');
 if (mode === 'poll' && vus !== participants) throw new Error('poll requires VUS=PARTICIPANTS');
-const users = new SharedArray('users', () => {
+const users = setupMode === 'csv' ? new SharedArray('users', () => {
   const lines = open(__ENV.USERS_CSV || '../../seed/out/users.csv').trim().split('\n');
   const header = lines.shift().trim().split(',');
   const id = header.indexOf('user_id'), token = header.indexOf('access_token');
   if (id < 0 || token < 0) throw new Error('users.csv needs user_id and access_token');
   return lines.slice(0, totalUsers).map(line => { const c = line.trim().split(','); return { id: c[id], token: c[token] }; });
-});
-if (users.length < totalUsers || users.some(u => !u.id || !u.token) || new Set(users.map(u => u.id)).size !== totalUsers || new Set(users.map(u => u.token)).size !== totalUsers)
+}) : [];
+if (setupMode === 'csv' && (users.length < totalUsers || users.some(u => !u.id || !u.token) || new Set(users.map(u => u.id)).size !== totalUsers || new Set(users.map(u => u.token)).size !== totalUsers))
   throw new Error('users.csv needs enough distinct user IDs and access tokens');
 const options = {
+  setupTimeout: '10m',
   scenarios: { ticketing: mode === 'poll' || mode === 'mixed'
     ? { executor: 'constant-vus', vus: mode === 'mixed' ? totalUsers : vus, duration }
     : { executor: 'shared-iterations', vus, iterations: participants, maxDuration: __ENV.MAX_DURATION || '5m' } },
@@ -93,9 +95,26 @@ const holdLatency = new Trend('ticket_hold_duration', true);
 function count(outcome, bad) { outcomes.add(1, { outcome }); unexpected.add(bad); }
 function headers(user, key) { return { Authorization: `Bearer ${user.token}`, 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) }; }
 function setup() {
-  const metrics = http.get(`${management}/actuator/prometheus`, { tags: { name: 'setup' } });
-  if (metrics.status !== 200) fail(`management probe failed: ${metrics.status}`);
-  const response = http.get(`${base}/api/performances/${performanceId}/seats`, { headers: headers(users[0]), tags: { name: 'setup' } });
+  if (management) {
+    const metrics = http.get(`${management}/actuator/prometheus`, { tags: { name: 'setup' } });
+    if (metrics.status !== 200) fail(`management probe failed: ${metrics.status}`);
+  }
+  const activeUsers = [];
+  if (setupMode === 'self') {
+    for (let id = 1; id <= totalUsers; id++) {
+      const login = http.post(`${base}/api/auth/login`, JSON.stringify({ email: `fanq${id}@fanq.com`, password: __ENV.SEED_PASSWORD || '0000' }), {
+        headers: { 'Content-Type': 'application/json' }, tags: { name: 'setup' }, redirects: 0,
+      });
+      let token; try { token = login.json('accessToken'); } catch (_) { /* invalid response */ }
+      if (login.status !== 200 || typeof token !== 'string' || !token) fail(`seed login failed for account ${id}: HTTP ${login.status}`);
+      activeUsers.push({ id: String(id), token });
+      if (id < totalUsers) sleep(0.1);
+    }
+    if (new Set(activeUsers.map(u => u.token)).size !== totalUsers) fail('seed logins returned duplicate tokens');
+  } else {
+    for (const user of users) activeUsers.push(user);
+  }
+  const response = http.get(`${base}/api/performances/${performanceId}/seats`, { headers: headers(activeUsers[0]), tags: { name: 'setup' } });
   if (response.status !== 200) fail(`seat probe failed: ${response.status}`);
   let seats; try { seats = response.json(); } catch (_) { fail('seat probe did not return JSON'); }
   if (!Array.isArray(seats)) fail('seat probe did not return an array');
@@ -110,9 +129,10 @@ function setup() {
   if (mode !== 'poll') { holdAttempts.add(0); holdCompleted.add(0); }
   if (mode === 'replay') replayCompleted.add(0);
   if (mode === 'mixed') pollRequests.add(0);
-  return { ids, seatCount: seats.length };
+  return { ids, seatCount: seats.length, users: activeUsers };
 }
 function run(data) {
+  const users = data.users;
   const pollUser = mode === 'poll' || (mode === 'mixed' && exec.vu.idInTest <= participants);
   if (pollUser) {
     return runPoll(data, { base, performanceId, users, entry, vus, participants, mode, headers, pollRequests, pollErrors, count, pollLatency });

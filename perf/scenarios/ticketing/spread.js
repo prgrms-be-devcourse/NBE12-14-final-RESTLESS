@@ -1,4 +1,4 @@
-// spread 시나리오. 실행 방법: ../ticketing.md
+// 좌석 조회: 3초에 걸쳐 분산 진입한다.
 import { createRuntime } from './common.js';
 
 const scenario = createRuntime("poll", "spread", null);

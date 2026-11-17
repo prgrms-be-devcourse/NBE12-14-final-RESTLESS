@@ -12,10 +12,10 @@ SCENARIO:
   mixed, mixed-distributed   조회 80% + 선점 20% (인기 좌석 또는 분산)
 
 USERS는 전체 테스트 사용자 수다. 예: run-ticketing.sh spread 100
-필수 환경변수: BASE_URL, MANAGEMENT_URL, PERF_ALLOWED_APP_HOSTS,
-              PERFORMANCE_ID, USERS_CSV
+필수 환경변수: BASE_URL, PERFORMANCE_ID
+인증: USERS_CSV 또는 SETUP=self (시드 계정 로그인)
 선택 환경변수: DURATION, MAX_DURATION, HOT_SEATS, HOLD_DELAY_SECONDS,
-              POLL_ENTRY (mixed만), K6_BIN
+              POLL_ENTRY (mixed만), MANAGEMENT_URL, K6_BIN
 HELP
 }
 if [[ "${1:-}" == '-h' || "${1:-}" == '--help' ]]; then usage; exit 0; fi
@@ -24,15 +24,19 @@ scenario="$1"
 case "$scenario" in spread|simultaneous|hot|overlap|distributed|replay|mixed|mixed-distributed) ;; *) echo "알 수 없는 시나리오: $scenario" >&2; usage >&2; exit 2;; esac
 [[ "$2" =~ ^[1-9][0-9]{0,5}$ ]] || { echo 'USERS는 1~999999 사이의 양의 정수여야 합니다.' >&2; exit 2; }
 users="$2"
-for name in BASE_URL MANAGEMENT_URL PERF_ALLOWED_APP_HOSTS PERFORMANCE_ID USERS_CSV; do
+for name in BASE_URL PERFORMANCE_ID; do
   [[ -n "${!name:-}" ]] || { echo "필수 환경변수가 비어 있습니다: $name" >&2; exit 2; }
 done
 [[ "$PERFORMANCE_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'PERFORMANCE_ID는 양의 정수여야 합니다.' >&2; exit 2; }
-[[ -f "$USERS_CSV" && -r "$USERS_CSV" ]] || { echo 'USERS_CSV 파일을 읽을 수 없습니다.' >&2; exit 2; }
+if [[ "${SETUP:-csv}" != self ]]; then
+  [[ -n "${USERS_CSV:-}" && -f "$USERS_CSV" && -r "$USERS_CSV" ]] || { echo 'USERS_CSV 파일을 읽을 수 없습니다.' >&2; exit 2; }
+fi
 K6_BIN="${K6_BIN:-k6}"
 command -v "$K6_BIN" >/dev/null || { echo "k6를 찾을 수 없습니다: $K6_BIN" >&2; exit 2; }
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-export USERS_CSV="$(cd "$(dirname "$USERS_CSV")" && pwd)/$(basename "$USERS_CSV")"
+if [[ "${SETUP:-csv}" != self ]]; then
+  export USERS_CSV="$(cd "$(dirname "$USERS_CSV")" && pwd)/$(basename "$USERS_CSV")"
+fi
 export PARTICIPANTS="$users" VUS="$users"
 export HOT_SEATS="${HOT_SEATS:-1}" MAX_DURATION="${MAX_DURATION:-5m}"
 export HOLD_DELAY_SECONDS="${HOLD_DELAY_SECONDS:-3}" MIXED_HOLD=hot
@@ -53,4 +57,9 @@ printf '시나리오: %s | 사용자: %s | 실행 ID: %s\n' "$scenario" "$users"
 if [[ "$MODE" == mixed ]]; then printf '조회: %s명 | 선점: %s명\n' "$PARTICIPANTS" "$HOLD_PARTICIPANTS"; fi
 if [[ "$MODE" != poll ]]; then printf '선점 요청으로 테스트 데이터가 변경됩니다. 실험 간 초기 상태를 확인하세요.\n'; fi
 printf '결과: %s\n' "$SUMMARY_PATH"
-"$K6_BIN" run "$root/perf/scenarios/ticketing/${scenario}.js"
+if [[ -n "${TICKETING_K6_CONFIG:-}" ]]; then
+  [[ -r "$TICKETING_K6_CONFIG" ]] || { echo 'k6 설정 파일을 읽을 수 없습니다.' >&2; exit 2; }
+  "$K6_BIN" run --config "$TICKETING_K6_CONFIG" "$root/perf/scenarios/ticketing/${scenario}.js"
+else
+  "$K6_BIN" run "$root/perf/scenarios/ticketing/${scenario}.js"
+fi
