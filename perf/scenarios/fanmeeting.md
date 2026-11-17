@@ -48,7 +48,7 @@ PARTICIPANTS=1000 PEAK_RATE=200 perf/scenarios/fanmeeting-s1.sh
 | `CLOSE_PARTICIPANTS`, `CLOSE_RATE` | 500, 자동 | C. A가 쓰지 않은 계정(`USER_OFFSET=PARTICIPANTS`)을 쓴다. 계정이 모자라면 남는 만큼만, 0이면 건너뛴다. 도착률을 비우면 마감 3초 전부터 약 6초에 걸쳐 보내도록(참여자/6) 정한다 |
 | `RESULT`, `RESULT_RATE`, `RESULT_HOLD` | `true`, `PEAK_RATE`, 자동 | 결과 조회 폭주. A 참여자만 조회한다. C가 있으면 DB의 당첨·예비·주문 수에는 C 응모자도 들어가므로 첫 바퀴 수가 DB보다 작다 |
 | `DRAW_TIMEOUT` | 600 | 마감 뒤 추첨 확정을 기다리는 최대 초. 넘으면 조회를 건너뛴다 |
-| `METRICS_INTERVAL` | 5 | 지표 저장 간격(초) |
+| `METRICS_INTERVAL` | 2 | 지표 저장 간격(초). 한 회 약 100MB(스냅샷 약 160KB × 600장). 보낼 때는 압축한다 |
 | `OPEN_IN`, `WINNER_LIMIT`, `RESERVE_LIMIT`, `FEE_AMOUNT` | prepare와 같음 | 행사 설정 |
 | `K6`, `K6_IMAGE`, `K6_ADD_HOST` | `docker`, `grafana/k6:2.4.0`, 자동 | `K6=local`이면 설치된 k6. `K6_ADD_HOST`는 컨테이너 안에서 `perf-app`이 가리킬 주소(로컬 실행이면 `host-gateway`) |
 | `INVARIANTS_SQL` | `backend/src/test/resources/harness/fanmeeting-invariants.sql` | DB 점검을 할 때만 필요 |
