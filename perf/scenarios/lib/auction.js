@@ -4,6 +4,8 @@ import { check, fail } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { SharedArray } from 'k6/data';
 
+export const SETUP = __ENV.SETUP || 'manifest';
+if (!['manifest', 'self'].includes(SETUP)) throw new Error(`invalid SETUP: ${SETUP}`);
 export const SEED_OUT = __ENV.SEED_OUT || '../seed/out';
 export const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8080').replace(/\/$/, '');
 export const MANAGEMENT_URL = (__ENV.MANAGEMENT_URL || 'http://localhost:8081').replace(/\/$/, '');
@@ -14,11 +16,11 @@ for (const url of [BASE_URL, MANAGEMENT_URL]) {
   const host = url.replace(/^https?:\/\//, '').split(/[:/]/)[0];
   if (!/^perf-/i.test(host) || /prod/i.test(host) || !allowed.includes(host)) throw new Error(`host ${host} is not an allowed perf host`);
 }
-export const manifest = JSON.parse(open(`${SEED_OUT}/manifest.json`));
-export const auction = manifest.auction;
-if (!auction || !Number.isInteger(auction.mass_first_user_id) || auction.mass_first_user_id <= 1) throw new Error('manifest auction account ranges are missing');
+export const manifest = SETUP === 'manifest' ? JSON.parse(open(`${SEED_OUT}/manifest.json`)) : null;
+export const auction = manifest?.auction || null;
+if (SETUP === 'manifest' && (!auction || !Number.isInteger(auction.mass_first_user_id) || auction.mass_first_user_id <= 1)) throw new Error('manifest auction account ranges are missing');
 if (!Number.isInteger(ROW_OFFSET) || ROW_OFFSET < 0) throw new Error('ROW_OFFSET must be a non-negative integer');
-export const users = new SharedArray('auction users', () => {
+export const users = SETUP === 'manifest' ? new SharedArray('auction users', () => {
   const lines = open(`${SEED_OUT}/users.csv`).split('\n');
   const head = lines[0].split(',');
   const id = head.indexOf('user_id'), token = head.indexOf('access_token');
@@ -32,8 +34,8 @@ export const users = new SharedArray('auction users', () => {
     if (userId > ROW_OFFSET && userId < auction.mass_first_user_id) rows.push({ id: userId, token: fields[token].trim() });
   }
   return rows;
-});
-if (!users.length) throw new Error('no eligible auction users after ROW_OFFSET');
+}) : [];
+if (SETUP === 'manifest' && !users.length) throw new Error('no eligible auction users after ROW_OFFSET');
 http.setResponseCallback(http.expectedStatuses(200, 201, 400, 401, 403, 404, 409, 422, 429));
 
 export const outcomes = {
@@ -95,4 +97,40 @@ export function summarize(data, { headline, conditions, extraLatency = [] }) {
   const out = { stdout: lines.join('\n') };
   if (SUMMARY_PATH) out[SUMMARY_PATH] = JSON.stringify({ conditions: { baseUrl: BASE_URL, rowOffset: ROW_OFFSET, ...conditions }, outcomes: outcomeValues, failedThresholds, metrics: data.metrics }, null, 2);
   return out;
+}
+
+// Self setup runs before load stages. Tokens and credentials never enter logs or summary.
+export function loginOrganizer(email, password) {
+  const res = http.post(`${BASE_URL}/api/auth/login`, JSON.stringify({ email, password }), {
+    headers: { 'Content-Type': 'application/json' }, tags: { name: 'setup' },
+  });
+  let token; try { token = res.json('accessToken'); } catch (_) { /* rejected or unavailable */ }
+  if (res.status !== 200 || !token) fail(`organizer login failed: HTTP ${res.status}`);
+  return token;
+}
+export function loginBidders(first, count, batchSize, password) {
+  const started = Date.now(), loggedIn = [];
+  for (let start = 0; start < count; start += batchSize) {
+    const size = Math.min(batchSize, count - start);
+    const requests = Array.from({ length: size }, (_, i) => ({ method: 'POST', url: `${BASE_URL}/api/auth/login`,
+      body: JSON.stringify({ email: `fanq${first + start + i}@fanq.com`, password }),
+      params: { headers: { 'Content-Type': 'application/json' }, tags: { name: 'setup' } } }));
+    const responses = http.batch(requests);
+    responses.forEach((res, i) => {
+      let token; try { token = res.json('accessToken'); } catch (_) { /* failed login */ }
+      if (res.status === 200 && token) loggedIn.push({ id: first + start + i, token });
+    });
+  }
+  const seconds = (Date.now() - started) / 1000;
+  console.log(`bidder logins: ${loggedIn.length}/${count}, elapsed=${seconds.toFixed(3)}s`);
+  if (loggedIn.length / count < 0.99) fail(`bidder login success rate ${loggedIn.length}/${count} is below 99%`);
+  return { users: loggedIn, requested: count, succeeded: loggedIn.length, seconds };
+}
+export function createAuction(token, terms) {
+  const res = http.post(`${BASE_URL}/api/auctions`, JSON.stringify(terms), {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, tags: { name: 'setup' },
+  });
+  let id; try { id = res.json('auctionId'); } catch (_) { /* server response failed */ }
+  if (res.status !== 201 || !Number.isSafeInteger(id) || id < 1) fail(`auction creation failed: HTTP ${res.status}`);
+  return id;
 }

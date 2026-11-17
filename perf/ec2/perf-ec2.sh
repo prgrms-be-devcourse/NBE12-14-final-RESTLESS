@@ -107,13 +107,13 @@ case "$cmd" in
     scale="${1:?scale is required}"
     seed "$scale"
     mkdir -p "$(dirname "$BUNDLE")" && chmod 700 "$(dirname "$BUNDLE")"
-    tar -czf "$BUNDLE" -C "$OUT" users.csv manifest.json && chmod 600 "$BUNDLE"
+    tar -czf "$BUNDLE" -C "$OUT" users.csv staff.csv manifest.json && chmod 600 "$BUNDLE"
     echo "bundle: $BUNDLE ($(du -h "$BUNDLE" | cut -f1)). Next: perf-ec2.sh serve-tokens"
     ;;
   refresh)
     scale="${1:?scale is required}"
     seed "$scale" --refresh
-    tar -czf "$BUNDLE" -C "$OUT" users.csv manifest.json && chmod 600 "$BUNDLE"
+    tar -czf "$BUNDLE" -C "$OUT" users.csv staff.csv manifest.json && chmod 600 "$BUNDLE"
     echo "bundle refreshed. Next: perf-ec2.sh serve-tokens"
     ;;
   verify)

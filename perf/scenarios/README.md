@@ -18,7 +18,7 @@ perf/scenarios/run-ticketing.sh simultaneous 100
 다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 실행마다 `.ai-output/perf/`에 결과가 저장된다.
 
 [성능 실험 계획](../../docs/testing/performance.md)의 실험을 돌리는 k6 스크립트다. 입력 데이터는 [시드](../seed/README.md)가 만든다.
-드롭과 경매 시나리오를 둔다. 다른 도메인 시나리오는 각 담당자가 준비한다.
+드롭과 경매 시나리오를 둔다. 팬미팅은 [fanmeeting.md](fanmeeting.md)에 따로 둔다. 다른 도메인 시나리오는 각 담당자가 준비한다.
 
 | 파일 | 실험 | 내용 |
 |---|---|---|
@@ -26,6 +26,7 @@ perf/scenarios/run-ticketing.sh simultaneous 100
 | [drop-reservation-step.js](drop-reservation-step.js) | EXP-01 용량 측정 | 도착률을 계단식으로 올려 무릎 지점과 최대 지속 처리량을 찾는다. 대기열 없음 |
 | [auction-bid-step.js](auction-bid-step.js) | AU-1·2·7 | 핫·분산·종료 직전 입찰 계단식 측정 |
 | [auction-close-report.sql](auction-close-report.sql) | AU-8 | 동시 종료 지연과 결과 집계 |
+| `fanmeeting-*` ([설명](fanmeeting.md)) | 팬미팅 S1, FM-EXP-05 | 오픈·마감 응모 몰림, 추첨, 결과 조회 폭주. `fanmeeting-s1.sh` 하나로 한 회 실행 |
 
 두 시나리오는 [lib/drop-reservation.js](lib/drop-reservation.js)의 호스트 안전장치, 요청, 결과 분류, 요약을 같이 쓴다. 다른 것은 부하 모델뿐이다.
 
@@ -205,6 +206,33 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
 EC2 실행은 위의 `--add-host` 주소를 EC2 IP로 바꾼다. EC2에서는 `perf/ec2/README.md`의 DB 생성·시드·토큰 전달과 앱 기동 절차를 따른다. `ending` 전에 앱을 멈춘 상태에서 서버의 perf 환경 변수로 `AUCTION_CLOSE_IN_MINUTES=4 perf/seed/seed.sh --scale small --profile perf --refresh`를 실행하고 토큰을 다시 전달한다.
 
 계단별 결과는 입찰 요청 지연, 오류율과 초당 수락 건수다. 5xx·연결 오류만 누적 오류율 중단에 포함하고 수락·금액 부족·이미 최고·경매 종료·시작 전·크레딧 부족·기타 4xx를 따로 센다. 각 요청의 `retry` 태그는 재시도 여부를 나타낸다. `ending`은 종료 결과와 최초/최종 종료 시각, 연장 시간, 종료 처리 지연을 요약한다. 실행 후 `perf/seed/seed.sh --scale <scale> --profile perf --verify`에서 경매 불변식 10개가 0인지 본다. 시드 기준값 실패는 입찰 또는 종료 뒤 정상이다.
+
+### 자기 준비 모드
+
+서버를 직접 조작할 수 없는 측정자는 `SETUP=self`로 토큰 파일 없이 시작할 수 있다. 서버에서는 perf DB에 `seed base`를 **한 번** 넣고 `perf/ec2/perf-ec2.sh start`로 perf 앱을 띄워 둔다. 시드 회원과 주최자로 로그인한 뒤 판마다 새 경매를 등록한다. 서버 시각은 기존 시드 경매 1번의 상세 `serverTime`에서 읽는다. 요청은 모두 perf 호스트 허용 목록을 통과해야 한다.
+
+```bash
+mkdir -p .ai-output/perf
+docker run --rm -v "$PWD/perf/scenarios:/scenarios:ro" -v "$PWD/.ai-output/perf:/out" \
+  --add-host perf-app:<IP> \
+  -e BASE_URL=http://perf-app:8080 -e MANAGEMENT_URL=http://perf-app:8081 \
+  -e PERF_ALLOWED_APP_HOSTS=perf-app -e SETUP=self -e MODE=hot \
+  -e BIDDERS=1000 -e SUMMARY_PATH=/out/auction-self-hot.json \
+  -e K6_WEB_DASHBOARD=true -e K6_WEB_DASHBOARD_EXPORT=/out/auction-self-hot.html \
+  grafana/k6:2.4.0 run /scenarios/auction-bid-step.js
+```
+
+`MODE=spread`는 여러 경매를 만들고, `MODE=ending`은 종료 직전 경매를 만든다. 로그인과 등록은 setup에서 진행하므로 입찰 전 준비 시간이 필요하다. 로그인 성공률이 99% 미만이거나 경매가 열리지 않으면 측정을 시작하지 않는다. 각 실행이 만든 경매는 DB에 남아 누적된다. 여러 판이 끝나면 서버에서 `perf/ec2/perf-ec2.sh verify base`로 불변식을 확인한다. 시드 기준값 일부는 측정 후 실패하는 것이 정상이다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `SETUP` | `manifest` | `self`면 직접 로그인과 등록, 기본값은 기존 CSV·manifest 방식 |
+| `BIDDERS`, `BIDDER_FIRST_ID`, `BIDDER_LAST_ALLOWED_ID` | `1000`, `1`, `96900` | 연속 회원 ID 수·시작·허용 상한. small에서는 상한을 840으로 지정 |
+| `ORGANIZER_EMAIL`, `SEED_PASSWORD` | `organizer1@fanq.com`, `0000` | 주최자와 시드 계정 비밀번호 |
+| `START_DELAY`, `AUCTION_DURATION` | `20s`, `2h` | 등록부터 시작까지, hot/spread 경매 길이 |
+| `SPREAD_COUNT`, `LOGIN_BATCH` | `100`, `50` | 분산 경매 수, 동시 로그인 요청 수 |
+
+`BIDDER_LAST_ALLOWED_ID`는 base 시드의 AU-6·8 계정 보호 범위다. 다른 스케일에서는 해당 시드의 범위를 확인해 직접 설정한다. 시드 출력과 토큰을 측정자에게 복사할 필요는 없다. 요약 JSON에는 생성된 경매 ID, 로그인 요청·성공 수와 시간, 입찰자 범위와 주최자가 기록된다. 비밀번호와 토큰은 요약에 기록하지 않는다.
 
 ### AU-8 동시 종료 집계
 
