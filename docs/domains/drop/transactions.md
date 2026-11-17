@@ -22,6 +22,16 @@ TX2~TX5의 드롭 쪽 단계는 결제 모듈이 같은 트랜잭션에서 호�
 
 하나라도 실패하면 전체 롤백한다.
 
+계측 (#216): 재고 행 잠금을 두 타이머로 잰다. 태그 값은 정해진 몇 개뿐이다.
+
+| 타이머 | 구간 | 태그 |
+|---|---|---|
+| `drop.inventory.hold.update` | 2번 재고 UPDATE 호출. 잠금 대기를 포함한다 | `result`: held, sold_out |
+| `drop.inventory.lock.held` | UPDATE가 끝난 시각부터 트랜잭션 종료까지 | `outcome`: committed, rolled_back, unknown |
+| `drop.reservation.duration` | TX1 전체 | `result`: created, replayed, sold_out, not_on_sale, active_exists, rejected, error |
+
+`drop.inventory.lock.held`는 앱에서 잰다. DB가 잠금을 쥔 시간에 UPDATE 응답과 커밋 왕복이 더해진다. 품절 UPDATE는 행을 바꾸지 않아 이 타이머에 들어가지 않는다.
+
 ## TX2. PG 승인 시작
 
 짧은 MySQL 트랜잭션에서:

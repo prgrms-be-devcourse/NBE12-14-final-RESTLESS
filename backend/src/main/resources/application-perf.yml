@@ -39,4 +39,6 @@ management:
       percentiles-histogram:
         http.server.requests: true
         drop.reservation.duration: true
+        drop.inventory.hold.update: true
+        drop.inventory.lock.held: true
         payment.pg.approve: true

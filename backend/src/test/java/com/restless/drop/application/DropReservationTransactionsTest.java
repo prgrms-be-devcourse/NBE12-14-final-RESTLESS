@@ -9,6 +9,7 @@ import com.restless.order.application.OrderService;
 import com.restless.order.application.OrderView;
 import com.restless.order.domain.OrderStatus;
 import com.restless.order.domain.OrderType;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -52,7 +53,7 @@ class DropReservationTransactionsTest {
         when(orders.find(7L)).thenReturn(Optional.of(new OrderView(7L, 2L, OrderType.DROP, OrderStatus.PENDING_PAYMENT, 0)));
         when(reservations.saveAndFlush(any(DropReservation.class))).thenAnswer(call -> call.getArgument(0));
         var service = new DropReservationTransactions(drops, variants, slots, inventories, reservations,
-                orders, clock, new DropReservationSettings(Duration.ofMinutes(5), false), mock(DropQueueEntryRepository.class));
+                orders, clock, new DropReservationSettings(Duration.ofMinutes(5), false), mock(DropQueueEntryRepository.class), new SimpleMeterRegistry());
 
         assertThatThrownBy(() -> service.create(1L, 2L, "key",
                 new CreateDropReservationRequest(3L, "회원", "010", "서울")))
@@ -98,7 +99,7 @@ class DropReservationTransactionsTest {
         admission.admit(opens, Duration.ofMinutes(5));
         when(queue.lockLatest(1L, 2L)).thenReturn(Optional.of(admission));
         var service = new DropReservationTransactions(drops, variants, slots, inventories, reservations,
-                orders, clock, new DropReservationSettings(Duration.ofMinutes(5), true), queue);
+                orders, clock, new DropReservationSettings(Duration.ofMinutes(5), true), queue, new SimpleMeterRegistry());
 
         assertThatThrownBy(() -> service.create(1L, 2L, "key",
                 new CreateDropReservationRequest(3L, "회원", "010", "서울")))

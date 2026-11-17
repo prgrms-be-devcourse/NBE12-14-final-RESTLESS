@@ -28,7 +28,8 @@ class DropReservationServiceTest {
 
         assertThat(service.create(1L, 2L, "key", request)).isEqualTo(new Result(body, true));
         assertThat(meters.get("drop.reservation").tag("result", "replayed").counter().count()).isEqualTo(1);
-        assertThat(meters.get("drop.reservation.duration").timer().count()).isEqualTo(1);
+        assertThat(durations()).isEqualTo(1);
+        assertThat(meters.get("drop.reservation.duration").tag("result", "replayed").timer().count()).isEqualTo(1);
         var sequence = inOrder(transactions);
         sequence.verify(transactions).create(1L, 2L, "key", request);
         sequence.verify(transactions).findExisting(1L, 2L, "key");
@@ -41,7 +42,8 @@ class DropReservationServiceTest {
         when(transactions.findExisting(1L, 2L, "key")).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.create(1L, 2L, "key", request)).isSameAs(failure);
         assertThat(meters.find("drop.reservation").counter()).isNull();
-        assertThat(meters.get("drop.reservation.duration").timer().count()).isEqualTo(1);
+        assertThat(durations()).isEqualTo(1);
+        assertThat(meters.get("drop.reservation.duration").tag("result", "error").timer().count()).isEqualTo(1);
     }
 
     @Test
@@ -57,8 +59,23 @@ class DropReservationServiceTest {
         }
         for (var result : new String[]{"created", "replayed", "sold_out", "not_on_sale", "active_exists"}) {
             assertThat(meters.get("drop.reservation").tag("result", result).counter().count()).isEqualTo(1);
+            assertThat(meters.get("drop.reservation.duration").tag("result", result).timer().count()).isEqualTo(1);
         }
-        assertThat(meters.get("drop.reservation.duration").timer().count()).isEqualTo(5);
+        assertThat(durations()).isEqualTo(5);
+    }
+
+    @Test
+    void otherBusinessRejectionsAreTimedAsRejectedWithoutAResultCounter() {
+        doThrow(new BusinessException(ErrorCode.DROP_ADMISSION_REQUIRED)).when(transactions).create(1L, 2L, "key", request);
+        assertThatThrownBy(() -> service.create(1L, 2L, "key", request)).isInstanceOf(BusinessException.class);
+        assertThat(meters.find("drop.reservation").counter()).isNull();
+        assertThat(meters.get("drop.reservation.duration").tag("result", "rejected").timer().count()).isEqualTo(1);
+        assertThat(durations()).isEqualTo(1);
+    }
+
+    /** Every call is timed exactly once, whatever its result tag. */
+    private long durations() {
+        return meters.get("drop.reservation.duration").timers().stream().mapToLong(timer -> timer.count()).sum();
     }
 
     @Test
