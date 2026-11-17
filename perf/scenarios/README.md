@@ -1,7 +1,24 @@
 # k6 시나리오
 
+## 티켓팅
+
+좌석 조회는 `ticketing/spread.js`(분산 진입)와 `ticketing/simultaneous.js`(동시 진입)를 사용한다. 선점과 혼합을 포함한 모든 티켓팅 시나리오는 `run-ticketing.sh`로 실행한다. `users.csv`는 공통 시드가 만든 서로 다른 사용자 토큰을 사용하며, 파일은 Git에 올리지 않는다.
+
+```bash
+export BASE_URL="http://<테스트-서버>:8080"
+export PERFORMANCE_ID=<회차_ID>
+export USERS_CSV="$PWD/perf/seed/out/users.csv"
+
+perf/scenarios/run-ticketing.sh spread 100
+perf/scenarios/run-ticketing.sh simultaneous 100
+```
+
+숫자는 전체 사용자 수다. 조회의 기본 실행 시간은 2분이며, `DURATION=10s perf/scenarios/run-ticketing.sh spread 5`처럼 바꿀 수 있다. CSV 대신 시드 계정으로 로그인하려면 `SETUP=self`를 지정한다. 로그인은 Refresh Token을 DB에 추가한다. HTTP 사용 시 비밀번호와 토큰은 암호화되지 않는다. 시작 전에 perf 프로필, 테스트 DB, 회차와 토큰 유효기간을 확인한다.
+
+다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 실행마다 `.ai-output/perf/`에 결과가 저장된다.
+
 [성능 실험 계획](../../docs/testing/performance.md)의 실험을 돌리는 k6 스크립트다. 입력 데이터는 [시드](../seed/README.md)가 만든다.
-드롭과 경매 시나리오를 둔다. 팬미팅은 [fanmeeting.md](fanmeeting.md)에 따로 둔다. 다른 도메인 시나리오는 각 담당자가 준비한다.
+드롭·경매·티켓팅 시나리오를 둔다. 팬미팅은 [fanmeeting.md](fanmeeting.md)에 따로 둔다.
 
 | 파일 | 실험 | 내용 |
 |---|---|---|

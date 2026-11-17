@@ -49,3 +49,10 @@ JOIN auction_bids b ON b.auction_bid_id = h.auction_bid_id
 JOIN _perf_refresh_auctions r ON r.auction_id = b.auction_id
 SET t.created_at = b.accepted_at + INTERVAL IF(t.transaction_type = 'HOLD', 0, 1) MICROSECOND;
 DROP TEMPORARY TABLE _perf_refresh_auctions;
+
+-- 공통 시드의 티켓팅 예매 기간 갱신. 기존 예약·선점은 유지한다.
+UPDATE performances p JOIN venue_layouts l ON l.id = p.layout_id
+SET p.starts_at = UTC_TIMESTAMP(6) + INTERVAL 8 DAY,
+    p.booking_opens_at = UTC_TIMESTAMP(6) - INTERVAL 1 DAY,
+    p.booking_closes_at = UTC_TIMESTAMP(6) + INTERVAL 7 DAY
+WHERE l.layout_code = 'PERF-TICKET';

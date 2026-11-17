@@ -22,7 +22,7 @@ def seed_sql():
 
 
 if __name__ == '__main__':
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[4]
     subprocess.run([
         'docker', 'compose', '-f', str(repo / 'backend/compose.yaml'), '--profile', 'dev',
         'exec', '-T', 'mysql', 'sh', '-c',
