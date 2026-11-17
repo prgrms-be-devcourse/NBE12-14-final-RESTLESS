@@ -1,8 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")" && pwd)"
-: "${DB_HOST:?}" "${DB_NAME:?}" "${DB_USERNAME:?}" "${DB_PASSWORD:?}" "${PERF_ALLOWED_DB_HOSTS:?}"
 [[ "${1:-}" == seed || "${1:-}" == verify ]] || { echo 'usage: ticketing.sh seed | verify PERFORMANCE_ID' >&2; exit 1; }
+
+# 직접 DB 설정을 주지 않은 EC2에서는 기존 perf 설정을 읽는다. 파일은 셸 코드로 실행하지 않는다.
+if [[ -z "${DB_HOST:-}" && -z "${DB_NAME:-}" && -z "${DB_USERNAME:-}" && -z "${DB_PASSWORD:-}" && -z "${PERF_ALLOWED_DB_HOSTS:-}" ]]; then
+  env_file="${PERF_ENV_FILE:-/opt/restless/perf.env}"
+  if [[ -r "$env_file" ]]; then
+    env_content="$(cat "$env_file")" || { echo 'cannot read perf environment file' >&2; exit 1; }
+  else
+    env_content="$(sudo cat "$env_file")" || { echo 'cannot read perf environment file; check its path and permissions' >&2; exit 1; }
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      DB_URL=*) DB_URL="${line#*=}" ;;
+      DB_USERNAME=*) DB_USERNAME="${line#*=}" ;;
+      DB_PASSWORD=*) DB_PASSWORD="${line#*=}" ;;
+      SPRING_PROFILES_ACTIVE=*) SPRING_PROFILES_ACTIVE="${line#*=}" ;;
+    esac
+  done <<< "$env_content"
+  unset env_content
+  [[ "${SPRING_PROFILES_ACTIVE:-}" == perf ]] || { echo 'perf environment file must set SPRING_PROFILES_ACTIVE=perf' >&2; exit 1; }
+  [[ "${DB_URL:-}" =~ ^jdbc:mysql://([^:/]+)(:([0-9]+))?/([^?]+) ]] || { echo 'perf environment file needs a valid MySQL DB_URL' >&2; exit 1; }
+  DB_HOST="${BASH_REMATCH[1]}" DB_PORT="${BASH_REMATCH[3]:-3306}" DB_NAME="${BASH_REMATCH[4]}"
+  PERF_ALLOWED_DB_HOSTS="$DB_HOST"
+  export DB_HOST DB_PORT DB_NAME DB_USERNAME DB_PASSWORD PERF_ALLOWED_DB_HOSTS SPRING_PROFILES_ACTIVE
+  if [[ -z "${MYSQL:-}" ]] && ! command -v mysql >/dev/null; then
+    MYSQL="docker run --rm -i --network host -e MYSQL_PWD mysql:8.4 mysql"
+  fi
+fi
+: "${DB_HOST:?}" "${DB_NAME:?}" "${DB_USERNAME:?}" "${DB_PASSWORD:?}" "${PERF_ALLOWED_DB_HOSTS:?}"
 [[ "$DB_NAME" == perf-* && ! "$DB_NAME $DB_HOST" =~ [Pp][Rr][Oo][Dd] ]] || { echo 'invalid perf DB' >&2; exit 1; }
 allowed=0
 IFS=',' read -ra hosts <<< "$PERF_ALLOWED_DB_HOSTS"

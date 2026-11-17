@@ -138,6 +138,8 @@ EC2와 RDS에서는 아직 재지 않았다.
 
 기존에 공통 시드만 적용한 DB에는 파일을 배포하는 것만으로 데이터가 추가되지 않는다. 회차가 전혀 없는지 확인한 뒤 `ticketing.sh seed`로 추가할 수 있다. 이미 사용 중인 DB에서 공통 시드를 다시 실행하거나 초기화하지 않는다.
 
+EC2에서 DB 환경변수를 직접 지정하지 않았다면 `ticketing.sh`가 `/opt/restless/perf.env`를 읽고 perf 프로필과 DB 이름을 확인한다. 다른 경로는 `PERF_ENV_FILE`로 지정한다. 기존처럼 DB 환경변수를 직접 지정하는 방식도 지원하며, 일부만 지정했다면 나머지를 파일과 섞지 않고 오류로 중단한다. 설정 파일을 읽을 수 없거나 DB_URL이 없으면 AWS 담당자에게 경로와 권한을 확인한다.
+
 `ticketing.sh`는 기존 DB에 대한 추가 적재와 `ticketing-verify.sql` 점검용이다. `backend/scripts/seed/ticketing/`은 로컬 개발 DB에 반원형 100석 샘플을 추가하는 별도 도구이며 AWS 성능 데이터와 용도가 다르다. 부하 발생 코드는 `perf/scenarios/ticketing/`에 둔다.
 
 백엔드 이미지 배포는 시드를 실행하지 않는다. AWS 성능 환경 준비 과정에서 공통 시드를 실행하면 티켓팅 데이터도 함께 생성된다.
