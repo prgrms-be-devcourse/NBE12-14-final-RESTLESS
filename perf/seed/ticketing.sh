@@ -19,7 +19,8 @@ if [[ "$1" == seed ]]; then
   mysql_run < "$root/ticketing.sql"
 else
   [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || { echo 'positive PERFORMANCE_ID required' >&2; exit 1; }
-  result="$( { printf 'SET @performance = %s;\n' "$2"; cat "$root/ticketing-verify.sql"; } | mysql_run --batch --skip-column-names)"
+  result="$( { printf 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;\nSTART TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY;\nSET @performance = %s;\n' "$2"; cat "$root/ticketing-verify.sql"; printf '\nCOMMIT;\n'; } | mysql_run --batch --skip-column-names)"
   printf '%s\n' "$result"
-  [[ "$(printf '%s\n' "$result" | awk -F '\t' '$2 != 0 {n++} END {print n+0}')" == 0 ]] || exit 1
+  [[ "$(printf '%s\n' "$result" | awk -F '\t' 'NF != 2 || $2 !~ /^[0-9]+$/ || $2 != 0 {n++} END {if (NR != 14) n++; print n+0}')" == 0 ]] || { echo 'verify: invariant violation or incomplete result' >&2; exit 1; }
+  echo 'verify: all 14 checks passed'
 fi

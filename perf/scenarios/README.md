@@ -1,10 +1,11 @@
 # k6 시나리오
 
 [성능 실험 계획](../../docs/testing/performance.md)의 실험을 돌리는 k6 스크립트다. 입력 데이터는 [시드](../seed/README.md)가 만든다.
-드롭과 경매 시나리오를 둔다. 다른 도메인 시나리오는 각 담당자가 준비한다.
+드롭, 경매, 티켓팅 시나리오를 둔다. 티켓팅 조회·선점 실행 방법은 별도 안내를 따른다.
 
 | 파일 | 실험 | 내용 |
 |---|---|---|
+| [ticketing/ 시나리오](ticketing.md) | 티켓팅 조회·선점 | 3초 폴링과 좌석 선점 경쟁 |
 | [drop-reservation-spike.js](drop-reservation-spike.js) | EXP-01 쓰기 기준선 | 판매 시작 순간 핫 드롭 재고 점유 스파이크. 대기열 없음 |
 | [drop-reservation-step.js](drop-reservation-step.js) | EXP-01 용량 측정 | 도착률을 계단식으로 올려 무릎 지점과 최대 지속 처리량을 찾는다. 대기열 없음 |
 | [auction-bid-step.js](auction-bid-step.js) | AU-1·2·7 | 핫·분산·종료 직전 입찰 계단식 측정 |
