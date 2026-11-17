@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 팬미팅 측정 중 서버 지표 기록. Grafana 없이 서버 지연·처리량·연결 풀·CPU를 남긴다. 사용법은 perf/scenarios/README.md.
+# 팬미팅 측정 중 서버 지표 기록. Grafana 없이 서버 지연·처리량·연결 풀·CPU를 남긴다. 사용법은 perf/scenarios/fanmeeting.md.
 #
 #   fanmeeting-metrics.sh                 # 기록 시작. Ctrl-C(또는 DURATION 경과)로 끝내면 요약을 출력한다
 #   fanmeeting-metrics.sh summary <dir>   # 이미 기록한 폴더를 다시 요약한다. FROM, UNTIL로 구간을 자를 수 있다

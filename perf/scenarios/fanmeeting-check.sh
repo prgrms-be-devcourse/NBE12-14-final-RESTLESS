@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 팬미팅 S1(C46) 측정 뒤 점검: 불변식, 응모 정합성, 추첨 소요 시간. 사용법은 perf/scenarios/README.md.
+# 팬미팅 S1(C46) 측정 뒤 점검: 불변식, 응모 정합성, 추첨 소요 시간. 사용법은 perf/scenarios/fanmeeting.md.
 #
 # 필요: DB_HOST, DB_NAME, DB_USERNAME, DB_PASSWORD, PERF_ALLOWED_DB_HOSTS (seed.sh와 같은 값)
 #       INVARIANTS_SQL  "-- name:" 블록으로 나뉜 불변식 SQL 경로 (fanmeeting-invariants.sql)

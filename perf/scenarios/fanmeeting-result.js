@@ -1,4 +1,4 @@
-// 팬미팅 FM-EXP-05: 추첨 확정 직후 결과 조회 폭주. 사용법은 perf/scenarios/README.md.
+// 팬미팅 FM-EXP-05: 추첨 확정 직후 결과 조회 폭주. 사용법은 perf/scenarios/fanmeeting.md.
 //
 // fanmeeting-apply.js로 응모한 같은 회원들이 결과 발표 직후 계속 새로고침하는 상황을 만든다. 읽기만 한다.
 //   1) GET /api/fan-meetings/{eventId}/result/me

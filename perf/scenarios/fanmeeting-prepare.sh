@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 팬미팅 S1(C46) 준비: 주최자 토큰으로 측정용 행사를 하나 만든다. 사용법은 perf/scenarios/README.md.
+# 팬미팅 S1(C46) 준비: 주최자 토큰으로 측정용 행사를 하나 만든다. 사용법은 perf/scenarios/fanmeeting.md.
 #
 # 필요: BASE_URL, MANAGEMENT_URL, PERF_ALLOWED_APP_HOSTS (k6 시나리오와 같은 값)
 # 선택: SEED_OUT(perf/seed/out), OPEN_IN(3m), WINNER_LIMIT(300), RESERVE_LIMIT(100), FEE_AMOUNT(50000),

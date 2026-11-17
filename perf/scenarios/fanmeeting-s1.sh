@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 팬미팅 S1 한 회: 행사 하나로 측정 흐름 전체를 명령 하나로 돈다. 사용법은 perf/scenarios/README.md.
+# 팬미팅 S1 한 회: 행사 하나로 측정 흐름 전체를 명령 하나로 돈다. 사용법은 perf/scenarios/fanmeeting.md.
 #
 #   지표 기록 시작 → 행사 생성 → 응모 몰림(A, START_OFFSET=-2s면 B) → 점검 1
 #   → 마감 앞뒤 응모(C) → 추첨 확정 대기 → 점검 2(D) → 결과 조회 폭주 → 점검 3 → 지표 요약(단계별)

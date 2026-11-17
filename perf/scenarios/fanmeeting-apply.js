@@ -1,4 +1,4 @@
-// 팬미팅 S1(C46): 응모 오픈 순간 서로 다른 회원의 첫 응모 몰림. 사용법은 perf/scenarios/README.md.
+// 팬미팅 S1(C46): 응모 오픈 순간 서로 다른 회원의 첫 응모 몰림. 사용법은 perf/scenarios/fanmeeting.md.
 //
 // POST /api/fan-meetings/{eventId}/applications만 친다. 행사는 fanmeeting-prepare.sh가 만든다.
 // 반복마다 users.csv의 다른 행을 쓴다. 한 계정은 테스트 전체에서 한 번만 요청하고 다시 보내지 않는다.
