@@ -23,6 +23,7 @@ AI는 아래 항목을 임의로 확정하지 않는다. 구현에 영향을 주
 | 재대기, 재입장 정책 | DECIDED (2026-11-13): 상태 조회가 30초보다 오래 끊기면 이탈. 다시 들어오면 새 순번 ([드롭 정책 7절](../domains/drop/policy.md#7-구매권-정책-decided-2026-11-13)) |
 | 대기열 FIFO 보장 수준 | DECIDED (2026-11-13): 대략적인 진입 순서. 정확한 선착순보다 처리 속도 우선 (`SKIP LOCKED` 배치) |
 | MySQL Queue SQL과 Worker 구조 | 구현됨 (#70): `drop_queue_entries`, 입장 작업 `dropQueueAdmissionJob` ([transactions.md](../domains/drop/transactions.md), [data-model.md](../domains/drop/data-model.md)) |
+| 드롭 품절 뒤 대기자 처리 | OPEN (2026-11-18): 현재 판매 기간 종료 전에는 품절만으로 대기를 닫지 않는다. 가용 재고 0·최종 매진 시 대기 종료/안내 여부와 반환 재고 재판매 관계는 팀 결정 필요. 이번 성능 실험은 정책을 유지하고 품절 뒤 대기 인원·시간만 측정한다. 임의 변경 금지 ([실험 계획](../testing/drop-performance-plan.md)) |
 | 판매 시작 직전 대기열 허용 여부 | 정책 확인. 현재 계약·구현은 판매 기간 밖 진입을 409 `DROP_NOT_ON_SALE`로 거절한다 ([drop.md](../contracts/api/drop.md) D4). 허용하려면 계약 변경 |
 | 회원, 주최자 권한 범위 | 팀 확인 |
 | 쿠폰의 드롭 결제 할인 연결 | 후순위 협의 |
