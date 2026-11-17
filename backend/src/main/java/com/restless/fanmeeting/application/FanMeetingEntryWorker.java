@@ -33,11 +33,11 @@ public class FanMeetingEntryWorker {
 
     public void openDue() {
         each("open", transitions.findDueToOpen(batchSize), transitions::open);
-        for (Long eventId : transitions.findOpenMissed(batchSize)) {
+        each("open-missed", transitions.findOpenMissed(batchSize), eventId -> {
             if (transitions.open(eventId) == OpenResult.MISSED && missedReported.add(eventId)) {
                 log.error("FANMEETING_OPEN_MISSED eventId={} 마감 시각까지 열지 못했습니다. 운영자 처리가 필요합니다.", eventId);
             }
-        }
+        });
     }
 
     public void closeDue() {

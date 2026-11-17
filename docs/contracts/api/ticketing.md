@@ -1,25 +1,32 @@
-> 구현 범위 변경 (DECIDED, 2026-11-12): 전용 멱등성 기록·실행권·접수 작업 자동 복구는 후속 구현이다. 아래 범용 202/statusUrl과 거절 응답 재현은 목표 계약이며 현재 MVP 보장으로 표시하지 않는다. 기존 자원의 중복 생성·변경 방지와 불명확 결제 보호·재확인은 필수다. [구현 범위](../../domains/ticketing/idempotency.md)를 따른다.
 # 티켓팅 API
 
-- 담당: 송혜민
-- 출처: [design.md 8.3](../../domains/ticketing/design.md)
-- 상태: Draft
+> 담당: 송혜민
+>
+> 상태: IMPLEMENTED (환불 요청 `.../cancellations`는 미구현)
+>
+> 관련 코드: `backend/src/main/java/com/restless/concert/api/`, `backend/src/main/java/com/restless/ticketing/api/`
+>
+> 마지막 확인: 2026-11-16 (엔드포인트와 결제 Handler 등록 여부를 코드와 대조. 공연 목록·상세는 `common.md`에서 이 문서로 일원화)
 
-| Method | Endpoint | 기능 |
-|---|---|---|
-| GET | `/api/concerts` | 공연 목록 (페이지 조회) |
-| GET | `/api/concerts/{concertId}` | 공연 상세 |
-| GET | `/api/concerts/{concertId}/performances` | 공연 회차 목록 |
-| GET | `/api/performances/{performanceId}/seats` | 회차별 좌석 상태 (3초 폴링) |
-| POST | `/api/ticket-reservations` | 좌석 선점 (`Idempotency-Key`) |
-| GET | `/api/ticket-reservations/{reservationId}` | 예약 상세 |
-| GET | `/api/ticket-reservations/active` | 활성 예약 조회, 복구 |
-| GET | `/api/tickets` | 본인 발급 티켓 목록 (페이지 조회) |
-| GET | `/api/tickets/{ticketId}` | 본인 발급 티켓 상세 |
-| DELETE | `/api/ticket-reservations/{reservationId}` | 선점 취소 |
-| POST | `/api/ticket-reservations/{reservationId}/checkout` | 결제 시작 |
-| POST | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 요청 |
-| GET | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 상태 조회 |
+- 출처: [design.md 8.3](../../domains/ticketing/design.md)
+
+> 구현 범위 변경 (DECIDED, 2026-11-12): 전용 멱등성 기록·실행권·접수 작업 자동 복구는 후속 구현이다. 아래 범용 202/statusUrl과 거절 응답 재현은 목표 계약이며 현재 MVP 보장으로 표시하지 않는다. 기존 자원의 중복 생성·변경 방지와 불명확 결제 보호·재확인은 필수다. [구현 범위](../../domains/ticketing/idempotency.md)를 따른다.
+
+| Method | Endpoint | 기능 | 구현 |
+|---|---|---|---|
+| GET | `/api/concerts` | 공연 목록 (페이지 조회) | 구현 |
+| GET | `/api/concerts/{concertId}` | 공연 상세 | 구현 |
+| GET | `/api/concerts/{concertId}/performances` | 공연 회차 목록 | 구현 |
+| GET | `/api/performances/{performanceId}/seats` | 회차별 좌석 상태 (3초 폴링) | 구현 |
+| POST | `/api/ticket-reservations` | 좌석 선점 (`Idempotency-Key`) | 구현 |
+| GET | `/api/ticket-reservations/{reservationId}` | 예약 상세 | 구현 |
+| GET | `/api/ticket-reservations/active` | 활성 예약 조회, 복구 | 구현 |
+| GET | `/api/tickets` | 본인 발급 티켓 목록 (페이지 조회) | 구현 |
+| GET | `/api/tickets/{ticketId}` | 본인 발급 티켓 상세 | 구현 |
+| DELETE | `/api/ticket-reservations/{reservationId}` | 선점 취소 | 구현 |
+| POST | `/api/ticket-reservations/{reservationId}/checkout` | 결제 시작 | 구현 |
+| POST | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 요청 | 미구현 |
+| GET | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 상태 조회 | 미구현 |
 
 ## 공연 목록 조회
 
@@ -342,7 +349,7 @@ Java 엔티티·Repository는 Performance/PerformanceRepository, DB 테이블은
 ## 공통 결제 대상 식별 (DECIDED, 2026-11-13)
 
 티켓팅은 공통 결제의 `payableType=TICKET`, `payableId=예약 ID`로 연결한다. 공통 주문 ID와 결제창의 pgOrderId는 별개다. 금액은 예약에 연결된 공통 주문에서 확인한다.
-현재 예약의 수락 시도 저장 기반과 내부 서비스의 대상 조회·승인 시작·성공 확정/티켓 발급을 구현했으며 티켓팅 PaymentResultHandler는 아직 등록하지 않았다. 따라서 이 매핑 합의가 티켓팅의 공통 결제 준비·승인 API 사용 가능을 뜻하지 않는다. checkout 응답과 기존 API 동작은 유지한다.
+티켓팅 결제 Handler(`TicketPaymentResultHandler`)가 등록돼 있어, 티켓 주문도 공통 결제 준비·승인 API(`POST /api/payments`, `/confirm`)를 쓴다 (2026-11-16 코드 기준). checkout 응답과 기존 API 동작은 유지한다.
 
 
 ## 본인 발급 티켓 목록·상세

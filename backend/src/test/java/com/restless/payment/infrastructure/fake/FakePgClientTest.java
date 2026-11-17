@@ -2,6 +2,7 @@ package com.restless.payment.infrastructure.fake;
 
 import com.restless.payment.application.pg.*;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -10,6 +11,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Random;
 import java.util.concurrent.*;
+import java.util.random.RandomGenerator;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -18,6 +20,15 @@ class FakePgClientTest {
     FakePgClient client = new FakePgClient(new FakePgProperties(null, 0, 0, 0), new Random(42), Clock.fixed(NOW, ZoneOffset.UTC));
     PgApproveCommand command(String order, String key) {
         return new PgApproveCommand("payment-" + order, order, 1000, key);
+    }
+
+    @Test void defaultRandomComesFromJavaBaseSoTheJreImageCanStart() {
+        // The runtime image (temurin 21 JRE) has no jdk.random module, so RandomGenerator.getDefault() fails there (#195).
+        var noRandomBean = new StaticListableBeanFactory().getBeanProvider(RandomGenerator.class);
+        var fake = new FakePgClient(new FakePgProperties(null, 0, 0, 0), noRandomBean, Clock.fixed(NOW, ZoneOffset.UTC));
+        assertThat(fake).extracting("random")
+            .extracting(random -> random.getClass().getModule().getName())
+            .isEqualTo("java.base");
     }
 
     @Test void defaultsToApprovalAndQueryAndCancelAreConsistent() {

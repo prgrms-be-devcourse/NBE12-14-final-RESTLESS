@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/auction/domain/`, `backend/src/main/java/com/restless/credit/domain/`, `backend/src/main/resources/db/migration/V*__auction_*.sql`, `backend/src/test/resources/harness/auction-invariants.sql`
 >
-> 마지막 확인: 2026-11-15 (#140 종료 실패 테스트, 불변식 SQL 파일 분리와 함께 고침)
+> 마지막 확인: 2026-11-16 (#155 불변식 SQL 파일 분리와 함께 고침)
 
 동시 요청이나 재시도가 있어도 반드시 지켜야 하는 조건이다. 단위, 통합, 동시성 테스트의 기준이며, 테스트 이름이나 주석에 `INV-AU-xx`를 붙여 추적한다.
 

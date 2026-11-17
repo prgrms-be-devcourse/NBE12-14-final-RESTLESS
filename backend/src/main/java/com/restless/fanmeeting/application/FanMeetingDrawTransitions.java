@@ -11,6 +11,7 @@ import com.restless.fanmeeting.infrastructure.FanMeetingDrawRunRepository;
 import com.restless.fanmeeting.infrastructure.FanMeetingEventRepository;
 import com.restless.fanmeeting.infrastructure.FanMeetingOrderRepository;
 import com.restless.fanmeeting.infrastructure.FanMeetingSelectionRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -20,6 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -49,6 +51,8 @@ public class FanMeetingDrawTransitions {
     private final FanMeetingOrderRepository orders;
     private final MemberPort memberPort;
     private final Clock clock;
+    private final MeterRegistry meterRegistry;
+    private final Set<Long> lateReported = ConcurrentHashMap.newKeySet();
 
     /** Claim에 성공한 Worker가 들고 다니는 값. seed와 token은 응답·로그에 내보내지 않는다. */
     public record DrawClaim(Long drawRunId, Long eventId, String leaseToken, byte[] seed, int winnerLimit,
@@ -77,6 +81,10 @@ public class FanMeetingDrawTransitions {
         if (!run.isClaimable(now)) {
             return Optional.empty();
         }
+        if (!event.isDrawAllowed(now)) {
+            reportLateDraw(event.getId());
+            return Optional.empty();
+        }
         String token = UUID.randomUUID().toString();
         run.claim(token, now);
         event.startDrawing(now);
@@ -85,7 +93,6 @@ public class FanMeetingDrawTransitions {
     }
 
     /** ② 계산. 잠그지 않는다. 탈퇴 회원은 빼고(응모 행은 그대로), 순위 키로 당첨·예비를 정한다. */
-    @Transactional(readOnly = true)
     public DrawPlan compute(DrawClaim claim) {
         List<Candidate> applied = applications.findCandidates(claim.eventId());
         Set<Long> active = activeUserIds(applied);
@@ -118,6 +125,10 @@ public class FanMeetingDrawTransitions {
             return List.of();
         }
         Instant now = clock.instant();
+        if (!event.isDrawAllowed(now)) {
+            reportLateDraw(event.getId());
+            return List.of();
+        }
         List<NotificationRequest> notifications = new ArrayList<>();
         int rank = 1;
         for (Candidate winner : plan.winners()) {
@@ -134,6 +145,13 @@ public class FanMeetingDrawTransitions {
         run.complete(plan.candidateCount(), now);
         event.finishDraw(plan.candidateCount() > 0, now);
         return notifications;
+    }
+
+    private void reportLateDraw(Long eventId) {
+        if (lateReported.add(eventId)) {
+            log.error("FANMEETING_DRAW_TOO_LATE eventId={}", eventId);
+            meterRegistry.counter("fanmeeting.worker.failure", "action", "draw-too-late").increment();
+        }
     }
 
     private Set<Long> activeUserIds(List<Candidate> applied) {

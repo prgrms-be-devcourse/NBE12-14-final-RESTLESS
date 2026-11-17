@@ -45,24 +45,38 @@ public interface FanMeetingOrderRepository extends JpaRepository<FanMeetingOrder
      * issuedBefore는 {@link FanMeetingOrder#issuedAtPastDeadline}으로 구한다.
      */
     @Query("""
-            select o.id from FanMeetingOrder o
+            select o.id as orderId, o.issuedAt as position from FanMeetingOrder o
              where o.status = com.restless.fanmeeting.domain.FanMeetingOrderStatus.PENDING_PAYMENT
                and o.issuedAt <= :issuedBefore and o.paymentId is null
-             order by o.issuedAt
+               and (:afterTime is null or o.issuedAt > :afterTime
+                    or (o.issuedAt = :afterTime and o.id > :afterId))
+             order by o.issuedAt, o.id
             """)
-    List<Long> findIdsToExpire(@Param("issuedBefore") Instant issuedBefore, Pageable limit);
+    List<ExpiryCandidate> findIdsToExpire(@Param("issuedBefore") Instant issuedBefore,
+            @Param("afterTime") Instant afterTime,
+            @Param("afterId") Long afterId, Pageable limit);
 
     /**
      * 보류 경고 후보: 보류가 오래됐고 아직 경고하지 않음. 잠금 없는 조회이고, 잠근 뒤 다시 확인한다.
      * startedBefore는 {@link FanMeetingOrder#reviewStartedAtToWarn}으로 구한다.
      */
     @Query("""
-            select o.id from FanMeetingOrder o
+            select o.id as orderId, o.reviewStartedAt as position from FanMeetingOrder o
              where o.status = com.restless.fanmeeting.domain.FanMeetingOrderStatus.PAYMENT_REVIEW
                and o.reviewStartedAt <= :startedBefore and o.reviewWarnedAt is null
-             order by o.reviewStartedAt
+               and (:afterTime is null or o.reviewStartedAt > :afterTime
+                    or (o.reviewStartedAt = :afterTime and o.id > :afterId))
+             order by o.reviewStartedAt, o.id
             """)
-    List<Long> findIdsToWarnReview(@Param("startedBefore") Instant startedBefore, Pageable limit);
+    List<ExpiryCandidate> findIdsToWarnReview(@Param("startedBefore") Instant startedBefore,
+            @Param("afterTime") Instant afterTime,
+            @Param("afterId") Long afterId, Pageable limit);
+
+    interface ExpiryCandidate {
+        Long getOrderId();
+
+        Instant getPosition();
+    }
 
     long countByEventIdAndStatus(Long eventId, FanMeetingOrderStatus status);
 

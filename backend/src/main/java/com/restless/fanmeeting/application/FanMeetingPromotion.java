@@ -65,7 +65,8 @@ public class FanMeetingPromotion {
      */
     public Preview preview(Long eventId) {
         Optional<FanMeetingEvent> event = events.findById(eventId);
-        if (event.isEmpty()) {
+        // 잠금 전 시각은 불필요한 회원 조회를 줄이는 용도다. 실제 판정은 promote에서 다시 한다.
+        if (event.isEmpty() || !event.get().isPromotionAllowed(clock.instant())) {
             return Preview.none();
         }
         Map<FanMeetingSelectionStatus, Long> counts = countByStatus(eventId);
@@ -130,8 +131,10 @@ public class FanMeetingPromotion {
 
         long review = orders.countByEventIdAndStatus(eventId, FanMeetingOrderStatus.PAYMENT_REVIEW);
         if (event.isRecruitmentDone(new FanMeetingEvent.Occupancy(confirmed, paymentPending, waiting, review), now)) {
-            selections.findWaitingReservesForUpdate(eventId, Pageable.unpaged())
-                    .forEach(reserve -> reserve.markNotNeeded(now));
+            if (waiting > 0) {
+                selections.findWaitingReservesForUpdate(eventId, Pageable.unpaged())
+                        .forEach(reserve -> reserve.markNotNeeded(now));
+            }
             event.completeRecruitment(now);
         }
         return notifications;

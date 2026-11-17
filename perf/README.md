@@ -5,7 +5,8 @@ EXP-01~04([성능 실험 계획](../docs/testing/performance.md))를 실행하�
 | 폴더 | 내용 |
 |---|---|
 | [seed/](seed/README.md) | 실험 입력 데이터. 빈 스키마에 대량 시드, 토큰 CSV, 정합성 점검 |
-| [scenarios/](scenarios/README.md) | k6 시나리오. EXP-01 드롭 재고 점유 스파이크 |
+| [scenarios/](scenarios/README.md) | k6 시나리오. EXP-01 드롭 재고 점유 스파이크, 계단식 용량 측정 |
+| [ec2/](ec2/README.md) | 배포 서버를 perf로 빌리는 순서와 명령. 시드, 토큰 전달, 정리 |
 
 ## 원칙
 
@@ -31,7 +32,7 @@ EXP-01~04([성능 실험 계획](../docs/testing/performance.md))를 실행하�
 - 시드는 호스트나 DB 이름에 prod가 들어 있으면 멈춘다. RDS 식별자에 prod를 넣지 않는다.
 - 보안 그룹은 8080과 8081을 내 IP에만 연다. RDS 3306은 EC2 보안 그룹에만 열고, 시드를 넣을 때만 내 IP를 잠시 추가한다.
 - t3는 버스터블이다. 테스트하는 동안만 크레딧 사양을 무제한으로 두고 끝나면 표준으로 되돌린다. 보고서에 CPU 크레딧 잔량을 함께 기록한다.
-- 끝나면 앱을 `prod`로 되돌린다.
+- 테스트 중에는 자동 배포를 멈추고 perf 컨테이너를 `restless-perf` 이름으로 띄운다. 끝나면 배포 컨테이너가 다시 뜬다 ([deploy/ec2](../deploy/ec2/README.md#부하-테스트와-함께-쓰기)).
 
 ### 이 환경에서 믿을 수 있는 것
 

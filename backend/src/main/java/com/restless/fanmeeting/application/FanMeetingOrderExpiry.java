@@ -36,15 +36,22 @@ public class FanMeetingOrderExpiry {
     private final FanMeetingSelectionRepository selections;
     private final Clock clock;
 
-    @Transactional(readOnly = true)
-    public List<Long> findDueToExpire(int limit) {
-        return orders.findIdsToExpire(FanMeetingOrder.issuedAtPastDeadline(clock.instant()), PageRequest.of(0, limit));
+    /** 마지막으로 조회한 주문의 정렬 키. 처리가 실패해도 다음 묶음은 이 위치 뒤에서 읽는다. */
+    public record Cursor(Long orderId, Instant position) {
     }
 
     @Transactional(readOnly = true)
-    public List<Long> findReviewsToWarn(int limit) {
+    public List<Cursor> findDueToExpire(Cursor after, int limit) {
+        return orders.findIdsToExpire(FanMeetingOrder.issuedAtPastDeadline(clock.instant()),
+                after == null ? null : after.position(), after == null ? 0L : after.orderId(),
+                PageRequest.of(0, limit)).stream().map(row -> new Cursor(row.getOrderId(), row.getPosition())).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<Cursor> findReviewsToWarn(Cursor after, int limit) {
         return orders.findIdsToWarnReview(FanMeetingOrder.reviewStartedAtToWarn(clock.instant()),
-                PageRequest.of(0, limit));
+                after == null ? null : after.position(), after == null ? 0L : after.orderId(),
+                PageRequest.of(0, limit)).stream().map(row -> new Cursor(row.getOrderId(), row.getPosition())).toList();
     }
 
     /** 결제 대기, 기한 경과, 진행 중인 시도 없음이면 주문·선발을 EXPIRED로 바꾼다. 만료했으면 true. */

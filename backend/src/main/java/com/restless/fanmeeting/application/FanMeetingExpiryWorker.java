@@ -1,9 +1,10 @@
 package com.restless.fanmeeting.application;
 
+import com.restless.fanmeeting.application.FanMeetingOrderExpiry.Cursor;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
-import java.util.function.IntFunction;
-import java.util.function.Predicate;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,26 +45,26 @@ public class FanMeetingExpiryWorker {
      * 대상이 없어질 때까지 묶음을 반복한다. 당첨자는 주문이 같은 시각에 발급돼 기한도 같이 끝나므로,
      * 한 회차에 한 묶음만 처리하면 만료와 그 뒤의 승격이 밀린다.
      *
-     * <p>멈추는 때: 묶음이 덜 찼을 때(남은 대상 없음), 한 건도 처리하지 못했을 때(실패한 주문만 다시 조회되는
-     * 반복을 막는다), {@link #MAX_ROUNDS}묶음을 채웠을 때.
+     * <p>조회한 마지막 시각·ID 뒤부터 이어 읽는다. 실패 건은 다음 회차에서 다시 시도한다.
+     * 묶음이 덜 찼거나 {@link #MAX_ROUNDS}묶음을 채웠으면 멈춘다.
      */
-    private void drain(String action, IntFunction<List<Long>> finder, Predicate<Long> task) {
+    private void drain(String action, BiFunction<Cursor, Integer, List<Cursor>> finder, Consumer<Long> task) {
+        Cursor after = null;
         for (int round = 0; round < MAX_ROUNDS; round++) {
-            List<Long> orderIds = finder.apply(batchSize);
-            int done = 0;
-            for (Long orderId : orderIds) {
+            List<Cursor> candidates = finder.apply(after, batchSize);
+            for (Cursor candidate : candidates) {
+                Long orderId = candidate.orderId();
                 try {
-                    if (task.test(orderId)) {
-                        done++;
-                    }
+                    task.accept(orderId);
                 } catch (RuntimeException e) {
                     log.error("FanMeeting {} failed orderId={}", action, orderId, e);
                     meterRegistry.counter("fanmeeting.worker.failure", "action", action).increment();
                 }
             }
-            if (orderIds.size() < batchSize || done == 0) {
+            if (candidates.size() < batchSize) {
                 return;
             }
+            after = candidates.getLast();
         }
     }
 }

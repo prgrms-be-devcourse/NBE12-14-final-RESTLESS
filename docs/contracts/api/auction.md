@@ -1,36 +1,40 @@
 # 경매 API
 
+> 담당: 천종원
+>
+> 상태: IMPLEMENTED (1차 구현 기준). 정책은 [policy.md](../../domains/auction/policy.md)를 따른다.
+>
 > 관련 코드: `backend/src/main/java/com/restless/auction/api/`, `backend/src/main/java/com/restless/credit/api/`, `backend/src/main/java/com/restless/common/error/ErrorCode.java`
 >
-> 마지막 확인: 2026-11-15 (#131 결과·내 입찰 조회까지)
+> 마지막 확인: 2026-11-16 (엔드포인트와 공개 경로를 컨트롤러·`SecurityConfig`와 대조)
 
-- 담당: 천종원
-- 상태: PROPOSED (1차 구현 기준). 정책은 [policy.md](../../domains/auction/policy.md)를 따른다.
-- 오류 응답 형식은 [공통 규칙](README.md)을 따른다.
+오류 응답 형식은 [README 공통 규칙 3](README.md#공통-규칙)을 따른다.
 
 모든 경매 API는 로그인이 필요하다 (`Authorization: Bearer <accessToken>`). 토큰이 없으면 401 `UNAUTHORIZED`.
+
+- 현재 구현: 목록·상세·결과 조회(`GET /api/auctions`, `/{auctionId}`, `/{auctionId}/result`)는 아직 `SecurityConfig` 공개 경로에 있어 토큰 없이도 응답한다. 공개 경로에서 빼는 작업은 인증 담당(홍승연)이 한다 ([policy.md](../../domains/auction/policy.md) 2절, 9절). 실시간 스트림, 입찰, 내 입찰, 지갑은 로그인이 필요하다.
 
 > 현재 `SecurityConfig.PUBLIC_GET_PATHS`에 경매 조회 경로가 공개로 들어 있다. 공개 목록에서 빼는 작업은 인증 담당(홍승연)이 한다.
 
 ## 조회
 
-| Method | Endpoint | 기능 |
-|---|---|---|
-| GET | `/api/auctions?status=&page=&size=` | 목록. `status`는 `SCHEDULED`, `OPEN`, `CLOSED` |
-| GET | `/api/auctions/{auctionId}` | 상세: 물품, 현재 최고 입찰, 최소 입찰 가능 금액, 종료 시각, `revision` |
-| GET | `/api/auctions/{auctionId}/stream` | 실시간 상태 (SSE) |
-| GET | `/api/auctions/{auctionId}/result` | 종료 결과. 종료 전이면 404 `AUCTION_RESULT_NOT_FOUND` |
+| Method | Endpoint | 기능 | 구현 |
+|---|---|---|---|
+| GET | `/api/auctions?status=&page=&size=` | 목록. `status`는 `SCHEDULED`, `OPEN`, `CLOSED` | 구현 |
+| GET | `/api/auctions/{auctionId}` | 상세: 물품, 현재 최고 입찰, 최소 입찰 가능 금액, 종료 시각, `revision` | 구현 |
+| GET | `/api/auctions/{auctionId}/stream` | 실시간 상태 (SSE) | 구현 |
+| GET | `/api/auctions/{auctionId}/result` | 종료 결과. 종료 전이면 404 `AUCTION_RESULT_NOT_FOUND` | 구현 |
 
 입찰 전체 내역 API는 1차에서 제공하지 않는다. 입찰은 모두 저장하지만 화면에는 최고 입찰 하나만 보여 준다.
 
 ## 회원
 
-| Method | Endpoint | 기능 |
-|---|---|---|
-| POST | `/api/auctions/{auctionId}/bids` | 입찰. `Idempotency-Key` 헤더 필수 |
-| GET | `/api/me/bids?status=&page=&size=` | 내가 참여한 경매별 마지막 입찰, 입찰 상태(`HIGHEST`, `OUTBID`, `WON`), 경매 상태 |
-| GET | `/api/me/wallet` | 보유, 묶인, 사용 가능 크레딧 |
-| POST | `/api/me/wallet/grants` | 테스트용 10,000 지급. 운영(prod)에서는 없음 |
+| Method | Endpoint | 기능 | 구현 |
+|---|---|---|---|
+| POST | `/api/auctions/{auctionId}/bids` | 입찰. `Idempotency-Key` 헤더 필수 | 구현 |
+| GET | `/api/me/bids?status=&page=&size=` | 내가 참여한 경매별 마지막 입찰, 입찰 상태(`HIGHEST`, `OUTBID`, `WON`), 경매 상태 | 구현 |
+| GET | `/api/me/wallet` | 보유, 묶인, 사용 가능 크레딧 | 구현 |
+| POST | `/api/me/wallet/grants` | 테스트용 10,000 지급. 운영(prod)에서는 없음 | 구현 |
 
 종료된 경매(`CLOSED`)에서 낙찰되지 못한 입찰은 `OUTBID`다. 화면은 이를 "낙찰 실패"로 표시한다.
 
@@ -51,11 +55,11 @@ POST /api/me/wallet/grants
 
 ## 주최자 (ORGANIZER, ADMIN)
 
-| Method | Endpoint | 기능 | 조건 |
-|---|---|---|---|
-| POST | `/api/auctions` | 등록 | |
-| PATCH | `/api/auctions/{auctionId}` | 수정 | 본인 경매(ADMIN 예외), 시작 전 |
-| DELETE | `/api/auctions/{auctionId}` | 삭제 | 본인 경매(ADMIN 예외), 시작 전 |
+| Method | Endpoint | 기능 | 조건 | 구현 |
+|---|---|---|---|---|
+| POST | `/api/auctions` | 등록 | | 구현 |
+| PATCH | `/api/auctions/{auctionId}` | 수정 | 본인 경매(ADMIN 예외), 시작 전 | 구현 |
+| DELETE | `/api/auctions/{auctionId}` | 삭제 | 본인 경매(ADMIN 예외), 시작 전 | 구현 |
 
 USER가 이 API를 직접 호출하면 Security가 403 `FORBIDDEN`으로 막는다.
 

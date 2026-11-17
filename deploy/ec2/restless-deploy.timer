@@ -1,0 +1,9 @@
+[Unit]
+Description=Check GHCR for a new restless dev image every 3 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=3min
+
+[Install]
+WantedBy=timers.target

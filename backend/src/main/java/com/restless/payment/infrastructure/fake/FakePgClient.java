@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -41,7 +42,9 @@ public class FakePgClient implements PgClient {
 
     @Autowired
     public FakePgClient(FakePgProperties properties, ObjectProvider<RandomGenerator> random, Clock clock) {
-        this(properties, random.getIfAvailable(RandomGenerator::getDefault), clock);
+        // RandomGenerator.getDefault() needs the jdk.random module, which the temurin 21 JRE runtime image lacks (#195).
+        // java.util.Random lives in java.base and is thread-safe, so it works in every runtime image.
+        this(properties, random.getIfAvailable(Random::new), clock);
     }
 
     public FakePgClient(FakePgProperties properties, RandomGenerator random, Clock clock) {

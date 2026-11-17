@@ -27,3 +27,10 @@ AGENTS.md의 핵심 불변식 중 이 도메인에 해당하는 것:
 - 정원 초과 금지 → INV-FM-07
 - 결과를 모르는 PG 응답을 실패로 처리하지 않음 → INV-FM-10, INV-FM-11
 - 중복 요청이 중복 주문을 만들지 않음 → INV-FM-01, INV-FM-13, `UNIQUE(selection_id)`
+
+## 실행 가능한 SQL 검사
+
+`backend/src/test/resources/harness/fanmeeting-invariants.sql`은 쿼리마다 위반 행 수를 반환한다. 0이면 정상이다.
+mysql에 파일을 그대로 입력하면 전체 DB를 검사한다. 가입 시각 검사는 기본 OFF이며, ON 데이터만 있는 DB를 확인할 때 같은 세션에서 `SET @fanmeeting_joined_at_check = 1;`을 먼저 실행한다.
+테스트 도우미는 `event-scope` 주석을 지정한 행사 ID 조건으로 바꾸고 가입 검사 여부를 명시적으로 전달한다. 빈 행사 목록은 검사 범위 0건이다.
+INV-FM-02 SQL은 `updated_at > closed_at`인 행을 검출한다. 타임스탬프는 커밋 시각 자체가 아니므로 커밋 순서의 보장은 Event 잠금 경합 테스트와 함께 확인한다. 마감 이후 Application을 정당하게 수정하는 운영 경로는 없다.

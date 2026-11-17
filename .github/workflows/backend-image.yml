@@ -1,0 +1,114 @@
+name: Backend image
+
+# dev에 push되어 CI가 통과한 커밋만 이미지로 만든다. 테스트는 CI가 이미 돌렸으므로 여기서는 다시 돌리지 않는다.
+# 수동 실행은 아무 브랜치나 고를 수 있다. 부하 테스트에서 개선 전후 이미지를 머지 없이 만들 때 쓴다.
+# dev 태그는 그 커밋이 dev의 최신 커밋일 때만 옮긴다. 아래 Move dev tag 단계 참고.
+# PR에서는 Dockerfile이 빌드되는지만 확인하고 올리지 않는다.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [dev]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - backend/Dockerfile
+      - backend/.dockerignore
+      - .github/workflows/backend-image.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # GHCR 이미지 이름은 소문자만 허용한다.
+  IMAGE: ghcr.io/prgrms-be-devcourse/nbe12-14-final-restless-backend
+
+jobs:
+  image:
+    # workflow_run은 CI가 성공했고, PR이 아닌 dev push로 돌았을 때만 진행한다.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Resolve commit
+        id: ref
+        env:
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            workflow_run) sha="$RUN_SHA"; branch="$RUN_BRANCH" ;;
+            pull_request) sha="$PR_SHA"; branch="" ;;
+            *) sha="$GITHUB_SHA"; branch="$GITHUB_REF_NAME" ;;
+          esac
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "tag=$IMAGE:sha-${sha:0:12}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.sha }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # EC2 t3.small이 x86이라 amd64만 만든다.
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.ref.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.ref.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # dev 태그는 이 커밋이 아직 dev의 최신 커밋일 때만 옮긴다. EC2는 dev 태그를 배포한다.
+      # CI는 커밋마다 끝나는 시점이 달라서, 늦게 끝난 옛 커밋이 최신 이미지를 덮어쓰는 것을 막는다.
+      # 이미지 빌드는 concurrency 그룹으로 한 번에 하나만 돌므로 확인과 태그 이동 사이에 다른 실행이 끼지 않는다.
+      - if: github.event_name != 'pull_request' && steps.ref.outputs.branch == 'dev'
+        name: Move dev tag
+        id: dev
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.ref.outputs.sha }}
+          TAG: ${{ steps.ref.outputs.tag }}
+        run: |
+          tip="$(gh api "repos/$GITHUB_REPOSITORY/commits/dev" --jq .sha)"
+          if [ "$tip" = "$SHA" ]; then
+            docker buildx imagetools create -t "$IMAGE:dev" "$TAG"
+            echo "moved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::dev is now at ${tip:0:12}, so dev stays where it is. Only $TAG was pushed."
+            echo "moved=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: github.event_name != 'pull_request'
+        name: Summary
+        env:
+          TAG: ${{ steps.ref.outputs.tag }}
+          MOVED: ${{ steps.dev.outputs.moved }}
+        run: |
+          {
+            echo "### Pushed"
+            echo "- \`$TAG\`"
+            if [ "$MOVED" = "true" ]; then echo "- \`$IMAGE:dev\`"; fi
+          } >> "$GITHUB_STEP_SUMMARY"

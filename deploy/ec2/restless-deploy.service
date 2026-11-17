@@ -1,0 +1,11 @@
+[Unit]
+Description=Replace the restless container when a new dev image is in GHCR
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# GHCR 로그인 정보(~/.docker/config.json)와 docker 그룹 권한이 ubuntu 사용자에게 있다.
+User=ubuntu
+ExecStart=/opt/restless/restless-deploy.sh

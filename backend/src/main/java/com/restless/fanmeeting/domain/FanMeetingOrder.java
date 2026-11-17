@@ -29,7 +29,7 @@ import org.hibernate.type.SqlTypes;
 public class FanMeetingOrder {
 
     /** 결제 기한 = 발급 + 60분 (policy.md 4절). */
-    static final Duration PAYMENT_WINDOW = Duration.ofMinutes(60);
+    public static final Duration PAYMENT_WINDOW = Duration.ofMinutes(60);
 
     /** 보류가 이만큼 이어지면 경고한다 (policy.md 7절). */
     static final Duration REVIEW_WARNING_AFTER = Duration.ofMinutes(30);

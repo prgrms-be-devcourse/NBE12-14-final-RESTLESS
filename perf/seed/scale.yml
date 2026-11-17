@@ -13,6 +13,18 @@ common:
   # 핫 드롭 판매 기간. 시드 또는 --refresh 시각부터 센다.
   hot_window_hours: 24
   # 주최자 계정 수. 공연마다 돌아가며 판매자가 된다.
+  auction_heavy_users: 100
+  auction_heavy_auctions_per_user: 50
+  auction_ending: 1
+  auction_mass_close: 1000
+  auction_mass_close_bids_per: 3
+  auction_spread: 100
+  auction_bg: 1000
+  auction_bg_bids_per: 20
+  auction_bg_pct_unsold: 10
+  auction_start_price: 10000
+  auction_min_increment: 100
+  credit_grant: 100000000
   organizers: 10
   drop_hot_variants: 3
   drop_hot_price: 59000
@@ -26,6 +38,11 @@ common:
 
 # 로컬 확인용
 small:
+  auction_heavy_users: 10
+  auction_heavy_auctions_per_user: 20
+  auction_mass_close: 50
+  auction_spread: 10
+  auction_bg: 50
   users: 1000
   drop_hot_stock: 100
   drop_bg_drops: 5
@@ -38,8 +55,23 @@ base:
   drop_bg_drops: 100
   drop_bg_reservations: 100000
 
+# 용량 측정 (계단식, perf/scenarios/drop-reservation-step.js)
+# 재고가 1,000이면 높은 도착률에서 몇 초 만에 품절되어 품절 응답만 재게 된다. 성공 점유 경로의 처리량을 보려고
+# 재고를 계획 도착 수(기본 계단 약 19만)보다 크게 둔다. 계정은 테스트에서 한 번씩만 쓰므로 계정 수도 같이 늘린다.
+# 핫 SKU 3개, 배경 데이터 크기는 base와 같아서 행 경합과 테이블 크기 조건이 같다. 바뀌는 것은 재고 수량뿐이다.
+capacity:
+  users: 210000
+  drop_hot_stock: 210000
+  contention_ratio: 1
+  drop_bg_drops: 100
+  drop_bg_reservations: 100000
+
 # 확장 실험
 large:
+  auction_heavy_users: 1000
+  auction_mass_close: 10000
+  auction_spread: 1000
+  auction_bg: 10000
   users: 1000000
   drop_hot_stock: 100000
   drop_bg_drops: 1000
