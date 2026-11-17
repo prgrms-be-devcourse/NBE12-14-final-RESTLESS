@@ -18,7 +18,7 @@ perf/scenarios/run-ticketing.sh simultaneous 100
 다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 실행마다 `.ai-output/perf/`에 결과가 저장된다.
 
 [성능 실험 계획](../../docs/testing/performance.md)의 실험을 돌리는 k6 스크립트다. 입력 데이터는 [시드](../seed/README.md)가 만든다.
-드롭과 경매 시나리오를 둔다. 팬미팅은 [fanmeeting.md](fanmeeting.md)에 따로 둔다. 다른 도메인 시나리오는 각 담당자가 준비한다.
+드롭·경매·티켓팅 시나리오를 둔다. 팬미팅은 [fanmeeting.md](fanmeeting.md)에 따로 둔다.
 
 | 파일 | 실험 | 내용 |
 |---|---|---|
