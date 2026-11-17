@@ -6,7 +6,7 @@ SET @now = UTC_TIMESTAMP(6);
 UPDATE drops
 SET opens_at  = @now - INTERVAL 1 MINUTE,
     closes_at = @now + INTERVAL @hot_window_hours HOUR
-WHERE id = 1;
+WHERE id = 1 OR (@warm_stock > 0 AND id = @warm_drop_id);
 
 UPDATE refresh_tokens
 SET expires_at = @now + INTERVAL @token_ttl_hours HOUR

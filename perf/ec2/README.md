@@ -22,7 +22,7 @@ perf/ec2/perf-ec2.sh check                 # 프로필, DB 이름, 대기열 꺼
 perf/ec2/perf-ec2.sh create-db             # 처음 한 번
 perf/ec2/perf-ec2.sh start sha-<12자리>     # 자동 배포 멈춤, restless 중지, restless-perf 기동, Flyway 결과
 perf/ec2/perf-ec2.sh stop-app
-perf/ec2/perf-ec2.sh seed capacity         # 계단식은 capacity, 스파이크는 base
+perf/ec2/perf-ec2.sh seed capacity         # 용량 측정은 capacity, 대표 판매는 sale, 스파이크는 base
 perf/ec2/perf-ec2.sh serve-tokens          # 노트북이 받으면 바로 끝난다
 ```
 

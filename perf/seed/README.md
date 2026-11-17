@@ -44,6 +44,18 @@ perf/seed/seed.sh --scale base --profile perf
 모든 수치는 [scale.yml](scale.yml)에서 바꾼다. small은 로컬, base는 기본 실험, capacity는 계단식 용량 측정, large는 확장 실험용이다.
 capacity는 base와 같고 핫 재고와 계정만 21만이다. 품절 응답 대신 성공 점유 경로의 처리량을 재려는 것이다 ([이유](../scenarios/README.md#재고를-크게-두는-이유)).
 
+드롭 성능 실험용 스케일은 아래와 같다. 스케일 구역끼리는 상속하지 않는다.
+
+| 스케일 | base·capacity와 다른 점 | 쓰는 실험 |
+|---|---|---|
+| sale | base에 워밍업 드롭(재고 5,000)을 더한다. 재고 1,000, 참여자 10,000명 | 대표 판매 H |
+| sale_small, sale_mini | sale과 같고 핫 재고가 500, 200이다. 참여자 5,000명, 2,000명 | H 축소 진단 |
+| capacity_single | capacity와 같고 핫 SKU가 1개다. 재고 21만이 한 SKU에 있다 | SKU 1개 대조 |
+| sale_local | small에 워밍업 드롭(재고 200)을 더한다. 핫 재고 50 | 로컬 확인 |
+
+워밍업 드롭은 `drop_warm_stock`이 0보다 클 때만 만든다. 판매 중이고 핫 드롭과 SKU 수·가격이 같다. 측정 전에 같은 경로를 데우되 핫 드롭 재고와 참여 계정을 쓰지 않으려고 둔다.
+ID는 배경 드롭 뒤다. `--refresh`가 핫 드롭과 함께 판매 기간을 다시 맞춘다. `manifest.json`의 `drop.warmup`에 드롭 ID, SKU, 총재고, 워밍업 계정의 첫 행이 남는다. 워밍업 드롭이 없으면 `null`이다.
+
 | 구분 | base |
 |---|---|
 | 회원 | users 100,000 + 관리자 1 + 주최자 10, refresh_tokens 계정마다 1 |
@@ -66,13 +78,13 @@ ID를 명시적으로 넣어서 시나리오가 값을 예측할 수 있다. 앱
 | 테이블 | ID |
 |---|---|
 | users | 회원 1..users, 관리자 users+1, 주최자 users+2..users+1+organizers |
-| drops | 핫 1, 배경 2.. |
+| drops | 핫 1, 배경 2.., 워밍업 드롭은 배경 뒤 |
 | auctions | 핫 1, 분산 2..1+auction_spread, 배경 그 뒤, AU-6 종료 경매, AU-7, AU-8 순서 |
 | AU-6 회원 | 마지막 auction_heavy_users명 |
 | AU-8 입찰 회원 | AU-6 회원 앞의 auction_mass_close × auction_mass_close_bids_per명 (입찰마다 다른 회원) |
 | credit_wallets | 일반 회원 ID와 동일 |
 | auction_bids, credit_holds | 배경 입찰 순서대로 1부터, 확보 ID는 입찰 ID와 동일 |
-| drop_variants | 핫 1..3, 배경 4.. |
+| drop_variants | 핫 1..3, 배경 4.., 워밍업 SKU는 배경 뒤 |
 | drop_reservations, orders, payments | 배경 점유 n에 대해 모두 n |
 
 ## 계정과 이름

@@ -5,11 +5,13 @@
 // 점유에 성공하면 가짜 PG 결제까지 잇는다 (PAY=0이면 점유까지만).
 // 회원 한 명이 iteration 하나다. 한 계정은 한 번만 참여하고 실패해도 새 회원처럼 다시 들어오지 않는다.
 // 앱의 restless.drop.queue.required가 QUEUE와 같아야 한다. 다르면 전제 조건 임계값이 실행을 멈춘다.
+// 시드에 워밍업 드롭이 있으면(--scale sale 등) 측정 전에 그 드롭으로 같은 경로를 데운다.
+// 워밍업은 핫 드롭 재고와 참여 계정을 쓰지 않고, 요약의 판매 결과에서 빠진다.
 import { sleep } from 'k6';
 import exec from 'k6/execution';
 import {
   DROP_ID, VARIANT_IDS, TOTAL_STOCK, manifest, loadUsers, baseThresholds, summaryTrendStats, checkTarget,
-  reserve, skipped, summarize, tracked, windowTag, durationMs, emptyThresholds, latencyLine, pct, ROW_OFFSET,
+  reserve, skipped, summarize, tracked, windowTag, durationMs, emptyThresholds, latencyLine, pct, ROW_OFFSET, HOT,
 } from './lib/drop-reservation.js';
 import {
   enterQueue, pollQueue, pay, recordFirstResponse, recordQueueWait, recordMember, PAY_TIMEOUT,
@@ -40,16 +42,35 @@ const WINDOW_S = Number(__ENV.WINDOW_SECONDS || 10);
 const MAX_VUS = Number(__ENV.MAX_VUS || (QUEUE === 'on' ? PARTICIPANTS + Math.ceil((PEAK_RATE * MARGIN_MS) / 1000) + 10 : 3000));
 const PRE_VUS = Number(__ENV.PRE_VUS || (QUEUE === 'on' ? MAX_VUS : Math.min(MAX_VUS, 1000)));
 
-const users = loadUsers(PARTICIPANTS);
+// 워밍업: 시드의 워밍업 드롭에 WARM_RATE로 WARM 동안 보낸다. 계정은 참여자 뒤 행을 쓴다. WARMUP=0이면 끈다.
+const warmSeed = manifest.drop.warmup || null;
+const WARMUP = warmSeed && __ENV.WARMUP !== '0'
+  ? { dropId: warmSeed.drop_id, variantIds: warmSeed.variants.map((v) => v.variant_id) } : null;
+const WARM_RATE = Number(__ENV.WARM_RATE || 30);
+const WARM_MS = WARMUP ? durationMs(__ENV.WARM || '60s') : 0;
+// 워밍업 회원이 끝나기를 기다리는 시간. 그 뒤에 판매가 시작한다.
+const WARM_GAP_MS = WARMUP ? durationMs(__ENV.WARM_GAP || '10s') : 0;
+const WARM_COUNT = Math.round((WARM_RATE * WARM_MS) / 1000);
+if (WARMUP && WARM_COUNT > warmSeed.total_stock) {
+  throw new Error(`warmup arrivals ${WARM_COUNT} exceed warmup drop stock ${warmSeed.total_stock}: lower WARM_RATE or WARM`);
+}
+if (WARMUP && warmSeed.first_user_row !== PARTICIPANTS) {
+  console.warn(`warmup accounts start at row ${PARTICIPANTS}, manifest suggests ${warmSeed.first_user_row}`);
+}
+const users = loadUsers(PARTICIPANTS + WARM_COUNT);
 const WINDOWS = Math.ceil((INFLOW_MS + OBSERVE_MS) / 1000 / WINDOW_S);
 const RESULTS = ['paid', 'reserved', 'payment_pending', 'payment_failed', 'sold_out', 'queue_closed', 'admission_expired', 'unfinished', 'error'];
 const APIS = QUEUE === 'on' ? ['enter', 'poll', 'reserve'] : ['reserve'];
 if (PAY) APIS.push('prepare', 'confirm');
 
+// 판매 결과는 scenario:sale 태그로만 본다. 워밍업 요청이 섞이지 않는다.
+const SALE = 'scenario:sale';
 const subMetrics = [
-  ...APIS.flatMap((api) => [`drop_eval_latency{api:${api}}`, `drop_unexpected_error{api:${api}}`]),
-  ...RESULTS.flatMap((r) => [`drop_member_result{result:${r}}`, `drop_member_total{result:${r}}`]),
-  'drop_queue_poll{result:waiting}', 'drop_queue_poll{result:closed}',
+  ...APIS.flatMap((api) => [`drop_eval_latency{api:${api},${SALE}}`, `drop_unexpected_error{api:${api},${SALE}}`]),
+  ...RESULTS.flatMap((r) => [`drop_member_result{result:${r},${SALE}}`, `drop_member_total{result:${r},${SALE}}`]),
+  `drop_queue_poll{result:waiting,${SALE}}`, `drop_queue_poll{result:closed,${SALE}}`,
+  `drop_first_response{${SALE}}`, `drop_queue_wait{${SALE}}`, `iteration_started{${SALE}}`, `iteration_finished{${SALE}}`,
+  `drop_sold_out{${SALE}}`, 'drop_member_result{scenario:warmup}', 'drop_member_result{result:paid,scenario:warmup}',
 ];
 // 창별 구매 경로 지연과 조회 지연. 요청은 시작한 창에 귀속한다. 정확한 분석은 --out 원자료로 한다.
 for (let w = 0; w < WINDOWS; w++) {
@@ -57,10 +78,29 @@ for (let w = 0; w < WINDOWS; w++) {
   if (QUEUE === 'on') subMetrics.push(`drop_eval_latency{api:poll,win:${w}}`);
 }
 
+// 핫 드롭의 신규 점유만 재고와 대조한다. 워밍업 드롭의 점유는 뺀다.
+const thresholds = { ...baseThresholds, ...emptyThresholds(subMetrics) };
+delete thresholds.drop_reservation_created;
+thresholds[`drop_reservation_created{${SALE}}`] = [`count<=${TOTAL_STOCK}`];
+
 export const options = {
   scenarios: {
+    ...(WARMUP ? {
+      warmup: {
+        executor: 'constant-arrival-rate',
+        exec: 'warmup',
+        rate: WARM_RATE,
+        timeUnit: '1s',
+        duration: `${WARM_MS}ms`,
+        preAllocatedVUs: Math.min(PRE_VUS, 200),
+        maxVUs: Math.max(200, WARM_COUNT),
+        gracefulStop: `${Math.ceil(WARM_GAP_MS / 1000)}s`,
+      },
+    } : {}),
     sale: {
       executor: 'ramping-arrival-rate',
+      exec: 'sale',
+      startTime: `${WARM_MS + WARM_GAP_MS}ms`,
       startRate: 0,
       timeUnit: '1s',
       preAllocatedVUs: PRE_VUS,
@@ -73,12 +113,9 @@ export const options = {
       gracefulStop: `${Math.ceil(OBSERVE_MS / 1000) + 30}s`,
     },
   },
-  thresholds: {
-    ...baseThresholds,
-    ...emptyThresholds(subMetrics),
-    // off인데 대기열이 켜져 있으면 baseThresholds의 drop_admission_required가 멈춘다.
-    // on인데 대기열이 꺼져 있어도 요청은 성공하므로 setup에서 따로 알린다.
-  },
+  // off인데 대기열이 켜져 있으면 baseThresholds의 drop_admission_required가 멈춘다.
+  // on인데 대기열이 꺼져 있어도 요청은 성공하므로 setup에서 따로 알린다.
+  thresholds,
   summaryTrendStats,
 };
 
@@ -86,26 +123,39 @@ export function setup() {
   checkTarget();
   console.log(`drop=${DROP_ID} variants=${VARIANT_IDS} stock=${TOTAL_STOCK} participants=${PARTICIPANTS} queue=${QUEUE} pay=${PAY} `
     + `peak=${PEAK_RATE}/s ramp=${RAMP_MS}ms hold=${HOLD_MS}ms margin=${MARGIN_MS}ms observe=${OBSERVE_MS}ms poll=${POLL_S}s `
-    + `maxVUs=${MAX_VUS} rowOffset=${ROW_OFFSET}`);
+    + `maxVUs=${MAX_VUS} rowOffset=${ROW_OFFSET} `
+    + (WARMUP ? `warmup=drop ${WARMUP.dropId} ${WARM_RATE}/s x ${WARM_MS}ms (${WARM_COUNT} accounts from row ${PARTICIPANTS}) gap=${WARM_GAP_MS}ms` : 'warmup=none'));
   if (QUEUE === 'on') console.log('queue=on: the app must run with restless.drop.queue.required=true and the admission scheduler enabled');
 }
 
-export default function () {
+export function sale() {
   const n = exec.scenario.iterationInTest;
-  if (n >= users.length) {
+  if (n >= PARTICIPANTS) {
     skipped.add(1);
     return;
   }
   const scenarioStart = exec.scenario.startTime;
   const deadline = scenarioStart + INFLOW_MS + OBSERVE_MS;
   const tag = () => ({ win: windowTag(scenarioStart, WINDOW_S) });
-  tracked({}, () => member(users[n], n, deadline, tag));
+  tracked({}, () => member(users[n], n, deadline, tag, HOT));
 }
 
-function member(user, n, deadline, tag) {
+// 워밍업 드롭에 같은 흐름을 보낸다. 계정은 참여자 뒤 행이고 창 태그는 warmup이다.
+export function warmup() {
+  const n = exec.scenario.iterationInTest;
+  if (n >= WARM_COUNT) {
+    skipped.add(1);
+    return;
+  }
+  const deadline = exec.scenario.startTime + WARM_MS + WARM_GAP_MS;
+  const tag = () => ({ win: 'warmup' });
+  tracked({ win: 'warmup' }, () => member(users[PARTICIPANTS + n], n, deadline, tag, WARMUP));
+}
+
+function member(user, n, deadline, tag, target) {
   const startedMs = Date.now();
   if (QUEUE === 'on') {
-    const entered = enterQueue(user, tag());
+    const entered = enterQueue(user, tag(), target.dropId);
     recordFirstResponse(entered.res);
     if (entered.status === 'ERROR' || entered.status === 'NOT_ON_SALE') return recordMember('error', startedMs);
     let status = entered.status;
@@ -114,35 +164,39 @@ function member(user, n, deadline, tag) {
     while (status === 'WAITING' || status === 'ERROR') {
       if (Date.now() + POLL_S * 1000 > deadline) return recordMember('unfinished', startedMs);
       sleep(POLL_S);
-      status = pollQueue(user, tag());
+      status = pollQueue(user, tag(), target.dropId);
     }
     if (status === 'CLOSED') return recordMember('queue_closed', startedMs);
     if (status !== 'ADMITTED') return recordMember('admission_expired', startedMs);
     recordQueueWait(Date.now() - enteredMs);
   }
 
-  const reserved = reserve(user, n, tag());
+  const reserved = reserve(user, n, tag(), target);
   if (QUEUE === 'off') recordFirstResponse(reserved.res);
   if (reserved.outcome === 'sold_out') return recordMember('sold_out', startedMs);
   if (reserved.outcome !== 'created' || !reserved.body) return recordMember('error', startedMs);
   if (!PAY) return recordMember('reserved', startedMs);
-  const paid = pay(user, reserved.body, tag());
+  const paid = pay(user, reserved.body, tag(), target.dropId);
   return recordMember(paid, startedMs);
 }
 
 export function handleSummary(data) {
   const m = (key) => (data.metrics[key] ? data.metrics[key].values : {});
   const lines = [
+    ...(WARMUP ? [`  warmup on drop ${WARMUP.dropId}: ${m('drop_member_result{scenario:warmup}').count || 0} members of ${WARM_COUNT} planned, `
+      + `${m('drop_member_result{result:paid,scenario:warmup}').count || 0} paid. The counters above include warmup; the lines below are the sale only.`] : []),
+    `  sale: started ${m(`iteration_started{${SALE}}`).count || 0}, finished ${m(`iteration_finished{${SALE}}`).count || 0}, `
+      + `created ${m(`drop_reservation_created{${SALE}}`).count || 0}, sold out ${m(`drop_sold_out{${SALE}}`).count || 0}`,
     `  member results (of ${PARTICIPANTS} planned):`,
-    ...RESULTS.map((r) => `    ${r.padEnd(20)} ${m(`drop_member_result{result:${r}}`).count || 0}`),
-    latencyLine('first response', m('drop_first_response')),
-    ...APIS.map((api) => `${latencyLine(`eval ${api}`, m(`drop_eval_latency{api:${api}}`))}  unexpected ${pct(m(`drop_unexpected_error{api:${api}}`).rate)}`),
+    ...RESULTS.map((r) => `    ${r.padEnd(20)} ${m(`drop_member_result{result:${r},${SALE}}`).count || 0}`),
+    latencyLine('first response', m(`drop_first_response{${SALE}}`)),
+    ...APIS.map((api) => `${latencyLine(`eval ${api}`, m(`drop_eval_latency{api:${api},${SALE}}`))}  unexpected ${pct(m(`drop_unexpected_error{api:${api},${SALE}}`).rate)}`),
     ...(QUEUE === 'on' ? [
-      latencyLine('queue wait', m('drop_queue_wait')),
-      `  polls waiting ${m('drop_queue_poll{result:waiting}').count || 0}, closed ${m('drop_queue_poll{result:closed}').count || 0}`,
+      latencyLine('queue wait', m(`drop_queue_wait{${SALE}}`)),
+      `  polls waiting ${m(`drop_queue_poll{result:waiting,${SALE}}`).count || 0}, closed ${m(`drop_queue_poll{result:closed,${SALE}}`).count || 0}`,
     ] : []),
-    latencyLine('arrival to paid', m('drop_member_total{result:paid}')),
-    latencyLine('arrival to sold out', m('drop_member_total{result:sold_out}')),
+    latencyLine('arrival to paid', m(`drop_member_total{result:paid,${SALE}}`)),
+    latencyLine('arrival to sold out', m(`drop_member_total{result:sold_out,${SALE}}`)),
     `  windows of ${WINDOW_S}s (reserve eval latency, requests attributed to their start window):`,
   ];
   for (let w = 0; w < WINDOWS; w++) {
@@ -157,7 +211,8 @@ export function handleSummary(data) {
     headline: `drop ${DROP_ID} sale, queue ${QUEUE}, stock ${TOTAL_STOCK}, participants ${PARTICIPANTS}, peak ${PEAK_RATE}/s`,
     conditions: { scenario: 'sale', queue: QUEUE, pay: PAY, participants: PARTICIPANTS, ratio: RATIO, peakRate: PEAK_RATE,
       rampMs: RAMP_MS, holdMs: HOLD_MS, marginMs: MARGIN_MS, observeMs: OBSERVE_MS, pollSeconds: POLL_S, windowSeconds: WINDOW_S,
-      payTimeout: PAY_TIMEOUT, preVUs: PRE_VUS, maxVUs: MAX_VUS },
+      payTimeout: PAY_TIMEOUT, preVUs: PRE_VUS, maxVUs: MAX_VUS,
+      warmup: WARMUP ? { dropId: WARMUP.dropId, rate: WARM_RATE, ms: WARM_MS, gapMs: WARM_GAP_MS, accounts: WARM_COUNT } : null },
     extraLines: lines,
   });
 }

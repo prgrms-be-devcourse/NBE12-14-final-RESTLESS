@@ -29,8 +29,8 @@ function json(res) {
 }
 
 // POST /queue/entries. status: WAITING, ADMITTED, NOT_ON_SALE, ERROR.
-export function enterQueue(user, tags = {}) {
-  const res = http.post(`${BASE_URL}/api/drops/${DROP_ID}/queue/entries`, null, {
+export function enterQueue(user, tags = {}, dropId = DROP_ID) {
+  const res = http.post(`${BASE_URL}/api/drops/${dropId}/queue/entries`, null, {
     headers: authHeaders(user),
     tags: { name: 'POST /api/drops/{id}/queue/entries', ...tags },
     timeout: HTTP_TIMEOUT,
@@ -47,8 +47,8 @@ export function enterQueue(user, tags = {}) {
 }
 
 // GET /queue/me. status: WAITING, ADMITTED, EXPIRED, CONSUMED, CLOSED(404), ERROR.
-export function pollQueue(user, tags = {}) {
-  const res = http.get(`${BASE_URL}/api/drops/${DROP_ID}/queue/me`, {
+export function pollQueue(user, tags = {}, dropId = DROP_ID) {
+  const res = http.get(`${BASE_URL}/api/drops/${dropId}/queue/me`, {
     headers: authHeaders(user),
     tags: { name: 'GET /api/drops/{id}/queue/me', ...tags },
     timeout: HTTP_TIMEOUT,
@@ -63,10 +63,10 @@ export function pollQueue(user, tags = {}) {
 }
 
 // 결제 준비와 승인. result: paid, payment_pending(202), payment_failed, error.
-export function pay(user, reservation, tags = {}) {
+export function pay(user, reservation, tags = {}, dropId = DROP_ID) {
   const prepared = http.post(`${BASE_URL}/api/payments`,
     JSON.stringify({ payableType: 'DROP', payableId: reservation.reservationId }), {
-      headers: authHeaders(user, { 'Idempotency-Key': `perf-pay-${DROP_ID}-${user.id}` }),
+      headers: authHeaders(user, { 'Idempotency-Key': `perf-pay-${dropId}-${user.id}` }),
       tags: { name: 'POST /api/payments', ...tags },
       timeout: PAY_TIMEOUT,
     });
@@ -78,7 +78,7 @@ export function pay(user, reservation, tags = {}) {
   }
   const body = json(prepared);
   const confirmed = http.post(`${BASE_URL}/api/payments/confirm`,
-    JSON.stringify({ paymentKey: `perf-key-${DROP_ID}-${user.id}`, orderId: body.pgOrderId, amount: body.amount }), {
+    JSON.stringify({ paymentKey: `perf-key-${dropId}-${user.id}`, orderId: body.pgOrderId, amount: body.amount }), {
       headers: authHeaders(user),
       tags: { name: 'POST /api/payments/confirm', ...tags },
       timeout: PAY_TIMEOUT,

@@ -93,6 +93,10 @@ per_drop=$(( (SCALE_drop_bg_reservations + SCALE_drop_bg_drops - 1) / SCALE_drop
 (( participants <= SCALE_users )) || die "hot participants $participants (stock x ratio) exceed users $SCALE_users"
 (( per_drop <= SCALE_users )) || die "reservations per background drop $per_drop exceed users"
 (( SCALE_drop_hot_queue_prefill <= SCALE_users )) || die "drop_hot_queue_prefill exceeds users"
+(( SCALE_drop_warm_stock >= 0 )) || die "drop_warm_stock must not be negative"
+# 워밍업 드롭 ID는 배경 드롭 뒤, SKU ID는 배경 SKU 뒤다 (sql/20_drop.sql의 ID 규칙).
+warm_drop_id=$(( SCALE_drop_bg_drops + 2 ))
+warm_variant_first=$(( SCALE_drop_hot_variants + SCALE_drop_bg_drops * SCALE_drop_bg_variants_per_drop + 1 ))
 (( SCALE_drop_bg_pct_confirmed + SCALE_drop_bg_pct_restored + SCALE_drop_bg_pct_released <= 100 )) \
   || die "drop_bg_pct_* sum exceeds 100"
 (( SCALE_organizers > 0 && SCALE_drop_hot_variants > 0 && SCALE_drop_bg_drops > 0 && SCALE_drop_bg_variants_per_drop > 0 )) \
@@ -111,6 +115,7 @@ SET @users = $SCALE_users, @organizers = $SCALE_organizers, @ratio = $SCALE_cont
 SET @token_ttl_hours = $SCALE_token_ttl_hours, @hot_window_hours = $SCALE_hot_window_hours;
 SET @hot_variants = $SCALE_drop_hot_variants, @hot_price = $SCALE_drop_hot_price;
 SET @hot_stock = $SCALE_drop_hot_stock, @hot_queue_prefill = $SCALE_drop_hot_queue_prefill;
+SET @warm_stock = $SCALE_drop_warm_stock, @warm_drop_id = $warm_drop_id, @warm_variant_first = $warm_variant_first;
 SET @bg_drops = $SCALE_drop_bg_drops, @bg_vpd = $SCALE_drop_bg_variants_per_drop;
 SET @bg_reservations = $SCALE_drop_bg_reservations;
 SET @pct_confirmed = $SCALE_drop_bg_pct_confirmed, @pct_restored = $SCALE_drop_bg_pct_restored;
@@ -157,7 +162,15 @@ write_tokens() {
           'variants', (SELECT JSON_ARRAYAGG(JSON_OBJECT('variant_id', v.id, 'sku', v.sku_code,
                                                         'price', v.price_amount, 'total_quantity', i.total_quantity))
                        FROM drop_variants v JOIN drop_inventories i ON i.variant_id = v.id
-                       WHERE v.drop_id = 1))))" > "$OUT/manifest.json"
+                       WHERE v.drop_id = 1),
+          'warmup', IF($SCALE_drop_warm_stock = 0, NULL, JSON_OBJECT(
+              'drop_id', $warm_drop_id,
+              'total_stock', $SCALE_drop_warm_stock,
+              'first_user_row', $participants,
+              'variants', (SELECT JSON_ARRAYAGG(JSON_OBJECT('variant_id', v.id, 'sku', v.sku_code,
+                                                            'price', v.price_amount, 'total_quantity', i.total_quantity))
+                           FROM drop_variants v JOIN drop_inventories i ON i.variant_id = v.id
+                           WHERE v.drop_id = $warm_drop_id))))))" > "$OUT/manifest.json"
   echo "out: $OUT/users.csv, staff.csv, manifest.json"
 }
 

@@ -117,6 +117,9 @@ SET @meta_staff = 1 + (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'o
 SET @meta_hot_drop = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'drop_hot_id');
 SET @meta_hot_stock = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'drop_hot_stock');
 SET @meta_bg_reservations = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'drop_bg_reservations');
+-- 워밍업 드롭이 없는 시드와 이 키가 생기기 전의 시드는 0이다.
+SET @meta_warm_drop = COALESCE((SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'drop_warm_id'), 0);
+SET @meta_warm_stock = COALESCE((SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'drop_warm_stock'), 0);
 
 INSERT INTO _perf_checks
 SELECT 'check', 'seed baseline: user count (members + admin + organizers)', ABS(COUNT(*) - (@meta_users + @meta_staff))
@@ -143,7 +146,13 @@ INSERT INTO _perf_checks
 SELECT 'check', 'seed baseline: background drop reservation count',
        ABS(COUNT(*) - @meta_bg_reservations)
 FROM drop_reservations
-WHERE drop_id <> @meta_hot_drop;
+WHERE drop_id NOT IN (@meta_hot_drop, @meta_warm_drop);
+
+INSERT INTO _perf_checks
+SELECT 'check', 'seed baseline: warmup drop total stock', ABS(COALESCE(SUM(i.total_quantity), 0) - @meta_warm_stock)
+FROM drop_inventories i
+JOIN drop_variants v ON v.id = i.variant_id
+WHERE v.drop_id = @meta_warm_drop;
 
 -- Auction seed baseline. Metadata is written by 30_auction.sql.
 SET @auction_spread = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_spread');

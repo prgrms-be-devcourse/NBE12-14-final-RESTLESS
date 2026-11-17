@@ -194,7 +194,8 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" -p 5665:5
 ### drop-sale.js (H)
 
 회원 한 명이 iteration 하나다. off는 도착 즉시 재고를 점유한다. on은 대기 진입 뒤 `POLL_SECONDS`마다 상태를 조회하고 입장하면 점유한다. 점유에 성공하면 결제 준비와 승인까지 보낸다.
-앱의 `RESTLESS_DROP_QUEUE_REQUIRED`가 `QUEUE`와 같아야 한다. 시드는 base다.
+앱의 `RESTLESS_DROP_QUEUE_REQUIRED`가 `QUEUE`와 같아야 한다. 시드는 sale이다. base로도 돌지만 워밍업이 없다.
+시드에 워밍업 드롭이 있으면 판매 전에 그 드롭으로 같은 흐름을 먼저 보낸다. 워밍업은 핫 드롭 재고와 참여 계정을 쓰지 않고 요약의 판매 결과에서 빠진다.
 
 | 변수 | 기본값 | 뜻 |
 |---|---|---|
@@ -205,17 +206,19 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" -p 5665:5
 | `OBSERVE` | 300s | 신규 유입이 끝난 뒤 관측 시간. 이 시각까지 입장하지 못한 회원은 `unfinished`다 |
 | `POLL_SECONDS` | 2 | 상태 조회 간격. 실험 가정이고 API 계약의 값이 아니다 |
 | `PAY` | 1 | 0이면 점유까지만 한다 |
+| `WARMUP` | 시드에 워밍업 드롭이 있으면 켬 | 0이면 워밍업을 끈다 |
+| `WARM_RATE`, `WARM`, `WARM_GAP` | 30, 60s, 10s | 워밍업 도착률과 시간, 워밍업이 끝난 뒤 판매 시작까지 기다리는 시간. 계정은 참여자 뒤 행을 쓴다 |
 | `WINDOW_SECONDS` | 10 | 창 길이 |
 | `MAX_VUS`, `PRE_VUS` | on은 참여자 수, off는 3000 | on은 대기 중인 회원마다 VU 하나를 쓴다 |
 
-- 축소 조건은 시드 재고와 `PEAK_RATE`를 함께 줄인다. H-small은 재고 500에 `PEAK_RATE=500`, H-mini는 재고 200에 `PEAK_RATE=200`이다. 축소 시드 스케일은 아직 없다.
+- 축소 조건은 시드 스케일과 `PEAK_RATE`를 함께 바꾼다. H-small은 `--scale sale_small`에 `PEAK_RATE=500`, H-mini는 `--scale sale_mini`에 `PEAK_RATE=200`이다.
 - 요약의 `member results`가 회원별 최종 결과다. `paid`, `sold_out`, `unfinished`, `queue_closed`, `admission_expired`, `payment_pending`, `payment_failed`, `error`로 나뉜다.
 - `first response`는 도착 뒤 첫 API의 평가 지연이다. `queue wait`는 진입 응답부터 입장을 확인한 시각까지다. `arrival to paid`는 도착부터 결제 승인까지다.
 - on에서 생성기가 참여자만큼 VU를 만들지 못하면 `dropped_iterations`가 생긴다. 그 실행은 원래 조건을 만들지 못한 것이다.
 
 ### drop-reservation-capacity.js (B1, B2)
 
-대기열을 끄고 점유 TTL을 실행 시간보다 길게 둔다(`RESTLESS_DROP_RESERVATION_TTL=PT30M`). 시드는 capacity다.
+대기열을 끄고 점유 TTL을 실행 시간보다 길게 둔다(`RESTLESS_DROP_RESERVATION_TTL=PT30M`). 시드는 capacity다. SKU 1개 대조는 capacity_single을 쓴다.
 워밍업과 측정은 별도 시나리오다. 워밍업은 `users.csv` 앞 `WARM_RATE` x `WARM` 행을 쓰고 측정은 그 뒤 행을 쓴다.
 
 | 변수 | 기본값 | 뜻 |
@@ -274,6 +277,8 @@ perf/scenarios/prom-collect.sh http://perf-app:8081 .ai-output/perf/<실행>/pro
 | queue poll, 200명 | 200명 유지, 측정 구간 조회 99.6/s, 서버 대기 인원 200 | 해당 없음 |
 | queue poll, 입장 작업 켬 | 임계값으로 중단 | 해당 없음 |
 | `HTTP_TIMEOUT=1ms` | 타임아웃 34건이 평가 지연에 1ms로 들어가고 응답 지연에는 0건 | 해당 없음 |
+| sale off, sale_local 시드, 워밍업 50명 | 워밍업 드롭 결제 50, 판매 결제 50, 품절 450 | 시드 기준값 외 0, 핫 드롭 판매 50 |
+| sale on, sale_local 시드, 워밍업 50명 | 워밍업 드롭 결제 50, 판매 결제 50, 품절 450, 소비된 구매권 50 | 시드 기준값 외 0 |
 
 ## 경매 몰림 부하 테스트: AU-1~AU-5
 

@@ -27,6 +27,8 @@ export const manifest = JSON.parse(open(`${SEED_OUT}/manifest.json`));
 export const DROP_ID = manifest.drop.hot_drop_id;
 export const VARIANT_IDS = manifest.drop.variants.map((v) => v.variant_id);
 export const TOTAL_STOCK = manifest.drop.total_stock;
+// 요청 대상 드롭. 기본은 측정용 핫 드롭이다. 워밍업은 시드의 워밍업 드롭을 넘긴다.
+export const HOT = { dropId: DROP_ID, variantIds: VARIANT_IDS };
 
 // "30s", "2m", "7500ms" 형식을 밀리초로 바꾼다.
 export function durationMs(d) {
@@ -156,13 +158,13 @@ export function checkTarget() {
 // 계정 하나가 SKU 하나에 재고 점유를 한 번 요청한다. Idempotency-Key는 계정마다 하나다.
 // tags는 요청과 지표에 함께 붙는다 (예: 계단식의 stage, 창 번호 win).
 // 결과 이름, 성공이면 응답 본문({reservationId, orderId, amount, ...}), k6 응답을 돌려준다.
-export function reserve(user, n, tags = {}) {
-  const variantId = VARIANT_IDS[n % VARIANT_IDS.length];
+export function reserve(user, n, tags = {}, target = HOT) {
+  const variantId = target.variantIds[n % target.variantIds.length];
   const res = http.post(
-    `${BASE_URL}/api/drops/${DROP_ID}/reservations`,
+    `${BASE_URL}/api/drops/${target.dropId}/reservations`,
     JSON.stringify({ variantId, recipient: `회원${user.id}`, phone: '010-0000-0000', address: '서울시 송파구 올림픽로 424' }),
     {
-      headers: authHeaders(user, { 'Idempotency-Key': `perf-${DROP_ID}-${user.id}` }),
+      headers: authHeaders(user, { 'Idempotency-Key': `perf-${target.dropId}-${user.id}` }),
       tags: { name: 'POST /api/drops/{id}/reservations', ...tags },
       timeout: HTTP_TIMEOUT,
     },
