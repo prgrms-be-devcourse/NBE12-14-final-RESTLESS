@@ -2,8 +2,12 @@
 //
 // POST /api/fan-meetings/{eventId}/applications만 친다. 행사는 fanmeeting-prepare.sh가 만든다.
 // 반복마다 users.csv의 다른 행을 쓴다. 한 계정은 테스트 전체에서 한 번만 요청하고 다시 보내지 않는다.
-//   MODE=open  (기본) 시나리오 A·B. 기준 시각 = 오픈(entryOpensAt). START_OFFSET=-2s면 오픈 2초 전부터 보낸다.
-//   MODE=close 시나리오 C. 기준 시각 = 마감(entryClosesAt). 기준 시각 1초 뒤부터 보낸 요청의 201은 0이어야 한다.
+// SCENARIO로 시나리오를 정한다. 판정이 시나리오마다 다르다.
+//   A  오픈 뒤 몰림.   MODE=open,  기본 START_OFFSET=2s.  시작 시각 >= 오픈. 전원 201이어야 한다(거절 0).
+//   B  오픈 직전부터. MODE=open,  기본 START_OFFSET=-2s. 시작 시각 < 오픈.  오픈 전 거절(WINDOW_CLOSED)이 정상이다.
+//   C  마감 앞뒤.     MODE=close, 기본 START_OFFSET=-3s. 마감 뒤 거절이 정상이고, 마감 1초 뒤부터 보낸 요청의 201은 0이어야 한다.
+// SCENARIO를 비우면 MODE와 시작 시각으로 정한다: close면 C, open이면 시작 시각이 오픈 전이면 B, 아니면 A.
+// 기준 시각은 MODE=open이면 오픈(entryOpensAt), close면 마감(entryClosesAt)이다.
 import http from 'k6/http';
 import exec from 'k6/execution';
 import { check, fail, sleep } from 'k6';
@@ -14,8 +18,13 @@ const SEED_OUT = __ENV.SEED_OUT || '../seed/out';
 const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8080').replace(/\/$/, '');
 const MANAGEMENT_URL = (__ENV.MANAGEMENT_URL || 'http://localhost:8081').replace(/\/$/, '');
 const SUMMARY_PATH = __ENV.SUMMARY_PATH || '';
-const MODE = __ENV.MODE || 'open';
+const SCENARIO_ENV = (__ENV.SCENARIO || '').toUpperCase();
+if (SCENARIO_ENV && !['A', 'B', 'C'].includes(SCENARIO_ENV)) throw new Error(`SCENARIO must be A, B or C: ${__ENV.SCENARIO}`);
+const MODE = __ENV.MODE || (SCENARIO_ENV === 'C' ? 'close' : 'open');
 if (MODE !== 'open' && MODE !== 'close') throw new Error(`MODE must be open or close: ${MODE}`);
+if (SCENARIO_ENV && (SCENARIO_ENV === 'C') !== (MODE === 'close')) {
+  throw new Error(`SCENARIO ${SCENARIO_ENV} needs MODE=${SCENARIO_ENV === 'C' ? 'close' : 'open'}, got MODE=${MODE}`);
+}
 
 // 배포 서버에 부하를 주지 않도록 perf로 시작하고 허용 목록에 정확히 있는 호스트만 친다 (drop-reservation-spike.js와 같은 규칙).
 const allowedHosts = (__ENV.PERF_ALLOWED_APP_HOSTS || '').split(',').map((h) => h.trim()).filter(Boolean);
@@ -51,9 +60,17 @@ function parseDuration(text) {
 
 // 기준 시각: MODE=open이면 오픈, close면 마감. 결과 구간(before, 0~1초, 1~2초, 2초 이후)도 이 시각에서 잰다.
 const REF_MS = MODE === 'open' ? OPENS_MS : CLOSES_MS;
-const START_OFFSET = __ENV.START_OFFSET || (MODE === 'open' ? '0s' : '-3s');
+const DEFAULT_OFFSET = { A: '2s', B: '-2s', C: '-3s' }[SCENARIO_ENV || (MODE === 'close' ? 'C' : 'A')];
+const START_OFFSET = __ENV.START_OFFSET || DEFAULT_OFFSET;
 const START_MS = __ENV.START_AT ? Date.parse(__ENV.START_AT) : REF_MS + parseDuration(START_OFFSET);
 if (Number.isNaN(START_MS)) throw new Error(`bad START_AT: ${__ENV.START_AT}`);
+const SCENARIO = SCENARIO_ENV || (MODE === 'close' ? 'C' : START_MS < OPENS_MS ? 'B' : 'A');
+if (SCENARIO === 'A' && START_MS < OPENS_MS) {
+  throw new Error(`SCENARIO A must start at or after entryOpensAt (start ${new Date(START_MS).toISOString()}, opens ${OPENS_AT}). Use SCENARIO=B to start before.`);
+}
+if (SCENARIO === 'B' && START_MS >= OPENS_MS) {
+  throw new Error(`SCENARIO B must start before entryOpensAt (start ${new Date(START_MS).toISOString()}, opens ${OPENS_AT}). Use SCENARIO=A after the open.`);
+}
 const WAIT_MS = START_MS - Date.now();
 if (WAIT_MS > 30 * 60 * 1000) throw new Error(`START_AT is ${Math.round(WAIT_MS / 60000)} minutes away. Start k6 closer to it.`);
 
@@ -90,6 +107,10 @@ const MAX_VUS = Number(__ENV.MAX_VUS || 3000);
 const closeThresholds = MODE === 'close'
   ? { fm_applied_1_2s: ['count==0'], fm_applied_after_2s: ['count==0'] }
   : {};
+// A: 열린 뒤에만 보내므로 거절이 나오면 안 된다. 모두 거절돼도 요청 수·DB 수·기대 미응모 수는 서로 맞아서
+// 다른 검사로는 잡히지 않는다. 전원 201과 WINDOW_CLOSED 0을 같이 요구한다. B·C의 정상 거절에는 걸지 않는다.
+const appliedThreshold = SCENARIO === 'A' ? `count==${PARTICIPANTS}` : `count<=${PARTICIPANTS}`;
+const scenarioThresholds = SCENARIO === 'A' ? { fm_window_closed: ['count==0'] } : {};
 
 export const options = {
   // setup이 시작 시각까지 기다리므로 그만큼 늘린다.
@@ -109,10 +130,18 @@ export const options = {
     },
   },
   // 업무 거절(409)은 http_req_failed에 넣지 않는다. 503 BUSY, 401, 5xx, 연결 오류는 실패다.
-  // 지연 목표 수치는 미측정이라 임계값을 두지 않는다. 아래는 정합성과 전제 조건 검사다.
+  // 지연 목표 수치는 미측정이라 임계값을 두지 않는다. 아래는 정합성, 전제 조건, 오류·미완료 검사다.
+  // BUSY·5xx·연결 오류·dropped가 하나라도 있으면 실패로 끝난다. 한계를 찾는 회차에서는 이 실패가 측정 결과다.
   thresholds: {
-    fm_applied: [`count<=${PARTICIPANTS}`],
+    fm_requests: [`count==${PARTICIPANTS}`],
+    fm_applied: [appliedThreshold],
+    ...scenarioThresholds,
     fm_already_applied: ['count==0'],
+    fm_busy: ['count==0'],
+    fm_server_error: ['count==0'],
+    fm_transport_error: ['count==0'],
+    fm_other_client_error: ['count==0'],
+    dropped_iterations: ['count==0'],
     fm_not_found: [{ threshold: 'count==0', abortOnFail: true }],
     fm_unauthorized: [{ threshold: 'count==0', abortOnFail: true }],
     ...closeThresholds,
@@ -125,6 +154,8 @@ export const options = {
 
 http.setResponseCallback(http.expectedStatuses(201, 409));
 
+// 실제로 보낸 응모 요청 수. 참여자 수와 같아야 모든 계정이 한 번씩 요청한 것이다.
+const requests = new Counter('fm_requests');
 const applied = new Counter('fm_applied');
 const alreadyApplied = new Counter('fm_already_applied');
 const windowClosed = new Counter('fm_window_closed');
@@ -142,7 +173,13 @@ const closedBy = Object.fromEntries(BUCKETS.map((b) => [b, new Counter(`fm_windo
 // k6가 잰 지연. 집 네트워크 왕복이 섞인 체감값이다. 서버 지연은 관리 포트의 http.server.requests로 본다.
 const duration = new Trend('fm_apply_duration', true);
 
+// 임계값을 건 카운터에 0을 하나씩 남긴다. 표본이 없는 지표도 임계값이 평가되게 한다.
+const THRESHOLD_COUNTERS = [requests, applied, windowClosed, alreadyApplied, busy, notFound, unauthorized, otherClientError,
+  serverError, transportError];
+
 export function setup() {
+  for (const c of THRESHOLD_COUNTERS) c.add(0);
+  for (const b of BUCKETS) { appliedBy[b].add(0); closedBy[b].add(0); }
   // perf 프로필만 관리 포트에 prometheus를 연다. 응답하지 않으면 perf 앱이 아니므로 멈춘다.
   const metrics = http.get(`${MANAGEMENT_URL}/actuator/prometheus`, { tags: { name: 'setup' } });
   if (metrics.status !== 200) fail(`management ${MANAGEMENT_URL}/actuator/prometheus returned ${metrics.status}`);
@@ -158,7 +195,7 @@ export function setup() {
   const clockOffsetMs = Number.isNaN(serverDate) ? null : serverDate - Date.now();
 
   const waitMs = START_MS - Date.now();
-  console.log(`event=${EVENT_ID} mode=${MODE} opens=${OPENS_AT} closes=${CLOSES_AT} participants=${PARTICIPANTS} `
+  console.log(`event=${EVENT_ID} scenario=${SCENARIO} mode=${MODE} opens=${OPENS_AT} closes=${CLOSES_AT} participants=${PARTICIPANTS} `
     + `offset=${USER_OFFSET} peak=${PEAK_RATE}/s start=${new Date(START_MS).toISOString()} wait=${Math.max(0, waitMs)}ms `
     + `serverClockOffset~${clockOffsetMs}ms`);
   if (waitMs > 0) sleep(waitMs / 1000);
@@ -172,6 +209,7 @@ export default function () {
     return;
   }
   const user = users[n];
+  requests.add(1);
   const sentAt = Date.now();
   const res = http.post(`${BASE_URL}/api/fan-meetings/${EVENT_ID}/applications`, null, {
     headers: { Authorization: `Bearer ${user.token}` },
@@ -236,10 +274,10 @@ export function handleSummary(data) {
   const ref = MODE === 'open' ? 'open' : 'close';
   const lines = [
     '',
-    `fanmeeting event ${EVENT_ID}, mode ${MODE}, participants ${PARTICIPANTS} (offset ${USER_OFFSET}), `
+    `fanmeeting event ${EVENT_ID}, scenario ${SCENARIO}, mode ${MODE}, participants ${PARTICIPANTS} (offset ${USER_OFFSET}), `
       + `peak ${PEAK_RATE}/s (ramp ${RAMP}, hold ${HOLD}), start ${new Date(START_MS).toISOString()}`,
     ...OUTCOME_METRICS.map((m) => `  ${m.padEnd(26)} ${value(m)}`),
-    `  requests total             ${requested} (must equal participants ${PARTICIPANTS})`,
+    `  requests sent              ${value('fm_requests')} (must equal participants ${PARTICIPANTS}; outcomes add up to ${requested})`,
     `  by time since ${ref} (laptop clock, server offset ~${clockOffsetMs}ms)`,
     `    ${'applied'.padEnd(16)} ${BUCKETS.map((b) => `${b} ${value(`fm_applied_${b}`)}`).join('  ')}`,
     `    ${'window_closed'.padEnd(16)} ${BUCKETS.map((b) => `${b} ${value(`fm_window_closed_${b}`)}`).join('  ')}`,
@@ -248,6 +286,8 @@ export function handleSummary(data) {
     `    applied        ${latency(trendOf('fm_apply_duration{outcome:applied}'))}`,
     `  load generator  http_req_connecting p95 ${fmt(trendOf('http_req_connecting')['p(95)'])} max ${fmt(trendOf('http_req_connecting').max)}`
       + `, http_req_blocked p95 ${fmt(trendOf('http_req_blocked')['p(95)'])} max ${fmt(trendOf('http_req_blocked').max)}`,
+    `  scenario ${SCENARIO}: ${SCENARIO === 'A' ? `every request must be 201 (applied ${value('fm_applied')}/${PARTICIPANTS}, window_closed ${value('fm_window_closed')})`
+      : SCENARIO === 'B' ? 'rejections before the open are expected' : 'rejections after the close are expected; 201 sent 1s+ after the close must be 0'}`,
     `  thresholds ${failedThresholds.length ? `FAILED: ${failedThresholds.join(', ')}` : 'ok'}`,
     '  next: perf/scenarios/fanmeeting-check.sh (invariants must be 0, applications must match fm_applied)',
     '',
@@ -255,12 +295,13 @@ export function handleSummary(data) {
   const out = { stdout: lines.join('\n') };
   if (SUMMARY_PATH) {
     out[SUMMARY_PATH] = JSON.stringify({
-      conditions: { eventId: EVENT_ID, mode: MODE, entryOpensAt: OPENS_AT, entryClosesAt: CLOSES_AT,
+      conditions: { eventId: EVENT_ID, scenario: SCENARIO, mode: MODE, entryOpensAt: OPENS_AT, entryClosesAt: CLOSES_AT,
         startAt: new Date(START_MS).toISOString(), startOffset: __ENV.START_AT ? null : START_OFFSET,
         participants: PARTICIPANTS, userOffset: USER_OFFSET, peakRate: PEAK_RATE, ramp: RAMP, hold: HOLD,
         preVUs: PRE_VUS, maxVUs: MAX_VUS, baseUrl: BASE_URL, serverClockOffsetMs: clockOffsetMs },
       outcomes: Object.fromEntries(OUTCOME_METRICS.map((m) => [m, value(m)])),
-      requestsTotal: requested,
+      requestsTotal: value('fm_requests'),
+      outcomesTotal: requested,
       byTimeSinceReference: Object.fromEntries(BUCKET_METRICS.map((m) => [m, value(m)])),
       clientLatencyNote: 'k6 지연은 집 네트워크 왕복이 섞인 체감값이다. 서버 지연은 관리 포트 http.server.requests로 본다.',
       loadGenerator: {

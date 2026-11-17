@@ -12,7 +12,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$ROOT/../.." && pwd)"
 die() { echo "fanmeeting-s1: $*" >&2; exit 2; }
 say() { echo "[$(date -u +%H:%M:%S)] $*"; }
-now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+# 단계 경계와 경계 스냅샷을 같은 정밀도로 비교하도록 밀리초까지 남긴다.
+now_iso() { python3 -c 'import datetime as d; print(d.datetime.now(d.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"))'; }
 
 # ---------------------------------------------------------------- 입력
 export BASE_URL="${BASE_URL:-http://perf-app:8080}"
@@ -94,7 +95,7 @@ fi
 mkdir -p "$RUN_DIR"
 export EVENT_FILE="$RUN_DIR/event.env"
 TIMELINE="$RUN_DIR/timeline.tsv"
-printf 'phase\tstart\tend\texit\n' > "$TIMELINE"
+printf 'phase\tstart\tend\texit\tstart_snapshot\tend_snapshot\n' > "$TIMELINE"
 exec > >(tee -a "$RUN_DIR/run.log") 2>&1
 
 cat > "$RUN_DIR/conditions.txt" <<EOF
@@ -119,7 +120,7 @@ stop_metrics() {
   metrics_pid=""
 }
 trap 'stop_metrics' EXIT
-OUT_DIR="$RUN_DIR/metrics" INTERVAL="$METRICS_INTERVAL" "$ROOT/fanmeeting-metrics.sh" > "$RUN_DIR/metrics.log" 2>&1 &
+OUT_DIR="$RUN_DIR/metrics" INTERVAL="$METRICS_INTERVAL" "$ROOT/fanmeeting-metrics.sh" >> "$RUN_DIR/metrics.log" 2>&1 &
 metrics_pid=$!
 sleep 2
 kill -0 "$metrics_pid" 2>/dev/null || die "metrics recorder stopped: $(tail -3 "$RUN_DIR/metrics.log")"
@@ -127,7 +128,9 @@ kill -0 "$metrics_pid" 2>/dev/null || die "metrics recorder stopped: $(tail -3 "
 # ---------------------------------------------------------------- 단계 실행 도우미
 phase_start=""
 begin() { phase_start="$(now_iso)"; say "== $1"; }
-finish() { printf '%s\t%s\t%s\t%s\n' "$1" "$phase_start" "$(now_iso)" "$2" >> "$TIMELINE"; }
+finish() {  # finish <phase> <exit> [start snapshot] [end snapshot]
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$phase_start" "$(now_iso)" "$2" "${3:--}" "${4:--}" >> "$TIMELINE"
+}
 
 run_k6() {  # run_k6 <phase> <script> [KEY=VALUE ...]
   local phase="$1" script="$2"; shift 2
@@ -159,13 +162,29 @@ run_check() {  # run_check <phase> [SUMMARY_PATH]
   return $code
 }
 
+# 단계 경계 스냅샷: 단계의 부하를 시작하기 전에 한 장, 부하가 끝난 뒤 한 장을 직접 저장한다(동기 호출).
+# 단계 요약은 이 두 파일(timeline.tsv의 start_snapshot, end_snapshot) 사이의 차이라서, 백그라운드 기록 간격 때문에
+# 단계 앞뒤 요청이 빠지거나 단계 밖 요청이 섞이지 않는다. 기록 루프와는 같은 잠금을 써서 겹치지 않는다.
+# 저장한 이름(epoch ms)을 출력한다. 실패하면 아무것도 출력하지 않고, 그 단계 요약은 INVALID가 된다.
+boundary_snap() {
+  local out
+  if out="$(OUT_DIR="$RUN_DIR/metrics" "$ROOT/fanmeeting-metrics.sh" snap 2>> "$RUN_DIR/metrics.log")"; then
+    echo "$out" >> "$RUN_DIR/metrics.log"
+    sed -n 's/^metrics: snapshot \([0-9][0-9]*\) .*/\1/p' <<< "$out"
+  else
+    say "boundary snapshot failed ($1). This phase's server metrics will be marked INVALID." >&2
+  fi
+}
+
 failures=()
 step() {  # step <phase> <command...>: 실패해도 흐름은 계속 가고 끝에 모아서 보여 준다
   local phase="$1"; shift
   begin "$phase"
-  local code=0
+  local snap_from snap_until code=0
+  snap_from="$(boundary_snap "$phase start")"
   "$@" || code=$?
-  finish "$phase" "$code"
+  snap_until="$(boundary_snap "$phase end")"
+  finish "$phase" "$code" "$snap_from" "$snap_until"
   [[ $code -eq 0 ]] || { failures+=("$phase(exit $code)"); say "$phase exited $code"; }
 }
 
@@ -177,17 +196,44 @@ finish prepare 0
 source "$EVENT_FILE"
 
 # ---------------------------------------------------------------- 2. 응모 몰림 (A, 또는 START_OFFSET<0이면 B)
-apply_phase="apply-A"; [[ "$START_OFFSET" == -* ]] && apply_phase="apply-B"
+# 시나리오를 k6에 명시한다. A는 전원 201이어야 하고, B는 오픈 전 거절이 정상이다(판정이 다르다).
+apply_scenario=A; [[ "$START_OFFSET" == -* ]] && apply_scenario=B
+apply_phase="apply-$apply_scenario"
 say "k6 waits until $FM_ENTRY_OPENS_AT ${START_OFFSET} (participants $PARTICIPANTS, ${PEAK_RATE}/s, ramp $RAMP, hold $HOLD)"
-step "$apply_phase" run_k6 "$apply_phase" fanmeeting-apply.js MODE=open START_OFFSET="$START_OFFSET" \
+step "$apply_phase" run_k6 "$apply_phase" fanmeeting-apply.js SCENARIO="$apply_scenario" MODE=open START_OFFSET="$START_OFFSET" \
   PARTICIPANTS="$PARTICIPANTS" USER_OFFSET=0 PEAK_RATE="$PEAK_RATE" RAMP="$RAMP" HOLD="$HOLD" \
   ${PRE_VUS:+PRE_VUS=$PRE_VUS} ${MAX_VUS:+MAX_VUS=$MAX_VUS}
 step check-1-apply run_check check-1-apply "$RUN_DIR/$apply_phase.json"
 
+# 결과 조회에서 NOT_APPLIED가 나와야 하는 인원 = A(B) 참여자 중 응모가 안 된 사람.
+#   DB 점검이 있으면 DB의 APPLIED 수로 정한다(이 시점의 행사 응모는 A뿐이다).
+#   없으면 k6 201 수로 정하되, 연결 오류·5xx가 있으면 실제 응모 여부를 알 수 없어 판정하지 않는다(unknown).
+expected_not_applied() {
+  local db_applied=""
+  [[ -f "$RUN_DIR/check-1-apply.txt" ]] \
+    && db_applied="$(sed -n 's/.*(APPLIED \([0-9][0-9]*\),.*/\1/p' "$RUN_DIR/check-1-apply.txt" | head -1)"
+  if [[ -n "$db_applied" ]]; then
+    echo "$((PARTICIPANTS - db_applied)) db"
+    return
+  fi
+  python3 -c '
+import json, sys
+try:
+    o = json.load(open(sys.argv[1]))["outcomes"]
+except (OSError, ValueError, KeyError):
+    print("unknown no-apply-summary"); sys.exit()
+uncertain = o["fm_transport_error"] + o["fm_server_error"]
+print("unknown k6-responses-lost" if uncertain else str(int(sys.argv[2]) - o["fm_applied"]) + " k6")
+' "$RUN_DIR/$apply_phase.json" "$PARTICIPANTS"
+}
+read -r EXPECTED_NOT_APPLIED expected_source <<< "$(expected_not_applied)"
+echo "expected_not_applied=$EXPECTED_NOT_APPLIED source=$expected_source" >> "$RUN_DIR/conditions.txt"
+say "result check: expected NOT_APPLIED $EXPECTED_NOT_APPLIED (from $expected_source)"
+
 # ---------------------------------------------------------------- 3. 마감 앞뒤 (C)
 if [[ $CLOSE_PARTICIPANTS -gt 0 ]]; then
   say "k6 waits until $FM_ENTRY_CLOSES_AT -3s (C: $CLOSE_PARTICIPANTS unused accounts, ${CLOSE_RATE}/s)"
-  step apply-C run_k6 apply-C fanmeeting-apply.js MODE=close START_OFFSET=-3s \
+  step apply-C run_k6 apply-C fanmeeting-apply.js SCENARIO=C MODE=close START_OFFSET=-3s \
     PARTICIPANTS="$CLOSE_PARTICIPANTS" USER_OFFSET="$PARTICIPANTS" PEAK_RATE="$CLOSE_RATE" RAMP=1s HOLD=8s
 else
   say "C skipped (no unused accounts or CLOSE_PARTICIPANTS=0)"
@@ -211,9 +257,9 @@ step wait-draw wait_draw
 step check-2-draw run_check check-2-draw
 
 # ---------------------------------------------------------------- 5. 결과 조회 폭주
-if [[ "$RESULT" == "true" ]] && grep -q $'^wait-draw\t.*\t0$' "$TIMELINE"; then
+if [[ "$RESULT" == "true" ]] && awk -F'\t' '$1 == "wait-draw" && $4 == "0" { ok = 1 } END { exit !ok }' "$TIMELINE"; then
   step result run_k6 result fanmeeting-result.js PARTICIPANTS="$PARTICIPANTS" USER_OFFSET=0 \
-    PEAK_RATE="$RESULT_RATE" RAMP=5s HOLD="$RESULT_HOLD"
+    EXPECTED_NOT_APPLIED="$EXPECTED_NOT_APPLIED" PEAK_RATE="$RESULT_RATE" RAMP=5s HOLD="$RESULT_HOLD"
   step check-3-result run_check check-3-result
 else
   say "result read storm skipped"
@@ -222,12 +268,24 @@ fi
 # ---------------------------------------------------------------- 6. 지표 요약 (전체, 단계별)
 stop_metrics
 cat "$RUN_DIR/metrics.log"
-while IFS=$'\t' read -r phase start end _; do
+# 단계 요약은 경계 스냅샷 두 장을 직접 지정해 센다. 경계가 하나라도 없으면 단계 시각으로 자르되 INVALID로 표시한다.
+# 요약이 INVALID(경계 누락, 앱 재시작, 카운터 역행)면 실패로 모은다. 그 숫자를 처리량으로 읽지 않는다.
+while IFS=$'\t' read -r phase start end _ snap_from snap_until; do
   [[ "$phase" == apply-* || "$phase" == result ]] || continue
-  FROM="$start" UNTIL="$end" "$ROOT/fanmeeting-metrics.sh" summary "$RUN_DIR/metrics" > "$RUN_DIR/metrics-$phase.txt" 2>&1 || true
+  mcode=0
+  if [[ "$snap_from" =~ ^[0-9]+$ && "$snap_until" =~ ^[0-9]+$ ]]; then
+    FROM_SNAPSHOT="$snap_from" UNTIL_SNAPSHOT="$snap_until" \
+      "$ROOT/fanmeeting-metrics.sh" summary "$RUN_DIR/metrics" > "$RUN_DIR/metrics-$phase.txt" 2>&1 || mcode=$?
+  else
+    FROM="$start" UNTIL="$end" BOUNDARY_MISSING="$phase boundary snapshot missing (start ${snap_from:--}, end ${snap_until:--})" \
+      "$ROOT/fanmeeting-metrics.sh" summary "$RUN_DIR/metrics" > "$RUN_DIR/metrics-$phase.txt" 2>&1 || mcode=$?
+  fi
   mv -f "$RUN_DIR/metrics/summary.json" "$RUN_DIR/metrics-$phase.json" 2>/dev/null || true
+  [[ $mcode -eq 0 ]] || failures+=("metrics-$phase(invalid, exit $mcode)")
 done < <(tail -n +2 "$TIMELINE")
-"$ROOT/fanmeeting-metrics.sh" summary "$RUN_DIR/metrics" > "$RUN_DIR/metrics-all.txt" 2>&1 || true
+mcode=0
+"$ROOT/fanmeeting-metrics.sh" summary "$RUN_DIR/metrics" > "$RUN_DIR/metrics-all.txt" 2>&1 || mcode=$?
+[[ $mcode -eq 0 ]] || failures+=("metrics-all(invalid, exit $mcode)")
 
 # ---------------------------------------------------------------- 7. 한 장 요약
 python3 - "$RUN_DIR" > "$RUN_DIR/summary.txt" <<'PY'
@@ -241,8 +299,8 @@ print(f"S1 event {env['FM_EVENT_ID']}  opens {env['FM_ENTRY_OPENS_AT']}  closes 
 print(open(os.path.join(d, 'conditions.txt')).read().strip())
 print('\nphases (UTC)')
 for line in list(open(os.path.join(d, 'timeline.tsv')))[1:]:
-    p, s, e, c = line.rstrip('\n').split('\t')
-    print(f"  {p:16} {s} → {e}  exit {c}")
+    p, s, e, c, sf, su = (line.rstrip('\n').split('\t') + ['-', '-'])[:6]
+    print(f"  {p:16} {s} → {e}  exit {c}  snapshots {sf} → {su}")
 for name in ('apply-A', 'apply-B', 'apply-C'):
     s = load(f'{name}.json')
     if not s:
@@ -250,7 +308,7 @@ for name in ('apply-A', 'apply-B', 'apply-C'):
     o, b = s['outcomes'], s['byTimeSinceReference']
     print(f"\n{name}: applied {o['fm_applied']}, window_closed {o['fm_window_closed']}, busy {o['fm_busy']}, "
           f"5xx {o['fm_server_error']}, transport {o['fm_transport_error']}, dropped {o['dropped_iterations']}, "
-          f"requests {s['requestsTotal']}/{s['conditions']['participants']}")
+          f"requests sent {s['requestsTotal']}/{s['conditions']['participants']}")
     print('  applied by time  ' + '  '.join(f"{k[11:]} {v}" for k, v in b.items() if k.startswith('fm_applied_')))
     print('  closed by time   ' + '  '.join(f"{k[17:]} {v}" for k, v in b.items() if k.startswith('fm_window_closed_')))
     if s['failedThresholds']:
@@ -260,9 +318,12 @@ if r:
     f = r['firstPass']
     print(f"\nresult: first pass winner {f['fm_result_first_winner']}, reserve {f['fm_result_first_reserve']}, "
           f"not_selected {f['fm_result_first_not_selected']}, pending {f['fm_result_first_pending']}, "
-          f"with_order {f['fm_result_first_with_order']} (complete {f['complete']}); "
+          f"not_applied {f['fm_result_first_not_applied']}, with_order {f['fm_result_first_with_order']}, "
+          f"valid {f['total']}/{r['conditions']['participants']} (complete {f['complete']}); "
           f"order mismatch {r['outcomes']['fm_order_mismatch']}, not_found {r['outcomes']['fm_order_not_found']}, "
-          f"5xx {r['outcomes']['fm_server_error']}")
+          f"5xx {r['outcomes']['fm_server_error']}, transport {r['outcomes']['fm_transport_error']}, "
+          f"dropped {r['outcomes']['dropped_iterations']}")
+    print(f"  not applied check: {f['notAppliedVerdict']}")
     print("  (A participants only. With C, DB WINNER/RESERVE/orders also count C applicants, so first pass is lower)")
     if r['failedThresholds']:
         print('  thresholds FAILED: ' + ', '.join(r['failedThresholds']))
@@ -271,10 +332,17 @@ for name in ('apply-A', 'apply-B', 'apply-C', 'result'):
     m = load(f'metrics-{name}.json')
     if not m:
         continue
-    print(f"\nserver {name} ({m['from']} → {m['until']})")
+    if not m.get('valid', False):
+        print(f"\nserver {name}  ⚠ INVALID: {'; '.join(m.get('problems') or ['unknown'])}. Not a throughput result.")
+        if not m.get('endpoints'):
+            continue
+    print(f"\nserver {name} (counted {m.get('from')} → {m.get('until')}, {m['snapshots']} snapshots, "
+          f"boundary {m.get('fromSnapshot') or '-'} → {m.get('untilSnapshot') or '-'})")
     for e in m['endpoints']:
         fmt = lambda v: '-' if v is None else f'{v:.1f}'
-        print(f"  {e['endpoint']}: {int(e['requests'])} req, peak {fmt(e['peakRate'])}/s, "
+        print(f"  {e['endpoint']}: {int(e['requests'])} req (all statuses, peak {fmt(e['peakRate'])}/s), "
+              f"success {e['successStatus']} {int(e['successRequests'])} (avg {fmt(e['successAvgRate'])}/s, "
+              f"peak {fmt(e['successPeakRate'])}/s), "
               f"p95 {fmt(e['p95Ms'])}ms, p99 {fmt(e['p99Ms'])}ms, max {fmt(e['maxMs'])}ms")
     res = m['resources']
     print(f"  hikari active max {res['hikariActiveMax']}/{res['hikariMax']}, pending max {res['hikariPendingMax']}, "

@@ -7,7 +7,7 @@
 // 결과 분포(당첨·예비·미선발 수)를 세고 fanmeeting-check.sh의 DB 숫자와 비교한다. 그 뒤 반복은 새로고침이다.
 import http from 'k6/http';
 import exec from 'k6/execution';
-import { check, fail } from 'k6';
+import { fail } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
 import { SharedArray } from 'k6/data';
 
@@ -40,7 +40,16 @@ if (!EVENT_ID) throw new Error('EVENT_FILE (from fanmeeting-prepare.sh) or EVENT
 const REQUIRE_DRAWN = (__ENV.REQUIRE_DRAWN || 'true') !== 'false';
 const DRAWN_STATUSES = ['PAYMENT_IN_PROGRESS', 'RECRUITMENT_COMPLETED'];
 
-// 참여자 = apply와 같은 USER_OFFSET·PARTICIPANTS. 응모한 회원과 같게 맞춰야 NOT_APPLIED가 0이다.
+// 참여자 = apply와 같은 USER_OFFSET·PARTICIPANTS(응모를 요청한 회원 전원).
+// EXPECTED_NOT_APPLIED: 그중 응모가 안 된 인원(오픈 전·BUSY로 거절). 첫 바퀴 NOT_APPLIED 수가 이 값과 같아야 한다.
+//   숫자(기본 0)  같은지 판정한다.
+//   unknown      판정하지 않고 수만 남긴다. 응모에 연결 오류·5xx가 있어 실제 응모 여부를 응답으로 확정할 수 없고
+//                DB로도 확인하지 못했을 때 쓴다.
+const EXPECTED_NOT_APPLIED_RAW = (__ENV.EXPECTED_NOT_APPLIED || '0').trim();
+if (EXPECTED_NOT_APPLIED_RAW !== 'unknown' && !/^\d+$/.test(EXPECTED_NOT_APPLIED_RAW)) {
+  throw new Error(`EXPECTED_NOT_APPLIED must be a whole number or unknown: ${EXPECTED_NOT_APPLIED_RAW}`);
+}
+const EXPECTED_NOT_APPLIED = EXPECTED_NOT_APPLIED_RAW === 'unknown' ? null : Number(EXPECTED_NOT_APPLIED_RAW);
 const PARTICIPANTS = Number(__ENV.PARTICIPANTS || 1000);
 const USER_OFFSET = Number(__ENV.USER_OFFSET || 0);
 const users = new SharedArray('users', () => {
@@ -71,6 +80,8 @@ const PRE_VUS = Number(__ENV.PRE_VUS || 300);
 const MAX_VUS = Number(__ENV.MAX_VUS || 2000);
 
 const drawnThresholds = REQUIRE_DRAWN ? { fm_result_first_pending: ['count==0'] } : {};
+const notAppliedThresholds = EXPECTED_NOT_APPLIED === null
+  ? {} : { fm_result_first_not_applied: [`count==${EXPECTED_NOT_APPLIED}`] };
 
 export const options = {
   scenarios: {
@@ -87,14 +98,20 @@ export const options = {
       ],
     },
   },
-  // 지연 목표는 미측정이라 임계값을 두지 않는다. 아래는 정합성과 전제 조건 검사다.
+  // 지연 목표는 미측정이라 임계값을 두지 않는다. 아래는 정합성, 전제 조건, 오류·미완료 검사다.
+  // 첫 바퀴의 유효한 결과(알려진 result 값을 받은 조회)가 참여자 수와 같아야 분포를 DB와 비교할 수 있다.
   thresholds: {
-    fm_result_first_not_applied: ['count==0'],
+    fm_result_first_total: [`count==${PARTICIPANTS}`],
+    ...notAppliedThresholds,
     fm_order_not_found: ['count==0'],
     fm_order_mismatch: ['count==0'],
     fm_result_unknown: ['count==0'],
     fm_unauthorized: [{ threshold: 'count==0', abortOnFail: true }],
     fm_not_found: [{ threshold: 'count==0', abortOnFail: true }],
+    fm_server_error: ['count==0'],
+    fm_transport_error: ['count==0'],
+    fm_other_client_error: ['count==0'],
+    dropped_iterations: ['count==0'],
     ...drawnThresholds,
     'fm_read_duration{endpoint:result}': [],
     'fm_read_duration{endpoint:order}': [],
@@ -107,6 +124,7 @@ http.setResponseCallback(http.expectedStatuses(200));
 const RESULTS = ['WINNER', 'RESERVE', 'NOT_SELECTED', 'PENDING', 'NOT_APPLIED'];
 // 첫 바퀴(회원당 1번)의 결과 분포. DB와 비교하는 숫자다.
 const firstBy = Object.fromEntries(RESULTS.map((r) => [r, new Counter(`fm_result_first_${r.toLowerCase()}`)]));
+const firstTotal = new Counter('fm_result_first_total');
 const firstWithOrder = new Counter('fm_result_first_with_order');
 const resultOk = new Counter('fm_result_ok');
 const orderOk = new Counter('fm_order_ok');
@@ -122,6 +140,9 @@ const transportError = new Counter('fm_transport_error');
 const duration = new Trend('fm_read_duration', true);
 
 export function setup() {
+  // 임계값을 건 카운터에 0을 하나씩 남긴다. 표본이 없는 지표도 임계값이 평가되게 한다.
+  for (const c of [...Object.values(firstBy), firstTotal, firstWithOrder, orderNotFound, orderMismatch, resultUnknown,
+    notFound, unauthorized, otherClientError, serverError, transportError]) c.add(0);
   const metrics = http.get(`${MANAGEMENT_URL}/actuator/prometheus`, { tags: { name: 'setup' } });
   if (metrics.status !== 200) fail(`management ${MANAGEMENT_URL}/actuator/prometheus returned ${metrics.status}`);
   const detail = http.get(`${BASE_URL}/api/fan-meetings/${EVENT_ID}`, { tags: { name: 'setup' } });
@@ -156,8 +177,10 @@ export default function () {
     resultUnknown.add(1);
     return;
   }
-  if (firstPass) firstBy[result].add(1);
-  check(res, { 'result is not NOT_APPLIED': () => result !== 'NOT_APPLIED' });
+  if (firstPass) {
+    firstBy[result].add(1);
+    firstTotal.add(1);
+  }
 
   if (!body.orderId) return;
   if (firstPass) firstWithOrder.add(1);
@@ -203,15 +226,18 @@ export function handleSummary(data) {
   const trendOf = (name) => (data.metrics[name] ? data.metrics[name].values : {});
   const fmt = (v) => (v === undefined ? '-' : `${v.toFixed(1)}ms`);
   const latency = (t) => `med ${fmt(t.med)}  p95 ${fmt(t['p(95)'])}  p99 ${fmt(t['p(99)'])}  max ${fmt(t.max)}`;
-  const firstTotal = RESULTS.reduce((sum, r) => sum + value(`fm_result_first_${r.toLowerCase()}`), 0);
+  const firstValid = value('fm_result_first_total');
   const iterations = value('iterations');
   const reqRate = data.metrics.http_reqs ? data.metrics.http_reqs.values.rate : 0;
   const failedThresholds = Object.entries(data.metrics)
     .filter(([, m]) => m.thresholds && Object.values(m.thresholds).some((t) => !t.ok))
     .map(([name]) => name);
-  // 첫 바퀴가 다 돌지 않았으면 분포를 DB와 비교할 수 없다. 반복 수를 늘린다(HOLD 또는 PEAK_RATE).
-  const firstPassDone = iterations >= PARTICIPANTS;
-  if (!firstPassDone) failedThresholds.push(`first pass incomplete (${iterations}/${PARTICIPANTS} iterations)`);
+  // 첫 바퀴가 유효한 결과로 다 채워졌을 때만 분포를 DB와 비교할 수 있다(fm_result_first_total 임계값과 같은 조건).
+  const firstPassDone = firstValid === PARTICIPANTS;
+  const notApplied = value('fm_result_first_not_applied');
+  const notAppliedVerdict = EXPECTED_NOT_APPLIED === null
+    ? `UNDETERMINED (${notApplied} NOT_APPLIED; apply had transport errors or 5xx, check the DB)`
+    : `${notApplied === EXPECTED_NOT_APPLIED ? 'ok' : 'FAILED'} (${notApplied}, expected ${EXPECTED_NOT_APPLIED})`;
   const status = data.setup_data ? data.setup_data.status : null;
   const lines = [
     '',
@@ -220,7 +246,8 @@ export function handleSummary(data) {
     `  iterations ${iterations}, http_reqs ${value('http_reqs')} (${reqRate.toFixed(1)}/s)`,
     `  first pass (one per member, compare with fanmeeting-check.sh) ${firstPassDone ? '' : '— INCOMPLETE'}`,
     ...FIRST_METRICS.map((m) => `    ${m.padEnd(28)} ${value(m)}`),
-    `    total                        ${firstTotal} (must equal participants ${PARTICIPANTS})`,
+    `    valid results                ${firstValid} (must equal participants ${PARTICIPANTS})`,
+    `    not applied                  ${notAppliedVerdict}`,
     ...OUTCOME_METRICS.map((m) => `  ${m.padEnd(30)} ${value(m)}`),
     '  k6 latency, client-observed (체감값, 서버 지연은 8081 http.server.requests)',
     `    result/me      ${latency(trendOf('fm_read_duration{endpoint:result}'))}`,
@@ -234,9 +261,11 @@ export function handleSummary(data) {
   if (SUMMARY_PATH) {
     out[SUMMARY_PATH] = JSON.stringify({
       conditions: { eventId: EVENT_ID, eventStatus: status, requireDrawn: REQUIRE_DRAWN, participants: PARTICIPANTS,
+        expectedNotApplied: EXPECTED_NOT_APPLIED_RAW,
         userOffset: USER_OFFSET, peakRate: PEAK_RATE, ramp: RAMP, hold: HOLD, preVUs: PRE_VUS, maxVUs: MAX_VUS,
         baseUrl: BASE_URL },
-      firstPass: { complete: firstPassDone, total: firstTotal,
+      firstPass: { complete: firstPassDone, total: firstValid, expectedNotApplied: EXPECTED_NOT_APPLIED,
+        notAppliedVerdict,
         ...Object.fromEntries(FIRST_METRICS.map((m) => [m, value(m)])) },
       outcomes: Object.fromEntries(OUTCOME_METRICS.map((m) => [m, value(m)])),
       iterations,

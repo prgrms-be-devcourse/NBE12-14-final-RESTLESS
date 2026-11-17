@@ -5,7 +5,7 @@
 #       INVARIANTS_SQL  "-- name:" 블록으로 나뉜 불변식 SQL 경로 (fanmeeting-invariants.sql)
 #       EVENT_FILE(fanmeeting-prepare.sh 출력) 또는 EVENT_ID
 # 선택: DB_PORT(3306), MYSQL(예: "docker exec -i -e MYSQL_PWD perf-mysql mysql"),
-#       SUMMARY_PATH(k6 요약 JSON. 있으면 201 수와 응모 수를 비교한다)
+#       SUMMARY_PATH(k6 요약 JSON. 있으면 201 수와 응모 수를 비교한다. 연결 오류·5xx 수만큼은 DB가 더 많아도 된다)
 # 종료 코드: 불변식 위반이 있거나 응모 수가 맞지 않으면 1.
 set -euo pipefail
 
@@ -73,13 +73,16 @@ echo "  applications $total (APPLIED $applied, WITHDRAWN $withdrawn), distinct u
 if [[ "$dup" != "0" ]]; then echo "  FAILED: duplicate applications per user"; failed=1; fi
 if [[ -n "${SUMMARY_PATH:-}" ]]; then
   [[ -f "$SUMMARY_PATH" ]] || die "SUMMARY_PATH not found: $SUMMARY_PATH"
-  read -r k6_event k6_applied k6_transport <<< "$(python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))
-print(s["conditions"]["eventId"], s["outcomes"]["fm_applied"], s["outcomes"]["fm_transport_error"])' "$SUMMARY_PATH")"
+  read -r k6_event k6_applied k6_uncertain <<< "$(python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); o=s["outcomes"]
+print(s["conditions"]["eventId"], o["fm_applied"], o["fm_transport_error"] + o["fm_server_error"])' "$SUMMARY_PATH")"
   [[ "$k6_event" == "$EVENT_ID" ]] || die "summary is for event $k6_event, not $EVENT_ID"
+  # 연결 오류·5xx는 응답을 못 받았을 뿐 커밋됐을 수 있다. 그 수만큼은 DB가 k6 201보다 많아도 된다(DB가 정답).
   if [[ "$k6_applied" == "$applied" ]]; then
     echo "  k6 201 $k6_applied = APPLIED $applied (ok)"
+  elif [[ $k6_uncertain -gt 0 && $applied -gt $k6_applied && $applied -le $((k6_applied + k6_uncertain)) ]]; then
+    echo "  k6 201 $k6_applied < APPLIED $applied: $((applied - k6_applied)) of $k6_uncertain responses without 201 (transport error or 5xx) committed. DB count is used (ok)"
   else
-    echo "  FAILED: k6 201 $k6_applied != APPLIED $applied (k6 transport errors $k6_transport may have committed without a response)"
+    echo "  FAILED: k6 201 $k6_applied != APPLIED $applied (responses without 201: $k6_uncertain)"
     failed=1
   fi
 fi

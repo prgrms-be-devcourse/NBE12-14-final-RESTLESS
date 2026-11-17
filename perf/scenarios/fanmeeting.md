@@ -26,6 +26,28 @@
 
 한 단계가 실패(임계값 실패, 점검 실패)해도 다음 단계로 가고, 끝에 실패한 단계를 모아 보여 주며 종료 코드 1로 끝난다. 행사 생성이 실패하면 바로 멈춘다.
 
+**판정 기준.** BUSY, 5xx, 연결 오류, `dropped_iterations`가 하나라도 있거나 보낸 요청 수가 참여자 수와 다르면 그 단계는 실패다. 한계를 찾는 회차(3·4회)에서는 이 실패가 곧 측정 결과다. 몇 번째 도착률에서, 어떤 응답이 얼마나 나왔는지를 기록한다.
+
+거절의 판정은 시나리오마다 다르다. `fanmeeting-s1.sh`는 k6에 `SCENARIO`를 명시해서 넘긴다.
+
+| 시나리오 | 정상인 거절 | 실패 조건 |
+|---|---|---|
+| A (`START_OFFSET` 0 이상) | 없음 | 201 수 ≠ 참여자 수, 또는 `APPLICATION_WINDOW_CLOSED`가 1건이라도 있음 |
+| B (`START_OFFSET` 음수) | 오픈 전·직후 `APPLICATION_WINDOW_CLOSED` | 위 공통 조건만 |
+| C | 마감 뒤 `APPLICATION_WINDOW_CLOSED` | 마감 1초 뒤부터 보낸 요청의 201 |
+
+A를 따로 묶는 이유: A에서 전원이 거절돼도 요청 수, DB 수(0 = 0), 기대 미응모 수(참여자 전원)가 서로 맞아서 다른 검사로는 잡히지 않는다.
+
+**결과 조회의 기대 미응모 수.** 결과 조회는 A(B)에서 요청한 회원 전원을 조회한다. 그중 응모가 안 된 사람(B의 오픈 전 거절, BUSY 거절)은 `NOT_APPLIED`가 정상이다. 그래서 기대 미응모 수를 정해 같은지 본다.
+
+| 상황 | 기대 미응모 수 |
+|---|---|
+| DB 점검이 있음 | 참여자 − 점검 1의 DB `APPLIED` (확정값) |
+| DB 점검이 없고, A에 연결 오류·5xx가 없음 | 참여자 − k6 201 수 |
+| DB 점검이 없고, A에 연결 오류·5xx가 있음 | **판정 불가**(`unknown`). 응답을 못 받았지만 커밋됐을 수 있다. 수만 남기고, 나중에 DB로 확인한다 |
+
+`conditions.txt`의 `expected_not_applied`와 `source`(db, k6, unknown)에 남는다.
+
 ### 실행
 
 레포 루트에서. `perf-app`은 `/etc/hosts`에 EC2 주소로 등록한다(docker k6에는 그 주소를 자동으로 넘긴다).
@@ -49,7 +71,7 @@ EC2에서 빌려 쓸 때는 [perf/ec2](../ec2/README.md) 순서를 따른다.
 | 변수 | 기본값 | 뜻 |
 |---|---|---|
 | `PARTICIPANTS`, `PEAK_RATE`, `RAMP`, `HOLD` | 1000, 1000, 5s, 자동 | A의 참여자와 도착률. `HOLD`를 비우면 모든 참여자가 보낼 만큼 자동으로 잡는다 |
-| `START_OFFSET` | `2s` | A는 `2s`, B는 `-2s`. 음수면 단계 이름이 `apply-B`가 된다 |
+| `START_OFFSET` | `2s` | A는 `2s`, B는 `-2s`. 음수면 B(`SCENARIO=B`, 단계 이름 `apply-B`), 0 이상이면 A(`SCENARIO=A`)로 k6에 넘긴다 |
 | `CLOSE_PARTICIPANTS`, `CLOSE_RATE` | 500, 자동 | C. A가 쓰지 않은 계정(`USER_OFFSET=PARTICIPANTS`)을 쓴다. 계정이 모자라면 남는 만큼만, 0이면 건너뛴다. 도착률을 비우면 마감 3초 전부터 약 6초에 걸쳐 보내도록(참여자/6) 정한다 |
 | `RESULT`, `RESULT_RATE`, `RESULT_HOLD` | `true`, `PEAK_RATE`, 자동 | 결과 조회 폭주. A 참여자만 조회한다. C가 있으면 DB의 당첨·예비·주문 수에는 C 응모자도 들어가므로 첫 바퀴 수가 DB보다 작다 |
 | `DRAW_TIMEOUT` | 600 | 마감 뒤 추첨 확정을 기다리는 최대 초. 넘으면 조회를 건너뛴다 |
@@ -63,11 +85,11 @@ EC2에서 빌려 쓸 때는 [perf/ec2](../ec2/README.md) 순서를 따른다.
 
 | 파일 | 내용 |
 |---|---|
-| `summary.txt` | **한 장 요약.** 조건, 단계별 시각, A·B·C 결과(시간 구간별), 조회 첫 바퀴 분포, 단계별 서버 p95·p99·처리량·Hikari·CPU, 점검 핵심 줄 |
-| `conditions.txt`, `timeline.tsv`, `event.env` | 조건, 단계별 시작·끝(UTC)·종료 코드, 행사 |
+| `summary.txt` | **한 장 요약.** 조건, 단계별 시각, A·B·C 결과(시간 구간별), 조회 첫 바퀴 분포와 미응모 판정, 단계별 서버 지표(실제 집계 구간, 전체 요청과 성공 처리량, p95·p99, Hikari, CPU), 점검 핵심 줄 |
+| `conditions.txt`, `timeline.tsv`, `event.env` | 조건, 단계별 시작·끝(UTC)·종료 코드·경계 스냅샷 이름(`start_snapshot`, `end_snapshot`), 행사 |
 | `apply-A.json`(`apply-B`), `apply-C.json`, `result.json` | k6 요약 |
 | `check-1-apply.txt`, `check-2-draw.txt`, `check-3-result.txt` | 점검 출력 |
-| `metrics/`, `metrics-<단계>.txt/json`, `metrics-all.txt` | 서버 지표 스냅샷과 단계별·전체 요약 |
+| `metrics/`, `metrics-<단계>.txt/json`, `metrics-all.txt` | 서버 지표 스냅샷과 단계별·전체 요약. 단계 요약은 그 단계의 경계 스냅샷 두 장 사이다. `valid: false`면 `problems`에 이유가 있다 |
 | `run.log` | 화면 출력 전체 |
 
 같은 시간대의 EC2 CPU 크레딧(CloudWatch)과 RDS CPU는 `timeline.tsv`의 시각으로 따로 본다.
@@ -90,6 +112,11 @@ EC2에서 빌려 쓸 때는 [perf/ec2](../ec2/README.md) 순서를 따른다.
 
 Grafana가 없어도 서버 쪽 숫자를 남긴다. 관리 포트의 `/actuator/prometheus`를 `INTERVAL`초마다 파일로 저장하고, 끝나면 구간 차이로 계산한다. 앱에는 읽기 요청만 보낸다. `curl`과 `python3`만 있으면 된다.
 
+구간 숫자는 구간 안의 **첫 스냅샷과 마지막 스냅샷의 차이**다. 구간 시작과 첫 스냅샷 사이의 요청은 들어가지 않는다. 그래서 `fanmeeting-s1.sh`는 단계마다 **부하를 시작하기 전에** `snap`으로 한 장, **부하가 끝난 뒤** 한 장을 저장한다(경계 스냅샷). 이름은 `timeline.tsv`에 남기고, 단계 요약은 `FROM_SNAPSHOT`·`UNTIL_SNAPSHOT`으로 정확히 그 두 장 사이를 센다. 손으로 자를 때는 요약 첫 줄의 `counted <시각> → <시각>`(실제 집계 구간)을 같이 적는다.
+
+- **수집은 겹치지 않는다.** 기록 루프와 `snap`은 `OUT_DIR/.scrape.lock`(mkdir 잠금)을 잡고 한 번에 하나만 수집한다. 파일 이름은 잠금 안에서 응답을 다 받은 시각이라, 이름 순서가 서버가 응답을 만든 순서와 같고 느린 수집도 실제 시각에 가깝게 붙는다. 느린 수집이 겹쳐 누적값 순서가 뒤집히는 일(100 → 0 → 200)이 없다. 잠금을 `LOCK_WAIT`초 안에 못 얻으면 그 수집은 실패로 끝난다. 주인 프로세스가 죽은 잠금은 치우고 다시 잡는다.
+- **INVALID.** 경계 스냅샷이 없거나, 구간 안에서 앱이 재시작됐거나(`process_start_time_seconds` 변경), 누적 카운터가 줄어든 곳이 있으면 요약 첫머리에 `⚠ INVALID: <이유>`를 표시하고 `summary.json`에 `valid: false`를 남긴 뒤 종료 코드 3으로 끝난다. `fanmeeting-s1.sh`는 이를 실패 단계로 모은다. 그 숫자는 처리량으로 쓰지 않는다.
+
 **측정 시작 전에 켜고, 모든 실행(A·B·C·조회)이 끝난 뒤 Ctrl-C로 끈다.** 여러 실행이 한 기록에 섞이므로, 실행마다 k6가 출력한 시작·끝 시각으로 `summary`를 다시 잘라 본다.
 
 ```bash
@@ -100,6 +127,12 @@ MANAGEMENT_URL=http://perf-app:8081 PERF_ALLOWED_APP_HOSTS=perf-app \
 # 끝난 뒤 실행 하나만 (ISO-8601 또는 epoch ms)
 FROM=2026-11-17T05:03:00Z UNTIL=2026-11-17T05:04:00Z \
   perf/scenarios/fanmeeting-metrics.sh summary .ai-output/perf/metrics-s1
+
+# 실행 앞뒤에 경계 스냅샷을 직접 찍고 그 두 장 사이만 센다 (s1.sh가 단계마다 하는 것과 같다)
+OUT_DIR=.ai-output/perf/metrics-s1 perf/scenarios/fanmeeting-metrics.sh snap   # "metrics: snapshot <ms> <file>"
+# ... k6 실행 ...
+OUT_DIR=.ai-output/perf/metrics-s1 perf/scenarios/fanmeeting-metrics.sh snap
+FROM_SNAPSHOT=<처음 ms> UNTIL_SNAPSHOT=<나중 ms> perf/scenarios/fanmeeting-metrics.sh summary .ai-output/perf/metrics-s1
 ```
 
 | 변수 | 기본값 | 뜻 |
@@ -109,21 +142,27 @@ FROM=2026-11-17T05:03:00Z UNTIL=2026-11-17T05:04:00Z \
 | `DURATION` | 0 | 0이면 Ctrl-C까지, 아니면 그 초만큼 |
 | `OUT_DIR` | `.ai-output/perf/metrics-<시각>` | 스냅샷(`<epoch ms>.prom`)과 `summary.json` |
 | `PERF_APP_ADDR` | 없음 | `/etc/hosts` 대신 perf- 이름을 이 IP로 연결 |
-| `FROM`, `UNTIL` | 없음 | `summary`에서 볼 구간 |
+| `FROM`, `UNTIL` | 없음 | `summary`에서 볼 구간(시각). 그 안의 첫·마지막 스냅샷 사이를 센다 |
+| `FROM_SNAPSHOT`, `UNTIL_SNAPSHOT` | 없음 | `summary`에서 정확히 이 두 스냅샷 사이를 센다(`snap`이 출력한 이름). 파일이 없으면 INVALID |
+| `LOCK_WAIT` | 15 | 수집 잠금을 기다리는 최대 초 |
 
 요약에 나오는 것:
 
 | 항목 | 뜻 |
 |---|---|
-| 엔드포인트별 `requests`, 상태 코드별 수 | 서버가 실제로 받은 요청. k6 수와 같아야 한다 |
-| `avg`, `peak` (/s) | 구간 평균, 스냅샷 사이 최고 처리량. **한계 TPS는 `peak`가 더 오르지 않고 p99와 BUSY가 오르기 시작하는 지점**이다 |
+| `counted <시각> → <시각>` | 실제로 차이를 계산한 첫·마지막 스냅샷 시각. 경계 스냅샷을 줬으면 그 파일 이름, `FROM`·`UNTIL`을 줬으면 요청한 구간도 같이 나온다 |
+| `⚠ INVALID: <이유>` | 경계 누락, 앱 재시작, 카운터 역행. 아래 숫자를 처리량으로 읽지 않는다 |
+| 엔드포인트별 `all requests`, 상태 코드별 수 | 서버가 받은 요청 전부(성공, 거절, 오류). k6 수와 같아야 한다 |
+| `all requests` `avg`, `peak` (/s) | 전체 요청 처리량(RPS). 거절(409·503)과 오류도 들어 있다 |
+| `success (<코드>)` `avg`, `peak` (/s) | **성공 처리량.** 응모(POST)는 201만, 조회(GET)는 200만 센다. 응모의 성공 TPS, 조회의 성공 RPS다 |
 | `p50`, `p95`, `p99`, `max` | 서버 처리 시간(히스토그램 구간 보간). 네트워크 왕복이 없는 값이다 |
 | hikari `active/max`, `pending`, `timeouts`, `acquire max` | 연결 풀. active가 max에 붙고 pending이 쌓이면 연결 풀이 병목이다 |
 | tomcat `busy`, cpu `process`/`system`, heap | 요청 스레드, CPU, 메모리 |
 | fanmeeting workers | Worker 실행 수, 오류, 평균·최대 시간. 열기·마감 지연을 볼 때 `run`(열기·마감)을 본다 |
 
+- **한계 TPS는 성공 처리량으로 본다.** 도착률을 올려도 `success peak`가 더 오르지 않고, 503 BUSY와 p99가 오르기 시작하는 지점이다. 전체 `peak`는 거절도 처리량에 넣으므로 한계를 실제보다 크게 보이게 한다.
 - `max`, `pending` 같은 순간값은 스냅샷 시각의 값이라 `INTERVAL`보다 짧은 스파이크는 놓칠 수 있다.
-- 기록 중 앱이 재시작되면 경고가 나온다. 그 구간 숫자는 쓰지 않는다.
+- 기록 중 앱이 재시작되면 INVALID다. 그 구간 숫자는 쓰지 않는다.
 - EC2 CPU 크레딧과 RDS CPU는 AWS 콘솔(CloudWatch, RDS 모니터링)에서 같은 시간대로 본다.
 
 ## 팬미팅 S1: 응모 몰림 (C46)
@@ -134,9 +173,9 @@ FROM=2026-11-17T05:03:00Z UNTIL=2026-11-17T05:04:00Z \
 
 | 시나리오 | 보는 것 | 실행 |
 |---|---|---|
-| A | 오픈 순간 몰림. 응모 수 = 201 수, `APPLICATION_BUSY` 0, 불변식 0 | `START_OFFSET=2s` |
-| B | 오픈 직전부터 보낼 때 Open Worker 지연. 오픈 뒤 몇 초 동안 `APPLICATION_WINDOW_CLOSED`가 나는지 | `START_OFFSET=-2s` |
-| C | 마감 앞뒤 요청. 마감 1초 뒤부터 보낸 요청의 201이 0인지 | `MODE=close` |
+| A | 오픈 순간 몰림. **전원 201**(거절 0), `APPLICATION_BUSY` 0, 불변식 0 | `SCENARIO=A` (기본 `START_OFFSET=2s`) |
+| B | 오픈 직전부터 보낼 때 Open Worker 지연. 오픈 뒤 몇 초 동안 `APPLICATION_WINDOW_CLOSED`가 나는지 | `SCENARIO=B` (기본 `START_OFFSET=-2s`) |
+| C | 마감 앞뒤 요청. 마감 1초 뒤부터 보낸 요청의 201이 0인지 | `SCENARIO=C` (`MODE=close`, 기본 `START_OFFSET=-3s`) |
 | D | 마감 뒤 추첨 시간. `started_at → completed_at`, `attempt_count`, `candidate_count` | 마감 뒤 `fanmeeting-check.sh` |
 
 - 응모 기간은 10분 고정이다([정책 3절](../../docs/domains/fanmeeting/policy.md)). 행사 하나로 A나 B를 한 번, 같은 행사 마감에 C를 한 번 돌릴 수 있다. 측정마다 새 행사를 만든다.
@@ -157,13 +196,14 @@ perf/scenarios/fanmeeting-prepare.sh
 ```
 
 3. k6: 오픈 전에 시작한다. `setup`이 시작 시각까지 기다렸다가 부하를 건다.
+   A 예시다. B는 `-e SCENARIO=B -e START_OFFSET=-2s`, C는 마감 전에 `-e SCENARIO=C`(또는 `MODE=close`)와 A가 쓰지 않은 `USER_OFFSET`을 준다.
 
 ```bash
 docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
   --add-host perf-app:10.0.1.10 \
   -e BASE_URL=http://perf-app:8080 -e MANAGEMENT_URL=http://perf-app:8081 \
   -e PERF_ALLOWED_APP_HOSTS=perf-app -e SEED_OUT=/perf/seed/out \
-  -e EVENT_FILE=/out/fanmeeting-event.env -e PARTICIPANTS=10000 -e START_OFFSET=2s \
+  -e EVENT_FILE=/out/fanmeeting-event.env -e PARTICIPANTS=10000 -e SCENARIO=A -e START_OFFSET=2s \
   -e SUMMARY_PATH=/out/fanmeeting-apply.json \
   grafana/k6:2.4.0 run /perf/scenarios/fanmeeting-apply.js
 ```
@@ -199,8 +239,9 @@ perf/scenarios/fanmeeting-check.sh
 |---|---|---|
 | `BASE_URL`, `MANAGEMENT_URL`, `PERF_ALLOWED_APP_HOSTS`, `SEED_OUT` | 드롭과 같음 | 드롭 절 참고 |
 | `EVENT_FILE` | 없음 | prepare가 만든 파일. 또는 `EVENT_ID`, `ENTRY_OPENS_AT`, `ENTRY_CLOSES_AT`를 직접 준다 |
-| `MODE` | `open` | `open`이면 기준 시각이 오픈(A·B), `close`면 마감(C) |
-| `START_OFFSET` | open `0s`, close `-3s` | 기준 시각에서 부하 시작까지. `-2s`, `500ms`, `2s` |
+| `SCENARIO` | `MODE`와 시작 시각으로 정함 | `A`, `B`, `C`. 비우면 `MODE=close`는 C, `MODE=open`은 시작 시각이 오픈 전이면 B, 아니면 A. A는 시작이 오픈 이후, B는 오픈 전이어야 하고 C는 `MODE=close`여야 한다(아니면 시작하지 않는다) |
+| `MODE` | `SCENARIO`가 C면 `close`, 아니면 `open` | `open`이면 기준 시각이 오픈(A·B), `close`면 마감(C) |
+| `START_OFFSET` | A `2s`, B `-2s`, C `-3s` | 기준 시각에서 부하 시작까지. `-2s`, `500ms`, `2s` |
 | `START_AT` | 기준 시각 + `START_OFFSET` | 시작 시각을 ISO-8601로 직접 줄 때 |
 | `PARTICIPANTS`, `USER_OFFSET` | 1000, 0 | `users.csv`의 USER 행 중 `USER_OFFSET` 다음부터 쓰는 계정 수. C는 같은 행사에 응모하지 않은 계정을 쓰도록 `USER_OFFSET`을 준다 |
 | `PEAK_RATE`, `RAMP`, `HOLD` | 1000, 5s, 20s | 최고 도착률(초당 반복), 오르는 시간, 유지 시간 |
@@ -218,7 +259,7 @@ perf/scenarios/fanmeeting-check.sh
 | `EVENT_FILE` 또는 `EVENT_ID` | 응모 정합성과 추첨을 볼 행사 |
 | `SUMMARY_PATH` | 있으면 k6 201 수와 APPLIED 수를 비교한다 |
 
-불변식 위반이 있거나, 회원당 응모가 2건 이상이거나, 201 수와 APPLIED 수가 다르면 종료 코드 1이다.
+불변식 위반이 있거나, 회원당 응모가 2건 이상이거나, 201 수와 APPLIED 수가 맞지 않으면 종료 코드 1이다. 연결 오류·5xx는 응답만 못 받고 커밋됐을 수 있어서, 그 건수 안에서는 APPLIED가 201보다 많아도 통과하고 차이를 적는다. 이때는 DB 수가 정답이다.
 
 ### 안전장치
 
@@ -231,14 +272,16 @@ perf/scenarios/fanmeeting-check.sh
 
 | 지표 | 응답 | 기대 |
 |---|---|---|
-| `fm_applied` | 201 | A: 참여자 수. 점검의 APPLIED 수와 같아야 한다 |
+| `fm_applied` | 201 | A: 참여자 수 (임계값). B·C: 참여자 수 이하. 점검의 APPLIED 수와 같아야 한다 |
 | `fm_already_applied` | 409 `ALREADY_APPLIED` | 0. 계정을 한 번만 쓰므로 나오면 조사한다 (임계값) |
-| `fm_window_closed` | 409 `APPLICATION_WINDOW_CLOSED` | A: 0. B·C: 구간별로 본다 |
-| `fm_busy` | 503 `APPLICATION_BUSY` | 0. C46 기준. 0이 아니면 건수와 서버 로그의 원인을 적는다 |
+| `fm_window_closed` | 409 `APPLICATION_WINDOW_CLOSED` | A: 0 (임계값). B·C: 정상 거절. 구간별로 본다 |
+| `fm_busy` | 503 `APPLICATION_BUSY` | 0 (임계값). C46 기준. 0이 아니면 건수와 서버 로그의 원인을 적는다 |
 | `fm_not_found`, `fm_unauthorized` | 404, 401 | 0. 나오면 바로 멈춘다 |
-| `fm_other_client_error`, `fm_server_error`, `fm_transport_error` | 그 밖의 4xx, 5xx, 연결 오류와 타임아웃 | 0 |
+| `fm_other_client_error`, `fm_server_error`, `fm_transport_error` | 그 밖의 4xx, 5xx, 연결 오류와 타임아웃 | 0 (임계값) |
+| `fm_requests` | 보낸 요청 수 | 참여자 수 (임계값) |
+| `dropped_iterations` | k6가 목표 도착률을 못 채워 버린 반복 | 0 (임계값) |
 
-- 요청 합계(`requests total`)가 참여자 수와 같아야 모든 계정이 보낸 것이다.
+- `fm_requests`가 참여자 수와 같아야 모든 계정이 보낸 것이다. 결과별 수의 합은 `outcomesTotal`로 따로 남는다.
 - 구간 집계(`fm_applied_*`, `fm_window_closed_*`)는 기준 시각(오픈 또는 마감)에서 요청을 보낸 시각까지 경과 시간이다. `before`, `0_1s`, `1_2s`, `after_2s`로 나눈다. 노트북 시계 기준이고, 서버 시계와의 차이를 `serverClockOffsetMs`(Date 헤더라 1초 단위)로 남긴다.
 - B: `fm_window_closed_0_1s`, `1_2s`가 Open Worker 지연이다. `before`는 오픈 전이라 거절되는 것이 정상이다.
 - C: 마감 판정은 커밋 기준이다. 마감 직전에 보낸 요청은 마감 뒤에 커밋돼도 성공할 수 있다. 그래서 `fm_applied_0_1s`는 허용하고 `fm_applied_1_2s`, `fm_applied_after_2s`가 0인지 본다(임계값). 0이 아니면 시계 차이부터 확인한다.
@@ -275,6 +318,7 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
 |---|---|---|
 | `BASE_URL`, `MANAGEMENT_URL`, `PERF_ALLOWED_APP_HOSTS`, `SEED_OUT`, `EVENT_FILE`/`EVENT_ID` | apply와 같음 | |
 | `PARTICIPANTS`, `USER_OFFSET` | 1000, 0 | 그 행사에 응모한 apply 실행과 같은 값 |
+| `EXPECTED_NOT_APPLIED` | 0 | 그중 응모가 안 된 인원. 첫 바퀴 `NOT_APPLIED` 수가 이 값과 같아야 한다. `unknown`이면 판정하지 않는다(응모에 연결 오류·5xx가 있고 DB로 확인하지 못했을 때). `fanmeeting-s1.sh`가 자동으로 넘긴다 |
 | `PEAK_RATE`, `RAMP`, `HOLD` | 1000, 5s, 60s | 초당 새로고침 수, 오르는 시간, 유지 시간. 총 반복이 `PARTICIPANTS` 이상이어야 첫 바퀴가 끝난다 |
 | `PRE_VUS`, `MAX_VUS` | 300, 2000 | |
 | `REQUIRE_DRAWN` | `true` | 행사가 `PAYMENT_IN_PROGRESS`나 `RECRUITMENT_COMPLETED`가 아니면 멈춘다. `false`면 추첨 확정 전에도 돈다(그때 `PENDING`이 정상) |
@@ -287,10 +331,10 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
 | `fm_result_first_winner`, `_reserve`, `_not_selected` | 점검의 `selections WINNER`, `RESERVE`와 같다. 미선발 = 참여자 − 당첨 − 예비 |
 | `fm_result_first_with_order` | 점검의 `orders` 수와 같다 |
 | `fm_result_first_pending` | 0. 확정 뒤인데 `PENDING`이면 결과 공개가 늦은 것이다 (임계값) |
-| `fm_result_first_not_applied` | 0. 나오면 `PARTICIPANTS`·`USER_OFFSET`이 apply와 다르다 (임계값) |
+| `fm_result_first_not_applied` | `EXPECTED_NOT_APPLIED`와 같다 (임계값). 다르면 `PARTICIPANTS`·`USER_OFFSET`이 apply와 다르거나 응모 결과와 조회 결과가 어긋난 것이다. `unknown`이면 `UNDETERMINED`로 수만 남는다 |
 | `fm_order_not_found`, `fm_order_mismatch` | 0. 결과에는 주문이 있는데 주문 조회가 없다고 하거나 번호가 다르면 두 조회가 다른 상태를 본다 (임계값) |
-| `fm_server_error`, `fm_transport_error`, `fm_other_client_error` | 0 |
-| 첫 바퀴 `total` | 참여자 수. 모자라면 `HOLD`나 `PEAK_RATE`를 늘린다 |
+| `fm_server_error`, `fm_transport_error`, `fm_other_client_error`, `dropped_iterations` | 0 (임계값) |
+| 첫 바퀴 `valid results`(`fm_result_first_total`) | 참여자 수 (임계값). 알려진 결과 값을 받은 첫 조회 수다. 오류로 받지 못한 회원이 있으면 모자란다. 반복이 모자라면 `HOLD`나 `PEAK_RATE`를 늘린다 |
 
 - 서버 지연은 관리 포트의 `http_server_requests_seconds{uri="/api/fan-meetings/{eventId}/result/me"}`, `.../orders/me`로 본다. 같이 볼 것: Hikari 활성·대기 연결, DB CPU, 요청당 쿼리 수(슬로우 쿼리 로그나 `performance_schema`).
 - k6 지연(`fm_read_duration{endpoint:result|order}`)은 체감값이다.
