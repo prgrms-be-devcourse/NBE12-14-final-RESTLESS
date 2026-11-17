@@ -24,6 +24,7 @@ perf/seed/seed.sh --scale base --profile perf
 | 기본 | 시드, `out/` 토큰 CSV, 점검. 빈 스키마에서만 실행된다 |
 | `--refresh` | 스냅샷 복원 뒤 실험 전에 실행. 핫 드롭·경매 기간과 Refresh Token 만료를 지금 기준으로 다시 맞추고 CSV를 다시 만든다 |
 | `--verify` | 점검만 |
+| `AUCTION_CLOSE_IN_MINUTES=2 ... --refresh` | AU-7·8의 종료 시각을 현재 + 2분으로 설정 |
 
 로컬에서는 `--scale small`을 쓰고, mysql 클라이언트가 없으면 `MYSQL="docker exec -i -e MYSQL_PWD <컨테이너> mysql"`로 컨테이너 안의 클라이언트를 쓴다.
 
@@ -40,7 +41,8 @@ perf/seed/seed.sh --scale base --profile perf
 
 ## 수치
 
-모든 수치는 [scale.yml](scale.yml)에서 바꾼다. small은 로컬, base는 기본 실험, large는 확장 실험용이다.
+모든 수치는 [scale.yml](scale.yml)에서 바꾼다. small은 로컬, base는 기본 실험, capacity는 계단식 용량 측정, large는 확장 실험용이다.
+capacity는 base와 같고 핫 재고와 계정만 21만이다. 품절 응답 대신 성공 점유 경로의 처리량을 재려는 것이다 ([이유](../scenarios/README.md#재고를-크게-두는-이유)).
 
 | 구분 | base |
 |---|---|
@@ -49,8 +51,10 @@ perf/seed/seed.sh --scale base --profile perf
 | 배경 드롭 | 종료 100건, SKU 300, 점유 100,000 (CONFIRMED 80%, RESTORED 3%, RELEASED 7%, EXPIRED 10%) |
 | 주문, 결제 | 배경 점유마다 주문 1, 품목 1, 배송 스냅샷 1, 결제 1. 환불 완료 3,000 |
 | 경매·크레딧 | 핫 1, 분산 100, 종료 1,000 (유찰 10%, 낙찰 입찰 20건), 회원마다 크레딧 100,000,000 지급 |
+| AU-6 | 기록 많은 회원 100명, 회원당 종료 경매 50건 이상 (낙찰·추월) |
+| AU-7·8 | 종료 직전 1건, 동시 종료 1,000건, 경매당 입찰 3건 |
 
-small은 분산 10·종료 50, large는 분산 1,000·종료 10,000이다. 시작가 10,000, 최소 인상액 100이다.
+small은 분산 10·종료 50, AU-6 회원 10명·인당 20건, AU-8 50건이다. large는 분산 1,000·종료 10,000, AU-6 회원 1,000명·인당 50건, AU-8 10,000건이다. 시작가 10,000, 최소 인상액 100이다.
 
 핫 데이터는 비어 있는 상태로 시작한다. 경쟁률은 시드가 아니라 k6가 쓰는 계정 행 수로 바꾼다. 점유, 주문, 결제, 대기열 등록은 테스트가 만든다. 대기열을 미리 채워야 하면 `drop_hot_queue_prefill`을 쓴다.
 핫 기준값(총재고)은 `perf_seed_meta`와 `out/manifest.json`에 남는다. 테스트 뒤 불변식 대조에 쓴다.
@@ -63,7 +67,9 @@ ID를 명시적으로 넣어서 시나리오가 값을 예측할 수 있다. 앱
 |---|---|
 | users | 회원 1..users, 관리자 users+1, 주최자 users+2..users+1+organizers |
 | drops | 핫 1, 배경 2.. |
-| auctions | 핫 1, 분산 2..1+auction_spread, 배경 그 뒤 |
+| auctions | 핫 1, 분산 2..1+auction_spread, 배경 그 뒤, AU-6 종료 경매, AU-7, AU-8 순서 |
+| AU-6 회원 | 마지막 auction_heavy_users명 |
+| AU-8 입찰 회원 | AU-6 회원 앞의 auction_mass_close × auction_mass_close_bids_per명 (입찰마다 다른 회원) |
 | credit_wallets | 일반 회원 ID와 동일 |
 | auction_bids, credit_holds | 배경 입찰 순서대로 1부터, 확보 ID는 입찰 ID와 동일 |
 | drop_variants | 핫 1..3, 배경 4.. |
@@ -88,7 +94,9 @@ ID를 명시적으로 넣어서 시나리오가 값을 예측할 수 있다. 앱
 |---|---|
 | users.csv | user_id, email, role, access_token, refresh_token. 핫 참여자는 앞에서부터 participants 행 |
 | staff.csv | 관리자, 주최자 전원 |
-| manifest.json | 핫 드롭과 SKU, 판매 기간, 경쟁률, 핫 경매 ID·분산 ID 범위·시작가·인상액·지급액 |
+| manifest.json | 핫 드롭과 SKU, 판매 기간, 경쟁률, 핫 경매 ID·분산 ID 범위·시작가·인상액·지급액, AU-6 회원 범위, AU-7·8 경매 범위와 AU-8 회원 범위·종료 시각 |
+
+AU-1은 CSV 앞에서부터 AU-8 회원 구간 직전까지만 사용한다. 정확한 구간은 manifest의 `mass_first_user_id`와 `heavy_first_user_id`를 확인한다. AU-7·8 실험은 매번 스냅샷 복원 후 refresh부터 시작한다. 종료되거나 새 입찰이 붙은 경매는 refresh가 건드리지 않는다.
 
 비밀번호는 로그인 자체를 측정할 때만 쓰고, 나머지는 CSV 토큰을 쓴다.
 Refresh Token은 한 번 쓰면 교체되므로 같은 행을 다시 쓰려면 스냅샷을 복원한다.
@@ -101,6 +109,7 @@ Refresh Token은 한 번 쓰면 교체되므로 같은 행을 다시 쓰려면 �
 - 주문 금액과 품목 합계, 결제 금액, 점유·주문·결제 상태 조합, 환불 금액
 - 드롭 불변식 INV-01~09 및 경매·크레딧 불변식 SQL 10개
 - 핫·분산 경매 상태와 입찰, 배경 경매 수와 유찰 수, 지갑 수
+- AU-6 회원별 경매 기록 수, AU-7 상태와 입찰 0건, AU-8 공통 종료 시각과 최고 입찰 확보
 - 시드 기준값: 행 수, 핫 재고 합계, 핫 드롭이 비어 있는지
 
 부하 테스트 뒤 `--verify`를 실행하면 시드 기준값 검사는 실패하는 것이 정상이다. 그때는 불변식과 금액 검사가 0인지 본다.
@@ -118,6 +127,7 @@ Refresh Token은 한 번 쓰면 교체되므로 같은 행을 다시 쓰려면 �
 | 환경 | 스케일 | 시간 |
 |---|---|---|
 | 로컬 macOS, Docker MySQL 8.4 | small | 1초 (토큰과 점검 포함) |
-| 로컬 macOS, Docker MySQL 8.4 | base | 21초 (토큰과 점검 포함) |
+| 로컬 macOS, Docker MySQL 8.4 | base | 23초 (토큰과 점검 포함) |
+| 로컬 macOS, Docker MySQL 8.4 | capacity | 31초 (토큰과 점검 포함) |
 
 EC2와 RDS에서는 아직 재지 않았다.

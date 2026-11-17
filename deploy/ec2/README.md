@@ -46,6 +46,7 @@ sudo systemctl enable --now restless-deploy.timer
 ## 부하 테스트와 함께 쓰기
 
 부하 테스트는 같은 서버의 8080을 쓰므로 배포 컨테이너를 멈추고 perf 컨테이너를 `restless-perf` 이름으로 띄운다.
+아래 단계는 [perf/ec2/perf-ec2.sh](../../perf/ec2/perf-ec2.sh)의 `start`, `finish`가 대신한다.
 그 이름의 컨테이너가 돌고 있는 동안 이 스크립트는 교체하지 않는다.
 
 ```bash

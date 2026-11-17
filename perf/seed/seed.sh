@@ -3,6 +3,7 @@
 #
 #   seed.sh --scale base --profile perf            # 빈 스키마에 시드, 토큰 CSV, 점검
 #   seed.sh --scale base --profile perf --refresh  # 스냅샷 복원 뒤: 핫 판매 기간, 토큰 만료 갱신
+#   AUCTION_CLOSE_IN_MINUTES=2 seed.sh --scale base --profile perf --refresh # AU-7/8 종료 시각
 #   seed.sh --scale base --profile perf --verify   # 점검만
 #
 # 필요한 환경변수: DB_HOST, DB_NAME, DB_USERNAME, DB_PASSWORD, JWT_SECRET, PERF_ALLOWED_DB_HOSTS
@@ -82,6 +83,12 @@ fi
 scale_vars="$(python3 "$ROOT/lib/scale.py" "$ROOT/scale.yml" "$SCALE")" || die "cannot read scale.yml"
 eval "$scale_vars"
 participants=$(( SCALE_drop_hot_stock * SCALE_contention_ratio ))
+heavy_count=$(( SCALE_auction_heavy_users * SCALE_auction_heavy_auctions_per_user ))
+mass_accounts=$(( SCALE_auction_mass_close * SCALE_auction_mass_close_bids_per ))
+(( SCALE_auction_heavy_users >= 2 && SCALE_auction_mass_close_bids_per >= 2 && mass_accounts + SCALE_auction_heavy_users < SCALE_users )) || die "auction account ranges overlap"
+close_minutes=${AUCTION_CLOSE_IN_MINUTES:-0}
+[[ "$close_minutes" =~ ^[0-9]{1,5}$ ]] || die "AUCTION_CLOSE_IN_MINUTES must be a positive integer"
+if [[ -n "${AUCTION_CLOSE_IN_MINUTES:-}" ]] && (( 10#$close_minutes == 0 )); then die "AUCTION_CLOSE_IN_MINUTES must be positive"; fi
 per_drop=$(( (SCALE_drop_bg_reservations + SCALE_drop_bg_drops - 1) / SCALE_drop_bg_drops ))
 (( participants <= SCALE_users )) || die "hot participants $participants (stock x ratio) exceed users $SCALE_users"
 (( per_drop <= SCALE_users )) || die "reservations per background drop $per_drop exceed users"
@@ -93,7 +100,7 @@ per_drop=$(( (SCALE_drop_bg_reservations + SCALE_drop_bg_drops - 1) / SCALE_drop
 
 seq_size=$SCALE_users
 for n in $(( SCALE_users + 1 + SCALE_organizers )) "$SCALE_drop_bg_reservations" \
-         $(( SCALE_drop_bg_drops * SCALE_drop_bg_variants_per_drop )) "$SCALE_drop_hot_queue_prefill" $(( 1 + SCALE_auction_spread + SCALE_auction_bg )) $(( SCALE_auction_bg * SCALE_auction_bg_bids_per )); do
+         $(( SCALE_drop_bg_drops * SCALE_drop_bg_variants_per_drop )) "$SCALE_drop_hot_queue_prefill" $(( 1 + SCALE_auction_spread + SCALE_auction_bg )) $(( SCALE_auction_bg * SCALE_auction_bg_bids_per )) "$(( heavy_count * 2 ))" "$(( heavy_count + SCALE_auction_ending + SCALE_auction_mass_close ))" "$mass_accounts"; do
   (( n > seq_size )) && seq_size=$n
 done
 
@@ -111,6 +118,8 @@ SET @pct_released = $SCALE_drop_bg_pct_released;
 SET @auction_spread = $SCALE_auction_spread, @auction_bg = $SCALE_auction_bg, @auction_bg_bids_per = $SCALE_auction_bg_bids_per;
 SET @auction_bg_pct_unsold = $SCALE_auction_bg_pct_unsold, @auction_start_price = $SCALE_auction_start_price;
 SET @auction_min_increment = $SCALE_auction_min_increment, @credit_grant = $SCALE_credit_grant;
+SET @heavy_users = $SCALE_auction_heavy_users, @heavy_per_user = $SCALE_auction_heavy_auctions_per_user;
+SET @ending_count = $SCALE_auction_ending, @mass_count = $SCALE_auction_mass_close, @mass_bids = $SCALE_auction_mass_close_bids_per, @close_minutes = $((10#$close_minutes));
 SQL
 }
 
@@ -138,7 +147,7 @@ write_tokens() {
       'seeded_at', (SELECT v FROM perf_seed_meta WHERE k = 'seeded_at'),
       'contention_ratio', $SCALE_contention_ratio,
       'participants', 'users.csv rows 1..$participants',
-      'auction', JSON_OBJECT('hot_auction_id', 1, 'spread_first_id', 2, 'spread_last_id', 1 + $SCALE_auction_spread, 'start_price', $SCALE_auction_start_price, 'min_increment', $SCALE_auction_min_increment, 'credit_grant', $SCALE_credit_grant),
+      'auction', JSON_OBJECT('hot_auction_id', 1, 'spread_first_id', 2, 'spread_last_id', 1 + $SCALE_auction_spread, 'start_price', $SCALE_auction_start_price, 'min_increment', $SCALE_auction_min_increment, 'credit_grant', $SCALE_credit_grant, 'heavy_first_user_id', $((SCALE_users - SCALE_auction_heavy_users + 1)), 'heavy_last_user_id', $SCALE_users, 'ending_first_id', $((2 + SCALE_auction_spread + SCALE_auction_bg + heavy_count)), 'ending_last_id', $((1 + SCALE_auction_spread + SCALE_auction_bg + heavy_count + SCALE_auction_ending)), 'mass_first_id', $((2 + SCALE_auction_spread + SCALE_auction_bg + heavy_count + SCALE_auction_ending)), 'mass_last_id', $((1 + SCALE_auction_spread + SCALE_auction_bg + heavy_count + SCALE_auction_ending + SCALE_auction_mass_close)), 'mass_first_user_id', $((SCALE_users - SCALE_auction_heavy_users - mass_accounts + 1)), 'mass_last_user_id', $((SCALE_users - SCALE_auction_heavy_users)), 'mass_ends_at', (SELECT ends_at FROM auctions WHERE auction_id = $((2 + SCALE_auction_spread + SCALE_auction_bg + heavy_count + SCALE_auction_ending)))),
       'drop', JSON_OBJECT(
           'hot_drop_id', 1,
           'opens_at', (SELECT opens_at FROM drops WHERE id = 1),
