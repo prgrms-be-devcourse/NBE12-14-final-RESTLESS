@@ -29,7 +29,7 @@ Observe → Hypothesize → Change → Verify Correctness → Benchmark → Comp
 - 한 비교 실험에서 주요 독립변인은 하나만 바꾼다.
 - 개선되지 않았으면 그 이유도 결과로 남긴다.
 - 부하 생성기의 dropped iterations, CPU, 메모리 한계도 확인한다.
-- 결과는 [reports/](../reports/)에 측정 조건과 함께 남긴다.
+- 결과는 각자 PC의 `.ai-output/perf/<날짜>-<실험>/`에 측정 조건과 함께 남긴다. 원자료, 보고서, 성능 개선 기록은 레포에 올리지 않는다. `docs/`에는 준비 문서(전략, 계획, 절차, 측정 규약)만 둔다.
 
 ## 4. 실험 목록
 

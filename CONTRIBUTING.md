@@ -87,4 +87,6 @@ npm run dev                  # /api 요청은 localhost:8080으로 프록시
 
 Claude, Codex, ChatGPT가 만든 계획, 보고서, 분석 메모는 `.ai-output/`에 둔다. 이 폴더는 커밋되지 않는다. 팀이 함께 볼 내용이면 `docs/`로 옮겨 PR로 올린다.
 
+성능 실험은 예외다. `docs/`에는 준비 문서(전략, 계획, 절차, 측정 규약)만 둔다. 측정 원자료, 결과 보고서, 성능 개선 기록은 `docs/`로 옮기지 않고 `.ai-output/perf/`에 둔다.
+
 AI 작업에 쓰는 하네스 도구(검사 스크립트, 가드, 지시서 템플릿)는 레포에 두지 않는다. 각자 PC의 `tools/harness/`에서 쓰며 `.gitignore`에 들어 있다. 실행 기록(로그, 단계 보고서)은 `.ai-output/`에 둔다.
