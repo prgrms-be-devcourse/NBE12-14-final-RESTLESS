@@ -269,6 +269,10 @@ resources = {
     'hikariAcquireMaxMs': (gauge_max('hikaricp_connections_acquire_seconds_max') or 0) * 1000,
     'tomcatBusyMax': gauge_max('tomcat_threads_busy_threads'),
     'tomcatMaxThreads': gauge_max('tomcat_threads_config_max_threads'),
+    # 동시에 열려 있는 TCP 연결(유지 연결 포함)과 한도. 게릴라 오픈처럼 새로고침이 많으면 한도(기본 8,192)에 다가간다.
+    'tomcatConnectionsMax': gauge_max('tomcat_connections_current_connections'),
+    'tomcatKeepAliveMax': gauge_max('tomcat_connections_keepalive_current_connections'),
+    'tomcatMaxConnections': gauge_max('tomcat_connections_config_max_connections'),
     'processCpuMax': gauge_max('process_cpu_usage'),
     'systemCpuMax': gauge_max('system_cpu_usage'),
     'cpuCount': gauge_max('system_cpu_count'),
@@ -280,6 +284,8 @@ lines += [
     '  resources (max over snapshots)',
     f"    hikari active {fmt(resources['hikariActiveMax'])}/{fmt(resources['hikariMax'])}  pending {fmt(resources['hikariPendingMax'])}"
     f"  timeouts {int(hikari_timeouts)}  acquire max {fmt(resources['hikariAcquireMaxMs'])}ms",
+    f"    tomcat connections {fmt(resources['tomcatConnectionsMax'])}/{fmt(resources['tomcatMaxConnections'])}"
+    f" (keep-alive {fmt(resources['tomcatKeepAliveMax'])})",
     f"    tomcat busy {fmt(resources['tomcatBusyMax'])}/{fmt(resources['tomcatMaxThreads'])}"
     f"  cpu process {pct(resources['processCpuMax'])} system {pct(resources['systemCpuMax'])} ({fmt(resources['cpuCount'])} cores)",
     f"    heap used {fmt(resources['heapUsedMaxMb'])}MB  threads {fmt(resources['liveThreadsMax'])}",
