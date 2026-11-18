@@ -121,6 +121,7 @@ AuctionChangedEvent (AFTER_COMMIT)
 구현은 `auction/api/AuctionStreams`다. 연결은 이 서버 메모리에만 있다.
 
 - **연결 순서:** 연결을 먼저 등록한 뒤 현재 상태를 조회해 보낸다. 조회와 등록 사이에 바뀐 내용은 다음 전송에 다시 가고, 클라이언트는 같은 `revision`을 무시한다.
+- **전송 내용:** 한 번의 전송에서 상태 JSON은 한 번만 만들고, 같은 문자열을 그 경매의 연결 전체에 보낸다. JSON을 만들지 못하면 그 경매의 이번 전송은 건너뛰고 `flush` 실패로 기록하며 연결은 유지한다. 연결 직후 첫 전송에서 실패하면 그 연결을 등록해 두지 않는다.
 - **전송 스레드:** 경매 종료·결제 대사 스케줄러와 스레드를 나누지 않으면 0.2초 간격이 밀리므로 전용 스레드를 쓴다. 한 경매의 전송이 실패해도 다른 경매는 계속 보낸다.
 - **설정** (`application.yml` `restless.auction.stream`): `flush-interval-ms`(기본 200), `timeout-ms`(연결 최대 유지 시간, 기본 30분. 지나면 서버가 닫고 클라이언트가 재연결한다).
 - **메트릭:** `auction.stream.connections`(열린 연결 수), `auction.stream.failure`(`stage` = `send` 끊긴 연결로 전송 실패, `flush` 한 경매 조회·전송 실패, `loop` 전송 주기 자체 실패).
