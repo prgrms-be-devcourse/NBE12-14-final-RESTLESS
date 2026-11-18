@@ -6,6 +6,8 @@
 
 ```bash
 export BASE_URL="http://<테스트-서버>:8080"
+export MANAGEMENT_URL="http://<테스트-서버>:8081"
+export PERF_ALLOWED_APP_HOSTS="<테스트-서버>"
 export PERFORMANCE_ID=<회차_ID>
 export USERS_CSV="$PWD/perf/seed/out/users.csv"
 
@@ -15,7 +17,19 @@ perf/scenarios/run-ticketing.sh simultaneous 100
 
 숫자는 전체 사용자 수다. 조회의 기본 실행 시간은 2분이며, `DURATION=10s perf/scenarios/run-ticketing.sh spread 5`처럼 바꿀 수 있다. CSV 대신 시드 계정으로 로그인하려면 `SETUP=self`를 지정한다. 로그인은 Refresh Token을 DB에 추가한다. HTTP 사용 시 비밀번호와 토큰은 암호화되지 않는다. 시작 전에 perf 프로필, 테스트 DB, 회차와 토큰 유효기간을 확인한다.
 
-다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 실행마다 `.ai-output/perf/`에 결과가 저장된다.
+다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 요약 결과는 `.ai-output/perf/ticketing-<시나리오>/summary-<UTC 날짜시간>.json`, HTML 보고서는 같은 폴더의 `report-<UTC 날짜시간>.html`에 자동 저장된다. 예: `.ai-output/perf/ticketing-spread/summary-20261118T010203Z.json`. 실행 중에는 `http://localhost:5665`에서 대시보드를 볼 수 있다. 실행기가 기본으로 대시보드와 HTML 내보내기를 켜므로 별도 k6 환경변수를 지정하지 않아도 된다.
+
+### 테스트 중 서버 지표를 CSV로 수집
+
+`run-ticketing.sh`가 테스트 시작 전 수집기를 자동으로 시작하고, 테스트 종료 후 마지막 지표를 저장한다. 관리 포트에 연결되지 않으면 테스트를 시작하지 않는다. 기본 간격은 2초이며 `INTERVAL=5`로 바꿀 수 있다. 별도 수집이 필요할 때는 아래 명령을 실행하고 `Ctrl-C`로 종료한다.
+
+```bash
+MANAGEMENT_URL="http://3.35.88.242:8081" \
+PERF_ALLOWED_APP_HOSTS="3.35.88.242" \
+python3 perf/scenarios/ticketing/collect-prometheus-csv.py simultaneous
+```
+
+CSV는 `.ai-output/perf/ticketing-simultaneous/prometheus-<UTC 날짜시간>.csv`에 저장된다. 각 행은 수집 시각, Prometheus 지표명, 라벨, 값이다. 수집기 시작 시 관리 포트 접근과 Prometheus 형식을 확인한 뒤에만 기록을 시작한다. 이 파일에는 관리 포트가 실제로 노출하는 지표만 들어간다. Tomcat·Hikari·JVM 값은 확인할 수 있지만 EC2 호스트 메모리나 별도 RDS 지표는 앱의 Prometheus에 노출되지 않으면 포함되지 않는다. 해당 지표는 CloudWatch 또는 DB 모니터링에서 별도로 수집해야 한다.
 
 [성능 실험 계획](../../docs/testing/performance.md)의 실험을 돌리는 k6 스크립트다. 입력 데이터는 [시드](../seed/README.md)가 만든다.
 드롭·경매·티켓팅 시나리오를 둔다. 팬미팅은 [fanmeeting.md](fanmeeting.md)에 따로 둔다.

@@ -11,7 +11,9 @@ for scenario in ['spread','simultaneous','hot','overlap','distributed','replay',
   d=json.loads(p.stdout.splitlines()[-1]); assert d['SCRIPT'].endswith('/ticketing/'+scenario+'.js'); assert d['MODE']==('poll' if scenario in ('spread','simultaneous') else 'mixed' if scenario.startswith('mixed') else scenario)
   assert int(d['PARTICIPANTS'])==(n*4//5 if scenario.startswith('mixed') else n)
   assert (int(d['HOLD_PARTICIPANTS']) if scenario.startswith('mixed') else 0)==(n-n*4//5 if scenario.startswith('mixed') else 0)
-  assert d['VUS']==str(n) and str(root/'.ai-output/perf') in d['SUMMARY_PATH']
+  summary=Path(d['SUMMARY_PATH'])
+  assert d['VUS']==str(n) and summary.parent==root/'.ai-output/perf'/f'ticketing-{scenario}'
+  assert summary.name.startswith('summary-') and summary.suffix=='.json'
   if scenario=='mixed-distributed': assert d['MIXED_HOLD']=='distributed'
 for args in (['bad','100'],['hot','0'],['mixed','1'],[]):
  assert subprocess.run([script,*args],env=env,capture_output=True).returncode != 0

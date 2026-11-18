@@ -12,7 +12,7 @@ SCENARIO:
   mixed, mixed-distributed   조회 80% + 선점 20% (인기 좌석 또는 분산)
 
 USERS는 전체 테스트 사용자 수다. 예: run-ticketing.sh spread 100
-필수 환경변수: BASE_URL, PERFORMANCE_ID
+필수 환경변수: BASE_URL, PERFORMANCE_ID, MANAGEMENT_URL, PERF_ALLOWED_APP_HOSTS
 인증: USERS_CSV 또는 SETUP=self (시드 계정 로그인)
 선택 환경변수: DURATION, MAX_DURATION, HOT_SEATS, HOLD_DELAY_SECONDS,
               POLL_ENTRY (mixed만), MANAGEMENT_URL, K6_BIN
@@ -24,7 +24,7 @@ scenario="$1"
 case "$scenario" in spread|simultaneous|hot|overlap|distributed|replay|mixed|mixed-distributed) ;; *) echo "알 수 없는 시나리오: $scenario" >&2; usage >&2; exit 2;; esac
 [[ "$2" =~ ^[1-9][0-9]{0,5}$ ]] || { echo 'USERS는 1~999999 사이의 양의 정수여야 합니다.' >&2; exit 2; }
 users="$2"
-for name in BASE_URL PERFORMANCE_ID; do
+for name in BASE_URL PERFORMANCE_ID MANAGEMENT_URL PERF_ALLOWED_APP_HOSTS; do
   [[ -n "${!name:-}" ]] || { echo "필수 환경변수가 비어 있습니다: $name" >&2; exit 2; }
 done
 [[ "$PERFORMANCE_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'PERFORMANCE_ID는 양의 정수여야 합니다.' >&2; exit 2; }
@@ -51,14 +51,50 @@ case "$scenario" in
     ;;
 esac
 mkdir -p "$root/.ai-output/perf"
-run_dir="$(mktemp -d "$root/.ai-output/perf/ticketing-XXXXXXXX")"
-export RUN_ID="$(basename "$run_dir")" SUMMARY_PATH="$run_dir/summary.json"
+run_dir="$root/.ai-output/perf/ticketing-$scenario"
+mkdir -p "$run_dir"
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+summary_path="$run_dir/summary-$timestamp.json"
+while [[ -e "$summary_path" ]]; do
+  sleep 1
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  summary_path="$run_dir/summary-$timestamp.json"
+done
+export RUN_ID="${scenario}-${timestamp//[^a-zA-Z0-9_-]/}"
+export SUMMARY_PATH="$summary_path"
+export K6_WEB_DASHBOARD="${K6_WEB_DASHBOARD:-true}"
+export K6_WEB_DASHBOARD_PORT="${K6_WEB_DASHBOARD_PORT:-5665}"
+export K6_WEB_DASHBOARD_EXPORT="${K6_WEB_DASHBOARD_EXPORT:-$run_dir/report-$timestamp.html}"
 printf '시나리오: %s | 사용자: %s | 실행 ID: %s\n' "$scenario" "$users" "$RUN_ID"
 if [[ "$MODE" == mixed ]]; then printf '조회: %s명 | 선점: %s명\n' "$PARTICIPANTS" "$HOLD_PARTICIPANTS"; fi
 if [[ "$MODE" != poll ]]; then printf '선점 요청으로 테스트 데이터가 변경됩니다. 실험 간 초기 상태를 확인하세요.\n'; fi
-printf '결과: %s\n' "$SUMMARY_PATH"
+printf '요약 JSON: %s\nHTML 보고서: %s\n실행 중 대시보드: http://localhost:%s\n' "$SUMMARY_PATH" "$K6_WEB_DASHBOARD_EXPORT" "$K6_WEB_DASHBOARD_PORT"
+command -v python3 >/dev/null || { echo 'python3를 찾을 수 없습니다.' >&2; exit 2; }
+if [[ -n "${TICKETING_K6_CONFIG:-}" && ! -r "$TICKETING_K6_CONFIG" ]]; then
+  echo 'k6 설정 파일을 읽을 수 없습니다.' >&2; exit 2
+fi
+ready_file="$(mktemp "$run_dir/.prometheus-ready-XXXXXXXX")"
+rm -f "$ready_file"
+PROMETHEUS_READY_FILE="$ready_file" python3 "$root/perf/scenarios/ticketing/collect-prometheus-csv.py" "$scenario" &
+collector_pid=$!
+cleanup_collector() {
+  if kill -0 "$collector_pid" 2>/dev/null; then kill -TERM "$collector_pid" 2>/dev/null || true; fi
+  wait "$collector_pid" 2>/dev/null || true
+  rm -f "$ready_file"
+}
+trap cleanup_collector EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+for ((i=0; i<120; i++)); do
+  [[ -f "$ready_file" ]] && break
+  if ! kill -0 "$collector_pid" 2>/dev/null; then
+    echo 'Prometheus 수집을 시작하지 못해 테스트를 중단합니다.' >&2; exit 1
+  fi
+  sleep 0.1
+done
+[[ -f "$ready_file" ]] || { echo 'Prometheus 수집 시작 시간이 초과되었습니다.' >&2; exit 1; }
+printf 'Prometheus CSV: %s\n' "$(cat "$ready_file")"
 if [[ -n "${TICKETING_K6_CONFIG:-}" ]]; then
-  [[ -r "$TICKETING_K6_CONFIG" ]] || { echo 'k6 설정 파일을 읽을 수 없습니다.' >&2; exit 2; }
   "$K6_BIN" run --config "$TICKETING_K6_CONFIG" "$root/perf/scenarios/ticketing/${scenario}.js"
 else
   "$K6_BIN" run "$root/perf/scenarios/ticketing/${scenario}.js"
