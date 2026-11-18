@@ -5,11 +5,13 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Ticker;
 import com.restless.auction.application.AuctionQueryService.AuctionDetail;
 import com.restless.auction.application.AuctionQueryService.AuctionPage;
+import com.restless.auction.application.AuctionQueryService.BidPrecheckState;
 import com.restless.auction.domain.AuctionStatus;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
+import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -26,6 +28,7 @@ public class AuctionQueryCache {
     private final MeterRegistry meters;
     private final boolean enabled;
     private final Cache<DetailKey, AuctionDetail> details;
+    private final Cache<DetailKey, BidPrecheckState> bidPrecheckStates;
     private final Cache<ListKey, AuctionPage> lists;
     private final Cache<Long, Long> generations;
 
@@ -42,6 +45,11 @@ public class AuctionQueryCache {
 
         Ticker ticker = () -> TimeUnit.MILLISECONDS.toNanos(clock.millis());
         this.details = Caffeine.newBuilder()
+                .maximumSize(10_000)
+                .expireAfterWrite(ttlMs, TimeUnit.MILLISECONDS)
+                .ticker(ticker)
+                .build();
+        this.bidPrecheckStates = Caffeine.newBuilder()
                 .maximumSize(10_000)
                 .expireAfterWrite(ttlMs, TimeUnit.MILLISECONDS)
                 .ticker(ticker)
@@ -73,6 +81,17 @@ public class AuctionQueryCache {
         DetailKey key = new DetailKey(auctionId, generation);
         AuctionDetail cached = details.get(key, ignored -> queries.detail(auctionId));
         return withCurrentServerTime(cached);
+    }
+
+    public Optional<BidPrecheckState> bidPrecheckState(Long auctionId) {
+        if (!enabled) {
+            return Optional.empty();
+        }
+        long generation = currentGeneration(auctionId);
+        DetailKey key = new DetailKey(auctionId, generation);
+        BidPrecheckState cached = bidPrecheckStates.get(key, ignored ->
+                queries.bidPrecheckState(auctionId).orElse(null));
+        return Optional.ofNullable(cached);
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
