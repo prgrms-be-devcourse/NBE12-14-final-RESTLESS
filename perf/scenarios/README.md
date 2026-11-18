@@ -60,18 +60,19 @@ java -jar backend/build/libs/restless-0.0.1-SNAPSHOT.jar
 
 ### 실행
 
-k6는 Docker 이미지 `grafana/k6:2.4.0`으로 돌린다. 레포 루트에서 실행한다.
+k6 2.4.0을 노트북에 설치해서 돌린다(`brew install k6`). 레포 루트에서 실행한다.
+맥의 Docker는 가상 머신의 메모리와 CPU 안에서 VU를 만든다. 2026-11-18 드롭 판매 1,000명/초 실행에서 VU가 3,748개에서 멈춰 도착 1만 명을 채우지 못했다.
+맥의 열린 파일 수 기본 제한으로는 VU 수천 개의 연결을 열지 못하므로 같은 셸에서 `ulimit -n`을 먼저 올린다.
 
 ```bash
-docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
-  --add-host perf-app:10.0.1.10 \
-  -e BASE_URL=http://perf-app:8080 -e MANAGEMENT_URL=http://perf-app:8081 \
-  -e PERF_ALLOWED_APP_HOSTS=perf-app -e SEED_OUT=/perf/seed/out \
-  -e SUMMARY_PATH=/out/drop-spike.json \
-  grafana/k6:2.4.0 run /perf/scenarios/drop-reservation-spike.js
+ulimit -n 65536
+BASE_URL=http://perf-app:8080 MANAGEMENT_URL=http://perf-app:8081 \
+PERF_ALLOWED_APP_HOSTS=perf-app SEED_OUT="$PWD/perf/seed/out" \
+SUMMARY_PATH=.ai-output/perf/drop-spike.json \
+k6 run perf/scenarios/drop-reservation-spike.js
 ```
 
-앱 호스트 이름은 `perf-`로 시작해야 한다. IP는 `--add-host perf-app:<IP>`로 이름을 붙인다. 로컬에서 앱을 띄웠으면 `--add-host perf-app:host-gateway`를 쓴다.
+앱 호스트 이름은 `perf-`로 시작해야 한다. `/etc/hosts`에 `<IP> perf-app`을 둔다. 로컬에서 앱을 띄웠으면 `127.0.0.1 perf-app`이다.
 
 | 변수 | 기본값 | 뜻 |
 |---|---|---|
@@ -112,7 +113,7 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
 - 측정이 끝나면 `seed.sh --verify`를 실행한다. 드롭 불변식, 금액, FK 고아 행 검사는 0이어야 한다. `seed baseline` 검사는 부하 뒤에 실패하는 것이 정상이다.
 - 앱 지표는 관리 포트의 `/actuator/prometheus`에서 본다. `drop.reservation.duration`, HikariCP, 톰캣 스레드 지표가 있다.
 
-- 실행 화면은 k6 웹 대시보드(`K6_WEB_DASHBOARD=true`, `-p 5665:5665`)로 보고, `K6_WEB_DASHBOARD_EXPORT`로 HTML 리포트를 `.ai-output/perf/`에 남긴다.
+- 실행 화면은 k6 웹 대시보드(`K6_WEB_DASHBOARD=true`, `localhost:5665`)로 보고, `K6_WEB_DASHBOARD_EXPORT`로 HTML 리포트를 `.ai-output/perf/`에 남긴다.
 - 서버 지표는 실행 직전과 직후에 `curl -s http://perf-app:8081/actuator/prometheus`를 파일로 저장해 차이를 본다. 실행 전체의 서버 평균 지연과 Hikari, 톰캣 상태를 얻는다.
 - EC2에서 준비하는 순서는 [ec2](../ec2/README.md)에 있다.
 
@@ -143,13 +144,12 @@ base 재고 1,000은 200/s에서 5초 만에 품절된다. 그 뒤로는 품절 
 ### 실행
 
 ```bash
-docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" -p 5665:5665 \
-  --add-host perf-app:3.35.88.242 \
-  -e BASE_URL=http://perf-app:8080 -e MANAGEMENT_URL=http://perf-app:8081 \
-  -e PERF_ALLOWED_APP_HOSTS=perf-app -e SEED_OUT=/perf/seed/out \
-  -e K6_WEB_DASHBOARD=true -e K6_WEB_DASHBOARD_HOST=0.0.0.0 -e K6_WEB_DASHBOARD_EXPORT=/out/step.html \
-  -e STEPS=50,100,200,400,800 -e SUMMARY_PATH=/out/step.json \
-  grafana/k6:2.4.0 run /perf/scenarios/drop-reservation-step.js
+ulimit -n 65536
+BASE_URL=http://perf-app:8080 MANAGEMENT_URL=http://perf-app:8081 \
+PERF_ALLOWED_APP_HOSTS=perf-app SEED_OUT="$PWD/perf/seed/out" \
+K6_WEB_DASHBOARD=true K6_WEB_DASHBOARD_EXPORT=.ai-output/perf/step.html \
+STEPS=50,100,200,400,800 SUMMARY_PATH=.ai-output/perf/step.json \
+k6 run perf/scenarios/drop-reservation-step.js
 ```
 
 | 변수 | 기본값 | 뜻 |
@@ -174,7 +174,7 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" -p 5665:5
 ## 드롭 성능 실험 시나리오
 
 [목표](../../docs/testing/drop-performance-plan.md), [실행 절차](../../docs/testing/drop-performance-procedure.md), [측정 규약](../../docs/testing/drop-performance-measurement.md)의 실험 H·B·Q를 돌린다.
-실행 명령은 위 스파이크와 같고 스크립트 이름과 `-e` 값만 다르다. 원자료를 남기려면 `run --out json=/out/<이름>.raw.json`을 붙인다.
+실행 명령은 위 스파이크와 같고 스크립트 이름과 환경 변수만 다르다. 원자료를 남기려면 `k6 run --out json=<결과 폴더>/<이름>.raw.json`을 붙인다.
 
 ### 공통 집계
 
