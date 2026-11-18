@@ -123,6 +123,48 @@ class DropReservationIntegrationTest {
         assertCode(() -> service.get(drop + 1, user, result.body().reservationId()), ErrorCode.NOT_FOUND);
     }
 
+    @Test
+    void inventoryLockTimersSeparateCommitRollbackAndSoldOut() {
+        var committed = lockHeld("committed");
+        var rolledBack = lockHeld("rolled_back");
+        var held = holdUpdate("held");
+        var soldOut = holdUpdate("sold_out");
+        // The order fails after the stock hold, so the row lock ends with a rollback.
+        var invalidShipping = new CreateDropReservationRequest(variant, "회원", "010", " ");
+        assertThatIllegalArgumentException().isThrownBy(() -> service.create(drop, user, "timed", invalidShipping));
+        assertThat(lockHeld("rolled_back")).isEqualTo(rolledBack + 1);
+        assertThat(lockHeld("committed")).isEqualTo(committed);
+
+        service.create(drop, user, "timed", request());
+        assertThat(lockHeld("committed")).isEqualTo(committed + 1);
+        assertThat(holdUpdate("held")).isEqualTo(held + 2);
+
+        // The remaining stock is gone: total 1 = reserved 1 keeps INV-01.
+        jdbc.update("UPDATE drop_inventories SET total_quantity = 1, available_quantity = 0 WHERE variant_id = ?", variant);
+        var email = UUID.randomUUID() + "@d2.test";
+        var now = Timestamp.from(opens);
+        jdbc.update("""
+                INSERT INTO users (email, password_hash, nickname, role, status, created_at, updated_at)
+                VALUES (?, 'hash', 'd2', 'USER', 'ACTIVE', ?, ?)
+                """, email, now, now);
+        var other = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class, email);
+        var soldOutTimed = meters.timer("drop.reservation.duration", "result", "sold_out").count();
+        assertCode(() -> service.create(drop, other, "late", request()), ErrorCode.DROP_SOLD_OUT);
+        // A sold-out UPDATE changes no row, so it is timed as an update but never as a held lock.
+        assertThat(holdUpdate("sold_out")).isEqualTo(soldOut + 1);
+        assertThat(lockHeld("committed")).isEqualTo(committed + 1);
+        assertThat(lockHeld("rolled_back")).isEqualTo(rolledBack + 1);
+        assertThat(meters.timer("drop.reservation.duration", "result", "sold_out").count()).isEqualTo(soldOutTimed + 1);
+    }
+
+    private long lockHeld(String outcome) {
+        return meters.timer("drop.inventory.lock.held", "outcome", outcome).count();
+    }
+
+    private long holdUpdate(String result) {
+        return meters.timer("drop.inventory.hold.update", "result", result).count();
+    }
+
     private void assertUnchanged() {
         assertThat(jdbc.queryForObject("SELECT available_quantity FROM drop_inventories WHERE variant_id = ?", Integer.class, variant)).isEqualTo(3);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_reservations WHERE drop_id = ?", Integer.class, drop)).isZero();

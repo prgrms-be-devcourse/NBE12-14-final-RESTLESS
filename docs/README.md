@@ -13,7 +13,6 @@
 | [decisions/](decisions/) | [ADR-0001 이벤트 처리](decisions/0001-event-handling.md), [ADR-0002 공통 규약](decisions/0002-common-conventions.md), [ADR-0003 결제 모듈 경계](decisions/0003-payment-module-boundary.md), [폐기한 가정](decisions/superseded.md) |
 | [testing/](testing/) | [테스트 전략과 실행 명령](testing/strategy.md), [성능 실험 계획](testing/performance.md) |
 | [operations/](operations/) | [장애 처리 설계](operations/failure-handling.md) |
-| [reports/](reports/) | 성능 실험 결과 (측정 조건 포함) |
 
 ## 작업별로 읽을 문서
 
@@ -26,7 +25,7 @@
 | 경매 등록, 입찰, 종료, 크레딧 | domains/auction/ 전체 (design.md는 원본), contracts/api/auction.md |
 | 팬미팅 응모, 추첨, 결제, 승격 | domains/fanmeeting/ 전체, contracts/api/fanmeeting.md, contracts/events/fanmeeting.md |
 | 테스트 작성 | testing/strategy.md, 해당 도메인 invariants.md (팬미팅은 test-scenarios.md도) |
-| 성능 실험 | testing/performance.md, 관련 ADR |
+| 성능 실험 | testing/performance.md, [드롭 목표](testing/drop-performance-plan.md)·[실행](testing/drop-performance-procedure.md)·[측정 규약](testing/drop-performance-measurement.md), 관련 ADR |
 | 서비스 의도, 사용자 시나리오, 범위, 역할, 완료기준 | [product/proposal.md](product/proposal.md) |
 | 정책이 애매할 때 | product/open-questions.md (목록에 있으면 임의로 정하지 않는다) |
 

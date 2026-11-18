@@ -21,6 +21,8 @@ public class DropReservationService {
 
     public Result create(Long dropId, Long userId, String key, CreateDropReservationRequest request) {
         var sample = Timer.start(meters);
+        // Bounded outcome tag so success and sold-out latency can be read apart (never an id).
+        var outcome = "error";
         try {
             if (key == null || key.isBlank() || key.length() > 100) {
                 throw new BusinessException(ErrorCode.INVALID_REQUEST);
@@ -34,18 +36,20 @@ public class DropReservationService {
                 if (existing.isEmpty()) throw conflict;
                 result = new Result(existing.get(), true);
             }
-            count(result.replayed() ? "replayed" : "created");
+            outcome = result.replayed() ? "replayed" : "created";
+            count(outcome);
             return result;
         } catch (BusinessException failure) {
-            switch (failure.getErrorCode()) {
-                case DROP_SOLD_OUT -> count("sold_out");
-                case DROP_NOT_ON_SALE -> count("not_on_sale");
-                case DROP_ACTIVE_PURCHASE_EXISTS -> count("active_exists");
-                default -> { }
-            }
+            outcome = switch (failure.getErrorCode()) {
+                case DROP_SOLD_OUT -> "sold_out";
+                case DROP_NOT_ON_SALE -> "not_on_sale";
+                case DROP_ACTIVE_PURCHASE_EXISTS -> "active_exists";
+                default -> "rejected";
+            };
+            if (!outcome.equals("rejected")) count(outcome);
             throw failure;
         } finally {
-            sample.stop(meters.timer("drop.reservation.duration"));
+            sample.stop(meters.timer("drop.reservation.duration", "result", outcome));
         }
     }
 

@@ -1,6 +1,6 @@
 # 부하 테스트
 
-EXP-01~04([성능 실험 계획](../docs/testing/performance.md))를 실행하는 도구를 둔다. 결과 요약은 [docs/reports/](../docs/reports/)에 측정 조건과 함께 남긴다.
+EXP-01~04([성능 실험 계획](../docs/testing/performance.md))를 실행하는 도구를 둔다. 결과(원자료, 보고서)는 각자 PC의 `.ai-output/perf/<날짜>-<실험>/`에 측정 조건과 함께 남기고 레포에 올리지 않는다.
 
 | 폴더 | 내용 |
 |---|---|

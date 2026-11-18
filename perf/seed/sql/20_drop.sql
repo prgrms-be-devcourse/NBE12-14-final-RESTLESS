@@ -3,8 +3,8 @@
 -- seed.sh가 FOREIGN_KEY_CHECKS=0으로 실행하고, verify.sql이 FK 고아 행을 따로 검사한다.
 --
 -- ID 규칙
---   drops:         핫 1, 배경 d(0..) → d + 2
---   drop_variants: 핫 1..@hot_variants, 배경 → @hot_variants + 1 + d * @bg_vpd + j
+--   drops:         핫 1, 배경 d(0..) → d + 2, 워밍업 → @bg_drops + 2 (@warm_stock > 0일 때만)
+--   drop_variants: 핫 1..@hot_variants, 배경 → @hot_variants + 1 + d * @bg_vpd + j, 워밍업은 배경 뒤 @hot_variants개
 --   drop_reservations: 배경 n(0..) → n + 1. 드롭 d = n DIV per_drop, 드롭 안 순번 k = n MOD per_drop
 
 SET @bg_per_drop = CEIL(@bg_reservations / @bg_drops);
@@ -146,3 +146,30 @@ ORDER BY r.id;
 INSERT INTO drop_purchase_slots (drop_id, user_id, active_reservation_id, updated_at)
 SELECT r.drop_id, r.user_id, NULL, r.updated_at
 FROM drop_reservations r;
+
+-- ---------------------------------------------------------------- 워밍업 드롭
+-- 측정 전에 같은 경로를 데우는 판매 중 드롭. 배경 드롭의 재고·점유 INSERT가 이 드롭을 집지 않게 파일 끝에 둔다.
+-- 핫 드롭과 SKU 수·가격·공연이 같다. @warm_stock이 0이면 만들지 않는다.
+-- 핫 드롭 재고와 참여 계정을 쓰지 않으려고 따로 둔다. 판매 기간은 99_hot_window.sql이 핫 드롭과 같이 맞춘다.
+INSERT INTO drops (id, concert_id, title, description, image_url, opens_at, closes_at, status, created_at)
+SELECT @warm_drop_id, 1, CONCAT(a.name, ' <', a.tour, '> 워밍업 전용 응원봉'),
+       '부하 테스트 워밍업 전용. 측정 대상이 아니다.',
+       'https://cdn.fanq.com/drops/warmup.png',
+       @t0 - INTERVAL 1 MINUTE, @t0 + INTERVAL @hot_window_hours HOUR, 'OPEN', @t0 - INTERVAL 7 DAY
+FROM _perf_artists a
+WHERE a.i = 0 AND @warm_stock > 0;
+
+INSERT INTO drop_variants (id, drop_id, sku_code, option_name, price_amount, is_active)
+SELECT @warm_variant_first + s.n, @warm_drop_id, CONCAT('WARM-', s.n + 1),
+       COALESCE(ELT(s.n + 1, '블랙', '화이트', '실버 한정'), CONCAT('Ver.', s.n + 1)), @hot_price, TRUE
+FROM _perf_seq s
+WHERE s.n < @hot_variants AND @warm_stock > 0;
+
+INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity)
+SELECT v.id, q.qty, q.qty, 0, 0
+FROM drop_variants v
+JOIN (SELECT @warm_variant_first + s.n AS variant_id,
+             FLOOR(@warm_stock / @hot_variants) + (s.n < MOD(@warm_stock, @hot_variants)) AS qty
+      FROM _perf_seq s
+      WHERE s.n < @hot_variants) q ON q.variant_id = v.id
+WHERE v.drop_id = @warm_drop_id AND @warm_stock > 0;

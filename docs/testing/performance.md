@@ -20,7 +20,7 @@
 
 최종 기준: 정합성 위반 0건과 미리 정한 지연, 오류율 목표를 지키면서 달성 가능한 최대 지속 처리량을 높인다.
 
-목표 수치는 측정 전이므로 TBD다. 측정하지 않은 수치를 쓰지 않는다.
+드롭의 실행 전 목적·가설·목표는 [성능 실험 계획](drop-performance-plan.md), 부하·준비·예산은 [실행 절차](drop-performance-procedure.md), 집계·판정은 [측정 규약](drop-performance-measurement.md)에 정의한다. 이번 범위는 한정 수량 판매·병목·대기열·폴링 비용이며 PG 장애 복구 성능은 후속 과제다. 목표는 달성 결과나 운영 SLA가 아니다. 다른 도메인의 목표는 별도 계획을 따른다. 측정하지 않은 결과 수치는 쓰지 않는다.
 
 ## 3. 반복 방법
 
@@ -29,7 +29,7 @@ Observe → Hypothesize → Change → Verify Correctness → Benchmark → Comp
 - 한 비교 실험에서 주요 독립변인은 하나만 바꾼다.
 - 개선되지 않았으면 그 이유도 결과로 남긴다.
 - 부하 생성기의 dropped iterations, CPU, 메모리 한계도 확인한다.
-- 결과는 [reports/](../reports/)에 측정 조건과 함께 남긴다.
+- 결과는 각자 PC의 `.ai-output/perf/<날짜>-<실험>/`에 측정 조건과 함께 남긴다. 원자료, 보고서, 성능 개선 기록은 레포에 올리지 않는다. `docs/`에는 준비 문서(전략, 계획, 절차, 측정 규약)만 둔다.
 
 ## 4. 실험 목록
 
@@ -42,4 +42,4 @@ Observe → Hypothesize → Change → Verify Correctness → Benchmark → Comp
 | EXP-05 | DBMS (EXPERIMENTAL) | MySQL, PostgreSQL | 같은 스키마, 인덱스, 트랜잭션 조건 |
 | EXP-06 | 수평 확장 (EXPERIMENTAL) | 단일, 다중 서버 | 공유 DB 병목 분석 포함 |
 | EXP-07 | 이벤트 유실 ([ADR-0001](../decisions/0001-event-handling.md)) | Spring Event, (조건 충족 시) Outbox | 강제 종료 시 누락 건수, 구매 확정 p95 |
-| EXP-AU | 경매 입찰·관전·조회·종료 ([상세](../domains/auction/load-test.md)) | 핫 경매와 분산 경매, 종료 직전 몰림, 동시 종료 수, 관전자 수와 재접속, 장시간 유지, 조회 대상 | 수락 TPS, p95/p99, 전달 지연, 종료 처리 지연, 누수, 경매 불변식 위반 0 |
+| EXP-AU | 경매 1초 몰림 ([상세](../domains/auction/load-test.md)) | 8,000 → 10,000건의 마감 직전 입찰, 상세·목록 조회, 평시 입찰, SSE 유지 | 응답·오류 코드, 지연, 입찰 수락 대조, 낙찰 정확성, 종료 전 거절, SSE 전달 지연, 경매 불변식 위반 0 |

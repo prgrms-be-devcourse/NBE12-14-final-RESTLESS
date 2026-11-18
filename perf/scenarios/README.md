@@ -24,11 +24,18 @@ perf/scenarios/run-ticketing.sh simultaneous 100
 |---|---|---|
 | [drop-reservation-spike.js](drop-reservation-spike.js) | EXP-01 쓰기 기준선 | 판매 시작 순간 핫 드롭 재고 점유 스파이크. 대기열 없음 |
 | [drop-reservation-step.js](drop-reservation-step.js) | EXP-01 용량 측정 | 도착률을 계단식으로 올려 무릎 지점과 최대 지속 처리량을 찾는다. 대기열 없음 |
-| [auction-bid-step.js](auction-bid-step.js) | AU-1·2·7 | 핫·분산·종료 직전 입찰 계단식 측정 |
-| [auction-close-report.sql](auction-close-report.sql) | AU-8 | 동시 종료 지연과 결과 집계 |
+| [drop-sale.js](drop-sale.js) | 드롭 H, EXP-02 | 한정 재고 판매. 대기열 off/on을 같은 도착 시간표로 비교하고 결제까지 잇는다 |
+| [drop-reservation-capacity.js](drop-reservation-capacity.js) | 드롭 B1·B2, EXP-01·04 | 성공 점유 경로의 연속 증가 탐색과 고정 도착률 유지 |
+| [drop-queue-poll.js](drop-queue-poll.js) | 드롭 Q | 대기자 N명을 고정하고 상태 조회 비용을 잰다 |
+| [prom-collect.sh](prom-collect.sh) | 드롭 H·B·Q | 관리 포트의 Prometheus 텍스트를 5초 간격으로 파일에 남긴다 |
+| [auction-burst.js](auction-burst.js) | AU-1~4 | 두 판(기본 8,000건 → 10,000건)을 한 번에 보내는 경매 API 부하 |
+| [auction-sse.mjs](auction-sse.mjs) | AU-5 | SSE 연결 계단, 유지, 가격 변경 전달 지연 |
+| [auction-run.sh](auction-run.sh) | AU-1~5 | 서버 지표 수집과 시나리오 실행, 결과 파일 관리 |
+| [sample-actuator.sh](sample-actuator.sh) | AU-1~5 | Actuator Prometheus 지표를 2초 간격으로 CSV 수집 |
 | `fanmeeting-*` ([설명](fanmeeting.md)) | 팬미팅 S1, FM-EXP-05 | 오픈·마감 응모 몰림, 추첨, 결과 조회 폭주. `fanmeeting-s1.sh` 하나로 한 회 실행 |
 
-두 시나리오는 [lib/drop-reservation.js](lib/drop-reservation.js)의 호스트 안전장치, 요청, 결과 분류, 요약을 같이 쓴다. 다른 것은 부하 모델뿐이다.
+드롭 시나리오는 [lib/drop-reservation.js](lib/drop-reservation.js)의 호스트 안전장치, 요청, 결과 분류, 집계, 요약을 같이 쓴다. 대기열과 결제 요청은 [lib/drop-flow.js](lib/drop-flow.js)에 있다.
+H·B·Q 시나리오는 [드롭 성능 실험 계획](../../docs/testing/drop-performance-plan.md)의 실험이다. 아래 [드롭 성능 실험 시나리오](#드롭-성능-실험-시나리오)에 사용법이 있다.
 
 ## drop-reservation-spike.js
 
@@ -98,9 +105,9 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
 | `drop_reservation_replayed` | 200 같은 키 재요청 | 0. 나오면 임계값 실패 |
 | `drop_admission_required`, `drop_not_on_sale` | 403, 409 | 0. 나오면 바로 멈춘다 |
 | `drop_other_client_error` | 그 밖의 4xx | 0 |
-| `drop_server_error`, `drop_transport_error` | 5xx, 연결 오류와 타임아웃 | 0 |
+| `drop_server_error`, `drop_transport_error`, `drop_timeout` | 5xx, 연결 오류, 제한 시간(기본 5초) 도달 | 0 |
 
-- 지연은 `drop_reservation_duration`에 있고 `outcome:created`, `outcome:sold_out`으로 나눠 볼 수 있다. 지연 목표 수치는 아직 정하지 않아서 임계값을 두지 않는다.
+- 지연은 `drop_reservation_duration`에 있고 `outcome:created`, `outcome:sold_out`으로 나눠 볼 수 있다. 응답을 받은 요청만 들어간다. 타임아웃을 제한 시간 값으로 넣은 평가 지연은 `drop_eval_latency{api:reserve}`다.
 - `dropped_iterations`는 VU가 모자라 k6가 시작하지 못한 반복이다. 결과 합계가 참여자보다 적으면 `MAX_VUS`를 늘리거나 부하 발생기가 한계인지 본다.
 - 측정이 끝나면 `seed.sh --verify`를 실행한다. 드롭 불변식, 금액, FK 고아 행 검사는 0이어야 한다. `seed baseline` 검사는 부하 뒤에 실패하는 것이 정상이다.
 - 앱 지표는 관리 포트의 `/actuator/prometheus`에서 본다. `drop.reservation.duration`, HikariCP, 톰캣 스레드 지표가 있다.
@@ -164,90 +171,187 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" -p 5665:5
 - 무릎 지점은 계단별 k6 지연과 오류율로 판단한다. k6 지연에는 집 네트워크 왕복이 섞이므로 테스트 전 왕복 지연을 같이 기록한다.
 - 계단별 서버 지연이 필요하면 계단을 따로 실행하고 실행마다 `/actuator/prometheus` 전후 값을 저장한다.
 
-## 경매: AU-1·2·7 계단식 입찰
+## 드롭 성능 실험 시나리오
 
-`auction-bid-step.js`는 `MODE=hot`(AU-1), `spread`(AU-2), `ending`(AU-7)을 지원한다. 별도 조회 부하를 섞지 않도록 setup에서 대상의 최소 입찰가만 가져오며, 각 VU는 경매별 최소가를 기억한다. `BID_AMOUNT_TOO_LOW`는 새 키로 한 번 재시도한다. 409 업무 거절은 오류율에서 제외한다. 동일 계정도 재사용하며 `users.csv`의 1번부터 manifest `auction.mass_first_user_id` 직전까지만 사용한다. `ROW_OFFSET`은 앞의 회원 ID 수를 건너뛴다. AU-6·8용 계정은 사용하지 않는다.
+[목표](../../docs/testing/drop-performance-plan.md), [실행 절차](../../docs/testing/drop-performance-procedure.md), [측정 규약](../../docs/testing/drop-performance-measurement.md)의 실험 H·B·Q를 돌린다.
+실행 명령은 위 스파이크와 같고 스크립트 이름과 `-e` 값만 다르다. 원자료를 남기려면 `run --out json=/out/<이름>.raw.json`을 붙인다.
 
-**AU-7·8은 실행마다 DB를 새로 만들고 시드한 뒤 `AUCTION_CLOSE_IN_MINUTES`로 refresh한다.** 종료됐거나 추가 입찰이 생긴 경매는 refresh가 초기화하지 않는다. AU-7은 setup이 종료 `LEAD`초 전까지 기다리므로 종료 시각을 LEAD보다 충분히 뒤로 잡는다.
+### 공통 집계
 
-| 변수 | 기본값 | 설명 |
-|---|---|---|
-| `MODE` | `hot` | `hot`, `spread`, `ending` |
-| `STEPS`, `STEP_RAMP`, `STEP_HOLD` | `10,25,50,100,200,400`, `10s`, `60s` | hot/spread 도착률과 계단 길이 |
-| `LEAD`, `PEAK`, `HOLD` | `120`, `50`, `120s` | ending 시작 전 남은 초, 최대 도착률, 유지 시간 |
-| `PRE_VUS`, `MAX_VUS`, `ABORT_ERROR_RATE` | `200`, `3000`, `0.05` | VU 수와 5xx·통신 오류의 누적 중단 비율 |
-| `ROW_OFFSET` | `0` | 앞쪽에서 제외할 회원 ID 수 |
-| `RESULT_WAIT_SECONDS`, `RESULT_POLL_SECONDS` | `600`, `3` | 종료 결과 조회 제한과 간격 |
-| `SETUP_TIMEOUT`, `TEARDOWN_TIMEOUT` | `1h`, `15m` | 시작 대기·종료 조회의 k6 제한 시간 |
-| `BASE_URL`, `MANAGEMENT_URL`, `PERF_ALLOWED_APP_HOSTS`, `SEED_OUT`, `SUMMARY_PATH` | 드롭과 동일 | 대상, 허용 호스트, 시드, JSON 결과 |
-
-로컬과 EC2 대상 모두 노트북에서 실행한다. 로컬 앱 포트에 맞게 주소를 바꾸고, EC2 IP는 `--add-host perf-app:<EC2 IP>`로 지정한다. 아래 `MODE`를 `hot`, `spread`, `ending`으로 바꾼다.
-
-```bash
-mkdir -p .ai-output/perf
-docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
-  --add-host perf-app:host-gateway \
-  -e BASE_URL=http://perf-app:8080 -e MANAGEMENT_URL=http://perf-app:8081 \
-  -e PERF_ALLOWED_APP_HOSTS=perf-app -e SEED_OUT=/perf/seed/out \
-  -e MODE=hot -e SUMMARY_PATH=/out/auction-hot.json \
-  -e K6_WEB_DASHBOARD=true -e K6_WEB_DASHBOARD_EXPORT=/out/auction-hot.html \
-  grafana/k6:2.4.0 run /perf/scenarios/auction-bid-step.js
-```
-
-모드별로 위 Docker 명령의 `-e MODE`와 출력 파일을 바꾼다:
-
-| 실행 | 옵션 예시 |
+| 지표 | 뜻 |
 |---|---|
-| 로컬 AU-1 | `-e MODE=hot -e SUMMARY_PATH=/out/auction-hot.json` |
-| 로컬 AU-2 | `-e MODE=spread -e SUMMARY_PATH=/out/auction-spread.json` |
-| 로컬 AU-7 | `-e MODE=ending -e LEAD=120 -e SUMMARY_PATH=/out/auction-ending.json` |
-| EC2 AU-1·2·7 | `--add-host perf-app:<EC2 IP>`와 위 각 MODE 옵션 |
+| `iteration_started`, `iteration_finished` | 시작한 작업 S와 끝난 작업 F. 미완료 I는 S - F다. 요약의 `unfinished` 줄을 종료 로그의 interrupted와 대조한다 |
+| `drop_eval_latency{api:...}` | API별 평가 지연. 응답을 받은 요청의 지연과, 제한 시간에 걸린 요청의 제한 시간 값이 들어간다 |
+| `drop_unexpected_error{api:...}` | API별 예상 밖 오류율. 5xx, 연결 실패, 타임아웃, 예상하지 않은 4xx다. 분모는 그 API의 시작한 요청이다 |
+| `drop_timeout`, `drop_transport_error` | 제한 시간 도달과 그 밖의 전송 실패. 전송 실패는 평가 지연에 넣지 않고 `drop_transport_failure_time`에 남긴다 |
+| 태그 `win` | 요청이 시작한 창 번호. 요약에 창별 지연이 나온다 |
 
-EC2 실행은 위의 `--add-host` 주소를 EC2 IP로 바꾼다. EC2에서는 `perf/ec2/README.md`의 DB 생성·시드·토큰 전달과 앱 기동 절차를 따른다. `ending` 전에 앱을 멈춘 상태에서 서버의 perf 환경 변수로 `AUCTION_CLOSE_IN_MINUTES=4 perf/seed/seed.sh --scale small --profile perf --refresh`를 실행하고 토큰을 다시 전달한다.
+- 제한 시간은 `HTTP_TIMEOUT`(기본 5s)이고 결제는 `PAY_TIMEOUT`(기본 10s)이다.
+- k6는 예정 도착 시각을 주지 않는다. 원자료에는 실제 시작 시각만 있다. 계획 대비 빠진 수는 `dropped_iterations`와 시작 수로 본다.
+- arrival-rate는 첫 작업을 1/도착률 초 뒤에 시작한다. 계획보다 한 건 적게 시작하는 것은 정상이다.
+- 창 기준 중단은 k6가 실행 중에 판정하지 못한다. 실행 중에는 사람이 보고, 판정은 끝난 뒤 요약과 원자료로 한다.
 
-계단별 결과는 입찰 요청 지연, 오류율과 초당 수락 건수다. 5xx·연결 오류만 누적 오류율 중단에 포함하고 수락·금액 부족·이미 최고·경매 종료·시작 전·크레딧 부족·기타 4xx를 따로 센다. 각 요청의 `retry` 태그는 재시도 여부를 나타낸다. `ending`은 종료 결과와 최초/최종 종료 시각, 연장 시간, 종료 처리 지연을 요약한다. 실행 후 `perf/seed/seed.sh --scale <scale> --profile perf --verify`에서 경매 불변식 10개가 0인지 본다. 시드 기준값 실패는 입찰 또는 종료 뒤 정상이다.
+### drop-sale.js (H)
 
-### 자기 준비 모드
+회원 한 명이 iteration 하나다. off는 도착 즉시 재고를 점유한다. on은 대기 진입 뒤 `POLL_SECONDS`마다 상태를 조회하고 입장하면 점유한다. 점유에 성공하면 결제 준비와 승인까지 보낸다.
+앱의 `RESTLESS_DROP_QUEUE_REQUIRED`가 `QUEUE`와 같아야 한다. 시드는 sale이다. base로도 돌지만 워밍업이 없다.
+시드에 워밍업 드롭이 있으면 판매 전에 그 드롭으로 같은 흐름을 먼저 보낸다. 워밍업은 핫 드롭 재고와 참여 계정을 쓰지 않고 요약의 판매 결과에서 빠진다.
 
-서버를 직접 조작할 수 없는 측정자는 `SETUP=self`로 토큰 파일 없이 시작할 수 있다. 서버에서는 perf DB에 `seed base`를 **한 번** 넣고 `perf/ec2/perf-ec2.sh start`로 perf 앱을 띄워 둔다. 시드 회원과 주최자로 로그인한 뒤 판마다 새 경매를 등록한다. 서버 시각은 기존 시드 경매 1번의 상세 `serverTime`에서 읽는다. 요청은 모두 perf 호스트 허용 목록을 통과해야 한다.
+| 변수 | 기본값 | 뜻 |
+|---|---|---|
+| `QUEUE` | off | off 또는 on |
+| `PARTICIPANTS` / `RATIO` | 총재고 x manifest 경쟁률 | 참여자 수. base는 1,000 x 10 |
+| `PEAK_RATE`, `RAMP` | 1000, 5s | 최고 도착률과 0에서 오르는 시간. 유지 시간은 참여자 수에 맞춰 계산한다. 기본값이면 7.5초 |
+| `MARGIN` | 200ms | 마지막 몇 명이 빠지지 않게 유지 구간에 더하는 시간. 넘친 작업은 `skipped_no_account`로 끝난다 |
+| `OBSERVE` | 300s | 신규 유입이 끝난 뒤 관측 시간. 이 시각까지 입장하지 못한 회원은 `unfinished`다 |
+| `POLL_SECONDS` | 2 | 상태 조회 간격. 실험 가정이고 API 계약의 값이 아니다 |
+| `PAY` | 1 | 0이면 점유까지만 한다 |
+| `WARMUP` | 시드에 워밍업 드롭이 있으면 켬 | 0이면 워밍업을 끈다 |
+| `WARM_RATE`, `WARM`, `WARM_GAP` | 30, 60s, 10s | 워밍업 도착률과 시간, 워밍업이 끝난 뒤 판매 시작까지 기다리는 시간. 계정은 참여자 뒤 행을 쓴다 |
+| `WINDOW_SECONDS` | 10 | 창 길이 |
+| `MAX_VUS`, `PRE_VUS` | on은 참여자 수, off는 3000 | on은 대기 중인 회원마다 VU 하나를 쓴다 |
+
+- 축소 조건은 시드 스케일과 `PEAK_RATE`를 함께 바꾼다. H-small은 `--scale sale_small`에 `PEAK_RATE=500`, H-mini는 `--scale sale_mini`에 `PEAK_RATE=200`이다.
+- 요약의 `member results`가 회원별 최종 결과다. `paid`, `sold_out`, `unfinished`, `queue_closed`, `admission_expired`, `payment_pending`, `payment_failed`, `error`로 나뉜다.
+- `first response`는 도착 뒤 첫 API의 평가 지연이다. `queue wait`는 진입 응답부터 입장을 확인한 시각까지다. `arrival to paid`는 도착부터 결제 승인까지다.
+- on에서 생성기가 참여자만큼 VU를 만들지 못하면 `dropped_iterations`가 생긴다. 그 실행은 원래 조건을 만들지 못한 것이다.
+
+### drop-reservation-capacity.js (B1, B2)
+
+대기열을 끄고 점유 TTL을 실행 시간보다 길게 둔다(`RESTLESS_DROP_RESERVATION_TTL=PT30M`). 시드는 capacity다. SKU 1개 대조는 capacity_single을 쓴다.
+워밍업과 측정은 별도 시나리오다. 워밍업은 `users.csv` 앞 `WARM_RATE` x `WARM` 행을 쓰고 측정은 그 뒤 행을 쓴다.
+
+| 변수 | 기본값 | 뜻 |
+|---|---|---|
+| `MODE` | ramp | ramp는 연속 증가 탐색, hold는 고정 도착률 유지 |
+| `WARM_RATE`, `WARM` | 30, 60s | 워밍업 도착률과 시간. 판정에서 빼지만 계정과 재고는 쓴다 |
+| `FROM`, `TO`, `RAMP` | 50, 350, 480s | ramp의 시작·끝 도착률과 오르는 시간 |
+| `DOWN`, `TAIL_RATE`, `TAIL` | 30s, 30, 90s | ramp 뒤 내리는 시간, 회복 관측 도착률과 시간 |
+| `RATE`, `HOLD` | 없음(필수), 180s | hold의 도착률과 유지 시간 |
+| `WINDOW_SECONDS` | 30 | 창 길이 |
+| `ABORT_ERROR_RATE` | 0.05 | 예상 밖 오류의 누적 비율이 넘으면 멈춘다. 30초 뒤부터 판정한다 |
+| `SPARE_ACCOUNTS` | 50 | 스케줄링 오차에 대비해 더 읽는 계정 수 |
+
+기본 ramp의 계획 도착 수는 106,200건이다. 요약의 창 표는 계획 수, 시작 수, 신규 점유 수, 평가 지연, 예상 밖 오류율을 보여 준다. 신규 성공률의 분모는 계획 수다.
 
 ```bash
-mkdir -p .ai-output/perf
-docker run --rm -v "$PWD/perf/scenarios:/scenarios:ro" -v "$PWD/.ai-output/perf:/out" \
-  --add-host perf-app:<IP> \
-  -e BASE_URL=http://perf-app:8080 -e MANAGEMENT_URL=http://perf-app:8081 \
-  -e PERF_ALLOWED_APP_HOSTS=perf-app -e SETUP=self -e MODE=hot \
-  -e BIDDERS=1000 -e SUMMARY_PATH=/out/auction-self-hot.json \
-  -e K6_WEB_DASHBOARD=true -e K6_WEB_DASHBOARD_EXPORT=/out/auction-self-hot.html \
-  grafana/k6:2.4.0 run /scenarios/auction-bid-step.js
+-e MODE=ramp                    # B1 연속 증가 탐색
+-e MODE=hold -e RATE=300        # B2 300건/초 3분 유지
 ```
 
-`MODE=spread`는 여러 경매를 만들고, `MODE=ending`은 종료 직전 경매를 만든다. 로그인과 등록은 setup에서 진행하므로 입찰 전 준비 시간이 필요하다. 로그인 성공률이 99% 미만이거나 경매가 열리지 않으면 측정을 시작하지 않는다. 각 실행이 만든 경매는 DB에 남아 누적된다. 여러 판이 끝나면 서버에서 `perf/ec2/perf-ec2.sh verify base`로 불변식을 확인한다. 시드 기준값 일부는 측정 후 실패하는 것이 정상이다.
+### drop-queue-poll.js (Q)
+
+대기열을 켜고 입장 작업을 끈다(`RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED=false`). 시드는 대기열을 미리 채우지 않는다.
+회원은 `ENTER_RATE`로 진입하고 진입하자마자 조회를 시작해 측정이 끝날 때까지 이어 간다. 구간은 fill, settle, warmup, measure 순서다.
+
+| 변수 | 기본값 | 뜻 |
+|---|---|---|
+| `WAITERS` | 없음(필수) | 고정할 대기 인원. 절차는 100, 500, 1000, 2000, 5000, 10000 순서다 |
+| `ENTER_RATE` | 50 | 초당 진입 인원 |
+| `SETTLE`, `WARM`, `MEASURE` | 10s, 60s, 120s | 인원 안정화, 워밍업, 측정 시간 |
+| `POLL_SECONDS` | 2 | 상태 조회 간격 |
+
+- 요약의 `fixed-N experiment held`는 모든 대기자가 측정 끝까지 WAITING이었다는 뜻이다. 한 명이라도 잃으면 `FAILED`다.
+- 입장 작업이 켜져 있어 ADMITTED가 보이면 `drop_queue_unexpected_admission` 임계값이 실행을 멈춘다.
+- 끝난 직후 서버의 `drop_queue_waiting` 값을 로그에 남긴다. 목표 인원과 같아야 한다.
+
+### prom-collect.sh
+
+```bash
+perf/scenarios/prom-collect.sh http://perf-app:8081 .ai-output/perf/<실행>/prom 5 &
+```
+
+수집 시각(UTC)을 이름으로 한 `.prom` 파일을 남긴다. 실패한 수집은 `.failed` 파일로 표시한다. 네 번째 인자로 프로세스 ID를 주면 그 프로세스가 끝날 때 같이 끝난다.
+
+### 로컬 확인 (2026-11-18, 측정 결과 아님)
+
+스크립트가 도는지만 확인했다. 앱, MySQL, k6를 맥북 한 대에서 돌렸고 small 시드(재고 100, 계정 1,000)를 썼다. 지연은 기준선이 아니다.
+
+| 실행 | 결과 | `--verify` |
+|---|---|---|
+| capacity hold, 10/s 6초 | 계획 80, 신규 점유 79, 오류 0 | 시드 기준값 외 0 |
+| capacity ramp, 5→15/s | 계획 80, 신규 점유 79, 오류 0 | 시드 기준값 외 0 |
+| sale off, 100/s | 결제 100, 품절 900 | 시드 기준값 외 0, 판매 수량 100 |
+| sale on, 입장 100명/회 | 결제 100, 품절 900, 소비된 구매권 100 | 시드 기준값 외 0 |
+| sale on, 입장 10명/회, 관측 12초 | 결제 100, 품절 113, 미완료 787 | 판매 수량 100, 승인 결제 100 대조 |
+| queue poll, 200명 | 200명 유지, 측정 구간 조회 99.6/s, 서버 대기 인원 200 | 해당 없음 |
+| queue poll, 입장 작업 켬 | 임계값으로 중단 | 해당 없음 |
+| `HTTP_TIMEOUT=1ms` | 타임아웃 34건이 평가 지연에 1ms로 들어가고 응답 지연에는 0건 | 해당 없음 |
+| sale off, sale_local 시드, 워밍업 50명 | 워밍업 드롭 결제 50, 판매 결제 50, 품절 450 | 시드 기준값 외 0, 핫 드롭 판매 50 |
+| sale on, sale_local 시드, 워밍업 50명 | 워밍업 드롭 결제 50, 판매 결제 50, 품절 450, 소비된 구매권 50 | 시드 기준값 외 0 |
+
+## 경매 몰림 부하 테스트: AU-1~AU-5
+
+앱을 `perf` 프로필로 실행하고 `base` 시드를 측정 기간 시작에 한 번 넣습니다. 스크립트가 주최자로 로그인하고 필요한 판마다 새 경매를 만듭니다. 판마다 DB를 복원할 필요는 없습니다. 생성한 경매는 DB에 남으므로 독립적인 측정 기간을 시작할 때만 새 시드를 준비합니다.
+
+Mac에는 k6 2.4.0(`brew install k6`)과 Node 24가 필요합니다. `PERF_APP_IP`에 대상 주소를 지정하면 실행기가 이를 `perf-local`에 매핑합니다. 실제 IP는 저장소나 결과에 기록하지 않습니다.
+
+```bash
+export PERF_APP_IP=<perf 서버 IP>
+PHASES=200,300 perf/scenarios/auction-run.sh detail local-detail
+PHASES=200,300 perf/scenarios/auction-run.sh list local-list
+PHASES=200,300 LOGIN_RATE=50 perf/scenarios/auction-run.sh bid local-bid
+PHASES=200,300 LOGIN_RATE=50 PHASE_GAP_SECONDS=240 perf/scenarios/auction-run.sh ending local-ending
+STEPS=50,100 ACCOUNTS=20 HOLD_SECONDS=20 perf/scenarios/auction-run.sh sse local-sse
+```
+
+기본 k6 실행은 한 번에 8,000건 판을 보낸 뒤 10,000건 판을 보냅니다. 로컬 확인에는 `PHASES`로 요청 수를 줄일 수 있습니다. 실행기는 Actuator 수집을 시작하고 시나리오 종료 뒤 멈춥니다.
+
+| ID | 실행 이름 | API / 인증 | 확인 목적 |
+|---|---|---|---|
+| AU-1 | `ending` | 입찰 POST, 로그인 | 마감 직전 입찰, 마감 전 발신 후 `AUCTION_CLOSED` 거절, 연장과 낙찰 정합성 |
+| AU-2 | `detail` | 공개 상세 GET | 한 경매 상세 조회 몰림 |
+| AU-3 | `list` | 공개 경매 목록 GET | OPEN 경매 목록 조회 몰림 |
+| AU-4 | `bid` | 입찰 POST, 로그인 | 평시 입찰 몰림 |
+| AU-5 | `sse` | 인증 SSE GET | 연결 유지와 변경 이벤트 전달 지연 |
+
+AU-2·AU-3은 현재 공개된 GET이므로 토큰 없이 호출합니다. 401이면 공개 GET 경로가 막힌 것으로 기록합니다.
+
+### k6 옵션
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `SETUP` | `manifest` | `self`면 직접 로그인과 등록, 기본값은 기존 CSV·manifest 방식 |
-| `BIDDERS`, `BIDDER_FIRST_ID`, `BIDDER_LAST_ALLOWED_ID` | `1000`, `1`, `96900` | 연속 회원 ID 수·시작·허용 상한. small에서는 상한을 840으로 지정 |
-| `ORGANIZER_EMAIL`, `SEED_PASSWORD` | `organizer1@fanq.com`, `0000` | 주최자와 시드 계정 비밀번호 |
-| `START_DELAY`, `AUCTION_DURATION` | `20s`, `2h` | 등록부터 시작까지, hot/spread 경매 길이 |
-| `SPREAD_COUNT`, `LOGIN_BATCH` | `100`, `50` | 분산 경매 수, 동시 로그인 요청 수 |
+| `TARGET` | 실행기가 지정 | `ending`, `detail`, `list`, `bid` |
+| `PHASES` | `8000,10000` | 오름차순 두 판의 요청 수 |
+| `BIDDER_FIRST_ID`, `BIDDER_LAST_ALLOWED_ID` | `1`, `96900` | 연속 입찰자 ID 범위. 상한을 넘으면 중단 |
+| `LOGIN_RATE`, `LOGIN_MARGIN_SECONDS` | `15`, `60` | 초당 로그인 수와 예상 로그인 완료 후 여유 시간 |
+| `PHASE_GAP_SECONDS` | 일반 60, ending 240 | 판 사이 간격 |
+| `AMOUNT_STEPS` | `100` | 시작가 위 최소 인상액 배수의 무작위 범위 |
+| `ENDING_LEAD_MS` | `1000` | 판 시각부터 원래 종료까지의 시간 |
+| `START_DELAY_SECONDS`, `AUCTION_DURATION_SECONDS` | `20`, `7200` | 경매 시작 지연과 일반 경매 길이 |
+| `REQUEST_TIMEOUT_SECONDS`, `RESULT_WAIT_SECONDS` | `60`, `300` | 요청 제한 시간과 결과 조회 대기 한도 |
+| `ORGANIZER_EMAIL`, `SEED_PASSWORD` | `organizer1@fanq.com`, `0000` | 시드 주최자 계정과 비밀번호 |
 
-`BIDDER_LAST_ALLOWED_ID`는 base 시드의 AU-6·8 계정 보호 범위다. 다른 스케일에서는 해당 시드의 범위를 확인해 직접 설정한다. 시드 출력과 토큰을 측정자에게 복사할 필요는 없다. 요약 JSON에는 생성된 경매 ID, 로그인 요청·성공 수와 시간, 입찰자 범위와 주최자가 기록된다. 비밀번호와 토큰은 요약에 기록하지 않는다.
+`ending`, `bid`, `detail`은 판마다 경매를 새로 만들고 `list`는 만들지 않습니다. 경매가 모두 OPEN 된 뒤 로그인 시작 시각과 판 시각을 정해 VU 로그인이 한꺼번에 밀리지 않게 합니다. 로그인은 setup 종료 뒤 10초 후 시작합니다. `ending`은 경매 등록에 종료 시각이 필요하므로 예정된 OPEN 시각, 로그인·여유 시간과 1초의 OPEN 전환 여유를 반영해 종료 시각을 먼저 잡습니다. 각 입찰자는 한 번 로그인하고 자신이 참여하는 각 판에서 한 번 요청합니다. 초당 15회로 10,000명을 로그인하면 약 11분이 걸리고, 첫 판 전에 설정한 여유 시간이 더해집니다.
 
-### AU-8 동시 종료 집계
+### SSE 옵션
 
-새 DB를 시드하고 `AUCTION_CLOSE_IN_MINUTES=2 ... --refresh` 후 앱을 기동한다. 모두 종료된 뒤 manifest의 범위를 변수로 전달한다. 아래는 로컬에서 `seed.sh`와 같은 DB 환경 변수와 `MYSQL` 명령을 사용하는 예다. 비밀번호는 `MYSQL_PWD`로 전달한다.
+`auction-sse.mjs`는 Node 24 내장 fetch를 씁니다. 장시간 경매를 만들고 관전자 계정에 로그인한 뒤 토큰을 연결에 재사용합니다. 별도 측정 계정이 연결 단계마다 입찰합니다. 기본 누적 단계는 2,000, 4,000, 6,000, 8,000, 10,000입니다.
 
-```bash
-export MYSQL_PWD="$DB_PASSWORD"
-MYSQL=${MYSQL:-mysql}
-read -r first last <<EOF_IDS
-$(python3 -c 'import json; a=json.load(open("perf/seed/out/manifest.json"))["auction"]; print(a["mass_first_id"], a["mass_last_id"])')
-EOF_IDS
-{ printf 'SET @auction_mass_first=%s, @auction_mass_last=%s;\n' "$first" "$last"; cat perf/scenarios/auction-close-report.sql; } |
-  $MYSQL -h "$DB_HOST" -P "${DB_PORT:-3306}" -u "$DB_USERNAME" "$DB_NAME"
-```
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `STEPS` | `2000,4000,6000,8000,10000` | 누적 SSE 연결 목표 |
+| `ACCOUNTS`, `BIDDER_FIRST_ID`, `BIDDER_LAST_ALLOWED_ID` | `1000`, `1`, `96900` | 관전자 계정 수와 범위. 다음 두 ID는 번갈아 쓰는 측정 입찰자 |
+| `LOGIN_RATE` | `15` | 초당 로그인 수. 관전자 1,000명은 약 67초 |
+| `CONNECT_RATE` | `200` | 초당 새 SSE 연결 수 |
+| `HOLD_SECONDS` | `60` | 각 연결 단계 유지 시간 |
+| `CONNECT_WAIT_SECONDS`, `PROPAGATION_WAIT_SECONDS` | `30`, `15` | 첫 이벤트와 입찰 뒤 이벤트 대기 한도 |
+| `POST_RUN_CLOSE_WAIT_SECONDS` | `90` | 마지막 단계 뒤 최종 CLOSED 이벤트 대기 시간. 60초 연장 포함 |
+| `PERF_APP_IP` | 필수 | 환경 변수로만 지정하는 대상 IP |
+| `PERF_APP_HOST`, `PERF_ALLOWED_APP_HOSTS` | `perf-local` | 논리 Host 이름과 허용 목록 |
 
-`closed_count`, `open_count`, 지연 min/p50/p95/max(최근접 순위), 첫 종료부터 마지막 종료까지 초, 그 구간의 초당 종료 수, SOLD/UNSOLD와 HELD 수를 출력한다. 종료가 한 건뿐이면 처리 구간이 0초여서 초당 종료 수는 NULL이다. 다른 도메인의 스케줄 지연은 로그에서 따로 확인한다.
+각 단계는 시도·성공(HTTP 200 및 첫 이벤트)·상태별 실패·끊김·활성·변경 이벤트 수신 연결 수와 이벤트 지연 p50/p95/최대를 기록합니다. 최고 입찰자 연속 입찰은 거절되므로 관전자와 별도인 두 측정 계정이 번갈아 입찰합니다. 스크립트는 로그인·연결 계획에 입찰 연장 시간을 더해 경매 수명을 정하고 마지막 CLOSED 이벤트를 기다립니다. 연결이 남으면 클라이언트 연결을 닫고, 서버가 끊긴 emitter를 정리하도록 별도 정리 입찰을 보냅니다. 입찰 응답에는 revision이 없으므로 OPEN revision에 성공한 측정 입찰 수를 더해 기대 revision을 계산합니다.
 
-EC2에서는 `perf/ec2/perf-ec2.sh`에 SQL 실행 명령이 없으므로 서버에서 `/opt/restless/perf.env`의 DB 접속값을 안전하게 환경 변수로 설정한 뒤 위 명령을 실행한다. DB 이름이 `perf-`로 시작하는지 확인하고, EC2에 mysql 클라이언트가 없으면 `MYSQL='docker run --rm -i --network host -e MYSQL_PWD mysql:8.4 mysql'`을 쓴다. 자격 증명은 출력하거나 노트북으로 옮기지 않는다.
+### 결과와 해석
+
+`auction-run.sh ending|detail|list|bid|sse [name]`은 `.ai-output/perf/auction/` 아래에 결과를 씁니다. JSON에는 조건, 판별 전송·응답·연결 실패, 상태·오류 코드 수, 지연, 입찰 대조 및 종료/SSE 결과가 들어갑니다. k6 실행은 HTML 대시보드도 만들고, 모든 실행은 로그와 2초 간격 Actuator CSV를 남깁니다.
+
+각 판은 전송·응답·연결 실패·5xx·상태 코드, 지연 p50/p95/p99/최대, T부터 1초 안에 응답한 비율, 마지막 응답 시각, 전송 시각 퍼짐을 기록합니다. 입찰은 201 응답 수와 서버 수락 수를 대조합니다. 비영(非零) 5xx·연결 실패·입찰 수 차이·낙찰자 불일치·최종 종료 시각 뒤 수락(INV-AU-11)은 눈에 띄게 표시합니다. 원래 마감 뒤 수락은 연장 정책상 정상일 수 있습니다. 별도로 원래 마감 전에 보냈는데 `AUCTION_CLOSED`로 거절된 수를 기록합니다. 지연·처리량 합격선은 두지 않습니다.
+
+CSV는 Hikari 활성·대기·타임아웃, Tomcat busy thread·현재 연결, 프로세스·시스템 CPU, `auction_stream_connections`, `http_server_requests_active_seconds_gcount` 합계를 샘플링합니다. 없는 지표나 응답은 빈 칸입니다.
+
+### 안전과 정합성
+
+앱 호스트는 `perf-`로 시작하고 `PERF_ALLOWED_APP_HOSTS`에 있어야 하며 `prod`를 포함하면 안 됩니다. 실행 전에 관리 endpoint의 `/actuator/prometheus`가 200인지 확인합니다. 비밀번호와 토큰은 로그나 요약에 남기지 않습니다.
+
+측정 기간이 끝나면 필요에 따라 `perf/ec2/perf-ec2.sh verify base`를 한 번 실행해 불변식을 확인합니다. 부하로 데이터가 바뀌었으므로 seed baseline 일부는 달라질 수 있습니다. 종료된 경매는 revision에서 OPEN 전환 +1, 입찰당 +1, 종료 전환 +1을 반영해 수락 수를 `revision - 2`로 구합니다. 열린 입찰 경매는 `revision - 1`을 씁니다.

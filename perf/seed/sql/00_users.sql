@@ -27,6 +27,8 @@ INSERT INTO perf_seed_meta (k, v) VALUES
     ('drop_hot_id', 1),
     ('drop_hot_stock', @hot_stock),
     ('drop_hot_participants', @hot_stock * @ratio),
+    ('drop_warm_id', IF(@warm_stock > 0, @warm_drop_id, 0)),
+    ('drop_warm_stock', @warm_stock),
     ('drop_bg_drops', @bg_drops),
     ('drop_bg_reservations', @bg_reservations);
 

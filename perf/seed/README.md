@@ -44,6 +44,18 @@ perf/seed/seed.sh --scale base --profile perf
 모든 수치는 [scale.yml](scale.yml)에서 바꾼다. small은 로컬, base는 기본 실험, capacity는 계단식 용량 측정, large는 확장 실험용이다.
 capacity는 base와 같고 핫 재고와 계정만 21만이다. 품절 응답 대신 성공 점유 경로의 처리량을 재려는 것이다 ([이유](../scenarios/README.md#재고를-크게-두는-이유)).
 
+드롭 성능 실험용 스케일은 아래와 같다. 스케일 구역끼리는 상속하지 않는다.
+
+| 스케일 | base·capacity와 다른 점 | 쓰는 실험 |
+|---|---|---|
+| sale | base에 워밍업 드롭(재고 5,000)을 더한다. 재고 1,000, 참여자 10,000명 | 대표 판매 H |
+| sale_small, sale_mini | sale과 같고 핫 재고가 500, 200이다. 참여자 5,000명, 2,000명 | H 축소 진단 |
+| capacity_single | capacity와 같고 핫 SKU가 1개다. 재고 21만이 한 SKU에 있다 | SKU 1개 대조 |
+| sale_local | small에 워밍업 드롭(재고 200)을 더한다. 핫 재고 50 | 로컬 확인 |
+
+워밍업 드롭은 `drop_warm_stock`이 0보다 클 때만 만든다. 판매 중이고 핫 드롭과 SKU 수·가격이 같다. 측정 전에 같은 경로를 데우되 핫 드롭 재고와 참여 계정을 쓰지 않으려고 둔다.
+ID는 배경 드롭 뒤다. `--refresh`가 핫 드롭과 함께 판매 기간을 다시 맞춘다. `manifest.json`의 `drop.warmup`에 드롭 ID, SKU, 총재고, 워밍업 계정의 첫 행이 남는다. 워밍업 드롭이 없으면 `null`이다.
+
 | 구분 | base |
 |---|---|
 | 회원 | users 100,000 + 관리자 1 + 주최자 10, refresh_tokens 계정마다 1 |
@@ -66,13 +78,13 @@ ID를 명시적으로 넣어서 시나리오가 값을 예측할 수 있다. 앱
 | 테이블 | ID |
 |---|---|
 | users | 회원 1..users, 관리자 users+1, 주최자 users+2..users+1+organizers |
-| drops | 핫 1, 배경 2.. |
+| drops | 핫 1, 배경 2.., 워밍업 드롭은 배경 뒤 |
 | auctions | 핫 1, 분산 2..1+auction_spread, 배경 그 뒤, AU-6 종료 경매, AU-7, AU-8 순서 |
 | AU-6 회원 | 마지막 auction_heavy_users명 |
 | AU-8 입찰 회원 | AU-6 회원 앞의 auction_mass_close × auction_mass_close_bids_per명 (입찰마다 다른 회원) |
 | credit_wallets | 일반 회원 ID와 동일 |
 | auction_bids, credit_holds | 배경 입찰 순서대로 1부터, 확보 ID는 입찰 ID와 동일 |
-| drop_variants | 핫 1..3, 배경 4.. |
+| drop_variants | 핫 1..3, 배경 4.., 워밍업 SKU는 배경 뒤 |
 | drop_reservations, orders, payments | 배경 점유 n에 대해 모두 n |
 
 ## 계정과 이름
@@ -137,6 +149,8 @@ EC2와 RDS에서는 아직 재지 않았다.
 공통 `seed.sh`는 `sql/40_ticketing.sql`도 실행하여 회차 1개와 좌석 1,000개를 생성한다. 결과 회차 ID와 좌석 수는 `out/manifest.json`의 `ticketing`에 기록된다. 새 성능 DB를 준비할 때 별도 티켓팅 시드 명령은 필요 없다.
 
 기존에 공통 시드만 적용한 DB에는 파일을 배포하는 것만으로 데이터가 추가되지 않는다. 회차가 전혀 없는지 확인한 뒤 `ticketing.sh seed`로 추가할 수 있다. 이미 사용 중인 DB에서 공통 시드를 다시 실행하거나 초기화하지 않는다.
+
+EC2에서 DB 환경변수를 직접 지정하지 않았다면 `ticketing.sh`가 `/opt/restless/perf.env`를 읽고 perf 프로필과 DB 이름을 확인한다. 다른 경로는 `PERF_ENV_FILE`로 지정한다. 기존처럼 DB 환경변수를 직접 지정하는 방식도 지원하며, 일부만 지정했다면 나머지를 파일과 섞지 않고 오류로 중단한다. 설정 파일을 읽을 수 없거나 DB_URL이 없으면 AWS 담당자에게 경로와 권한을 확인한다.
 
 `ticketing.sh`는 기존 DB에 대한 추가 적재와 `ticketing-verify.sql` 점검용이다. `backend/scripts/seed/ticketing/`은 로컬 개발 DB에 반원형 100석 샘플을 추가하는 별도 도구이며 AWS 성능 데이터와 용도가 다르다. 부하 발생 코드는 `perf/scenarios/ticketing/`에 둔다.
 
