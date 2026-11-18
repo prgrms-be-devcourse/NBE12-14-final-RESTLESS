@@ -34,7 +34,7 @@ if [[ -z "${DB_HOST:-}" && -e "$PERF_ENV_FILE" ]]; then
   [[ "${DB_URL:-}" =~ ^jdbc:mysql://([^:/]+)(:([0-9]+))?/([^?]+) ]] || die "cannot parse DB_URL in $PERF_ENV_FILE"
   DB_HOST="${BASH_REMATCH[1]}"; DB_PORT="${BASH_REMATCH[3]:-3306}"; DB_NAME="${BASH_REMATCH[4]}"
   PERF_ALLOWED_DB_HOSTS="$DB_HOST"
-  echo "fanmeeting-check: DB settings from $PERF_ENV_FILE ($DB_HOST/$DB_NAME)"
+  echo "fanmeeting-check: DB settings from $PERF_ENV_FILE (db $DB_NAME)"   # 호스트는 결과를 붙여넣을 때 퍼지지 않게 찍지 않는다
   if [[ -z "${MYSQL:-}" ]] && ! command -v mysql >/dev/null; then
     MYSQL="docker run --rm -i --network host -e MYSQL_PWD mysql:8.4 mysql"
   fi
