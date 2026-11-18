@@ -373,15 +373,25 @@ async function main() {
 
     const bidResponseStart = performance.now();
     const measurementToken = measurementTokens[results.length % measurementTokens.length];
-    const bidResponse = await request(`${BASE_URL}/api/auctions/${metrics.createdAuctionId}/bids`, {
-      method: 'POST', headers: { Authorization: `Bearer ${measurementToken}`, 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
-      body: JSON.stringify({ amount: opened.minimumBidAmount + opened.minimumIncrementAmount * (results.length + 1) }),
-      signal: AbortSignal.timeout(Number(env.REQUEST_TIMEOUT_SECONDS || 60) * 1000),
-    });
+    let bidResponse;
+    try {
+      bidResponse = await request(`${BASE_URL}/api/auctions/${metrics.createdAuctionId}/bids`, {
+        method: 'POST', headers: { Authorization: `Bearer ${measurementToken}`, 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
+        body: JSON.stringify({ amount: opened.minimumBidAmount + opened.minimumIncrementAmount * (results.length + 1) }),
+        signal: AbortSignal.timeout(Number(env.REQUEST_TIMEOUT_SECONDS || 60) * 1000),
+      });
+    } catch (error) {
+      // When watchers fill the server's connection limit, even an ordinary API request cannot connect.
+      // Record that as this step's result instead of aborting the whole run.
+      bidResponse = null;
+      step.bidOutcome = { status: 0, error: error?.cause?.code || error?.name || 'connection_error' };
+    }
     const bidReceivedAt = performance.now();
     let bidBody = {};
-    try { bidBody = await bidResponse.json(); } catch { /* report status */ }
-    if (bidResponse.status !== 201) {
+    if (bidResponse) { try { bidBody = await bidResponse.json(); } catch { /* report status */ } }
+    if (!bidResponse) {
+      step.bidResponseMs = bidReceivedAt - bidResponseStart;
+    } else if (bidResponse.status !== 201) {
       step.bidOutcome = { status: bidResponse.status, code: bidBody.code || null };
     } else {
       step.bidOutcome = { status: bidResponse.status };
