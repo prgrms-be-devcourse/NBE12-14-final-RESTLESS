@@ -93,11 +93,17 @@ if restarted:
 
 # 누적 카운터는 이름(시각) 순서대로 줄어들면 안 된다. 줄어들면 스냅샷 순서가 응답 순서와 다르거나(수집 겹침)
 # 재시작이다. 어느 쪽이든 차이·처리량을 믿을 수 없다.
-CUMULATIVE = ('_count', '_sum', '_bucket', '_total')
+# 검사 대상은 이 요약이 차이를 계산하는 누적값만이다. 이름이 _sum·_bucket으로 끝나도 *_active_seconds_*(지금 처리 중인
+# 요청)처럼 오르내리는 값이 있고 # TYPE으로도 구분되지 않으므로, 이름 끝이 아니라 아래 목록으로 고른다.
+CUMULATIVE = {
+    'http_server_requests_seconds_count', 'http_server_requests_seconds_sum', 'http_server_requests_seconds_bucket',
+    'tasks_scheduled_execution_seconds_count', 'tasks_scheduled_execution_seconds_sum',
+    'hikaricp_connections_timeout_total',
+}
 backwards = []
 for (t0, m0), (t1, m1) in zip(snaps, snaps[1:]):
     for (n, l), v1 in m1.items():
-        if not n.endswith(CUMULATIVE):
+        if n not in CUMULATIVE:
             continue
         v0 = m0.get((n, l))
         if v0 is not None and v1 < v0:

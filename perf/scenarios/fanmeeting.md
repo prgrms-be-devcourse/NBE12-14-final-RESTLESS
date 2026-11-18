@@ -115,7 +115,7 @@ Grafana가 없어도 서버 쪽 숫자를 남긴다. 관리 포트의 `/actuator
 구간 숫자는 구간 안의 **첫 스냅샷과 마지막 스냅샷의 차이**다. 구간 시작과 첫 스냅샷 사이의 요청은 들어가지 않는다. 그래서 `fanmeeting-s1.sh`는 단계마다 **부하를 시작하기 전에** `snap`으로 한 장, **부하가 끝난 뒤** 한 장을 저장한다(경계 스냅샷). 이름은 `timeline.tsv`에 남기고, 단계 요약은 `FROM_SNAPSHOT`·`UNTIL_SNAPSHOT`으로 정확히 그 두 장 사이를 센다. 손으로 자를 때는 요약 첫 줄의 `counted <시각> → <시각>`(실제 집계 구간)을 같이 적는다.
 
 - **수집은 겹치지 않는다.** 기록 루프와 `snap`은 `OUT_DIR/.scrape.lock`(mkdir 잠금)을 잡고 한 번에 하나만 수집한다. 파일 이름은 잠금 안에서 응답을 다 받은 시각이라, 이름 순서가 서버가 응답을 만든 순서와 같고 느린 수집도 실제 시각에 가깝게 붙는다. 느린 수집이 겹쳐 누적값 순서가 뒤집히는 일(100 → 0 → 200)이 없다. 잠금을 `LOCK_WAIT`초 안에 못 얻으면 그 수집은 실패로 끝난다. 주인 프로세스가 죽은 잠금은 치우고 다시 잡는다.
-- **INVALID.** 경계 스냅샷이 없거나, 구간 안에서 앱이 재시작됐거나(`process_start_time_seconds` 변경), 누적 카운터가 줄어든 곳이 있으면 요약 첫머리에 `⚠ INVALID: <이유>`를 표시하고 `summary.json`에 `valid: false`를 남긴 뒤 종료 코드 3으로 끝난다. `fanmeeting-s1.sh`는 이를 실패 단계로 모은다. 그 숫자는 처리량으로 쓰지 않는다.
+- **INVALID.** 경계 스냅샷이 없거나, 구간 안에서 앱이 재시작됐거나(`process_start_time_seconds` 변경), 요약이 차이를 계산하는 누적 카운터(`http_server_requests_seconds_*`, `tasks_scheduled_execution_seconds_*`, `hikaricp_connections_timeout_total`)가 줄어든 곳이 있으면 요약 첫머리에 `⚠ INVALID: <이유>`를 표시하고 `summary.json`에 `valid: false`를 남긴 뒤 종료 코드 3으로 끝난다. `fanmeeting-s1.sh`는 이를 실패 단계로 모은다. 그 숫자는 처리량으로 쓰지 않는다. `*_active_seconds_*`(지금 처리 중인 요청)처럼 이름이 `_sum`·`_bucket`으로 끝나도 오르내리는 지표는 검사하지 않는다.
 
 **측정 시작 전에 켜고, 모든 실행(A·B·C·조회)이 끝난 뒤 Ctrl-C로 끈다.** 여러 실행이 한 기록에 섞이므로, 실행마다 k6가 출력한 시작·끝 시각으로 `summary`를 다시 잘라 본다.
 
