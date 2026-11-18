@@ -36,7 +36,7 @@ CLAUDE.local.md
 /AGENTS.md
 /CLAUDE.md
 
-# Load test raw results (summaries go to docs/reports/)
+# Load test raw results (reports stay in .ai-output/perf/, never in docs/)
 performance/**/results/
 # Load test seed output: tokens for the perf database
 /perf/seed/out/
