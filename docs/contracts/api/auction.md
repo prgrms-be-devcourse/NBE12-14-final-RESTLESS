@@ -169,6 +169,8 @@ Content-Type: application/json
 }
 ```
 
+몰림을 줄이려고 서버는 경매 상태 캐시로 금액 부족을 먼저 확인할 수 있다. 이때 `minimumBidAmount`는 최대 1초 전 값일 수 있다. 이 값으로 다시 입찰해도 서버가 최신 금액으로 다시 검증하므로, 더 높은 금액이 필요하면 다시 `BID_AMOUNT_TOO_LOW`를 받는다.
+
 ## 결과
 
 `GET /api/auctions/12/result`
