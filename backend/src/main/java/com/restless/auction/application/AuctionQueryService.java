@@ -148,6 +148,11 @@ public class AuctionQueryService {
                                 long minimumIncrementAmount, HighestBid highestBid, long minimumBidAmount,
                                 Instant startsAt, Instant endsAt, int extensionDurationSeconds, long revision,
                                 Instant serverTime) {
+        public AuctionDetail withServerTime(Instant currentTime) {
+            return new AuctionDetail(auctionId, title, itemName, itemDescription, sellerNickname, status,
+                    startingPriceAmount, minimumIncrementAmount, highestBid, minimumBidAmount, startsAt, endsAt,
+                    extensionDurationSeconds, revision, currentTime);
+        }
     }
 
     /** 실시간 스트림 메시지. revision이 SSE 이벤트 id가 된다. */

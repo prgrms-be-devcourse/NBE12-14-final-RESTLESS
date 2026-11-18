@@ -55,6 +55,10 @@ restless:
       flush-interval-ms: 200
       # SSE 연결 최대 유지 시간(ms). 지나면 서버가 닫고, 클라이언트는 상세를 다시 받은 뒤 재연결한다.
       timeout-ms: 1800000
+    query-cache:
+      # 목록·상세 조회의 앱 메모리 캐시. 변경 이벤트로 상세를 즉시 갱신한다.
+      enabled: true
+      ttl-ms: 1000
   fanmeeting:
     worker:
       # 팬미팅 응모 기간 열기·마감, 추첨 Worker. 테스트에서는 build.gradle이 false로 끈다.

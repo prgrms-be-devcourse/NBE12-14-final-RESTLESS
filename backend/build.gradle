@@ -26,6 +26,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'com.github.ben-manes.caffeine:caffeine'
     implementation 'org.flywaydb:flyway-mysql'
     runtimeOnly 'com.mysql:mysql-connector-j'
     // 부하 테스트 지표. perf 프로필에서만 /actuator/prometheus를 연다 (application-perf.yml)
