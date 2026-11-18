@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/auction/application/`, `backend/src/main/java/com/restless/credit/application/`
 >
-> 마지막 확인: 2026-11-15 (#142 잠금 뒤 시각 읽기와 함께 고침)
+> 마지막 확인: 2026-11-18 (목록·상세 조회 캐시 추가)
 
 ## 공통 규칙
 
@@ -109,6 +109,30 @@ AuctionChangedEvent (AFTER_COMMIT)
 - **전송 스레드:** 경매 종료·결제 대사 스케줄러와 스레드를 나누지 않으면 0.2초 간격이 밀리므로 전용 스레드를 쓴다. 한 경매의 전송이 실패해도 다른 경매는 계속 보낸다.
 - **설정** (`application.yml` `restless.auction.stream`): `flush-interval-ms`(기본 200), `timeout-ms`(연결 최대 유지 시간, 기본 30분. 지나면 서버가 닫고 클라이언트가 재연결한다).
 - **메트릭:** `auction.stream.connections`(열린 연결 수), `auction.stream.failure`(`stage` = `send` 끊긴 연결로 전송 실패, `flush` 한 경매 조회·전송 실패, `loop` 전송 주기 자체 실패).
+
+## 조회 캐시 (트랜잭션 밖)
+
+인기 경매에 같은 조회가 몰릴 때 DB 조회를 줄인다. 구현은 `auction/application/AuctionQueryCache`이고, 캐시는 이 서버 메모리에만 있다.
+
+| 대상 | 캐시 키 | 새로 읽는 때 |
+|---|---|---|
+| 상세 | 경매 ID + 세대 번호 | 경매가 바뀌어 세대 번호가 오른 뒤, 또는 TTL(기본 1초) 뒤 |
+| 목록 | 상태 + 페이지 + 크기 | TTL(기본 1초) 뒤 |
+
+```text
+AuctionChangedEvent (AFTER_COMMIT)
+  → 그 경매의 세대 번호를 올린다
+다음 상세 조회
+  → 새 세대의 캐시가 없으므로 커밋된 최신 상태를 읽는다
+```
+
+- 입찰, 시작, 종료, 수정, 삭제가 이 이벤트를 발행한다. 삭제는 `revision`이 오르지 않으므로 `revision`을 캐시 키로 쓰지 않는다.
+- 세대 번호는 커밋 뒤에만 오른다. 롤백된 변경은 캐시에 영향을 주지 않는다. 이벤트 처리는 캐시 조회를 기다리지 않는다.
+- 같은 키를 동시에 조회하면 한 요청만 DB를 읽고 나머지는 그 결과를 쓴다.
+- 상세의 `serverTime`은 캐시하지 않고 응답할 때 넣는다.
+- 경매 이벤트가 없는 닉네임 변경은 TTL 뒤에 반영된다.
+- 입찰, SSE 상태 조회, 결과 조회, 내 입찰 조회, 주최자 수정 응답은 이 캐시를 쓰지 않는다.
+- **설정** (`application.yml` `restless.auction.query-cache`): `enabled`(기본 true, 테스트는 `build.gradle`이 끈다), `ttl-ms`(기본 1000).
 
 ## 장애 시나리오
 
