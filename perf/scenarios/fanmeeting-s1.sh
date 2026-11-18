@@ -37,9 +37,14 @@ DRAW_TIMEOUT="${DRAW_TIMEOUT:-600}"  # 마감 뒤 추첨 확정을 기다리는 
 METRICS_INTERVAL="${METRICS_INTERVAL:-2}"
 K6="${K6:-docker}"                   # docker 또는 local(설치된 k6)
 K6_IMAGE="${K6_IMAGE:-grafana/k6:2.4.0}"
+# k6 웹 대시보드: 단계 실행 중 http://localhost:K6_DASHBOARD_PORT 에서 실시간으로 보고, 끝나면 <단계>-dashboard.html로 남긴다.
+# 이 노트북에서만 열린다(127.0.0.1). 단계마다 k6를 새로 띄우므로 단계가 바뀌면 페이지를 새로고침한다.
+K6_DASHBOARD="${K6_DASHBOARD:-true}"
+K6_DASHBOARD_PORT="${K6_DASHBOARD_PORT:-5665}"
 INVARIANTS_SQL="${INVARIANTS_SQL:-$REPO/backend/src/test/resources/harness/fanmeeting-invariants.sql}"
 RUN_DIR="${RUN_DIR:-$REPO/.ai-output/perf/s1-$(date -u +%m%d-%H%M)-p${PARTICIPANTS}-r${PEAK_RATE}}"
-for n in PARTICIPANTS PEAK_RATE CLOSE_PARTICIPANTS RESULT_RATE DRAW_TIMEOUT METRICS_INTERVAL; do
+[[ "$K6_DASHBOARD" == "true" || "$K6_DASHBOARD" == "false" ]] || die "K6_DASHBOARD must be true or false: $K6_DASHBOARD"
+for n in PARTICIPANTS PEAK_RATE CLOSE_PARTICIPANTS RESULT_RATE DRAW_TIMEOUT METRICS_INTERVAL K6_DASHBOARD_PORT; do
   [[ "${!n}" =~ ^[0-9]+$ ]] || die "$n must be a whole number: ${!n}"
 done
 [[ $PARTICIPANTS -ge 1 && $PEAK_RATE -ge 1 && $RESULT_RATE -ge 1 ]] || die "PARTICIPANTS, PEAK_RATE, RESULT_RATE must be >= 1"
@@ -105,7 +110,7 @@ participants=$PARTICIPANTS peak_rate=$PEAK_RATE ramp=$RAMP hold=$HOLD start_offs
 close_participants=$CLOSE_PARTICIPANTS close_rate=$CLOSE_RATE
 result=$RESULT result_rate=$RESULT_RATE result_hold=$RESULT_HOLD
 winner_limit=${WINNER_LIMIT:-300} reserve_limit=${RESERVE_LIMIT:-100} fee_amount=${FEE_AMOUNT:-50000} open_in=${OPEN_IN:-3m}
-db_check=$DB_CHECK metrics_interval=${METRICS_INTERVAL}s users_available=$available
+db_check=$DB_CHECK metrics_interval=${METRICS_INTERVAL}s users_available=$available k6_dashboard=$K6_DASHBOARD
 EOF
 say "run dir $RUN_DIR"
 cat "$RUN_DIR/conditions.txt"
@@ -136,15 +141,23 @@ run_k6() {  # run_k6 <phase> <script> [KEY=VALUE ...]
   local phase="$1" script="$2"; shift 2
   local envs=(BASE_URL="$BASE_URL" MANAGEMENT_URL="$MANAGEMENT_URL" PERF_ALLOWED_APP_HOSTS="$PERF_ALLOWED_APP_HOSTS"
               SUMMARY_PATH="@OUT@/$phase.json" "$@")
+  if [[ "$K6_DASHBOARD" == "true" ]]; then
+    envs+=(K6_WEB_DASHBOARD=true K6_WEB_DASHBOARD_EXPORT="@OUT@/$phase-dashboard.html")
+    say "k6 dashboard: http://localhost:$K6_DASHBOARD_PORT (live while $phase runs), saved to $phase-dashboard.html"
+  fi
   local code=0
   if [[ "$K6" == "docker" ]]; then
     local args=(run --rm -v "$REPO/perf:/perf:ro" -v "$SEED_OUT:/seed:ro" -v "$RUN_DIR:/out")
+    # 컨테이너 안에서는 모든 주소로 열고(0.0.0.0), 밖으로는 이 노트북(127.0.0.1)에만 연결한다.
+    [[ "$K6_DASHBOARD" == "true" ]] \
+      && args+=(-p "127.0.0.1:$K6_DASHBOARD_PORT:5665" -e K6_WEB_DASHBOARD_HOST=0.0.0.0 -e K6_WEB_DASHBOARD_PORT=5665)
     for h in "${HOSTS[@]}"; do args+=(--add-host "$h:$K6_ADD_HOST"); done
     args+=(-e SEED_OUT=/seed -e EVENT_FILE=/out/event.env)
     for e in "${envs[@]}"; do args+=(-e "${e//@OUT@//out}"); done
     docker "${args[@]}" "$K6_IMAGE" run -q "/perf/scenarios/$script" || code=$?
   else
     local kv=(SEED_OUT="$SEED_OUT" EVENT_FILE="$EVENT_FILE")
+    [[ "$K6_DASHBOARD" == "true" ]] && kv+=(K6_WEB_DASHBOARD_HOST=127.0.0.1 K6_WEB_DASHBOARD_PORT="$K6_DASHBOARD_PORT")
     for e in "${envs[@]}"; do kv+=("${e//@OUT@/$RUN_DIR}"); done
     env "${kv[@]}" k6 run -q "$ROOT/$script" || code=$?
   fi
