@@ -362,7 +362,7 @@ AU-2·AU-3은 현재 공개된 GET이므로 토큰 없이 호출합니다. 401�
 
 각 판은 전송·응답·연결 실패·5xx·상태 코드, 지연 p50/p95/p99/최대, T부터 1초 안에 응답한 비율, 마지막 응답 시각, 전송 시각 퍼짐을 기록합니다. 입찰은 201 응답 수와 서버 수락 수를 대조합니다. 비영(非零) 5xx·연결 실패·입찰 수 차이·낙찰자 불일치·최종 종료 시각 뒤 수락(INV-AU-11)은 눈에 띄게 표시합니다. 원래 마감 뒤 수락은 연장 정책상 정상일 수 있습니다. 별도로 원래 마감 전에 보냈는데 `AUCTION_CLOSED`로 거절된 수를 기록합니다. 지연·처리량 합격선은 두지 않습니다.
 
-CSV는 Hikari 활성·대기·타임아웃, Tomcat busy thread·현재 연결, 프로세스·시스템 CPU, `auction_stream_connections`, `http_server_requests_active_seconds_gcount` 합계를 샘플링합니다. 없는 지표나 응답은 빈 칸입니다.
+CSV는 Hikari 활성·대기·타임아웃, Tomcat busy thread·현재 연결, 프로세스·시스템 CPU, `auction_stream_connections`, `http_server_requests_active_seconds_gcount` 합계, JVM 힙 사용·확보·최대(`area="heap"` 합계), GC 멈춤 시간 합과 횟수, JVM 스레드 수, 열린 파일 수를 샘플링합니다. 힙 열은 연결 수에 따른 메모리를 볼 때 씁니다. 컨테이너 전체 메모리는 Actuator에 없으므로 필요하면 EC2에서 `docker stats restless-perf`로 봅니다. 없는 지표나 응답은 빈 칸입니다.
 
 ### 안전과 정합성
 
