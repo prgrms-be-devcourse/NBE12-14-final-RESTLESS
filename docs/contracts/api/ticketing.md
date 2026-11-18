@@ -171,6 +171,12 @@ Long으로 변환할 수 없는 performanceId는 `400 INVALID_REQUEST`로 응답
 
 ## 좌석 선점
 
+### 본인 회차별 구매 한도 조회
+
+`GET /api/performances/{performanceId}/booking-availability`는 로그인 회원의 해당 회차 구매 현황을 반환한다. `maximum`은 회차당 한도, `confirmed`는 확정 수량, `reserved`는 선점 수량, `remaining`은 `max(0, maximum - confirmed - reserved)`이다. `activeReservation`은 해당 회차의 HELD·PAYMENT_PENDING·RECONCILING 본인 예약 상세 또는 null이다. 예약이 없는 최초 사용자도 수량 0으로 조회하며, 타인의 수량은 공개하지 않는다. 회차가 없으면 404, 비로그인은 401이다.
+
+조회 결과는 조회 시점의 안내이며 좌석을 확보하지 않는다. 다른 요청이 수량을 변경할 수 있으므로 실제 선점 시 서버는 기존 구매 관리 행 잠금 아래 한도와 활성 예약을 다시 확인한다. HELD는 기존 checkout 또는 취소로 이어가며, PAYMENT_PENDING·RECONCILING은 결제 확인으로 안내한다. 결제 진행 후에는 선점 취소 API를 사용할 수 없다.
+
 로그인 필수다. 회원 ID는 본문에서 받지 않고 `@LoginMember`로 인증된 토큰에서 추출한다.
 `performanceId`와 `seatIds`는 양수여야 하며 좌석 목록은 비어 있거나 중복될 수 없다.
 `seatIds`는 물리 좌석 ID가 아닌 조회 응답의 판매 좌석 `seatId`다.
