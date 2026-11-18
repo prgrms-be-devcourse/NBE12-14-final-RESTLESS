@@ -6,6 +6,8 @@
 
 ```bash
 export BASE_URL="http://<테스트-서버>:8080"
+export MANAGEMENT_URL="http://<테스트-서버>:8081"
+export PERF_ALLOWED_APP_HOSTS="<테스트-서버>"
 export PERFORMANCE_ID=<회차_ID>
 export USERS_CSV="$PWD/perf/seed/out/users.csv"
 
@@ -15,7 +17,19 @@ perf/scenarios/run-ticketing.sh simultaneous 100
 
 숫자는 전체 사용자 수다. 조회의 기본 실행 시간은 2분이며, `DURATION=10s perf/scenarios/run-ticketing.sh spread 5`처럼 바꿀 수 있다. CSV 대신 시드 계정으로 로그인하려면 `SETUP=self`를 지정한다. 로그인은 Refresh Token을 DB에 추가한다. HTTP 사용 시 비밀번호와 토큰은 암호화되지 않는다. 시작 전에 perf 프로필, 테스트 DB, 회차와 토큰 유효기간을 확인한다.
 
-다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 실행마다 `.ai-output/perf/`에 결과가 저장된다.
+다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 요약 결과는 `.ai-output/perf/ticketing-<시나리오>/summary-<UTC 날짜시간>.json`, HTML 보고서는 같은 폴더의 `report-<UTC 날짜시간>.html`에 자동 저장된다. 예: `.ai-output/perf/ticketing-spread/summary-20261118T010203Z.json`. 실행 중에는 `http://localhost:5665`에서 대시보드를 볼 수 있다. 실행기가 기본으로 대시보드와 HTML 내보내기를 켜므로 별도 k6 환경변수를 지정하지 않아도 된다.
+
+### 테스트 중 서버 지표를 CSV로 수집
+
+`run-ticketing.sh`가 테스트 시작 전 수집기를 자동으로 시작하고, 테스트 종료 후 마지막 지표를 저장한다. 관리 포트에 연결되지 않으면 테스트를 시작하지 않는다. 기본 간격은 2초이며 `INTERVAL=5`로 바꿀 수 있다. 별도 수집이 필요할 때는 아래 명령을 실행하고 `Ctrl-C`로 종료한다.
+
+```bash
+MANAGEMENT_URL="http://3.35.88.242:8081" \
+PERF_ALLOWED_APP_HOSTS="3.35.88.242" \
+python3 perf/scenarios/ticketing/collect-prometheus-csv.py simultaneous
+```
+
+CSV는 `.ai-output/perf/ticketing-simultaneous/prometheus-<UTC 날짜시간>.csv`에 저장된다. 각 행은 수집 시각, Prometheus 지표명, 라벨, 값이다. 수집기 시작 시 관리 포트 접근과 Prometheus 형식을 확인한 뒤에만 기록을 시작한다. 이 파일에는 관리 포트가 실제로 노출하는 지표만 들어간다. Tomcat·Hikari·JVM 값은 확인할 수 있지만 EC2 호스트 메모리나 별도 RDS 지표는 앱의 Prometheus에 노출되지 않으면 포함되지 않는다. 해당 지표는 CloudWatch 또는 DB 모니터링에서 별도로 수집해야 한다.
 
 [성능 실험 계획](../../docs/testing/performance.md)의 실험을 돌리는 k6 스크립트다. 입력 데이터는 [시드](../seed/README.md)가 만든다.
 드롭·경매·티켓팅 시나리오를 둔다. 팬미팅은 [fanmeeting.md](fanmeeting.md)에 따로 둔다.
@@ -60,18 +74,19 @@ java -jar backend/build/libs/restless-0.0.1-SNAPSHOT.jar
 
 ### 실행
 
-k6는 Docker 이미지 `grafana/k6:2.4.0`으로 돌린다. 레포 루트에서 실행한다.
+k6 2.4.0을 노트북에 설치해서 돌린다(`brew install k6`). 레포 루트에서 실행한다.
+맥의 Docker는 가상 머신의 메모리와 CPU 안에서 VU를 만든다. 2026-11-18 드롭 판매 1,000명/초 실행에서 VU가 3,748개에서 멈춰 도착 1만 명을 채우지 못했다.
+맥의 열린 파일 수 기본 제한으로는 VU 수천 개의 연결을 열지 못하므로 같은 셸에서 `ulimit -n`을 먼저 올린다.
 
 ```bash
-docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
-  --add-host perf-app:10.0.1.10 \
-  -e BASE_URL=http://perf-app:8080 -e MANAGEMENT_URL=http://perf-app:8081 \
-  -e PERF_ALLOWED_APP_HOSTS=perf-app -e SEED_OUT=/perf/seed/out \
-  -e SUMMARY_PATH=/out/drop-spike.json \
-  grafana/k6:2.4.0 run /perf/scenarios/drop-reservation-spike.js
+ulimit -n 65536
+BASE_URL=http://perf-app:8080 MANAGEMENT_URL=http://perf-app:8081 \
+PERF_ALLOWED_APP_HOSTS=perf-app SEED_OUT="$PWD/perf/seed/out" \
+SUMMARY_PATH=.ai-output/perf/drop-spike.json \
+k6 run perf/scenarios/drop-reservation-spike.js
 ```
 
-앱 호스트 이름은 `perf-`로 시작해야 한다. IP는 `--add-host perf-app:<IP>`로 이름을 붙인다. 로컬에서 앱을 띄웠으면 `--add-host perf-app:host-gateway`를 쓴다.
+앱 호스트 이름은 `perf-`로 시작해야 한다. `/etc/hosts`에 `<IP> perf-app`을 둔다. 로컬에서 앱을 띄웠으면 `127.0.0.1 perf-app`이다.
 
 | 변수 | 기본값 | 뜻 |
 |---|---|---|
@@ -112,7 +127,7 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
 - 측정이 끝나면 `seed.sh --verify`를 실행한다. 드롭 불변식, 금액, FK 고아 행 검사는 0이어야 한다. `seed baseline` 검사는 부하 뒤에 실패하는 것이 정상이다.
 - 앱 지표는 관리 포트의 `/actuator/prometheus`에서 본다. `drop.reservation.duration`, HikariCP, 톰캣 스레드 지표가 있다.
 
-- 실행 화면은 k6 웹 대시보드(`K6_WEB_DASHBOARD=true`, `-p 5665:5665`)로 보고, `K6_WEB_DASHBOARD_EXPORT`로 HTML 리포트를 `.ai-output/perf/`에 남긴다.
+- 실행 화면은 k6 웹 대시보드(`K6_WEB_DASHBOARD=true`, `localhost:5665`)로 보고, `K6_WEB_DASHBOARD_EXPORT`로 HTML 리포트를 `.ai-output/perf/`에 남긴다.
 - 서버 지표는 실행 직전과 직후에 `curl -s http://perf-app:8081/actuator/prometheus`를 파일로 저장해 차이를 본다. 실행 전체의 서버 평균 지연과 Hikari, 톰캣 상태를 얻는다.
 - EC2에서 준비하는 순서는 [ec2](../ec2/README.md)에 있다.
 
@@ -143,13 +158,12 @@ base 재고 1,000은 200/s에서 5초 만에 품절된다. 그 뒤로는 품절 
 ### 실행
 
 ```bash
-docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" -p 5665:5665 \
-  --add-host perf-app:3.35.88.242 \
-  -e BASE_URL=http://perf-app:8080 -e MANAGEMENT_URL=http://perf-app:8081 \
-  -e PERF_ALLOWED_APP_HOSTS=perf-app -e SEED_OUT=/perf/seed/out \
-  -e K6_WEB_DASHBOARD=true -e K6_WEB_DASHBOARD_HOST=0.0.0.0 -e K6_WEB_DASHBOARD_EXPORT=/out/step.html \
-  -e STEPS=50,100,200,400,800 -e SUMMARY_PATH=/out/step.json \
-  grafana/k6:2.4.0 run /perf/scenarios/drop-reservation-step.js
+ulimit -n 65536
+BASE_URL=http://perf-app:8080 MANAGEMENT_URL=http://perf-app:8081 \
+PERF_ALLOWED_APP_HOSTS=perf-app SEED_OUT="$PWD/perf/seed/out" \
+K6_WEB_DASHBOARD=true K6_WEB_DASHBOARD_EXPORT=.ai-output/perf/step.html \
+STEPS=50,100,200,400,800 SUMMARY_PATH=.ai-output/perf/step.json \
+k6 run perf/scenarios/drop-reservation-step.js
 ```
 
 | 변수 | 기본값 | 뜻 |
@@ -174,7 +188,7 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" -p 5665:5
 ## 드롭 성능 실험 시나리오
 
 [목표](../../docs/testing/drop-performance-plan.md), [실행 절차](../../docs/testing/drop-performance-procedure.md), [측정 규약](../../docs/testing/drop-performance-measurement.md)의 실험 H·B·Q를 돌린다.
-실행 명령은 위 스파이크와 같고 스크립트 이름과 `-e` 값만 다르다. 원자료를 남기려면 `run --out json=/out/<이름>.raw.json`을 붙인다.
+실행 명령은 위 스파이크와 같고 스크립트 이름과 환경 변수만 다르다. 원자료를 남기려면 `k6 run --out json=<결과 폴더>/<이름>.raw.json`을 붙인다.
 
 ### 공통 집계
 

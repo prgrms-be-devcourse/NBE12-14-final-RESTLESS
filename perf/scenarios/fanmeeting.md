@@ -78,6 +78,7 @@ EC2에서 빌려 쓸 때는 [perf/ec2](../ec2/README.md) 순서를 따른다.
 | `METRICS_INTERVAL` | 2 | 지표 저장 간격(초). 한 회 약 100MB(스냅샷 약 160KB × 600장). 보낼 때는 압축한다 |
 | `OPEN_IN`, `WINNER_LIMIT`, `RESERVE_LIMIT`, `FEE_AMOUNT` | prepare와 같음 | 행사 설정 |
 | `K6`, `K6_IMAGE`, `K6_ADD_HOST` | `docker`, `grafana/k6:2.4.0`, 자동 | `K6=local`이면 설치된 k6. `K6_ADD_HOST`는 컨테이너 안에서 `perf-app`이 가리킬 주소(로컬 실행이면 `host-gateway`) |
+| `K6_DASHBOARD`, `K6_DASHBOARD_PORT` | `true`, 5665 | k6 웹 대시보드. 단계 실행 중 `http://localhost:5665`에서 실시간으로 보고, 끝나면 `<단계>-dashboard.html`로 남긴다. 이 노트북(127.0.0.1)에서만 열린다. 단계마다 k6를 새로 띄우므로 단계가 바뀌면 새로고침한다. 오픈·마감을 기다리는 동안은 그래프가 비어 있다. k6가 본 값(체감)만 보이고 서버 안쪽은 지표 요약으로 본다 |
 | `INVARIANTS_SQL` | `backend/src/test/resources/harness/fanmeeting-invariants.sql` | DB 점검을 할 때만 필요 |
 | `RUN_DIR` | `.ai-output/perf/s1-<월일-시각>-p<참여자>-r<도착률>` | 결과 폴더. 이미 있으면 시작하지 않는다 |
 
@@ -88,6 +89,7 @@ EC2에서 빌려 쓸 때는 [perf/ec2](../ec2/README.md) 순서를 따른다.
 | `summary.txt` | **한 장 요약.** 조건, 단계별 시각, A·B·C 결과(시간 구간별), 조회 첫 바퀴 분포와 미응모 판정, 단계별 서버 지표(실제 집계 구간, 전체 요청과 성공 처리량, p95·p99, Hikari, CPU), 점검 핵심 줄 |
 | `conditions.txt`, `timeline.tsv`, `event.env` | 조건, 단계별 시작·끝(UTC)·종료 코드·경계 스냅샷 이름(`start_snapshot`, `end_snapshot`), 행사 |
 | `apply-A.json`(`apply-B`), `apply-C.json`, `result.json` | k6 요약 |
+| `apply-A-dashboard.html`(`apply-B`), `apply-C-dashboard.html`, `result-dashboard.html` | k6 웹 대시보드 그래프(`K6_DASHBOARD=true`일 때). 브라우저로 연다 |
 | `check-1-apply.txt`, `check-2-draw.txt`, `check-3-result.txt` | 점검 출력 |
 | `metrics/`, `metrics-<단계>.txt/json`, `metrics-all.txt` | 서버 지표 스냅샷과 단계별·전체 요약. 단계 요약은 그 단계의 경계 스냅샷 두 장 사이다. `valid: false`면 `problems`에 이유가 있다 |
 | `run.log` | 화면 출력 전체 |
@@ -115,7 +117,7 @@ Grafana가 없어도 서버 쪽 숫자를 남긴다. 관리 포트의 `/actuator
 구간 숫자는 구간 안의 **첫 스냅샷과 마지막 스냅샷의 차이**다. 구간 시작과 첫 스냅샷 사이의 요청은 들어가지 않는다. 그래서 `fanmeeting-s1.sh`는 단계마다 **부하를 시작하기 전에** `snap`으로 한 장, **부하가 끝난 뒤** 한 장을 저장한다(경계 스냅샷). 이름은 `timeline.tsv`에 남기고, 단계 요약은 `FROM_SNAPSHOT`·`UNTIL_SNAPSHOT`으로 정확히 그 두 장 사이를 센다. 손으로 자를 때는 요약 첫 줄의 `counted <시각> → <시각>`(실제 집계 구간)을 같이 적는다.
 
 - **수집은 겹치지 않는다.** 기록 루프와 `snap`은 `OUT_DIR/.scrape.lock`(mkdir 잠금)을 잡고 한 번에 하나만 수집한다. 파일 이름은 잠금 안에서 응답을 다 받은 시각이라, 이름 순서가 서버가 응답을 만든 순서와 같고 느린 수집도 실제 시각에 가깝게 붙는다. 느린 수집이 겹쳐 누적값 순서가 뒤집히는 일(100 → 0 → 200)이 없다. 잠금을 `LOCK_WAIT`초 안에 못 얻으면 그 수집은 실패로 끝난다. 주인 프로세스가 죽은 잠금은 치우고 다시 잡는다.
-- **INVALID.** 경계 스냅샷이 없거나, 구간 안에서 앱이 재시작됐거나(`process_start_time_seconds` 변경), 누적 카운터가 줄어든 곳이 있으면 요약 첫머리에 `⚠ INVALID: <이유>`를 표시하고 `summary.json`에 `valid: false`를 남긴 뒤 종료 코드 3으로 끝난다. `fanmeeting-s1.sh`는 이를 실패 단계로 모은다. 그 숫자는 처리량으로 쓰지 않는다.
+- **INVALID.** 경계 스냅샷이 없거나, 구간 안에서 앱이 재시작됐거나(`process_start_time_seconds` 변경), 요약이 차이를 계산하는 누적 카운터(`http_server_requests_seconds_*`, `tasks_scheduled_execution_seconds_*`, `hikaricp_connections_timeout_total`)가 줄어든 곳이 있으면 요약 첫머리에 `⚠ INVALID: <이유>`를 표시하고 `summary.json`에 `valid: false`를 남긴 뒤 종료 코드 3으로 끝난다. `fanmeeting-s1.sh`는 이를 실패 단계로 모은다. 그 숫자는 처리량으로 쓰지 않는다. `*_active_seconds_*`(지금 처리 중인 요청)처럼 이름이 `_sum`·`_bucket`으로 끝나도 오르내리는 지표는 검사하지 않는다.
 
 **측정 시작 전에 켜고, 모든 실행(A·B·C·조회)이 끝난 뒤 Ctrl-C로 끈다.** 여러 실행이 한 기록에 섞이므로, 실행마다 k6가 출력한 시작·끝 시각으로 `summary`를 다시 잘라 본다.
 
