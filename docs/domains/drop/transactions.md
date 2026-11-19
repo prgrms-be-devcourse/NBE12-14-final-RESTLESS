@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/application/`
 >
-> 마지막 확인: 2026-11-19 (#254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다)
+> 마지막 확인: 2026-11-19 (#254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
 
 PG 호출 중에는 DB 트랜잭션을 열어 두지 않는다.
 
@@ -40,23 +40,40 @@ TX2~TX5의 드롭 쪽 단계는 결제 모듈이 같은 트랜잭션에서 호�
 2. RESERVED → CONFIRMING, 예약에 이 시도의 `paymentId` 기록 (`current_payment_id`)
 3. Order → PAYMENT_CONFIRMING
 4. Payment 승인 시도 상태 기록 (READY → PROCESSING, `approval_started_at`)
-5. Commit
+5. 예약이 RESERVED가 아니거나 기한이 지났으면 아무것도 바꾸지 않고 `DROP_NOT_PAYABLE`로 거절한다
+6. Commit
 
 그다음 트랜잭션 밖에서 PG 승인 API를 호출한다.
 
+결제 준비 단계의 `load`도 예약 행을 잠그고, RESERVED일 때만 결제 대상(금액, 주문명, 기한)을 돌려준다.
+
 재결제도 같은 흐름이다. 새 `payments` 행이 생기고 `current_payment_id`가 새 시도로 바뀐다.
+
+### TX2-b. 승인 결과 불명확 (`onUnknown`)
+
+결제 모듈 트랜잭션에서:
+
+1. 실패 확정이 아닌 불명확한 결과이고 현재 시도(`current_payment_id`)의 CONFIRMING일 때만 예약 → RECONCILING
+2. Order → PAYMENT_REVIEW
+3. 재고와 구매 슬롯은 그대로 둔다 (예약 보호). 일반 만료 작업은 반환하지 않는다 (INV-10)
+4. 조건이 맞지 않으면 아무것도 바꾸지 않는다
+
+이후 결제 모듈의 대사 작업이 PG를 조회해 TX3, TX4-a, 보상 취소 중 하나로 이어 간다.
 
 ## TX3. 구매 확정
 
 PG 승인이 확인된 뒤 하나의 트랜잭션에서:
 
 1. 결제 승인 결과 기록
-2. 결과의 `paymentId`가 예약의 `current_payment_id`인지 확인. 아니면 REJECT (결제 모듈이 보상 취소)
-3. 예약 CONFIRMED
-4. reserved -1, sold +1
-5. 주문 PAID
-6. 구매 슬롯 해제 (같은 사용자가 다시 구매할 수 있게)
-7. Commit
+2. 예약 행을 잠그고 결과의 `paymentId`가 예약의 `current_payment_id`인지 확인. 아니면 `DROP_STALE_ATTEMPT`로 거절한다 (결제 모듈이 보상 취소). 이 경우 예약은 건드리지 않는다 (INV-15)
+3. 예약이 이미 CONFIRMED면 중복 결과로 보고 아무것도 바꾸지 않고 수락한다 (INV-11)
+4. 예약이 CONFIRMING 또는 RECONCILING이 아니면 `DROP_INVALID_STATE`로 거절한다
+5. 승인 금액이 서버 주문 금액과 다르면 예약을 COMPENSATING으로 바꾸고 `DROP_AMOUNT_MISMATCH`로 거절한다 (결제 모듈이 보상 취소, INV-08)
+6. 예약 CONFIRMED
+7. reserved -1, sold +1
+8. 주문 PAID
+9. 구매 슬롯 해제 (같은 사용자가 다시 구매할 수 있게). 슬롯의 `active_reservation_id`가 이 예약일 때만 비운다
+10. Commit
 
 승인 시각(`approvedAt`)이 예약 기한 뒤여도 확정한다. 기한은 TX2에서 판정했다.
 
@@ -80,9 +97,10 @@ PG 승인이 확인된 뒤 하나의 트랜잭션에서:
 
 ### TX4-b. 예약 만료 (만료 작업)
 
-하나의 트랜잭션에서:
+만료 작업(`dropReservationExpiryJob.runOnce()`)은 후보를 한 번에 100건 읽고, 건마다 별도 트랜잭션(REQUIRES_NEW)으로 처리한다.
+건별 트랜잭션은 다음을 수행한다.
 
-1. 예약 상태가 RESERVED이고 기한이 지났는지 조건부 검증
+1. 예약 행을 잠근 뒤 읽은 현재 시각으로 상태가 RESERVED이고 기한이 지났는지 조건부 검증
 2. EXPIRED로 전환
 3. reserved -1, available +1
 4. Order CANCELLED
@@ -92,20 +110,45 @@ PG 승인이 확인된 뒤 하나의 트랜잭션에서:
 재결제 대기로 돌아온 RESERVED 예약도 같은 작업이 닫는다.
 CONFIRMING, RECONCILING, COMPENSATING 상태의 거래는 일반 만료 작업이 반환하지 않는다.
 TX2와 TX4-b는 같은 예약 행 잠금으로 직렬화한다. 기한 직전의 재결제 시작과 만료가 겹쳐도 한쪽만 반영된다.
+한 건이 실패하면 오류 로그와 `drop.expiry.processed` 메트릭(`result`: expired, skipped, failed)을 남기고 다음 건으로 넘어간다.
 
-## TX5. 전액 환불 확정 (`onRefunded`)
+### TX4-c. 결제 전 구매 취소 (`cancel`)
+
+동작과 오류는 [API 계약 drop.md D3](../../contracts/api/drop.md)를 따른다. 예약 행을 잠그고 RESERVED일 때만 RELEASED로 바꾸며, 재고, 주문, 슬롯 갱신은 TX4-b와 같은 `DropReservationSettlement.release`를 쓴다. 승인 시작(TX2)과는 같은 예약 행 잠금으로 직렬화된다.
+
+## TX5. 전액 환불
+
+### TX5-a. 환불 요청 시작 (`onRefundRequesting`, `onRefundRejected`)
+
+결제 모듈 트랜잭션에서:
+
+1. 환불 종류가 CUSTOMER_REFUND이고 현재 시도의 예약이 CONFIRMED인지 확인. 아니면 `DROP_NOT_REFUNDABLE`로 거절한다
+2. Order PAID → REFUND_PENDING. 이미 REFUND_PENDING이면 중복 요청으로 보고 수락한다
+3. Order가 REFUND_REVIEW이면 PAID를 거쳐 REFUND_PENDING으로 다시 시작한다 (재요청)
+4. PG가 취소를 확정 거절하면(`onRefundRejected`) Order → REFUND_REVIEW. 재고는 건드리지 않는다
+5. Commit
+
+### TX5-b. 전액 환불 확정 (`onRefunded`)
 
 PG 취소가 확인된 뒤 하나의 트랜잭션에서:
 
-1. 환불 결과 기록
+1. 환불 결과 기록. 결과의 `paymentId`가 예약의 `current_payment_id`가 아니면 변경 없이 오류 로그와 메트릭
 2. 환불 종류에 따라 분기
-   - `CUSTOMER_REFUND`: 예약 CONFIRMED → RESTORED, sold -1, available +1, Order REFUNDED
-   - `COMPENSATION`: 예약 COMPENSATING → RELEASED, reserved -1, available +1, Order CANCELLED, 구매 슬롯 해제
+   - `CUSTOMER_REFUND`: 예약 CONFIRMED → RESTORED, sold -1, available +1, Order REFUNDED. 이미 RESTORED면 중복으로 무시한다. Order가 REFUND_PENDING 또는 REFUND_REVIEW가 아니면 변경 없이 이상 상태로 기록한다. 구매 슬롯은 건드리지 않는다 (확정 때 이미 해제했고, 그 사이 새 구매가 슬롯을 소유할 수 있다)
+   - `COMPENSATION`: 예약 COMPENSATING → RELEASED, reserved -1, available +1, Order CANCELLED, 구매 슬롯 해제. 이미 RELEASED면 중복으로 무시한다
 3. Commit
 
-종류와 예약 상태가 맞지 않으면 재고를 바꾸지 않고 오류 로그와 메트릭을 남긴다.
+종류와 예약 상태가 맞지 않으면 재고를 바꾸지 않고 오류 로그와 메트릭(`drop.payment.result`, `event=refunded`, `result=anomaly`)을 남긴다.
 
 PG 취소 결과가 불명확하면 재고를 복원하지 않는다.
+
+## 공통 규칙 (TX2~TX5)
+
+- 재고, 주문, 구매 슬롯 갱신은 `DropReservationSettlement` 한 곳에서 수행한다 (confirm, release, restore). 이 서비스는 호출자 트랜잭션 안에서만 실행된다 (MANDATORY). 재고 UPDATE가 정확히 1행을 바꾸지 않으면 예외로 전체를 롤백한다.
+- 구매 슬롯 해제는 슬롯의 `active_reservation_id`가 그 예약일 때만 한다. 다른 예약을 가리키면 건드리지 않는다.
+- 모든 전이는 예약 행 잠금 아래 조건부로 수행해 중복 확정과 중복 반환을 막는다 (INV-11).
+- 현재 시도(`current_payment_id`)가 아닌 결제 결과는 예약, 재고, 주문을 바꾸지 않는다 (INV-15).
+- 드롭 결제 콜백 메트릭 `drop.payment.result`(`event`, `result` 태그)는 결제 트랜잭션이 커밋된 뒤에만 센다. 메트릭 실패는 로그와 `drop.payment.metric.failure`로 남기고 결제 트랜잭션에 영향을 주지 않는다.
 
 ## D4. 입장 제어
 
