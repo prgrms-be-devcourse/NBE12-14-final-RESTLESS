@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -22,8 +24,10 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -52,13 +56,13 @@ import tools.jackson.databind.json.JsonMapper;
 class AuctionStreamJsonTest {
     @LocalServerPort int port;
     @Autowired AuctionStreams streams;
-    @Autowired AuctionQueryService queries;
     @Autowired BidService bidService;
     @Autowired AuctionCloseService closeService;
     @Autowired JwtTokenProvider tokenProvider;
     @Autowired JdbcTemplate jdbc;
     @Autowired MeterRegistry meters;
     @MockitoSpyBean JsonMapper json;
+    @MockitoSpyBean AuctionQueryService queries;
 
     final HttpClient http = HttpClient.newHttpClient();
     final List<Stream<String>> opened = new ArrayList<>();
@@ -91,6 +95,8 @@ class AuctionStreamJsonTest {
         return HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/auctions/" + auctionId + "/stream"))
             .header("Accept", "text/event-stream")
             .header("Authorization", "Bearer " + tokenProvider.issue(userId, "USER").value())
+            // 첫 이벤트가 없으면 응답 헤더도 오지 않으므로, 테스트가 멈추지 않게 제한한다.
+            .timeout(Duration.ofSeconds(10))
             .GET().build();
     }
 
@@ -144,6 +150,9 @@ class AuctionStreamJsonTest {
             next(viewer);
         }
         bid(chulsoo, auctionId, 50_000);
+        // send()는 이 값을 직접 읽지 않으므로, 호출 횟수가 곧 JSON으로 바꾼 횟수다.
+        AuctionSnapshot snapshot = spy(queries.snapshot(auctionId).orElseThrow());
+        doReturn(Optional.of(snapshot)).when(queries).snapshot(auctionId);
         clearInvocations(json);
 
         streams.flush();
@@ -152,6 +161,7 @@ class AuctionStreamJsonTest {
         assertThat(next(viewers.get(1)).data()).isEqualTo(first);
         assertThat(next(viewers.get(2)).data()).isEqualTo(first);
         verify(json, times(1)).writeValueAsString(any(AuctionSnapshot.class));
+        verify(snapshot, times(1)).minimumBidAmount();
     }
 
     @Test void 전송_내용은_상태_JSON과_같고_한글이_깨지지_않는다() throws Exception {
