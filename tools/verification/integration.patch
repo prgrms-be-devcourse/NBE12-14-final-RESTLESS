@@ -1,28 +1,230 @@
+diff --git a/tools/harness/guard/guard.py b/tools/harness/guard/guard.py
+--- a/tools/harness/guard/guard.py
++++ b/tools/harness/guard/guard.py
+@@ -18,13 +18,13 @@
+   - Harness tooling (tools/harness) and local state (.ai-output/harness, .codex, .git/hooks, .claude):
+     no changes, except stage reports .ai-output/harness/reports/<STAGE><n>-report.md (D3, P72, ...).
+   - Agent instructions: drop/AGENTS.md, drop/CLAUDE.md (versioned, same as tools/harness) and the
+-    personal root AGENTS.md, CLAUDE.md (git-ignored). Agents never edit them.
++    personal root AGENTS.md, CLAUDE.md (git-ignored). Edits require a harness branch.
+   - No new .md at the repository root besides README/AGENTS/CLAUDE/CONTRIBUTING/DESIGN/PRODUCT (AGENTS.md 7:
+     notes go to .ai-output/, shared docs to docs/). Any branch, agent or commit.
+-  - No `git commit --no-verify`, no `git push`, no HARNESS_EDIT override, no hooksPath change.
++  - No `git commit --no-verify`, normal commit/push/PR are allowed; HARNESS_EDIT requires a harness branch; no hooksPath change.
+
+ Harness branches (chore/drop-*-harness) may change harness files, and may commit tools/harness
+-and the drop agent instructions. The Codex hook never lets an agent edit those, on any branch.
++and the drop agent instructions. The Codex hook permits these patches on harness branches only.
+ Every block is appended to .ai-output/harness/guard-blocks.log in the main checkout.
+ """
+ import datetime
+@@ -51,7 +51,8 @@
+ # The only .md files allowed at the root. DESIGN.md / PRODUCT.md: shared design docs the design tool keeps there.
+ ROOT_DOCS = ("README.md", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "DESIGN.md", "PRODUCT.md")
+ HARNESS_TOOLS = "tools/harness/"  # versioned tooling: harness branches may commit it
+-TOOLING = (HARNESS_TOOLS, ".ai-output/harness/", ".codex/", ".git/hooks/", ".claude/")
++VERIFICATION_TOOLS = "tools/verification/"
++TOOLING = (HARNESS_TOOLS, VERIFICATION_TOOLS, ".ai-output/harness/", ".codex/", ".git/hooks/", ".claude/")
+ # Codex writes its stage report here (codex-stage-spec.md step 3).
+ REPORT = re.compile(r"^\.ai-output/harness/reports/[A-Za-z]+\d+-report\.md$")
+ REPORT_IN_CMD = re.compile(r"\.ai-output/harness/reports/[A-Za-z]+\d+-report\.md")
+@@ -71,7 +72,7 @@
+ # Path fragments that mark a command as touching guarded files (relative-path independent).
+ GUARDED_FRAGMENTS = (
+     "drop/acceptance", "test/resources/harness", "restless/architecture",
+-    "tools/harness", ".ai-output/harness", ".codex/", ".git/hooks", "hooksPath",
++    "tools/harness", "tools/verification", ".ai-output/harness", ".codex/", ".git/hooks", "hooksPath",
+     "restless/ticketing", "restless/fanmeeting", "restless/auction",
+     "restless/concert", "restless/credit", "restless/coupon",
+     "drop/AGENTS.md", "drop/CLAUDE.md",
+@@ -125,10 +126,10 @@
+     agent=True for the Codex hook (an agent edits), False for pre-commit (a commit on a branch)."""
+     if REPORT.match(path) and op in ("add", "update"):
+         return None
+-    if path.startswith(HARNESS_TOOLS) and harness_branch and not agent:
++    if path.startswith((HARNESS_TOOLS, VERIFICATION_TOOLS)) and harness_branch:
+         return None
+     if path in AGENT_DOCS:
+-        if harness_branch and not agent:
++        if harness_branch:
+             return None
+         return f"{path}: 에이전트 지침 파일은 에이전트가 고칠 수 없음 (드롭 지침은 하네스 PR에서만)"
+     if op == "add" and "/" not in path and path.endswith(".md") and path not in ROOT_DOCS:
+@@ -174,7 +175,9 @@
+ def rel(path, root, cwd):
+     p = path if os.path.isabs(path) else os.path.join(cwd, path)
+     p = os.path.realpath(p)
+-    for base in {os.path.realpath(root), os.path.realpath(git(["rev-parse", "--show-toplevel"], cwd) or root)}:
++    # Nested worktrees are also below the main root. Match the nearest root first.
++    bases = {os.path.realpath(root), os.path.realpath(git(["rev-parse", "--show-toplevel"], cwd) or root)}
++    for base in sorted(bases, key=len, reverse=True):
+         if p.startswith(base + os.sep):
+             return os.path.relpath(p, base)
+     return path
+@@ -198,15 +201,22 @@
+     return cmd if isinstance(cmd, str) else ""
+
+
+-def command_reason(cmd):
++def command_reason(cmd, harness_branch=False):
+     if re.search(r"\bgit\b[^;&|]*\bcommit\b[^;&|]*(\s--no-verify\b|\s-[a-zA-Z]*n[a-zA-Z]*\b)", cmd):
+         return "git commit --no-verify 금지 (pre-commit 가드를 건너뛸 수 없음)"
+-    if re.search(r"\bgit\b[^;&|]*\bpush\b", cmd):
+-        return "git push 금지 (push와 PR은 Claude가 한다)"
+-    if "HARNESS_EDIT" in cmd:
++    if "HARNESS_EDIT" in cmd and not harness_branch:
+         return "HARNESS_EDIT 사용 금지 (하네스 PR 전용)"
+     if re.search(r"core\.hooksPath|--no-verify", cmd):
+         return "git hook 우회 금지"
++    if re.fullmatch(r"git apply (?:--reverse )?--check tools/verification/integration\.patch", cmd.strip()):
++        return None
++    if re.fullmatch(r"git add(?: [A-Za-z0-9_./-]+)+", cmd.strip()):
++        return None
++    if cmd.strip() == "python3 tools/verification/test_integration.py":
++        return None
++    # Explicit checker invocations are executable tests, not arbitrary shell writers.
++    if re.fullmatch(r"python3? tools/harness/(guard/test_guard\.py|test_doc_check\.py|doc-check\.py)(?: [A-Za-z0-9_./-]+)*", cmd.strip()):
++        return None
+     stripped = HARMLESS_REDIRECT.sub(" ", cmd)
+     fragments = GUARDED_FRAGMENTS
+     stripped_reports = REPORT_IN_CMD.sub(" ", stripped)
+@@ -246,7 +256,7 @@
+                     reasons.append(r)
+     cmd = command_text(tool_input)
+     if cmd and "*** Begin Patch" not in cmd:
+-        r = command_reason(cmd)
++        r = command_reason(cmd, harness_branch)
+         if r:
+             reasons.append(r)
+
 diff --git a/tools/harness/README.md b/tools/harness/README.md
 --- a/tools/harness/README.md
 +++ b/tools/harness/README.md
-@@ -3,1 +3,2 @@
+@@ -3,6 +3,8 @@
  AI가 드롭 기능을 구현하고(Codex) 다른 AI가 검증할 때(Claude) 쓰는 작업 환경입니다. 이 문서가 작업 순서의 **유일한 기준**입니다. 다른 메모나 진행표에 적힌 순서가 이 문서와 다르면 이 문서를 따릅니다.
-+이 문서의 "대신 정한 정책"과 PROPOSED 이관은 `docs/testing/independent-verification.md`의 정책 결정 표 범위에서만 적용한다. 내부 선택은 기록하고, 사업 정책 제안은 사람 결정 전 미승인으로 유지한다.
-@@ -43,1 +43,2 @@
- 4. **검증** (Claude)
-+   - 먼저 `tools/verification/skills/independent-verification/SKILL.md`를 읽고 따른다. 구현 보고서 열람 전 사전 반례와 공유 가정을 별도 컨텍스트에서 기록하고, 검증 SHA·실제 스킬·실행 근거·미검증 범위를 남긴다.
-@@ -62,1 +63,2 @@
- - **보고서 대신 PR 본문**: 단계 보고서는 쓰지 않는다. 검사 결과, 대신 정한 것, Claude가 구현했다는 사실을 PR 본문에 쓴다. 대신 정한 것은 4번처럼 `policy.md`에 `PROPOSED`로 옮긴다.
-+- **독립 검증**: 같은 구현자의 검사는 참고 결과다. 새 컨텍스트의 다른 검증자 또는 사람이 전용 스킬 절차로 추가 검토하기 전에는 독립 검증 완료로 판정하지 않는다.
-diff --git a/backend/src/main/java/com/restless/drop/AGENTS.md b/backend/src/main/java/com/restless/drop/AGENTS.md
---- a/backend/src/main/java/com/restless/drop/AGENTS.md
-+++ b/backend/src/main/java/com/restless/drop/AGENTS.md
-@@ -30,1 +30,1 @@
--- 문서에 없는 정책은 멈추지 말고 문서에 가장 가까운 쪽으로 정한다. 정한 내용은 같은 PR에서 `policy.md`의 해당 절에 `PROPOSED`로 남긴다. 하네스 단계에서는 Codex가 보고서의 "대신 정한 것"에 적고 Claude가 옮긴다.
-+- 문서에 없는 사항의 결정 범위는 `docs/testing/independent-verification.md`의 정책 결정 표를 따른다. 내부 구현 선택은 진행하고 기록한다. 공개 계약·핵심 불변식·사업 정책과 열린 질문은 사람의 결정 전 확정하지 않는다. `PROPOSED`는 승인이 아니다.
-@@ -32,1 +32,3 @@
- ## 검증 (`backend/`에서)
+
+ 핵심 생각은 하나입니다. **완료 기준(수용 테스트)을 구현보다 먼저 만들고, 구현하는 쪽은 그 기준을 고칠 수 없게 합니다.**
 +
-+구현 검증·PR 승인 준비 전에 저장소 루트의 `tools/verification/skills/independent-verification/SKILL.md`를 읽고 따른다.
++Codex와 Claude 모두 commit·push·PR을 수행할 수 있다. 구현/검증 역할은 모델명이 아니라 별도 컨텍스트로 구분한다. 이 문서의 정책 이관은 `docs/testing/independent-verification.md`의 정책 결정 표 범위에서만 적용하며 사업 정책 제안은 사람 결정 전 미승인으로 유지한다.
+
+ ## 1. 어디에 무엇이 있나
+
+@@ -39,8 +41,9 @@
+    - 사람이 Codex 탭에 붙여넣는다. 자동 작업자(Orca)는 안전장치에 막혀 쓰지 않는다.
+ 3. **구현** (Codex)
+    - `@Disabled` 한 줄만 지우고 구현한다. `bash tools/harness/harness-check.sh`가 `RESULT: PASS`가 될 때까지 고친다.
+-   - 작은 단위로 커밋하고(push 금지) `.ai-output/harness/reports/<단계>-report.md`를 마지막에 쓴다.
+-4. **검증** (Claude)
++   - 작은 단위로 커밋하고 `.ai-output/harness/reports/<단계>-report.md`를 마지막에 쓴다.
++4. **검증** (Claude 또는 별도 컨텍스트의 Codex)
++   - `tools/verification/skills/independent-verification/SKILL.md`를 먼저 읽고 따른다. 구현 보고서 전에 사전 반례와 가정을 기록하고, 검증 SHA·스킬·실행 근거·미검증 범위를 남긴다.
+    - 보고서가 생기면 검사를 다시 돌린다. 이때 단계 브랜치에 들어 있는 사본이 아니라 **dev 쪽 `tools/harness/` 사본으로** 돌린다.
+    - 코드를 리뷰하고, 문제가 있으면 수정 지시서를 보낸다 (최대 3번).
+    - 보고서의 "대신 정한 것"은 **같은 PR에서** `docs/domains/drop/policy.md`의 해당 절에 `PROPOSED`로 옮기고, PR 본문 "What changed and why"에 "대신 정한 정책" 목록으로 적는다. 내 PC에만 남은 결정은 팀에게는 조용히 바뀐 정책과 같다 (AGENTS.md 2절).
+@@ -62,6 +65,8 @@
+ - **보고서 대신 PR 본문**: 단계 보고서는 쓰지 않는다. 검사 결과, 대신 정한 것, Claude가 구현했다는 사실을 PR 본문에 쓴다. 대신 정한 것은 4번처럼 `policy.md`에 `PROPOSED`로 옮긴다.
+ - **기록**: progress.md에는 Codex 지표(첫 검사, 수정 요청, 가드 차단)를 `-`로 두고 비고에 이유를 적는다.
+
++같은 구현자의 검사는 참고 결과다. 새 컨텍스트의 다른 검증자 또는 사람이 전용 스킬 절차로 추가 검토하기 전에는 독립 검증 완료로 판정하지 않는다.
++
+ ## 3. 검사는 세 겹이다
+
+ | 겹 | 언제 | 정확도 |
+@@ -77,7 +82,7 @@
+ - `tools/harness/`, `.ai-output/harness/`, `.codex/`, `.git/hooks/`, `.claude/`, 드롭 지침(`drop/AGENTS.md`, `drop/CLAUDE.md`) 수정
+ - 레포 루트에 새 `.md` 추가 (`README`, `AGENTS`, `CLAUDE`, `CONTRIBUTING`, `DESIGN`, `PRODUCT` 외). 메모는 `.ai-output/`, 팀 문서는 `docs/`
+ - 드롭 문서의 깨진 링크, `관련 코드` / `마지막 확인` 누락 (③에서 FAIL. 다른 담당 문서는 보지 않는다)
+-- `git commit --no-verify`, `git push`, `HARNESS_EDIT`, hook 경로 변경
++- `git commit --no-verify`, 하네스 브랜치 밖의 `HARNESS_EDIT`, hook 경로 변경. 일반 commit·push·PR은 허용
+
+ ## 4. 명령
+
+@@ -137,7 +142,7 @@
+
+ ## 7. 하네스를 바꾸려면
+
+-1. `chore/drop-<이슈>-harness` 브랜치를 만든다. 이 브랜치에서만 `tools/harness/`와 하네스 테스트를 커밋할 수 있다. Codex 편집 hook은 어느 브랜치에서도 이 폴더를 막는다.
++1. `chore/drop-<이슈>-harness` 브랜치를 만든다. 이 브랜치에서만 `tools/harness/`와 하네스 테스트를 커밋할 수 있다. Codex와 Claude 모두 이 브랜치에서 하네스·검증 도구와 에이전트 지침을 패치로 수정할 수 있다. 셸 덮어쓰기와 hook 우회는 계속 막는다.
+ 2. 가드를 바꿨으면 `test_guard.py`를 드롭·하네스·일반 브랜치에서 각각 돌린다. 문서 검사를 바꿨으면 `test_doc_check.py`를 돌린다.
+ 3. `HARNESS_EDIT=1 bash tools/harness/harness-check.sh`로 검사하고 PR을 연다.
+ 4. 아직 머지되지 않은 하네스 브랜치 위에 단계를 쌓으면, `harness-check.sh`가 그 하네스 커밋을 기준으로 삼는다 (`HARNESS_BRANCH` 환경 변수로 브랜치 이름을 바꿀 수 있다).
 diff --git a/tools/harness/codex-stage-spec.md b/tools/harness/codex-stage-spec.md
 --- a/tools/harness/codex-stage-spec.md
 +++ b/tools/harness/codex-stage-spec.md
-@@ -46,1 +46,1 @@
+@@ -28,7 +28,7 @@
+ - 하네스 파일 수정·추가·삭제 (`@Disabled` 줄과 그 import 삭제만 허용. 이 삭제는 apply_patch로 한다)
+ - 머지된 마이그레이션 수정 (새 마이그레이션 파일 추가는 허용)
+ - 다른 도메인(ticketing, fanmeeting, auction, concert, credit, coupon) 코드 수정
+-- `tools/harness/**`, `.ai-output/harness/**`, `.codex/**`, `.git/hooks/**`, 드롭 지침(`drop/AGENTS.md`, `drop/CLAUDE.md`) 수정, `git commit --no-verify`, `git push`, `HARNESS_EDIT`
++- 하네스·검증 도구와 에이전트 지침은 하네스 브랜치에서 패치로 수정할 수 있다. `.ai-output/harness/**`, `.codex/**`, `.git/hooks/**` 수정과 hook 우회, 하네스 브랜치 밖의 `HARNESS_EDIT`는 금지. 일반 commit·push·PR은 허용한다.
+ - 레포 루트에 새 `.md` 만들기 (메모·보고서는 `.ai-output/`에)
+ - 보호 경로를 셸 명령(sed -i, 리다이렉트, mv, rm, git checkout 등)으로 바꾸는 것. 읽기는 cat/grep/sed -n으로 리다이렉트 없이 한다
+
+@@ -43,7 +43,7 @@
+ ### 규칙 (드롭 지침에 더해 이 하네스 단계에만 해당)
+ - 새로 만든 빈 때문에 다른 모듈의 기존 테스트 **구성**(가짜 빈 등록 등)이 충돌하면, 그 테스트 구성만 고치는 것은 허용한다. 테스트 본문·단언과 그 모듈의 운영 코드는 바꾸지 않고, 고친 이유를 보고서에 적는다 (HD-12). 멈춰서 묻지 않는다.
+ - 공용 파일을 고쳤으면 보고서에 이유를 적는다.
 -- 정책이 문서에 없으면 멈추지 말고 문서에 가장 가까운 쪽으로 정해 보고서의 "대신 정한 것"에 `policy.md 절 | 결정 | 근거` 형식으로 적는다. `policy.md`는 직접 고치지 않는다 (Claude가 검증할 때 같은 PR에 `PROPOSED`로 옮긴다).
-+- 정책 누락은 `docs/testing/independent-verification.md`의 결정 범위 표를 따른다. 허용된 내부 선택과 사람 결정이 필요한 쟁점을 나누어 보고서에 근거와 함께 적는다. `PROPOSED` 표기만으로 사업 정책을 확정하지 않는다.
++- 정책 누락은 `docs/testing/independent-verification.md`의 결정 범위 표를 따른다. 내부 선택과 사람 결정이 필요한 쟁점을 구분하고 근거를 기록한다. `PROPOSED`는 승인이 아니다.
+ - 기본값을 바꾸는 설정을 건드렸고 다른 단계가 동시에 진행 중이면, 보고서에 "다른 단계에 영향 줄 수 있는 기본값 변경"으로 적는다.
+ - 가드는 보호 경로에 쓰는 명령을 막는다. 로그는 `> .ai-output/<이름>.log`처럼 보호 경로 밖으로 쓴다. 보호 경로를 `cp`·`python`으로 다루지 않는다.
+ - 보호 경로가 들어간 명령에는 `python`, `cp`, `mv`, 리다이렉트를 함께 넣지 않는다. 가드는 읽기만 하는 명령이라도 쓰기로 보고 막는다. 보호 경로 확인과 테스트 결과 읽기는 명령을 나눠 실행한다 (HD-17).
+@@ -51,7 +51,7 @@
+ ### 마무리
+ 1. `bash tools/harness/harness-check.sh` → `RESULT: PASS`가 나올 때까지 고친다.
+    - 검사는 브랜치가 최신 `origin/dev`보다 뒤처져 있으면 **dev를 합친 결과**를 빌드한다 (CI와 같음). `최신 origin/dev와 충돌함`이 나오면 `git merge origin/dev`로 합쳐 충돌을 정리하고 그 병합 커밋도 남긴다. 기존 테스트가 합친 결과에서만 깨지면 그것도 이번 작업에서 고친다.
+-2. **커밋을 작은 논리 단위로 나눈다** (PR 하나 = 커밋 하나로 만들지 않는다). 바꾼 파일만 경로로 지정해 아래 순서처럼 나눠 커밋한다. **push, PR 금지.**
++2. **커밋을 작은 논리 단위로 나눈다** (PR 하나 = 커밋 하나로 만들지 않는다). 바꾼 파일만 경로로 지정해 아래 순서처럼 나눠 커밋한다. **Codex도 push·PR을 수행할 수 있다. 독립 검증 완료 여부는 PR에 별도로 적는다.**
+    - `feat(drop): add <...> migration` — 새 마이그레이션
+    - `feat(drop): map <...> entities and repositories` — 엔티티·리포지토리
+    - `feat(drop): add <...> service` — application 서비스·DTO
+diff --git a/tools/harness/harness-check.sh b/tools/harness/harness-check.sh
+--- a/tools/harness/harness-check.sh
++++ b/tools/harness/harness-check.sh
+@@ -63,7 +63,7 @@
+
+ # 1b. Versioned harness tooling (tools/harness) and the drop agent instructions change only in a harness PR.
+ AGENT_DOCS="backend/src/main/java/com/restless/drop/AGENTS.md backend/src/main/java/com/restless/drop/CLAUDE.md"
+-CHANGED_TOOLS="$(git diff --name-only "$BASE" -- tools/harness $AGENT_DOCS; echo "$UNTRACKED" | grep -E '^(tools/harness/|backend/src/main/java/com/restless/drop/(AGENTS|CLAUDE)\.md$)')"
++CHANGED_TOOLS="$(git diff --name-only "$BASE" -- tools/harness tools/verification $AGENT_DOCS; echo "$UNTRACKED" | grep -E '^(tools/(harness|verification)/|backend/src/main/java/com/restless/drop/(AGENTS|CLAUDE)\.md$)')"
+ CHANGED_TOOLS="$(echo "$CHANGED_TOOLS" | sed '/^$/d')"
+ [ -n "$CHANGED_TOOLS" ] && [ "$HARNESS_EDIT" != 1 ] && fail "하네스 도구·드롭 지침 수정 금지:"$'\n'"$CHANGED_TOOLS"
+
+diff --git a/tools/harness/guard/test_guard.py b/tools/harness/guard/test_guard.py
+--- a/tools/harness/guard/test_guard.py
++++ b/tools/harness/guard/test_guard.py
+@@ -23,7 +23,7 @@
+  ("overwrite stage spec", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: .ai-output/harness/reports/D2-spec.md\n@@\n-a\n+b")}}, (B, B, B)),
+  ("drop main code", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: backend/src/main/java/com/restless/drop/application/DropService.java\n@@\n-a\n+b")}}, (0, 0, 0)),
+  ("other domain", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: backend/src/main/java/com/restless/ticketing/A.java\n@@\n-a\n+b")}}, (B, B, B)),
+- ("versioned harness tool (patch)", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: tools/harness/harness-check.sh\n@@\n-a\n+b")}}, (B, B, B)),
++ ("versioned harness tool (patch)", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: tools/harness/harness-check.sh\n@@\n-a\n+b")}}, (B, 0, B)),
+  ("versioned guard (shell)", {"tool_name": "shell", "tool_input": {"command": "echo x > tools/harness/guard/guard.py"}}, (B, B, B)),
+  ("run versioned harness-check", {"tool_name": "shell", "tool_input": {"command": "bash tools/harness/harness-check.sh > .ai-output/x.log 2>&1"}}, (0, 0, 0)),
+  # Known gap: the shell check matches path text, so cd + relative path is not seen here.
+@@ -50,13 +50,21 @@
+  ("git commit", {"tool_name": "shell", "tool_input": {"command": "git commit -m 'feat(drop): add stock hold' -- backend"}}, (0, 0, 0)),
+  ("commit --no-verify", {"tool_name": "shell", "tool_input": {"command": "git commit --no-verify -m x"}}, (B, B, B)),
+  ("commit -nm", {"tool_name": "shell", "tool_input": {"command": "git commit -nm x"}}, (B, B, B)),
+- ("git push", {"tool_name": "shell", "tool_input": {"command": "git push origin feat/drop-58"}}, (B, B, B)),
+- ("HARNESS_EDIT", {"tool_name": "shell", "tool_input": {"command": "HARNESS_EDIT=1 bash .ai-output/harness/harness-check.sh"}}, (B, B, B)),
++ ("git push", {"tool_name": "shell", "tool_input": {"command": "git push origin feat/drop-58"}}, (0, 0, 0)),
++ ("create PR", {"tool_name": "shell", "tool_input": {"command": "gh pr create --base dev --head feat/drop-58 --title example --body example"}}, (0, 0, 0)),
++ ("run guard tests", {"tool_name": "shell", "tool_input": {"command": "python3 tools/harness/guard/test_guard.py ."}}, (0, 0, 0)),
++ ("check integration patch", {"tool_name": "shell", "tool_input": {"command": "git apply --reverse --check tools/verification/integration.patch"}}, (0, 0, 0)),
++ ("stage verification patch", {"tool_name": "shell", "tool_input": {"command": "git add tools/verification/integration.patch"}}, (0, 0, 0)),
++ ("checker chained write blocked", {"tool_name": "shell", "tool_input": {"command": "python3 tools/harness/guard/test_guard.py .; echo x > tools/harness/guard/guard.py"}}, (B, B, B)),
++ ("checker redirect to guard blocked", {"tool_name": "shell", "tool_input": {"command": "python3 tools/harness/guard/test_guard.py . > tools/harness/guard/guard.py"}}, (B, B, B)),
++ ("write verification via shell blocked", {"tool_name": "shell", "tool_input": {"command": "echo x > tools/verification/skills/independent-verification/SKILL.md"}}, (B, B, B)),
++ ("HARNESS_EDIT", {"tool_name": "shell", "tool_input": {"command": "HARNESS_EDIT=1 bash .ai-output/harness/harness-check.sh"}}, (B, 0, B)),
+  ("hooksPath", {"tool_name": "shell", "tool_input": {"command": "git config core.hooksPath /tmp/x"}}, (B, B, B)),
+  ("rm pre-commit hook", {"tool_name": "shell", "tool_input": {"command": "rm .git/hooks/pre-commit"}}, (B, B, B)),
+- ("edit drop agent instructions", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: backend/src/main/java/com/restless/drop/AGENTS.md\n@@\n-a\n+b")}}, (B, B, B)),
++ ("edit drop agent instructions", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: backend/src/main/java/com/restless/drop/AGENTS.md\n@@\n-a\n+b")}}, (B, 0, B)),
+  ("drop CLAUDE.md via shell", {"tool_name": "shell", "tool_input": {"command": "echo x > backend/src/main/java/com/restless/drop/CLAUDE.md"}}, (B, B, B)),
+- ("edit personal root AGENTS.md", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: AGENTS.md\n@@\n-a\n+b")}}, (B, B, B)),
++ ("edit personal root AGENTS.md", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: AGENTS.md\n@@\n-a\n+b")}}, (B, 0, B)),
++ ("edit verification skill", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: tools/verification/skills/independent-verification/SKILL.md\n@@\n-a\n+b")}}, (B, 0, B)),
+  ("new memo at repo root", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Add File: readyToX.md\n+# memo")}}, (B, B, B)),
+  ("design doc at repo root", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Add File: DESIGN.md\n+# d")}}, (0, 0, 0)),
+  ("edit root README", {"tool_name": "apply_patch", "tool_input": {"command": P("*** Update File: README.md\n@@\n-a\n+b")}}, (0, 0, 0)),
