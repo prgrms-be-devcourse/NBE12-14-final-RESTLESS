@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/resources/db/migration/V*__drop_*.sql`, `backend/src/main/java/com/restless/drop/domain/`
 >
-> 마지막 확인: 2026-11-14 (#92 등록 검증·판매 상태 구현과 대조)
+> 마지막 확인: 2026-11-19 (#253 SKU별 대기열 목표 스키마 반영. 대기열 절의 표시는 구현 전이다. 나머지는 2026-11-14 #92 구현과 대조)
 
 ![Drop ERD](drop-erd.png)
 
@@ -97,16 +97,21 @@ SKU별 재고
 
 ## DROP_QUEUE_ENTRIES (DECIDED, D4)
 
+> SKU별 대기열 (DECIDED 2026-11-19, #253)은 아직 구현되지 않았다. 아래 목록의 `[목표]` 표시는 현재 마이그레이션(`V20261113_1800__drop_queue.sql`)에 없는 변경이며, 구현 때 새 마이그레이션으로 추가한다. 이번 작업에서는 마이그레이션을 만들지 않았다.
+
 - `id`: 서버가 발급하는 증가 PK. 대략적인 진입 순서에도 사용한다.
 - `drop_id`, `user_id`: 드롭·회원 FK.
-- `status`: WAITING / ADMITTED / CONSUMED / EXPIRED / CLOSED.
+- `variant_id` `[목표]`: 대기열 진입 때 고른 SKU(`drop_variants.id`) FK. NOT NULL. 대기 순서, 입장 수 계산, 구매권 귀속의 기준이다. 기존 행의 백필 방법은 구현 단계 과제다 (진행 중인 대기는 종료해도 되는지 포함).
+- `status`: WAITING / ADMITTED / CONSUMED / EXPIRED / CLOSED. `[목표]` 현재 구매 불가로 종료한 대기를 위한 상태 `UNAVAILABLE`을 추가한다(이름 결정 2026-11-19, [policy.md 7-1절](policy.md#7-1-sku별-구매-입장-대기열-decided-2026-11-19-253)). 현재 CHECK 제약 `ck_drop_queue_status`가 이 값을 허용하지 않아 새 마이그레이션이 필요하다. 종료는 행 삭제가 아니라 이 컬럼의 변경이다.
 - `entered_at`, `last_seen_at`: 진입 시각과 마지막 상태 조회 시각.
 - `admitted_at`, `admitted_until`, `consumed_at`: 입장·구매권 만료·소비 시각.
 - `active_user_id`: WAITING 또는 ADMITTED일 때만 user_id인 생성 컬럼.
-- `UNIQUE(drop_id, active_user_id)`: 회원·드롭당 살아 있는 대기는 최대 1건.
-- 입장 인덱스 `(drop_id, status, id)`와 `FOR UPDATE SKIP LOCKED`로 여러 작업의 입장 대상이 겹치지 않게 한다. 엄격한 FIFO는 보장하지 않는다.
+- `UNIQUE(drop_id, active_user_id)`: 회원과 드롭당 살아 있는 대기(`WAITING`, `ADMITTED`)는 최대 1건. 종료된 행은 이 키에서 빠지므로 재고가 반환된 뒤 새 행으로 다시 진입할 수 있다. SKU별이어도 INV-05(드롭당 활성 구매 1건)에 맞춰 유지하는 안이다. SKU를 바꿔 다시 들어오면 기존 행을 `CLOSED`로 바꾼 뒤(키에서 빠진다) 새 행을 만든다. 같은 트랜잭션에서 먼저 flush해야 키가 겹치지 않는다.
+- 입장 인덱스 `(drop_id, status, id)`와 `FOR UPDATE SKIP LOCKED`로 여러 작업의 입장 대상이 겹치지 않게 한다. 엄격한 FIFO는 보장하지 않는다. `[목표]` SKU별 입장은 `(variant_id, status, id)` 인덱스로 같은 SKU의 대기 순서(`id`)대로 고르고, `(variant_id, status, admitted_until)`로 미사용 유효 ADMITTED를 센다.
+- 입장 가능 수 계산 `max(0, available - 미사용 유효 ADMITTED 수)`는 `drop_inventories.available_quantity`와 이 표의 `ADMITTED` 행을 함께 읽는다. 두 값을 읽고 발급하는 사이에 다른 입장 작업이 끼어들지 못해야 한다 (INV-16, [transactions.md](transactions.md) D4).
+- `WAITING`의 순서는 `id`(애플리케이션 대기 순서)이며 DB 락 획득 순서가 아니다. 재진입은 새 `id`를 받으므로 항상 뒤에 선다.
 - 회원별 최신 상태는 `(drop_id, user_id, id)`, 전체 대기 Gauge는 `(status, last_seen_at)` 인덱스를 사용한다.
-- 만료·소비 이력은 조회할 수 있으며, 재진입하면 새 행을 추가한다. CLOSED 이력만 있으면 상태 조회는 404다.
+- 만료, 소비, 종료 이력은 조회할 수 있으며, 재진입하면 새 행을 추가한다. 종료된 순번과 구매권은 복구하지 않는다. CLOSED 이력만 있으면 상태 조회는 404다. `[목표]` 최신 행이 `UNAVAILABLE`이면 404가 아니라 그 상태를 돌려준다.
 
 ## 공통 테이블 (Drop 소유 아님)
 

@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * D4 대기열·구매권 수용 테스트. 기준: {@code docs/contracts/api/drop.md} D4, {@code .ai-output/harness/drop-decisions.md}
  * (구매권 5분, 나가면 초기화, 처리 속도 우선), 불변식 INV-06.
- * <b>하네스 파일이다.</b> D4 구현 PR에서 아래 {@code @Disabled} 한 줄만 지운다. 테스트 내용은 바꾸지 않는다.
+ * <b>하네스 파일이다.</b> SKU별 대기열 정책(#253)에 맞춰 진입 요청에 variantId를 담고, 재고보다 많이 입장시키던 테스트 하나를 재고 기반 입장으로 바꿨다.
  *
  * <p>시간 의존 규칙을 빨리 확인하려고 이 클래스에서만 이탈 판정·구매권 시간을 짧게 둔다.
  */
@@ -165,8 +165,8 @@ class DropQueueAcceptanceTest extends DropAcceptanceSupport {
     }
 
     @Test
-    @DisplayName("입장해도 재고가 없으면 품절이다 (입장은 재고를 보장하지 않는다)")
-    void admissionDoesNotGuaranteeStock() {
+    @DisplayName("입장 수는 재고로 제한된다. 재고 1이면 1명만 입장하고, 입장하지 못한 회원은 구매권 없이 점유할 수 없다 (SKU별 대기열 정책 #253)")
+    void admissionIsLimitedByStock() {
         DropFixture drop = onSaleDrop(1);
         Long a = newUser();
         Long b = newUser();
@@ -174,16 +174,19 @@ class DropQueueAcceptanceTest extends DropAcceptanceSupport {
         enter(b, drop);
         runJob("dropQueueAdmissionJob");
 
+        assertThat(queueMe(a, drop).string("$.status")).isEqualTo("ADMITTED");
+        assertThat(queueMe(b, drop).string("$.status")).isEqualTo("WAITING");
         assertThat(reserve(a, drop, UUID.randomUUID().toString()).status()).isEqualTo(201);
-        Response soldOut = reserve(b, drop, UUID.randomUUID().toString());
-        assertThat(soldOut.status()).isEqualTo(409);
-        assertThat(soldOut.code()).isEqualTo("DROP_SOLD_OUT");
+        Response noAdmission = reserve(b, drop, UUID.randomUUID().toString());
+        assertThat(noAdmission.status()).isEqualTo(403);
+        assertThat(noAdmission.code()).isEqualTo("DROP_ADMISSION_REQUIRED");
     }
 
     // ---- helpers ----
 
     Response enter(Long user, DropFixture drop) {
-        return post("/api/drops/" + drop.dropId() + "/queue/entries", user, "");
+        // SKU별 대기열 (#253): 진입 때 SKU를 고른다. 현재 구현은 본문을 무시하므로 구현 전에도 통과한다.
+        return post("/api/drops/" + drop.dropId() + "/queue/entries", user, "{\"variantId\":" + drop.variant() + "}");
     }
 
     Response queueMe(Long user, DropFixture drop) {

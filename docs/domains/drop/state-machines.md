@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/domain/`, `backend/src/main/java/com/restless/order/domain/`, `backend/src/main/java/com/restless/payment/domain/`
 >
-> 마지막 확인: 2026-11-14 (#92 등록 검증·판매 상태 구현과 대조)
+> 마지막 확인: 2026-11-19 (#253 SKU별 대기열 정책 반영. 2절은 목표 상태이고 구현 전이다. 나머지는 2026-11-14 #92 구현과 대조)
 
 Order, Payment, Reservation 상태는 따로 저장하고, 조합 간 정합성을 검증한다.
 
@@ -17,15 +17,38 @@ DRAFT / SCHEDULED → CANCELLED
 
 현재 구현된 전환은 게시(`DRAFT → SCHEDULED`) 하나다. `OPEN`, `CLOSED`, `CANCELLED`로 바꾸는 기능은 아직 없다. 응답의 `saleStatus`는 판매 판정과 같은 기준(`Drop.saleStatus`)으로 계산한다. 판매 가능 상태가 아니면 `ENDED`, 그 밖에는 서버 시각으로 정한다 (#92).
 
-## 2. 대기열 상태
+## 2. 대기열 상태 (SKU별, 2026-11-19 정책. 구현 전)
+
+대기열 행은 `(drop_id, variant_id, user_id)`에 대한 것이고, 대기 순서와 입장은 `variant_id`(SKU)별로 독립이다. 회원이 같은 드롭에서 가진 살아 있는 대기는 최대 1건이다. 다른 SKU로 진입하면 기존 대기를 `CLOSED`로 빼고 새 SKU의 `WAITING`을 만든다.
 
 ```text
 NONE → WAITING → ADMITTED → CONSUMED
 WAITING → CLOSED
+ADMITTED → CLOSED
 ADMITTED → EXPIRED
+WAITING → UNAVAILABLE
+ADMITTED → UNAVAILABLE
 ```
 
-`ADMITTED`는 구매를 시도할 권한이며 재고 확보를 뜻하지 않는다. `CLOSED`는 대기 중 이탈(상태 조회 끊김)이나 판매 종료로 닫힌 대기다. 입장한 뒤에는 TTL로만 끝난다(`EXPIRED`).
+| 전이 | 조건 |
+|---|---|
+| NONE → WAITING | 판매 중이고 그 SKU의 `available > 0`일 때 SKU를 골라 진입. `variant_id` 저장. `available = 0`이면 진입을 거절하고 행을 만들지 않는다 |
+| WAITING → ADMITTED | 같은 SKU의 추가 발급 가능 수 `max(0, available - 미사용 유효 ADMITTED 수)`가 1 이상이고 배치 제한 안일 때, 같은 SKU의 대기 순서(`id`)대로 |
+| ADMITTED → CONSUMED | 그 SKU의 재고 점유 성공과 같은 트랜잭션 (TX1) |
+| ADMITTED → EXPIRED | `now >= admitted_until` |
+| WAITING → CLOSED | 마지막 상태 조회가 30초보다 오래 끊김(페이지를 나감), 판매 기간 종료, 또는 같은 회원이 같은 드롭의 다른 SKU로 진입 |
+| ADMITTED → CLOSED | 같은 회원이 같은 드롭의 다른 SKU로 진입. 미사용 구매권을 포기한 것이다 |
+| WAITING 또는 ADMITTED → UNAVAILABLE | 그 SKU의 `available = 0`을 입장 작업이 관찰함. `reserved` 수량과 무관. 다른 SKU는 영향 없음 |
+
+`UNAVAILABLE`은 2026-11-19에 정한 종료 상태 이름이다. 검토한 후보(`CLOSED` 재사용, `EXPIRED` 재사용, `SOLD_OUT`)는 [policy.md 7-1절](policy.md#7-1-sku별-구매-입장-대기열-decided-2026-11-19-253)에 있다.
+
+끝난 상태의 원인은 서로 다르다: `CONSUMED` 구매 성공, `EXPIRED` 구매권 TTL(`admitted_until`) 경과, `CLOSED` 대기 중 이탈 또는 판매 기간 종료, `UNAVAILABLE` 그 SKU의 `available = 0`.
+
+- `UNAVAILABLE`, `CONSUMED`, `EXPIRED`, `CLOSED`는 끝난 상태다. 다시 `WAITING`이나 `ADMITTED`가 되지 않는다. 재고가 반환돼 `available > 0`이 되어도 종료된 순번과 구매권은 복구하지 않고, 사용자는 새 `WAITING` 행으로 다시 진입한다.
+- 종료는 상태 전이다. 행을 지우지 않고 thread를 끝내지 않는다. 이미 `CONSUMED`인 행과 그 점유(재고 예약)는 종료 대상이 아니고 취소되지 않는다.
+- `ADMITTED`는 구매를 시도할 권한이며 재고 확보를 뜻하지 않는다. `UNAVAILABLE`이 된 구매권으로는 신규 점유를 만들 수 없다 (INV-06).
+- 현재 구매 불가(`available = 0`)는 최종 매진이 아니다. 대기열 행에 별도 "품절" 상태를 두지 않는다.
+- 구매 입장 대기열, `ADMITTED` 권한, DB row lock 대기는 서로 다르다 ([policy.md 7-1절](policy.md#7-1-sku별-구매-입장-대기열-decided-2026-11-19-253)).
 
 ## 3. 재고 예약 상태
 

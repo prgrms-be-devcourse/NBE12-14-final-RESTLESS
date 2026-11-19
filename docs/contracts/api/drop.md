@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/api/`, `backend/src/main/java/com/restless/drop/application/dto/`, `backend/src/test/java/com/restless/drop/acceptance/`
 >
-> 마지막 확인: 2026-11-14 (#92 등록 검증·판매 상태 구현과 대조. 탈퇴 제한은 #41, 탈퇴 동의는 #97, 검색·정렬은 #105, 주문 상세 결제 대상은 #109)
+> 마지막 확인: 2026-11-19 (#253 SKU별 대기열 정책의 계약 반영. D4는 목표 계약이고 구현 전이다. 나머지는 2026-11-14 기준: #92 등록 검증과 판매 상태, #41 탈퇴 제한, #97 탈퇴 동의, #105 검색과 정렬, #109 주문 상세 결제 대상)
 
 - 상태: v1 DECIDED (2026-11-13). 수용 테스트(`backend/src/test/java/com/restless/drop/acceptance/`)가 이 계약을 기준으로 판정한다.
 - Base URL: `/api` ([ADR-0002](../../decisions/0002-common-conventions.md)). 오류는 공통 형식 `{code, message, details, traceId, timestamp}` ([common.md](common.md)).
@@ -16,10 +16,10 @@
 | D1 상품 등록·조회 | 운영자 등록·게시, 사용자 목록·상세 |
 | D2 재고 점유 + 주문 생성 | 재고 점유 생성·조회 |
 | D3 결제 연결 | 재고 점유 취소, 결제는 공통 결제 API(`payableType = DROP`, `payableId = reservationId`) |
-| D4 대기열 | 대기열 진입, 내 대기 상태 |
+| D4 대기열 | SKU별 대기열 진입, 내 대기 상태 |
 | 탈퇴 제한 (#41) | 회원 탈퇴(`POST /api/me/withdraw`)를 막는 드롭 조건 |
 
-호출 순서: 상품 상세 → (배송·결제 페이지) → **결제하기 = 대기열 진입** → 대기 상태 반복 조회 → 입장 허가 → 재고 점유 + 주문 생성 → `POST /api/payments` → 토스 결제창 → `POST /api/payments/confirm` → 결과 조회
+호출 순서: 상품 상세 → (배송, 결제 페이지) → **결제하기 = 선택한 SKU의 대기열 진입** → 대기 상태 반복 조회 → 입장 허가 → 재고 점유 + 주문 생성 → `POST /api/payments` → 토스 결제창 → `POST /api/payments/confirm` → 결과 조회
 
 ## D1. 상품 등록·조회
 
@@ -70,7 +70,7 @@
 }
 ```
 - `saleStatus`: 판매 판정(D2)과 같은 기준이다. 게시 상태가 판매 가능(`SCHEDULED`, `OPEN`)이 아니면(`CLOSED` 등) 시각과 관계없이 `ENDED`. 판매 가능 상태이면 서버 시각 기준 `UPCOMING`(시작 전) / `ON_SALE`(`opensAt <= now < closesAt`) / `ENDED`(종료 후) (#92).
-- `soldOut`: 그 SKU의 `available_quantity = 0`. 재고 점유 중인 수량은 구매 가능 수량이 아니다.
+- `soldOut`: 그 SKU의 `available_quantity = 0`. 재고 점유 중인 수량은 구매 가능 수량이 아니다. "현재 구매 불가"라는 뜻이며 최종 매진이 아니다. 재고가 반환되면 다시 `false`가 된다.
 
 ## D2. 재고 점유 + 주문 생성
 
@@ -93,7 +93,7 @@
   - 409 `DROP_NOT_ON_SALE`: 판매 시작 전, 종료 후 (INV-14)
   - 409 `DROP_SOLD_OUT`: 그 SKU 구매 가능 수량 0
   - 409 `DROP_ACTIVE_PURCHASE_EXISTS`: 같은 회원이 같은 드롭에서 진행 중인 거래가 있음 (INV-05)
-  - 403 `DROP_ADMISSION_REQUIRED`: 대기열 사용 시 유효한 구매권 없음 (D4, INV-06)
+  - 403 `DROP_ADMISSION_REQUIRED`: 대기열 사용 시 유효한 구매권 없음 (D4, INV-06). 목표 계약: 종료된 구매권, 요청 `variantId`와 다른 SKU의 구매권도 같은 오류로 거절한다 (2026-11-19 결정. 정상 화면에서는 생기지 않는 요청을 막는 방어 검사다)
   - 400 `INVALID_REQUEST`: 키·배송지 검증
 - TTL 설정 `restless.drop.reservation.ttl` (기본 5분).
 - 대기열 사용 여부 설정 `restless.drop.queue.required` (기본 `true`). `false`면 구매권 없이 재고 점유한다. 트래픽 실험 EXP-02(대기열 있음/없음 비교)와 D2 수용 테스트가 쓴다.
@@ -117,25 +117,53 @@
 
 ## D4. 대기열
 
+> **현재 구현(드롭 단위)과 목표 계약(SKU별, DECIDED 2026-11-19, #253)이 다르다.** 목표 계약의 정책은 [policy.md 7-1절](../../domains/drop/policy.md#7-1-sku별-구매-입장-대기열-decided-2026-11-19-253)이다. `[목표]`는 현재 코드에 없는 동작이고, 구현 PR에서 코드를 맞추고 표시를 지운다. 수용 테스트 `DropQueueAcceptanceTest`(기본 흐름)와 `DropSkuQueuePolicyAcceptanceTest`(SKU별 정책)가 목표 계약을 검증한다. 구현 전에는 새 정책 단언이 실패한다.
+
+### 현재 구매 불가
+
+SKU의 `available = 0`이면 그 SKU는 **현재 구매 불가**다 (`reserved`와 무관). 신규 진입을 거절하고 구매권을 발급하지 않으며 기존 `WAITING`과 미사용 `ADMITTED`를 종료한다. 재고가 반환되면 판매 기간 안에서 새 진입을 다시 받는다. 종료된 순번과 구매권은 복구하지 않는다. 화면은 "현재 구매 불가"로 안내하고 최종 매진이라고 단정하지 않는다. 드롭 상세의 `soldOut`도 같은 뜻이다.
+
 ### `POST /api/drops/{dropId}/queue/entries` (회원)
 
+- 요청 `[목표]`: `{ "variantId": 10 }`. 진입 때 SKU를 고르고 서버가 `variant_id`로 저장한다.
+  - 현재 구현은 본문을 받지 않는다. 드롭 단위로 줄을 선다.
 - 대기열에 들어간다. 이미 대기 중이면 같은 대기를 돌려준다(1건).
 - 201 신규 / 200 기존 `{ "status": "WAITING", "position": 12 }`. 이미 입장 허가를 받은 상태면 200 `{ "status": "ADMITTED", "admittedUntil": "..." }`.
+- 응답 `[목표]`: 모든 응답에 `variantId`를 포함한다. `position`은 같은 SKU의 `WAITING` 안에서의 순번이다. 다른 SKU의 대기는 순번에 영향을 주지 않는다.
 - 진입 재요청은 heartbeat를 늘리지 않는다 (화면 신호는 아래 상태 조회).
+- 이전 대기가 `UNAVAILABLE` 등으로 끝났으면 새 행을 만들어 201과 새 순번을 준다. 종료 전 순번을 우대하지 않는다.
 - 없는 드롭 404 `NOT_FOUND`. 판매 기간이 아니거나 게시되지 않은 드롭(DRAFT 등)이면 409 `DROP_NOT_ON_SALE`.
+- 오류 `[목표]`:
+  - 400 `INVALID_REQUEST`: `variantId` 없음
+  - 404 `NOT_FOUND`: 그 드롭 소속이 아닌 SKU, 없는 SKU
+  - 409 `DROP_SOLD_OUT` `[목표]`: 그 SKU의 `available = 0`(현재 구매 불가). 기존 코드를 재사용하고 메시지는 "현재 구매 불가"다. 행을 만들지 않는다. 현재 구현은 진입을 받는다.
+- 같은 회원이 같은 드롭에서 다른 SKU로 진입하면 `[목표]` 201과 함께 새 SKU의 새 `WAITING`(새 순번)을 만들고 기존 SKU의 대기를 뺀다. 기존 대기가 `ADMITTED`여도 같다. 새 SKU가 `available = 0`이면 409 `DROP_SOLD_OUT`이고 기존 대기는 그대로다. 같은 SKU로 다시 진입하면 기존 대기를 돌려준다.
+- 페이지를 나가면 상태 조회가 끊겨 30초 뒤 대기가 닫힌다. 별도 해제 API는 없다.
 
 ### `GET /api/drops/{dropId}/queue/me` (회원)
 
-- 200 `{ "status": "WAITING" | "ADMITTED" | "EXPIRED" | "CONSUMED", "position": 3, "admittedUntil": "..." }` (`position`은 WAITING일 때만, `admittedUntil`은 ADMITTED일 때만)
+- 200 `{ "status": "WAITING" | "ADMITTED" | "EXPIRED" | "CONSUMED" | "UNAVAILABLE", "position": 3, "admittedUntil": "..." }` (`position`은 WAITING일 때만, `admittedUntil`은 ADMITTED일 때만). `[목표]` `variantId`도 함께 준다.
+- `UNAVAILABLE` `[목표]`: 그 SKU가 현재 구매 불가가 되어 대기나 미사용 구매권이 종료됐다. `{ "status": "UNAVAILABLE", "variantId": 10 }`. 404가 아니다. 화면이 "현재 구매 불가"를 보여 줄 수 있어야 하기 때문이다. 사용자가 다시 진입하면 새 기록이 최신이 된다.
 - 대기 중 상태 조회는 "아직 화면에 있음" 신호다. 조회가 `restless.drop.queue.heartbeat-timeout`보다 오래 끊기면 대기를 닫는다. 다시 들어오면 맨 뒤에서 다시 시작한다.
-- 대기 기록이 없거나 최신 기록이 CLOSED(이탈·판매 종료)면 404. EXPIRED, CONSUMED는 200으로 그대로 보여 준다.
+  - `heartbeat-timeout`(기본 30초)은 `WAITING`의 마지막 상태 조회 시각 기준이다. `ADMITTED`에는 적용하지 않는다.
+  - 상태 조회 간격 3~4초는 클라이언트 제안값이다. 계약상 의무도, 확정 정책도 아니다.
+- 대기 기록이 없거나 최신 기록이 CLOSED(이탈, 판매 종료)면 404. EXPIRED, CONSUMED, UNAVAILABLE은 200으로 그대로 보여 준다.
+- `[목표]` 이 요청은 어떤 경우에도 즉시 응답한다. 입장이 재개될 때까지 요청을 붙잡지 않는다.
+- `[목표]` `available = 0`이 되어도 `WAITING`이 곧바로 `UNAVAILABLE`로 바뀌는 것은 아니다. 입장 작업이 관찰한 뒤 바뀐다. 그 사이는 입장 작업 한 번의 주기 안이며, 그동안에도 구매권 없이는 점유할 수 없다.
 
 ### 입장 허가
 
 - 작업 빈 이름 `dropQueueAdmissionJob`, 메서드 `runOnce()`. 설정 `restless.drop.queue.scheduler.enabled=false`는 주기 실행만 멈추고 빈은 남는다. 한 번 실행에 대기자가 있는 드롭마다 `restless.drop.queue.admit-per-run`명까지 대략적인 진입 순서로 ADMITTED로 바꾼다. 정확한 선착순은 보장하지 않는다(처리 속도 우선).
-- 기본값: `heartbeat-timeout` 30초, `admit-per-run` 100명.
+  - 현재 구현: 재고를 보지 않고 드롭마다 `admit-per-run`명을 입장시킨다.
+  - `[목표]` SKU마다 `min(max(0, available - 미사용 유효 ADMITTED 수), admit-per-run)`명을 같은 SKU의 대기 순서(`id`)대로 입장시킨다. 같은 SKU를 여러 작업이 동시에 처리해도 구매권이 `available`을 넘기지 않는다 (INV-16).
+  - `[목표]` SKU의 `available = 0`이면 그 SKU는 입장시키지 않고 `WAITING`과 미사용 `ADMITTED`를 종료한다 (INV-17). `reserved` 수량은 보지 않는다. 다른 SKU는 영향이 없다.
+  - `[목표]` 재고가 반환돼 `available > 0`이 되면 새로 진입한 사용자부터 같은 SKU의 대기 순서대로 입장시킨다. 종료된 순번과 구매권은 복구하지 않는다.
+- 기본값: `heartbeat-timeout` 30초, `admit-per-run` 100명, 입장 작업 주기 1초(`restless.drop.queue.scheduler.fixed-delay-ms`).
 - 구매권 유효 시간 `restless.drop.queue.admission-ttl` (기본 5분). 재고 점유에 성공하면 CONSUMED.
-- 입장은 재고를 보장하지 않는다. 입장 후에도 품절이면 409 `DROP_SOLD_OUT`.
+- 입장은 재고를 보장하지 않는다. 입장 후에도 품절이면 409 `DROP_SOLD_OUT`. TX1 조건부 재고 UPDATE가 재고 확보의 최종 검증이다.
+- `[목표]` 구매권은 발급된 SKU의 재고 점유에만 쓴다. 종료된 구매권으로는 점유할 수 없다 (403 `DROP_ADMISSION_REQUIRED`).
+- 대기 종료는 이미 성공한 점유를 취소하지 않는다. 결제, 기한, 재결제, 복구는 D3와 policy.md 8절을 그대로 따른다.
+- PG 결과가 불명확한 점유는 `reserved`로 남는다. 이를 실패로 보고 재고를 반환하거나 입장시키지 않는다.
 
 ## 회원 탈퇴 제한 (#41)
 
