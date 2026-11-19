@@ -1,0 +1,28 @@
+diff --git a/tools/harness/README.md b/tools/harness/README.md
+--- a/tools/harness/README.md
++++ b/tools/harness/README.md
+@@ -3,1 +3,2 @@
+ AI가 드롭 기능을 구현하고(Codex) 다른 AI가 검증할 때(Claude) 쓰는 작업 환경입니다. 이 문서가 작업 순서의 **유일한 기준**입니다. 다른 메모나 진행표에 적힌 순서가 이 문서와 다르면 이 문서를 따릅니다.
++이 문서의 "대신 정한 정책"과 PROPOSED 이관은 `docs/testing/independent-verification.md`의 정책 결정 표 범위에서만 적용한다. 내부 선택은 기록하고, 사업 정책 제안은 사람 결정 전 미승인으로 유지한다.
+@@ -43,1 +43,2 @@
+ 4. **검증** (Claude)
++   - 먼저 `tools/verification/skills/independent-verification/SKILL.md`를 읽고 따른다. 구현 보고서 열람 전 사전 반례와 공유 가정을 별도 컨텍스트에서 기록하고, 검증 SHA·실제 스킬·실행 근거·미검증 범위를 남긴다.
+@@ -62,1 +63,2 @@
+ - **보고서 대신 PR 본문**: 단계 보고서는 쓰지 않는다. 검사 결과, 대신 정한 것, Claude가 구현했다는 사실을 PR 본문에 쓴다. 대신 정한 것은 4번처럼 `policy.md`에 `PROPOSED`로 옮긴다.
++- **독립 검증**: 같은 구현자의 검사는 참고 결과다. 새 컨텍스트의 다른 검증자 또는 사람이 전용 스킬 절차로 추가 검토하기 전에는 독립 검증 완료로 판정하지 않는다.
+diff --git a/backend/src/main/java/com/restless/drop/AGENTS.md b/backend/src/main/java/com/restless/drop/AGENTS.md
+--- a/backend/src/main/java/com/restless/drop/AGENTS.md
++++ b/backend/src/main/java/com/restless/drop/AGENTS.md
+@@ -30,1 +30,1 @@
+-- 문서에 없는 정책은 멈추지 말고 문서에 가장 가까운 쪽으로 정한다. 정한 내용은 같은 PR에서 `policy.md`의 해당 절에 `PROPOSED`로 남긴다. 하네스 단계에서는 Codex가 보고서의 "대신 정한 것"에 적고 Claude가 옮긴다.
++- 문서에 없는 사항의 결정 범위는 `docs/testing/independent-verification.md`의 정책 결정 표를 따른다. 내부 구현 선택은 진행하고 기록한다. 공개 계약·핵심 불변식·사업 정책과 열린 질문은 사람의 결정 전 확정하지 않는다. `PROPOSED`는 승인이 아니다.
+@@ -32,1 +32,3 @@
+ ## 검증 (`backend/`에서)
++
++구현 검증·PR 승인 준비 전에 저장소 루트의 `tools/verification/skills/independent-verification/SKILL.md`를 읽고 따른다.
+diff --git a/tools/harness/codex-stage-spec.md b/tools/harness/codex-stage-spec.md
+--- a/tools/harness/codex-stage-spec.md
++++ b/tools/harness/codex-stage-spec.md
+@@ -46,1 +46,1 @@
+-- 정책이 문서에 없으면 멈추지 말고 문서에 가장 가까운 쪽으로 정해 보고서의 "대신 정한 것"에 `policy.md 절 | 결정 | 근거` 형식으로 적는다. `policy.md`는 직접 고치지 않는다 (Claude가 검증할 때 같은 PR에 `PROPOSED`로 옮긴다).
++- 정책 누락은 `docs/testing/independent-verification.md`의 결정 범위 표를 따른다. 허용된 내부 선택과 사람 결정이 필요한 쟁점을 나누어 보고서에 근거와 함께 적는다. `PROPOSED` 표기만으로 사업 정책을 확정하지 않는다.

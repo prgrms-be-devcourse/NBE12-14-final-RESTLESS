@@ -25,6 +25,7 @@
 | 경매 등록, 입찰, 종료, 크레딧 | domains/auction/ 전체 (design.md는 원본), contracts/api/auction.md |
 | 팬미팅 응모, 추첨, 결제, 승격 | domains/fanmeeting/ 전체, contracts/api/fanmeeting.md, contracts/events/fanmeeting.md |
 | 테스트 작성 | testing/strategy.md, 해당 도메인 invariants.md (팬미팅은 test-scenarios.md도) |
+| AI 구현 검증·PR 승인 준비 | [독립 검증 절차와 필수 스킬](testing/independent-verification.md) |
 | 성능 실험 | testing/performance.md, [드롭 목표](testing/drop-performance-plan.md)·[실행](testing/drop-performance-procedure.md)·[측정 규약](testing/drop-performance-measurement.md), 관련 ADR |
 | 서비스 의도, 사용자 시나리오, 범위, 역할, 완료기준 | [product/proposal.md](product/proposal.md) |
 | 정책이 애매할 때 | product/open-questions.md (목록에 있으면 임의로 정하지 않는다) |
