@@ -7,6 +7,7 @@ Usage: perf/scenarios/run-ticketing.sh SCENARIO USERS
 
 SCENARIO:
   spread, simultaneous       좌석 조회 (3초 폴링)
+  page                       페이지 진입: 좌석·구매 가능 정보 조회
   hot, overlap               인기 좌석 또는 겹치는 좌석 선점 경쟁
   distributed, replay        서로 다른 좌석 선점 또는 멱등성 재요청
   mixed, mixed-distributed   조회 80% + 선점 20% (인기 좌석 또는 분산)
@@ -21,7 +22,7 @@ HELP
 if [[ "${1:-}" == '-h' || "${1:-}" == '--help' ]]; then usage; exit 0; fi
 [[ $# == 2 ]] || { usage >&2; exit 2; }
 scenario="$1"
-case "$scenario" in spread|simultaneous|hot|overlap|distributed|replay|mixed|mixed-distributed) ;; *) echo "알 수 없는 시나리오: $scenario" >&2; usage >&2; exit 2;; esac
+case "$scenario" in spread|simultaneous|page|hot|overlap|distributed|replay|mixed|mixed-distributed) ;; *) echo "알 수 없는 시나리오: $scenario" >&2; usage >&2; exit 2;; esac
 [[ "$2" =~ ^[1-9][0-9]{0,5}$ ]] || { echo 'USERS는 1~999999 사이의 양의 정수여야 합니다.' >&2; exit 2; }
 users="$2"
 for name in BASE_URL PERFORMANCE_ID MANAGEMENT_URL PERF_ALLOWED_APP_HOSTS; do
@@ -31,6 +32,7 @@ done
 if [[ "${SETUP:-csv}" != self ]]; then
   [[ -n "${USERS_CSV:-}" && -f "$USERS_CSV" && -r "$USERS_CSV" ]] || { echo 'USERS_CSV 파일을 읽을 수 없습니다.' >&2; exit 2; }
 fi
+[[ "${SETUP:-csv}" != self ]] || { echo '계정 중복 방지를 위해 USERS_CSV를 사용하세요. SETUP=self는 지원하지 않습니다.' >&2; exit 2; }
 K6_BIN="${K6_BIN:-k6}"
 command -v "$K6_BIN" >/dev/null || { echo "k6를 찾을 수 없습니다: $K6_BIN" >&2; exit 2; }
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -42,6 +44,7 @@ export HOT_SEATS="${HOT_SEATS:-1}" MAX_DURATION="${MAX_DURATION:-5m}"
 export HOLD_DELAY_SECONDS="${HOLD_DELAY_SECONDS:-3}" MIXED_HOLD=hot
 case "$scenario" in
   spread|simultaneous) export MODE=poll POLL_ENTRY="$scenario" DURATION="${DURATION:-2m}" ;;
+  page) export MODE=page POLL_ENTRY="${POLL_ENTRY:-spread}" DURATION="${DURATION:-2m}" ;;
   hot|overlap|distributed|replay) export MODE="$scenario" POLL_ENTRY=spread DURATION="${DURATION:-2m}" ;;
   mixed|mixed-distributed)
     readers=$(( users * 4 / 5 )); holders=$(( users - readers ))
@@ -67,7 +70,7 @@ export K6_WEB_DASHBOARD_PORT="${K6_WEB_DASHBOARD_PORT:-5665}"
 export K6_WEB_DASHBOARD_EXPORT="${K6_WEB_DASHBOARD_EXPORT:-$run_dir/report-$timestamp.html}"
 printf '시나리오: %s | 사용자: %s | 실행 ID: %s\n' "$scenario" "$users" "$RUN_ID"
 if [[ "$MODE" == mixed ]]; then printf '조회: %s명 | 선점: %s명\n' "$PARTICIPANTS" "$HOLD_PARTICIPANTS"; fi
-if [[ "$MODE" != poll ]]; then printf '선점 요청으로 테스트 데이터가 변경됩니다. 실험 간 초기 상태를 확인하세요.\n'; fi
+if [[ "$MODE" != poll && "$MODE" != page ]]; then printf '선점 요청으로 테스트 데이터가 변경됩니다. 실험 간 초기 상태를 확인하세요.\n'; fi
 printf '요약 JSON: %s\nHTML 보고서: %s\n실행 중 대시보드: http://localhost:%s\n' "$SUMMARY_PATH" "$K6_WEB_DASHBOARD_EXPORT" "$K6_WEB_DASHBOARD_PORT"
 command -v python3 >/dev/null || { echo 'python3를 찾을 수 없습니다.' >&2; exit 2; }
 if [[ -n "${TICKETING_K6_CONFIG:-}" && ! -r "$TICKETING_K6_CONFIG" ]]; then
@@ -75,9 +78,14 @@ if [[ -n "${TICKETING_K6_CONFIG:-}" && ! -r "$TICKETING_K6_CONFIG" ]]; then
 fi
 ready_file="$(mktemp "$run_dir/.prometheus-ready-XXXXXXXX")"
 rm -f "$ready_file"
+mac_collector_pid=""
 PROMETHEUS_READY_FILE="$ready_file" python3 "$root/perf/scenarios/ticketing/collect-prometheus-csv.py" "$scenario" &
 collector_pid=$!
 cleanup_collector() {
+  if [[ -n "$mac_collector_pid" ]]; then
+    kill -TERM "$mac_collector_pid" 2>/dev/null || true
+    wait "$mac_collector_pid" 2>/dev/null || true
+  fi
   if kill -0 "$collector_pid" 2>/dev/null; then kill -TERM "$collector_pid" 2>/dev/null || true; fi
   wait "$collector_pid" 2>/dev/null || true
   rm -f "$ready_file"
@@ -94,6 +102,17 @@ for ((i=0; i<120; i++)); do
 done
 [[ -f "$ready_file" ]] || { echo 'Prometheus 수집 시작 시간이 초과되었습니다.' >&2; exit 1; }
 printf 'Prometheus CSV: %s\n' "$(cat "$ready_file")"
+ROW_OFFSET="$(python3 "$root/perf/scenarios/ticketing/allocate-users.py" "$USERS_CSV" "$users" "$BASE_URL" "$PERFORMANCE_ID" "$RUN_ID")"
+export ROW_OFFSET
+printf 'CSV 계정 행: %s~%s (헤더 제외)\n' "$((ROW_OFFSET + 1))" "$((ROW_OFFSET + users))"
+if [[ "$(uname -s)" == Darwin ]]; then
+  mac_metrics_path="$run_dir/mac-$timestamp.csv"
+  python3 "$root/perf/scenarios/ticketing/collect-mac-csv.py" "$mac_metrics_path" "$$" "$BASE_URL" &
+  mac_collector_pid=$!
+  printf 'Mac 지표 CSV: %s\n' "$mac_metrics_path"
+else
+  printf 'Mac 지표 수집은 macOS에서만 실행됩니다.\n' >&2
+fi
 if [[ -n "${TICKETING_K6_CONFIG:-}" ]]; then
   "$K6_BIN" run --config "$TICKETING_K6_CONFIG" "$root/perf/scenarios/ticketing/${scenario}.js"
 else

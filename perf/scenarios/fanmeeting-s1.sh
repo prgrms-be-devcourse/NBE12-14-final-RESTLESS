@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 팬미팅 S1 한 회: 행사 하나로 측정 흐름 전체를 명령 하나로 돈다. 사용법은 perf/scenarios/fanmeeting.md.
 #
-#   지표 기록 시작 → 행사 생성 → 응모 몰림(A, START_OFFSET=-2s면 B) → 점검 1
+#   지표 기록 시작 → 행사 생성 → 응모 몰림(A, START_OFFSET=-2s면 B, GUERRILLA=true면 게릴라 오픈 G) → 점검 1
 #   → 마감 앞뒤 응모(C) → 추첨 확정 대기 → 점검 2(D) → 결과 조회 폭주 → 점검 3 → 지표 요약(단계별)
 #
 # 결과는 RUN_DIR 한 폴더에 모인다. 측정한 사람은 이 폴더를 통째로 넘기면 된다(토큰·비밀번호는 들어가지 않는다).
@@ -29,6 +29,13 @@ PEAK_RATE="${PEAK_RATE:-1000}"
 RAMP="${RAMP:-5s}"
 HOLD="${HOLD:-}"                     # 비우면 참여자 수와 도착률로 계산
 START_OFFSET="${START_OFFSET:-2s}"   # A: 2s(Open Worker 뒤), B: -2s(오픈 직전부터)
+# G 게릴라 오픈: 오픈 시각을 숨긴 행사(OPENS_AT_PUBLIC=false). 참여자 전원이 오픈 PREOPEN 전부터 상세를
+# POLL_MIN~POLL_MAX 간격으로 새로고침하다가 OPEN이 보이면 응모한다. 이때 PEAK_RATE·RAMP·HOLD는 쓰지 않는다.
+GUERRILLA="${GUERRILLA:-false}"
+PREOPEN="${PREOPEN:-60s}"
+POLL_MIN="${POLL_MIN:-1s}"
+POLL_MAX="${POLL_MAX:-3s}"
+OPEN_WAIT="${OPEN_WAIT:-120s}"
 CLOSE_PARTICIPANTS="${CLOSE_PARTICIPANTS:-500}"   # C. 0이면 건너뜀
 CLOSE_RATE="${CLOSE_RATE:-}"            # 비우면 마감 3초 전부터 약 6초에 걸쳐 보내도록 자동
 RESULT="${RESULT:-true}"             # 결과 조회 폭주. false면 건너뜀
@@ -44,6 +51,10 @@ K6_DASHBOARD_PORT="${K6_DASHBOARD_PORT:-5665}"
 INVARIANTS_SQL="${INVARIANTS_SQL:-$REPO/backend/src/test/resources/harness/fanmeeting-invariants.sql}"
 RUN_DIR="${RUN_DIR:-$REPO/.ai-output/perf/s1-$(date -u +%m%d-%H%M)-p${PARTICIPANTS}-r${PEAK_RATE}}"
 [[ "$K6_DASHBOARD" == "true" || "$K6_DASHBOARD" == "false" ]] || die "K6_DASHBOARD must be true or false: $K6_DASHBOARD"
+[[ "$GUERRILLA" == "true" || "$GUERRILLA" == "false" ]] || die "GUERRILLA must be true or false: $GUERRILLA"
+for v in PREOPEN POLL_MIN POLL_MAX OPEN_WAIT; do
+  [[ "${!v}" =~ ^[0-9]+(ms|s|m)?$ ]] || die "$v must look like 60s, 1500ms or 2m: ${!v}"
+done
 for n in PARTICIPANTS PEAK_RATE CLOSE_PARTICIPANTS RESULT_RATE DRAW_TIMEOUT METRICS_INTERVAL K6_DASHBOARD_PORT; do
   [[ "${!n}" =~ ^[0-9]+$ ]] || die "$n must be a whole number: ${!n}"
 done
@@ -110,6 +121,7 @@ participants=$PARTICIPANTS peak_rate=$PEAK_RATE ramp=$RAMP hold=$HOLD start_offs
 close_participants=$CLOSE_PARTICIPANTS close_rate=$CLOSE_RATE
 result=$RESULT result_rate=$RESULT_RATE result_hold=$RESULT_HOLD
 winner_limit=${WINNER_LIMIT:-300} reserve_limit=${RESERVE_LIMIT:-100} fee_amount=${FEE_AMOUNT:-50000} open_in=${OPEN_IN:-3m}
+guerrilla=$GUERRILLA$( [[ "$GUERRILLA" == "true" ]] && echo " preopen=$PREOPEN poll=$POLL_MIN~$POLL_MAX open_wait=$OPEN_WAIT (peak_rate, ramp, hold unused for apply)")
 db_check=$DB_CHECK metrics_interval=${METRICS_INTERVAL}s users_available=$available k6_dashboard=$K6_DASHBOARD
 EOF
 say "run dir $RUN_DIR"
@@ -203,19 +215,29 @@ step() {  # step <phase> <command...>: 실패해도 흐름은 계속 가고 끝�
 
 # ---------------------------------------------------------------- 1. 행사 생성
 begin prepare
+# 게릴라 오픈이면 오픈 시각을 숨긴 행사를 만든다.
+[[ "$GUERRILLA" == "true" ]] && export OPENS_AT_PUBLIC=false
 "$ROOT/fanmeeting-prepare.sh" || { finish prepare $?; die "prepare failed"; }
 finish prepare 0
 # shellcheck disable=SC1090
 source "$EVENT_FILE"
 
-# ---------------------------------------------------------------- 2. 응모 몰림 (A, 또는 START_OFFSET<0이면 B)
-# 시나리오를 k6에 명시한다. A는 전원 201이어야 하고, B는 오픈 전 거절이 정상이다(판정이 다르다).
-apply_scenario=A; [[ "$START_OFFSET" == -* ]] && apply_scenario=B
-apply_phase="apply-$apply_scenario"
-say "k6 waits until $FM_ENTRY_OPENS_AT ${START_OFFSET} (participants $PARTICIPANTS, ${PEAK_RATE}/s, ramp $RAMP, hold $HOLD)"
-step "$apply_phase" run_k6 "$apply_phase" fanmeeting-apply.js SCENARIO="$apply_scenario" MODE=open START_OFFSET="$START_OFFSET" \
-  PARTICIPANTS="$PARTICIPANTS" USER_OFFSET=0 PEAK_RATE="$PEAK_RATE" RAMP="$RAMP" HOLD="$HOLD" \
-  ${PRE_VUS:+PRE_VUS=$PRE_VUS} ${MAX_VUS:+MAX_VUS=$MAX_VUS}
+# ---------------------------------------------------------------- 2. 응모 몰림 (A, START_OFFSET<0이면 B, GUERRILLA=true면 G)
+# 시나리오를 k6에 명시한다. A·G는 전원 201이어야 하고, B는 오픈 전 거절이 정상이다(판정이 다르다).
+if [[ "$GUERRILLA" == "true" ]]; then
+  apply_scenario=G
+  apply_phase="apply-G"
+  say "k6 waits until $FM_ENTRY_OPENS_AT -$PREOPEN, then $PARTICIPANTS members refresh every $POLL_MIN~$POLL_MAX and apply when OPEN shows"
+  step "$apply_phase" run_k6 "$apply_phase" fanmeeting-apply.js SCENARIO=G MODE=open START_OFFSET="-$PREOPEN" \
+    PARTICIPANTS="$PARTICIPANTS" USER_OFFSET=0 POLL_MIN="$POLL_MIN" POLL_MAX="$POLL_MAX" OPEN_WAIT="$OPEN_WAIT"
+else
+  apply_scenario=A; [[ "$START_OFFSET" == -* ]] && apply_scenario=B
+  apply_phase="apply-$apply_scenario"
+  say "k6 waits until $FM_ENTRY_OPENS_AT ${START_OFFSET} (participants $PARTICIPANTS, ${PEAK_RATE}/s, ramp $RAMP, hold $HOLD)"
+  step "$apply_phase" run_k6 "$apply_phase" fanmeeting-apply.js SCENARIO="$apply_scenario" MODE=open START_OFFSET="$START_OFFSET" \
+    PARTICIPANTS="$PARTICIPANTS" USER_OFFSET=0 PEAK_RATE="$PEAK_RATE" RAMP="$RAMP" HOLD="$HOLD" \
+    ${PRE_VUS:+PRE_VUS=$PRE_VUS} ${MAX_VUS:+MAX_VUS=$MAX_VUS}
+fi
 step check-1-apply run_check check-1-apply "$RUN_DIR/$apply_phase.json"
 
 # 결과 조회에서 NOT_APPLIED가 나와야 하는 인원 = A(B) 참여자 중 응모가 안 된 사람.
@@ -314,7 +336,7 @@ print('\nphases (UTC)')
 for line in list(open(os.path.join(d, 'timeline.tsv')))[1:]:
     p, s, e, c, sf, su = (line.rstrip('\n').split('\t') + ['-', '-'])[:6]
     print(f"  {p:16} {s} → {e}  exit {c}  snapshots {sf} → {su}")
-for name in ('apply-A', 'apply-B', 'apply-C'):
+for name in ('apply-A', 'apply-B', 'apply-G', 'apply-C'):
     s = load(f'{name}.json')
     if not s:
         continue
@@ -324,6 +346,13 @@ for name in ('apply-A', 'apply-B', 'apply-C'):
           f"requests sent {s['requestsTotal']}/{s['conditions']['participants']}")
     print('  applied by time  ' + '  '.join(f"{k[11:]} {v}" for k, v in b.items() if k.startswith('fm_applied_')))
     print('  closed by time   ' + '  '.join(f"{k[17:]} {v}" for k, v in b.items() if k.startswith('fm_window_closed_')))
+    g = s.get('guerrilla')
+    if g:
+        lat = lambda t: '-' if not t else f"med {t.get('med', 0):.0f} p95 {t.get('p(95)', 0):.0f} max {t.get('max', 0):.0f} ms"
+        print(f"  guerrilla: opensAt hidden {s['conditions'].get('guerrilla')}, refresh {s['conditions'].get('pollMin')}~{s['conditions'].get('pollMax')}, "
+              f"detail requests {g['detailRequests']} (5xx {g['detailServerError']}, transport {g['detailTransportError']}, "
+              f"other {g['detailOtherError']}), never saw OPEN {g['neverSawOpen']}")
+        print(f"  detail latency {lat(g['detailLatency'])}; OPEN first seen after the open {lat(g['openSeenAfterMs'])}")
     if s['failedThresholds']:
         print('  thresholds FAILED: ' + ', '.join(s['failedThresholds']))
 r = load('result.json')
@@ -341,7 +370,7 @@ if r:
     if r['failedThresholds']:
         print('  thresholds FAILED: ' + ', '.join(r['failedThresholds']))
 pct = lambda v: '-' if v is None else f'{v * 100:.0f}%'
-for name in ('apply-A', 'apply-B', 'apply-C', 'result'):
+for name in ('apply-A', 'apply-B', 'apply-G', 'apply-C', 'result'):
     m = load(f'metrics-{name}.json')
     if not m:
         continue
@@ -358,6 +387,8 @@ for name in ('apply-A', 'apply-B', 'apply-C', 'result'):
               f"peak {fmt(e['successPeakRate'])}/s), "
               f"p95 {fmt(e['p95Ms'])}ms, p99 {fmt(e['p99Ms'])}ms, max {fmt(e['maxMs'])}ms")
     res = m['resources']
+    print(f"  tomcat connections max {res.get('tomcatConnectionsMax')}/{res.get('tomcatMaxConnections')} "
+          f"(keep-alive {res.get('tomcatKeepAliveMax')}), busy threads max {res.get('tomcatBusyMax')}/{res.get('tomcatMaxThreads')}")
     print(f"  hikari active max {res['hikariActiveMax']}/{res['hikariMax']}, pending max {res['hikariPendingMax']}, "
           f"timeouts {res['hikariTimeouts']}; cpu process max {pct(res['processCpuMax'])}, system max {pct(res['systemCpuMax'])}")
 for name in ('check-1-apply', 'check-2-draw', 'check-3-result'):

@@ -1,6 +1,6 @@
 # 경매 부하 테스트 계획
 
-> 관련 구현: `perf/scenarios/auction-burst.js`, `auction-sse.mjs`, `auction-run.sh`
+> 관련 코드: `perf/scenarios/auction-burst.js`, `perf/scenarios/auction-sse.mjs`, `perf/scenarios/auction-run.sh`
 >
 > 마지막 확인: 2026-11-17 (8,000 → 10,000 몰림 시나리오)
 

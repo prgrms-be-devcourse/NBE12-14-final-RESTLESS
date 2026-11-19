@@ -2,6 +2,7 @@
 
 배포 서버를 테스트 시간에만 빌려 perf 프로필로 띄운다. [perf-ec2.sh](perf-ec2.sh)가 EC2 쪽 단계를 묶는다.
 EC2 Instance Connect 브라우저 터미널에서 `~/restless` 저장소로 실행한다. k6는 노트북에서 돈다. 서버 자원은 CloudWatch로 본다.
+명령별 설명과 도메인 순서, 팀원 SSH 계정으로 실행하는 법은 [RUNBOOK.md](RUNBOOK.md)에 있다.
 
 - 비밀값은 EC2의 `/opt/restless/perf.env`에만 있다. 스크립트는 이 파일을 서버 안에서만 읽고 값을 출력하지 않는다.
 - 시드는 EC2에서 돌린다. perf `JWT_SECRET`이 서버 밖으로 나가지 않는다. 노트북에는 서명된 토큰 CSV만 옮긴다.

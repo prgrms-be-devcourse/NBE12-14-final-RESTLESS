@@ -16,7 +16,7 @@
 ```text
 지표 기록 시작 (fanmeeting-metrics.sh, 백그라운드)
 → 행사 생성 (fanmeeting-prepare.sh)
-→ 응모 몰림 A: 오픈 + START_OFFSET부터 PARTICIPANTS명, PEAK_RATE/s  (START_OFFSET=-2s면 B)
+→ 응모 몰림 A: 오픈 + START_OFFSET부터 PARTICIPANTS명, PEAK_RATE/s  (START_OFFSET=-2s면 B, GUERRILLA=true면 게릴라 오픈 G)
 → 점검 1: 불변식, 회원당 1건, k6 201 = APPLIED
 → 마감 앞뒤 C: 마감 3초 전부터 안 쓴 계정 CLOSE_PARTICIPANTS명
 → 추첨 확정 대기 → 점검 2: 추첨 시간(D), 당첨·예비·주문 수
@@ -72,6 +72,7 @@ EC2에서 빌려 쓸 때는 [perf/ec2](../ec2/README.md) 순서를 따른다.
 |---|---|---|
 | `PARTICIPANTS`, `PEAK_RATE`, `RAMP`, `HOLD` | 1000, 1000, 5s, 자동 | A의 참여자와 도착률. `HOLD`를 비우면 모든 참여자가 보낼 만큼 자동으로 잡는다 |
 | `START_OFFSET` | `2s` | A는 `2s`, B는 `-2s`. 음수면 B(`SCENARIO=B`, 단계 이름 `apply-B`), 0 이상이면 A(`SCENARIO=A`)로 k6에 넘긴다 |
+| `GUERRILLA`, `PREOPEN`, `POLL_MIN`, `POLL_MAX`, `OPEN_WAIT` | `false`, 60s, 1s, 3s, 120s | `true`면 A·B 대신 게릴라 오픈 G(단계 이름 `apply-G`). 오픈 시각을 숨긴 행사(`OPENS_AT_PUBLIC=false`)를 만들고, 참여자 전원이 오픈 `PREOPEN` 전부터 상세를 `POLL_MIN`~`POLL_MAX` 간격으로 새로고침하다가 OPEN이 보이면 응모한다. `PEAK_RATE`·`RAMP`·`HOLD`는 쓰지 않는다. 오픈 전 새로고침 부하 ≈ 참여자 ÷ 평균 간격(초당) |
 | `CLOSE_PARTICIPANTS`, `CLOSE_RATE` | 500, 자동 | C. A가 쓰지 않은 계정(`USER_OFFSET=PARTICIPANTS`)을 쓴다. 계정이 모자라면 남는 만큼만, 0이면 건너뛴다. 도착률을 비우면 마감 3초 전부터 약 6초에 걸쳐 보내도록(참여자/6) 정한다 |
 | `RESULT`, `RESULT_RATE`, `RESULT_HOLD` | `true`, `PEAK_RATE`, 자동 | 결과 조회 폭주. A 참여자만 조회한다. C가 있으면 DB의 당첨·예비·주문 수에는 C 응모자도 들어가므로 첫 바퀴 수가 DB보다 작다 |
 | `DRAW_TIMEOUT` | 600 | 마감 뒤 추첨 확정을 기다리는 최대 초. 넘으면 조회를 건너뛴다 |
@@ -106,6 +107,7 @@ EC2에서 빌려 쓸 때는 [perf/ec2](../ec2/README.md) 순서를 따른다.
 | 4 | `PARTICIPANTS=10000 PEAK_RATE=2000` | 〃 (3에서 이미 무너졌으면 생략) |
 | 5 | `PARTICIPANTS=100000 PEAK_RATE=<한계의 70~80%> CLOSE_PARTICIPANTS=0` | 10만 응모, 추첨(D), 조회. 계정을 A가 다 쓰므로 C는 없음 |
 | 6 | `PARTICIPANTS=10000 PEAK_RATE=1000 START_OFFSET=-2s` | B: 오픈 직후 거절 수 |
+| G | `GUERRILLA=true PARTICIPANTS=<N> POLL_MIN=<a> POLL_MAX=<b>` | 게릴라 오픈: 새로고침이 몰린 서버에 응모가 얹힐 때. N·간격은 한계 TPS를 본 뒤 오픈 전 새로고침이 한계의 50~70%가 되게 정한다 |
 
 - 회차 사이에는 다른 측정과 겹치지 않게 한다. 한 회 안에서 행사는 하나만 연다.
 - 노트북이 먼저 막혔는지 `summary.txt`의 `dropped`와 k6 요약의 `http_req_connecting`으로 확인한다([기준](../README.md#부하-발생기를-ec2로-옮기는-기준)).
@@ -159,6 +161,7 @@ FROM_SNAPSHOT=<처음 ms> UNTIL_SNAPSHOT=<나중 ms> perf/scenarios/fanmeeting-m
 | `success (<코드>)` `avg`, `peak` (/s) | **성공 처리량.** 응모(POST)는 201만, 조회(GET)는 200만 센다. 응모의 성공 TPS, 조회의 성공 RPS다 |
 | `p50`, `p95`, `p99`, `max` | 서버 처리 시간(히스토그램 구간 보간). 네트워크 왕복이 없는 값이다 |
 | hikari `active/max`, `pending`, `timeouts`, `acquire max` | 연결 풀. active가 max에 붙고 pending이 쌓이면 연결 풀이 병목이다 |
+| tomcat `connections` (keep-alive) | 동시에 열린 TCP 연결과 한도(기본 8,192). 넘치면 연결 단계에서 거절된다 |
 | tomcat `busy`, cpu `process`/`system`, heap | 요청 스레드, CPU, 메모리 |
 | fanmeeting workers | Worker 실행 수, 오류, 평균·최대 시간. 열기·마감 지연을 볼 때 `run`(열기·마감)을 본다 |
 
@@ -178,6 +181,7 @@ FROM_SNAPSHOT=<처음 ms> UNTIL_SNAPSHOT=<나중 ms> perf/scenarios/fanmeeting-m
 | A | 오픈 순간 몰림. **전원 201**(거절 0), `APPLICATION_BUSY` 0, 불변식 0 | `SCENARIO=A` (기본 `START_OFFSET=2s`) |
 | B | 오픈 직전부터 보낼 때 Open Worker 지연. 오픈 뒤 몇 초 동안 `APPLICATION_WINDOW_CLOSED`가 나는지 | `SCENARIO=B` (기본 `START_OFFSET=-2s`) |
 | C | 마감 앞뒤 요청. 마감 1초 뒤부터 보낸 요청의 201이 0인지 | `SCENARIO=C` (`MODE=close`, 기본 `START_OFFSET=-3s`) |
+| G | 게릴라 오픈. 오픈 시각을 모르는 회원들이 상세를 새로고침하다가 OPEN을 본 순간 응모. 전원 201, 상세 조회 오류 0, OPEN을 끝내 못 본 회원 0. OPEN이 처음 보인 시각(Open Worker 지연 + 새로고침 간격)과 동시 연결 수를 본다 | `SCENARIO=G` (기본 `START_OFFSET=-60s`, `POLL_MIN`·`POLL_MAX`·`OPEN_WAIT`), 행사는 `OPENS_AT_PUBLIC=false` |
 | D | 마감 뒤 추첨 시간. `started_at → completed_at`, `attempt_count`, `candidate_count` | 마감 뒤 `fanmeeting-check.sh` |
 
 - 응모 기간은 10분 고정이다([정책 3절](../../docs/domains/fanmeeting/policy.md)). 행사 하나로 A나 B를 한 번, 같은 행사 마감에 C를 한 번 돌릴 수 있다. 측정마다 새 행사를 만든다.
@@ -212,9 +216,17 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
 
 4. 점검: 응모가 끝나면 한 번, 마감(오픈 + 10분) 뒤 추첨이 끝나면 한 번 더 실행한다.
 
+EC2(perf 앱 서버)에서는 DB 정보를 `/opt/restless/perf.env`에서 읽으므로 행사 번호만 준다. 여러 개를 주면 차례로 본다.
+
+```bash
+cd ~/restless
+perf/scenarios/fanmeeting-check.sh 4 5
+```
+
+다른 곳에서는 DB 정보를 환경 변수로 준다. k6 요약과 비교하려면 행사 하나만 준다.
+
 ```bash
 export DB_HOST=<perf DB 호스트> DB_NAME=perf-restless DB_USERNAME=... DB_PASSWORD=... PERF_ALLOWED_DB_HOSTS=<perf DB 호스트>
-INVARIANTS_SQL=backend/src/test/resources/harness/fanmeeting-invariants.sql \
 EVENT_FILE=.ai-output/perf/fanmeeting-event.env SUMMARY_PATH=.ai-output/perf/fanmeeting-apply.json \
 perf/scenarios/fanmeeting-check.sh
 ```
@@ -241,27 +253,30 @@ perf/scenarios/fanmeeting-check.sh
 |---|---|---|
 | `BASE_URL`, `MANAGEMENT_URL`, `PERF_ALLOWED_APP_HOSTS`, `SEED_OUT` | 드롭과 같음 | 드롭 절 참고 |
 | `EVENT_FILE` | 없음 | prepare가 만든 파일. 또는 `EVENT_ID`, `ENTRY_OPENS_AT`, `ENTRY_CLOSES_AT`를 직접 준다 |
-| `SCENARIO` | `MODE`와 시작 시각으로 정함 | `A`, `B`, `C`. 비우면 `MODE=close`는 C, `MODE=open`은 시작 시각이 오픈 전이면 B, 아니면 A. A는 시작이 오픈 이후, B는 오픈 전이어야 하고 C는 `MODE=close`여야 한다(아니면 시작하지 않는다) |
+| `SCENARIO` | `MODE`와 시작 시각으로 정함 | `A`, `B`, `C`, `G`. G는 명시해야 한다. 비우면 `MODE=close`는 C, `MODE=open`은 시작 시각이 오픈 전이면 B, 아니면 A. A는 시작이 오픈 이후, B는 오픈 전이어야 하고 C는 `MODE=close`여야 한다(아니면 시작하지 않는다) |
 | `MODE` | `SCENARIO`가 C면 `close`, 아니면 `open` | `open`이면 기준 시각이 오픈(A·B), `close`면 마감(C) |
 | `START_OFFSET` | A `2s`, B `-2s`, C `-3s` | 기준 시각에서 부하 시작까지. `-2s`, `500ms`, `2s` |
 | `START_AT` | 기준 시각 + `START_OFFSET` | 시작 시각을 ISO-8601로 직접 줄 때 |
 | `PARTICIPANTS`, `USER_OFFSET` | 1000, 0 | `users.csv`의 USER 행 중 `USER_OFFSET` 다음부터 쓰는 계정 수. C는 같은 행사에 응모하지 않은 계정을 쓰도록 `USER_OFFSET`을 준다 |
-| `PEAK_RATE`, `RAMP`, `HOLD` | 1000, 5s, 20s | 최고 도착률(초당 반복), 오르는 시간, 유지 시간 |
+| `PEAK_RATE`, `RAMP`, `HOLD` | 1000, 5s, 20s | 최고 도착률(초당 반복), 오르는 시간, 유지 시간 (G는 쓰지 않음) |
+| `POLL_MIN`, `POLL_MAX`, `OPEN_WAIT` | 1s, 3s, 120s | G만. 회원마다 무작위 새로고침 간격, 오픈 뒤 OPEN이 보일 때까지 기다리는 최대 시간 |
 | `PRE_VUS`, `MAX_VUS` | 500, 3000 | 미리 만들 VU, 최대 VU |
 | `SUMMARY_PATH` | 없음 | JSON 요약 경로 |
 
 총 도착 수(대략 `PEAK_RATE` x (`RAMP`/2 + `HOLD` + 2.5초))가 참여자보다 많아야 모든 계정이 요청한다. 10만 명이면 `PEAK_RATE=5000`처럼 올리거나 `HOLD`를 늘린다. 남는 반복은 `skipped_no_account`로 센다.
 
-`fanmeeting-check.sh`
+`fanmeeting-check.sh [행사 번호 ...]`
 
 | 변수 | 뜻 |
 |---|---|
-| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`, `PERF_ALLOWED_DB_HOSTS`, `MYSQL` | `seed.sh`와 같음 |
-| `INVARIANTS_SQL` | 불변식 SQL. `-- name:` 블록마다 위반 행 수를 낸다. DB 전체를 검사한다 |
-| `EVENT_FILE` 또는 `EVENT_ID` | 응모 정합성과 추첨을 볼 행사 |
-| `SUMMARY_PATH` | 있으면 k6 201 수와 APPLIED 수를 비교한다 |
+| 인자 | 응모 정합성과 추첨을 볼 행사 번호. 여러 개면 차례로 본다. 없으면 `EVENT_ID`, 그다음 `EVENT_FILE` |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`, `PERF_ALLOWED_DB_HOSTS`, `MYSQL` | `seed.sh`와 같음. `DB_HOST`가 비어 있으면 `PERF_ENV_FILE`에서 읽는다 |
+| `PERF_ENV_FILE` | 기본 `/opt/restless/perf.env`. 있으면 `DB_URL`·`DB_USERNAME`·`DB_PASSWORD`를 읽고(읽기 권한이 없으면 `sudo`), 허용 호스트는 `DB_URL`의 호스트로 정한다. mysql이 없으면 `mysql:8.4` 컨테이너를 쓴다. 값은 화면에 남기지 않는다 |
+| `INVARIANTS_SQL` | 기본 `backend/src/test/resources/harness/fanmeeting-invariants.sql`. `-- name:` 블록마다 위반 행 수를 낸다. DB 전체를 한 번 검사한다 |
+| `EVENT_FILE` 또는 `EVENT_ID` | 인자가 없을 때 볼 행사 하나 |
+| `SUMMARY_PATH` | 있으면 k6 201 수와 APPLIED 수를 비교한다. 행사 하나일 때만 |
 
-불변식 위반이 있거나, 회원당 응모가 2건 이상이거나, 201 수와 APPLIED 수가 맞지 않으면 종료 코드 1이다. 연결 오류·5xx는 응답만 못 받고 커밋됐을 수 있어서, 그 건수 안에서는 APPLIED가 201보다 많아도 통과하고 차이를 적는다. 이때는 DB 수가 정답이다.
+불변식 위반이 있거나, 회원당 응모가 2건 이상이거나, 201 수와 APPLIED 수가 맞지 않으면 종료 코드 1이다. 행사 번호가 숫자가 아니거나 DB에 없거나 접속 정보가 없으면 2다. 연결 오류·5xx는 응답만 못 받고 커밋됐을 수 있어서, 그 건수 안에서는 APPLIED가 201보다 많아도 통과하고 차이를 적는다. 이때는 DB 수가 정답이다.
 
 ### 안전장치
 

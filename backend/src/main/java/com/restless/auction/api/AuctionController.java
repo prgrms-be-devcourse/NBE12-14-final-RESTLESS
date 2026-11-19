@@ -1,6 +1,7 @@
 package com.restless.auction.api;
 
 import com.restless.auction.application.AuctionQueryService;
+import com.restless.auction.application.AuctionQueryCache;
 import com.restless.auction.application.AuctionQueryService.AuctionDetail;
 import com.restless.auction.application.AuctionQueryService.AuctionPage;
 import com.restless.auction.application.AuctionQueryService.AuctionResultView;
@@ -23,6 +24,7 @@ public class AuctionController {
     static final int MAX_PAGE_SIZE = 100;
 
     private final AuctionQueryService auctionQueryService;
+    private final AuctionQueryCache auctionQueryCache;
 
     /** status를 빼면 전체. page는 0부터, size는 1~100. */
     @GetMapping
@@ -32,12 +34,12 @@ public class AuctionController {
         if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "page는 0 이상, size는 1에서 100 사이여야 합니다.");
         }
-        return auctionQueryService.list(status, page, size);
+        return auctionQueryCache.list(status, page, size);
     }
 
     @GetMapping("/{auctionId}")
     public AuctionDetail detail(@PathVariable Long auctionId) {
-        return auctionQueryService.detail(auctionId);
+        return auctionQueryCache.detail(auctionId);
     }
 
     /** 종료 전이면 404 AUCTION_RESULT_NOT_FOUND. */

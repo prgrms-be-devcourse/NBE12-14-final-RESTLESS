@@ -13,9 +13,12 @@ export USERS_CSV="$PWD/perf/seed/out/users.csv"
 
 perf/scenarios/run-ticketing.sh spread 100
 perf/scenarios/run-ticketing.sh simultaneous 100
+perf/scenarios/run-ticketing.sh page 100
 ```
 
-숫자는 전체 사용자 수다. 조회의 기본 실행 시간은 2분이며, `DURATION=10s perf/scenarios/run-ticketing.sh spread 5`처럼 바꿀 수 있다. CSV 대신 시드 계정으로 로그인하려면 `SETUP=self`를 지정한다. 로그인은 Refresh Token을 DB에 추가한다. HTTP 사용 시 비밀번호와 토큰은 암호화되지 않는다. 시작 전에 perf 프로필, 테스트 DB, 회차와 토큰 유효기간을 확인한다.
+숫자는 전체 사용자 수다. 조회의 기본 실행 시간은 2분이며, `DURATION=10s perf/scenarios/run-ticketing.sh spread 5`처럼 바꿀 수 있다. 실행기는 CSV 계정을 사용하며, 같은 서버 주소·회차에서 이미 배정한 사용자 ID를 `.ai-output/perf/ticketing-account-ledger.sqlite3`에 기록하고 건너뛴다. 과거 요약에 계정 정보가 있으면 해당 기록도 반영한다. 실패·중단된 실행의 배정도 유지한다. 직접 JS를 실행하거나 다른 컴퓨터에서 실행한 결과, 다른 주소로 접근한 같은 서버의 기록은 공유되지 않으므로 별도 조율이 필요하다. HTTP 사용 시 토큰은 암호화되지 않는다. 시작 전에 perf 프로필, 테스트 DB, 회차와 토큰 유효기간을 확인한다.
+
+`page`는 로그인 완료 사용자의 첫 진입에서 좌석과 구매 가능 정보를 병렬 조회하고 이후 좌석만 3초 간격으로 조회한다. 기본 진입은 3초 분산이며 `POLL_ENTRY=simultaneous`로 동시 진입을 지정한다. 포커스 복귀·선점 이후의 갱신은 포함하지 않는다. 구매 가능 정보 API가 배포된 이미지가 필요하다. `ticket_availability_requests`, `ticket_availability_errors`, `ticket_availability_duration`으로 해당 API를 따로 확인한다.
 
 다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 요약 결과는 `.ai-output/perf/ticketing-<시나리오>/summary-<UTC 날짜시간>.json`, HTML 보고서는 같은 폴더의 `report-<UTC 날짜시간>.html`에 자동 저장된다. 예: `.ai-output/perf/ticketing-spread/summary-20261118T010203Z.json`. 실행 중에는 `http://localhost:5665`에서 대시보드를 볼 수 있다. 실행기가 기본으로 대시보드와 HTML 내보내기를 켜므로 별도 k6 환경변수를 지정하지 않아도 된다.
 
@@ -30,6 +33,8 @@ python3 perf/scenarios/ticketing/collect-prometheus-csv.py simultaneous
 ```
 
 CSV는 `.ai-output/perf/ticketing-simultaneous/prometheus-<UTC 날짜시간>.csv`에 저장된다. 각 행은 수집 시각, Prometheus 지표명, 라벨, 값이다. 수집기 시작 시 관리 포트 접근과 Prometheus 형식을 확인한 뒤에만 기록을 시작한다. 이 파일에는 관리 포트가 실제로 노출하는 지표만 들어간다. Tomcat·Hikari·JVM 값은 확인할 수 있지만 EC2 호스트 메모리나 별도 RDS 지표는 앱의 Prometheus에 노출되지 않으면 포함되지 않는다. 해당 지표는 CloudWatch 또는 DB 모니터링에서 별도로 수집해야 한다.
+
+macOS에서 실행하면 같은 폴더에 `mac-<UTC 날짜시간>.csv`도 자동 저장한다. 기본 5초마다 Mac 전체 CPU 사용률, k6 프로세스 CPU 사용률(한 코어 기준, 100% 초과 가능), 서버로 향하는 네트워크 인터페이스의 전체 수신·송신 바이트와 초당 속도를 기록한다. 네트워크 값은 Mac의 해당 인터페이스 전체 트래픽이며 k6만의 사용량은 아니다. 첫 속도는 기준값이 없어 비어 있다. `MAC_METRICS_INTERVAL`(2초 이상)과 `MAC_NET_INTERFACE`로 간격과 인터페이스를 지정할 수 있다. 수집 실패는 CSV의 `errors` 열과 터미널에 표시된다. 실시간 대시보드 연결 때문에 k6 종료가 늦으면 수집도 계속되므로 분석 시 실제 부하 시간으로 구간을 제한한다.
 
 [성능 실험 계획](../../docs/testing/performance.md)의 실험을 돌리는 k6 스크립트다. 입력 데이터는 [시드](../seed/README.md)가 만든다.
 드롭·경매·티켓팅 시나리오를 둔다. 팬미팅은 [fanmeeting.md](fanmeeting.md)에 따로 둔다.

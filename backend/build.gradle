@@ -26,6 +26,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'com.github.ben-manes.caffeine:caffeine'
     implementation 'org.flywaydb:flyway-mysql'
     runtimeOnly 'com.mysql:mysql-connector-j'
     // 부하 테스트 지표. perf 프로필에서만 /actuator/prometheus를 연다 (application-perf.yml)
@@ -51,6 +52,8 @@ tasks.named('test') {
     // 경매 시작·종료 스케줄러는 테스트에서 끈다. 다른 테스트의 데이터 정리와 겹치지 않게 하기 위해서다.
     // 스케줄러를 검증하는 테스트만 @SpringBootTest(properties)로 다시 켠다.
     systemProperty 'restless.auction.scheduler.enabled', 'false'
+    // 기존 테스트는 DB를 직접 바꾼다. 경매 조회 캐시는 AuctionQueryCacheTest에서만 켠다.
+    systemProperty 'restless.auction.query-cache.enabled', 'false'
     systemProperty 'restless.payment.reconcile.enabled', 'false'
     systemProperty 'restless.drop.expiry.enabled', 'false'
     // JDBC Timestamp fixtures and JPA TIMESTAMP_UTC must use the same time zone on every host.

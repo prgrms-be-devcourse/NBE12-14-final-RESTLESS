@@ -6,6 +6,9 @@
 //   A  오픈 뒤 몰림.   MODE=open,  기본 START_OFFSET=2s.  시작 시각 >= 오픈. 전원 201이어야 한다(거절 0).
 //   B  오픈 직전부터. MODE=open,  기본 START_OFFSET=-2s. 시작 시각 < 오픈.  오픈 전 거절(WINDOW_CLOSED)이 정상이다.
 //   C  마감 앞뒤.     MODE=close, 기본 START_OFFSET=-3s. 마감 뒤 거절이 정상이고, 마감 1초 뒤부터 보낸 요청의 201은 0이어야 한다.
+//   G  게릴라 오픈.   MODE=open,  기본 START_OFFSET=-60s. 오픈 시각을 모르는 회원들이 상세를 새로고침하다가(POLL_MIN~POLL_MAX
+//                     간격) OPEN이 보이는 순간 한 번 응모한다. 회원마다 VU 하나. 판정은 A와 같고(전원 201, 거절 0),
+//                     상세 조회 오류 0, OPEN을 끝내 못 본 회원 0을 더 본다. 행사는 OPENS_AT_PUBLIC=false로 만든다.
 // SCENARIO를 비우면 MODE와 시작 시각으로 정한다: close면 C, open이면 시작 시각이 오픈 전이면 B, 아니면 A.
 // 기준 시각은 MODE=open이면 오픈(entryOpensAt), close면 마감(entryClosesAt)이다.
 import http from 'k6/http';
@@ -19,7 +22,7 @@ const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8080').replace(/\/$/, '');
 const MANAGEMENT_URL = (__ENV.MANAGEMENT_URL || 'http://localhost:8081').replace(/\/$/, '');
 const SUMMARY_PATH = __ENV.SUMMARY_PATH || '';
 const SCENARIO_ENV = (__ENV.SCENARIO || '').toUpperCase();
-if (SCENARIO_ENV && !['A', 'B', 'C'].includes(SCENARIO_ENV)) throw new Error(`SCENARIO must be A, B or C: ${__ENV.SCENARIO}`);
+if (SCENARIO_ENV && !['A', 'B', 'C', 'G'].includes(SCENARIO_ENV)) throw new Error(`SCENARIO must be A, B, C or G: ${__ENV.SCENARIO}`);
 const MODE = __ENV.MODE || (SCENARIO_ENV === 'C' ? 'close' : 'open');
 if (MODE !== 'open' && MODE !== 'close') throw new Error(`MODE must be open or close: ${MODE}`);
 if (SCENARIO_ENV && (SCENARIO_ENV === 'C') !== (MODE === 'close')) {
@@ -60,7 +63,7 @@ function parseDuration(text) {
 
 // 기준 시각: MODE=open이면 오픈, close면 마감. 결과 구간(before, 0~1초, 1~2초, 2초 이후)도 이 시각에서 잰다.
 const REF_MS = MODE === 'open' ? OPENS_MS : CLOSES_MS;
-const DEFAULT_OFFSET = { A: '2s', B: '-2s', C: '-3s' }[SCENARIO_ENV || (MODE === 'close' ? 'C' : 'A')];
+const DEFAULT_OFFSET = { A: '2s', B: '-2s', C: '-3s', G: '-60s' }[SCENARIO_ENV || (MODE === 'close' ? 'C' : 'A')];
 const START_OFFSET = __ENV.START_OFFSET || DEFAULT_OFFSET;
 const START_MS = __ENV.START_AT ? Date.parse(__ENV.START_AT) : REF_MS + parseDuration(START_OFFSET);
 if (Number.isNaN(START_MS)) throw new Error(`bad START_AT: ${__ENV.START_AT}`);
@@ -71,6 +74,14 @@ if (SCENARIO === 'A' && START_MS < OPENS_MS) {
 if (SCENARIO === 'B' && START_MS >= OPENS_MS) {
   throw new Error(`SCENARIO B must start before entryOpensAt (start ${new Date(START_MS).toISOString()}, opens ${OPENS_AT}). Use SCENARIO=A after the open.`);
 }
+if (SCENARIO === 'G' && START_MS >= OPENS_MS) {
+  throw new Error(`SCENARIO G must start refreshing before entryOpensAt (start ${new Date(START_MS).toISOString()}, opens ${OPENS_AT}).`);
+}
+// G: 새로고침 간격(사람마다 무작위)과, 오픈 뒤 OPEN이 보일 때까지 기다리는 최대 시간.
+const POLL_MIN_MS = parseDuration(__ENV.POLL_MIN || '1s');
+const POLL_MAX_MS = parseDuration(__ENV.POLL_MAX || '3s');
+const OPEN_WAIT_MS = parseDuration(__ENV.OPEN_WAIT || '120s');
+if (!(POLL_MIN_MS > 0 && POLL_MAX_MS >= POLL_MIN_MS)) throw new Error(`need 0 < POLL_MIN <= POLL_MAX: ${__ENV.POLL_MIN}, ${__ENV.POLL_MAX}`);
 const WAIT_MS = START_MS - Date.now();
 if (WAIT_MS > 30 * 60 * 1000) throw new Error(`START_AT is ${Math.round(WAIT_MS / 60000)} minutes away. Start k6 closer to it.`);
 
@@ -109,26 +120,37 @@ const closeThresholds = MODE === 'close'
   : {};
 // A: 열린 뒤에만 보내므로 거절이 나오면 안 된다. 모두 거절돼도 요청 수·DB 수·기대 미응모 수는 서로 맞아서
 // 다른 검사로는 잡히지 않는다. 전원 201과 WINDOW_CLOSED 0을 같이 요구한다. B·C의 정상 거절에는 걸지 않는다.
-const appliedThreshold = SCENARIO === 'A' ? `count==${PARTICIPANTS}` : `count<=${PARTICIPANTS}`;
-const scenarioThresholds = SCENARIO === 'A' ? { fm_window_closed: ['count==0'] } : {};
+// G도 OPEN을 본 뒤에만 보내므로 A와 같이 전원 201이어야 하고, 새로고침 중 상세 조회 오류와 OPEN을 못 본 회원도 0이어야 한다.
+const ALL_MUST_APPLY = SCENARIO === 'A' || SCENARIO === 'G';
+const appliedThreshold = ALL_MUST_APPLY ? `count==${PARTICIPANTS}` : `count<=${PARTICIPANTS}`;
+const scenarioThresholds = {
+  ...(ALL_MUST_APPLY ? { fm_window_closed: ['count==0'] } : {}),
+  ...(SCENARIO === 'G' ? {
+    fm_detail_server_error: ['count==0'], fm_detail_transport_error: ['count==0'], fm_detail_other_error: ['count==0'],
+    fm_never_saw_open: ['count==0'],
+    'fm_detail_duration': [], 'fm_open_seen_after_ms': [],
+  } : {}),
+};
+
+// 부하 모델. A·B·C: ramping-arrival-rate. G: 회원마다 VU 하나가 한 번(새로고침을 반복하다 응모하고 끝).
+const SCENARIO_DEF = SCENARIO === 'G'
+  ? {
+    executor: 'per-vu-iterations', vus: PARTICIPANTS, iterations: 1,
+    maxDuration: `${Math.ceil((OPENS_MS - START_MS + OPEN_WAIT_MS) / 1000) + 60}s`,
+  }
+  : {
+    executor: 'ramping-arrival-rate', startRate: 0, timeUnit: '1s', preAllocatedVUs: PRE_VUS, maxVUs: MAX_VUS,
+    stages: [
+      { target: PEAK_RATE, duration: RAMP },
+      { target: PEAK_RATE, duration: HOLD },
+      { target: 0, duration: '5s' },
+    ],
+  };
 
 export const options = {
   // setup이 시작 시각까지 기다리므로 그만큼 늘린다.
   setupTimeout: `${Math.max(60, Math.ceil(WAIT_MS / 1000) + 60)}s`,
-  scenarios: {
-    fanmeeting_apply: {
-      executor: 'ramping-arrival-rate',
-      startRate: 0,
-      timeUnit: '1s',
-      preAllocatedVUs: PRE_VUS,
-      maxVUs: MAX_VUS,
-      stages: [
-        { target: PEAK_RATE, duration: RAMP },
-        { target: PEAK_RATE, duration: HOLD },
-        { target: 0, duration: '5s' },
-      ],
-    },
-  },
+  scenarios: { fanmeeting_apply: SCENARIO_DEF },
   // 업무 거절(409)은 http_req_failed에 넣지 않는다. 503 BUSY, 401, 5xx, 연결 오류는 실패다.
   // 지연 목표 수치는 미측정이라 임계값을 두지 않는다. 아래는 정합성, 전제 조건, 오류·미완료 검사다.
   // BUSY·5xx·연결 오류·dropped가 하나라도 있으면 실패로 끝난다. 한계를 찾는 회차에서는 이 실패가 측정 결과다.
@@ -152,7 +174,7 @@ export const options = {
   summaryTrendStats: ['min', 'med', 'avg', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };
 
-http.setResponseCallback(http.expectedStatuses(201, 409));
+http.setResponseCallback(http.expectedStatuses(200, 201, 409));
 
 // 실제로 보낸 응모 요청 수. 참여자 수와 같아야 모든 계정이 한 번씩 요청한 것이다.
 const requests = new Counter('fm_requests');
@@ -172,10 +194,18 @@ const appliedBy = Object.fromEntries(BUCKETS.map((b) => [b, new Counter(`fm_appl
 const closedBy = Object.fromEntries(BUCKETS.map((b) => [b, new Counter(`fm_window_closed_${b}`)]));
 // k6가 잰 지연. 집 네트워크 왕복이 섞인 체감값이다. 서버 지연은 관리 포트의 http.server.requests로 본다.
 const duration = new Trend('fm_apply_duration', true);
+// G: 새로고침(상세 조회) 결과와, 오픈 시각부터 OPEN을 처음 본 때까지의 시간(Open Worker 지연 + 새로고침 간격).
+const detailRequests = new Counter('fm_detail_requests');
+const detailServerError = new Counter('fm_detail_server_error');
+const detailTransportError = new Counter('fm_detail_transport_error');
+const detailOtherError = new Counter('fm_detail_other_error');
+const neverSawOpen = new Counter('fm_never_saw_open');
+const detailDuration = new Trend('fm_detail_duration', true);
+const openSeenAfter = new Trend('fm_open_seen_after_ms', true);
 
 // 임계값을 건 카운터에 0을 하나씩 남긴다. 표본이 없는 지표도 임계값이 평가되게 한다.
 const THRESHOLD_COUNTERS = [requests, applied, windowClosed, alreadyApplied, busy, notFound, unauthorized, otherClientError,
-  serverError, transportError];
+  serverError, transportError, detailRequests, detailServerError, detailTransportError, detailOtherError, neverSawOpen];
 
 export function setup() {
   for (const c of THRESHOLD_COUNTERS) c.add(0);
@@ -186,7 +216,7 @@ export function setup() {
   const detail = http.get(`${BASE_URL}/api/fan-meetings/${EVENT_ID}`, { tags: { name: 'setup' } });
   if (detail.status !== 200) fail(`GET /api/fan-meetings/${EVENT_ID} returned ${detail.status}`);
   const status = detail.json('status');
-  const okStatus = MODE === 'open' ? ['SCHEDULED', 'OPEN'] : ['OPEN'];
+  const okStatus = SCENARIO === 'G' ? ['SCHEDULED'] : MODE === 'open' ? ['SCHEDULED', 'OPEN'] : ['OPEN'];
   if (!okStatus.includes(status)) fail(`event ${EVENT_ID} status is ${status}, need ${okStatus}. Run fanmeeting-prepare.sh again.`);
   if (MODE === 'open' && Date.now() >= CLOSES_MS) fail(`entry window already closed at ${CLOSES_AT}`);
 
@@ -194,31 +224,84 @@ export function setup() {
   const serverDate = Date.parse(detail.headers.Date || '');
   const clockOffsetMs = Number.isNaN(serverDate) ? null : serverDate - Date.now();
 
+  // G: 게릴라 행사는 열리기 전 상세에 오픈 시각을 주지 않는다. 주면 예고 오픈 행사라 회원이 시각을 알 수 있다.
+  let guerrilla = null;
+  if (SCENARIO === 'G') {
+    let opensShown = null;
+    try { opensShown = detail.json('entryOpensAt'); } catch (e) { /* 필드가 없으면 숨김으로 본다 */ }
+    guerrilla = opensShown == null;
+    if (!guerrilla) console.warn(`event ${EVENT_ID} shows entryOpensAt before the open: not a guerrilla event (OPENS_AT_PUBLIC=false)`);
+  }
+
   const waitMs = START_MS - Date.now();
   console.log(`event=${EVENT_ID} scenario=${SCENARIO} mode=${MODE} opens=${OPENS_AT} closes=${CLOSES_AT} participants=${PARTICIPANTS} `
     + `offset=${USER_OFFSET} peak=${PEAK_RATE}/s start=${new Date(START_MS).toISOString()} wait=${Math.max(0, waitMs)}ms `
     + `serverClockOffset~${clockOffsetMs}ms`);
   if (waitMs > 0) sleep(waitMs / 1000);
-  return { clockOffsetMs };
+  return { clockOffsetMs, guerrilla };
 }
 
 export default function () {
+  if (SCENARIO === 'G') {
+    guerrillaMember();
+    return;
+  }
   const n = exec.scenario.iterationInTest;
   if (n >= users.length) {
     skipped.add(1);
     return;
   }
-  const user = users[n];
+  const outcome = apply(users[n]);
+  check(outcome, { 'no server error': (o) => !['server_error', 'transport_error', 'busy'].includes(o) });
+}
+
+function apply(user) {
   requests.add(1);
   const sentAt = Date.now();
   const res = http.post(`${BASE_URL}/api/fan-meetings/${EVENT_ID}/applications`, null, {
     headers: { Authorization: `Bearer ${user.token}` },
     tags: { name: 'POST /api/fan-meetings/{eventId}/applications' },
   });
-  const bucket = bucketOf(sentAt - REF_MS);
-  const outcome = classify(res, bucket);
+  const outcome = classify(res, bucketOf(sentAt - REF_MS));
   duration.add(res.timings.duration, { outcome });
-  check(res, { 'no server error': () => !['server_error', 'transport_error', 'busy'].includes(outcome) });
+  return outcome;
+}
+
+const pollPause = () => (POLL_MIN_MS + Math.random() * (POLL_MAX_MS - POLL_MIN_MS)) / 1000;
+
+// G: 회원 한 명. 상세를 새로고침하다가 OPEN이 보이면 한 번 응모하고 끝낸다. 새로고침 오류는 세고 다시 시도한다.
+function guerrillaMember() {
+  const user = users[exec.vu.idInTest - 1];
+  sleep(Math.random() * POLL_MAX_MS / 1000); // 회원마다 새로고침 시점을 흩는다
+  const giveUpAt = OPENS_MS + OPEN_WAIT_MS;
+  for (;;) {
+    const res = http.get(`${BASE_URL}/api/fan-meetings/${EVENT_ID}`, {
+      headers: { Authorization: `Bearer ${user.token}` },
+      tags: { name: 'GET /api/fan-meetings/{eventId}' },
+    });
+    detailRequests.add(1);
+    detailDuration.add(res.timings.duration);
+    let status = '';
+    if (res.status === 200) {
+      try { status = res.json('status'); } catch (e) { detailOtherError.add(1); }
+    } else if (res.status === 0) detailTransportError.add(1);
+    else if (res.status >= 500) detailServerError.add(1);
+    else detailOtherError.add(1);
+    if (status === 'OPEN') {
+      openSeenAfter.add(Date.now() - OPENS_MS);
+      apply(user); // OPEN을 본 즉시 보낸다
+      return;
+    }
+    if (status && status !== 'SCHEDULED') { // 열리지 않고 다른 상태가 되면(취소 등) 더 기다려도 소용없다
+      neverSawOpen.add(1);
+      return;
+    }
+    if (Date.now() >= giveUpAt) {
+      neverSawOpen.add(1);
+      return;
+    }
+    sleep(pollPause());
+  }
 }
 
 function bucketOf(elapsedMs) {
@@ -286,7 +369,15 @@ export function handleSummary(data) {
     `    applied        ${latency(trendOf('fm_apply_duration{outcome:applied}'))}`,
     `  load generator  http_req_connecting p95 ${fmt(trendOf('http_req_connecting')['p(95)'])} max ${fmt(trendOf('http_req_connecting').max)}`
       + `, http_req_blocked p95 ${fmt(trendOf('http_req_blocked')['p(95)'])} max ${fmt(trendOf('http_req_blocked').max)}`,
-    `  scenario ${SCENARIO}: ${SCENARIO === 'A' ? `every request must be 201 (applied ${value('fm_applied')}/${PARTICIPANTS}, window_closed ${value('fm_window_closed')})`
+    ...(SCENARIO === 'G' ? [
+      `  guerrilla: refresh every ${__ENV.POLL_MIN || '1s'}~${__ENV.POLL_MAX || '3s'} from ${START_OFFSET} before the open, `
+        + `opensAt hidden before the open: ${data.setup_data ? data.setup_data.guerrilla : '-'}`,
+      `    detail requests ${value('fm_detail_requests')}  errors 5xx ${value('fm_detail_server_error')} `
+        + `transport ${value('fm_detail_transport_error')} other ${value('fm_detail_other_error')}  never saw OPEN ${value('fm_never_saw_open')}`,
+      `    detail latency     ${latency(trendOf('fm_detail_duration'))}`,
+      `    OPEN first seen after the open (laptop clock)  ${latency(trendOf('fm_open_seen_after_ms'))}`,
+    ] : []),
+    `  scenario ${SCENARIO}: ${ALL_MUST_APPLY ? `every request must be 201 (applied ${value('fm_applied')}/${PARTICIPANTS}, window_closed ${value('fm_window_closed')})`
       : SCENARIO === 'B' ? 'rejections before the open are expected' : 'rejections after the close are expected; 201 sent 1s+ after the close must be 0'}`,
     `  thresholds ${failedThresholds.length ? `FAILED: ${failedThresholds.join(', ')}` : 'ok'}`,
     '  next: perf/scenarios/fanmeeting-check.sh (invariants must be 0, applications must match fm_applied)',
@@ -298,9 +389,17 @@ export function handleSummary(data) {
       conditions: { eventId: EVENT_ID, scenario: SCENARIO, mode: MODE, entryOpensAt: OPENS_AT, entryClosesAt: CLOSES_AT,
         startAt: new Date(START_MS).toISOString(), startOffset: __ENV.START_AT ? null : START_OFFSET,
         participants: PARTICIPANTS, userOffset: USER_OFFSET, peakRate: PEAK_RATE, ramp: RAMP, hold: HOLD,
-        preVUs: PRE_VUS, maxVUs: MAX_VUS, baseUrl: BASE_URL, serverClockOffsetMs: clockOffsetMs },
+        preVUs: PRE_VUS, maxVUs: MAX_VUS, baseUrl: BASE_URL, serverClockOffsetMs: clockOffsetMs,
+        ...(SCENARIO === 'G' ? { pollMin: __ENV.POLL_MIN || '1s', pollMax: __ENV.POLL_MAX || '3s', openWait: __ENV.OPEN_WAIT || '120s',
+          guerrilla: data.setup_data ? data.setup_data.guerrilla : null } : {}) },
       outcomes: Object.fromEntries(OUTCOME_METRICS.map((m) => [m, value(m)])),
       requestsTotal: value('fm_requests'),
+      ...(SCENARIO === 'G' ? { guerrilla: {
+        detailRequests: value('fm_detail_requests'), detailServerError: value('fm_detail_server_error'),
+        detailTransportError: value('fm_detail_transport_error'), detailOtherError: value('fm_detail_other_error'),
+        neverSawOpen: value('fm_never_saw_open'), detailLatency: trendOf('fm_detail_duration'),
+        openSeenAfterMs: trendOf('fm_open_seen_after_ms'),
+      } } : {}),
       outcomesTotal: requested,
       byTimeSinceReference: Object.fromEntries(BUCKET_METRICS.map((m) => [m, value(m)])),
       clientLatencyNote: 'k6 지연은 집 네트워크 왕복이 섞인 체감값이다. 서버 지연은 관리 포트 http.server.requests로 본다.',

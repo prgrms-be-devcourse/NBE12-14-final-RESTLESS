@@ -6,7 +6,7 @@
 >
 > 관련 코드: `backend/src/main/java/com/restless/auction/api/`, `backend/src/main/java/com/restless/credit/api/`, `backend/src/main/java/com/restless/common/error/ErrorCode.java`
 >
-> 마지막 확인: 2026-11-16 (엔드포인트와 공개 경로를 컨트롤러·`SecurityConfig`와 대조)
+> 마지막 확인: 2026-11-18 (목록·상세 조회 캐시 반영)
 
 오류 응답 형식은 [README 공통 규칙 3](README.md#공통-규칙)을 따른다.
 
@@ -103,6 +103,8 @@ Content-Type: application/json
 
 정렬: `OPEN`은 곧 끝나는 순, `SCHEDULED`는 곧 시작하는 순, `CLOSED`와 전체는 최근 순.
 
+목록은 서버에서 최대 1초 캐시한다. 새 경매, 상태, 종료 시각이 최대 1초 늦게 보일 수 있다.
+
 ## 상세
 
 ```json
@@ -127,6 +129,7 @@ Content-Type: application/json
 
 - 입찰이 없으면 `highestBid`는 `null`이고 `minimumBidAmount`는 시작가다.
 - `serverTime`은 클라이언트 남은 시간 표시용이다. 입찰 가능 여부는 서버가 판단한다.
+- 상세는 서버에서 최대 1초 캐시한다. 입찰 수락, 시작, 종료, 수정, 삭제가 커밋되면 다음 조회부터 바로 반영한다. 경매 변경 이벤트가 없는 닉네임 변경은 최대 1초 늦게 보일 수 있다. `serverTime`은 캐시와 상관없이 응답 시각이다.
 
 ## 입찰
 
@@ -165,6 +168,8 @@ Content-Type: application/json
   "details": { "minimumBidAmount": 54000 }
 }
 ```
+
+몰림을 줄이려고 서버는 경매 상태 캐시로 금액 부족을 먼저 확인할 수 있다. 이때 `minimumBidAmount`는 최대 1초 전 값일 수 있다. 이 값으로 다시 입찰해도 서버가 최신 금액으로 다시 검증하므로, 더 높은 금액이 필요하면 다시 `BID_AMOUNT_TOO_LOW`를 받는다.
 
 ## 결과
 
