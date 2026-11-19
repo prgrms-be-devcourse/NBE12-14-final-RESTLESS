@@ -17,7 +17,7 @@ DRAFT / SCHEDULED → CANCELLED
 
 현재 구현된 전환은 게시(`DRAFT → SCHEDULED`) 하나다. `OPEN`, `CLOSED`, `CANCELLED`로 바꾸는 기능은 아직 없다. 응답의 `saleStatus`는 판매 판정과 같은 기준(`Drop.saleStatus`)으로 계산한다. 판매 가능 상태가 아니면 `ENDED`, 그 밖에는 서버 시각으로 정한다 (#92).
 
-## 2. 대기열 상태 (SKU별, 2026-11-19 정책. 구현 전)
+## 2. 대기열 상태 (SKU별, #254 구현)
 
 대기열 행은 `(drop_id, variant_id, user_id)`에 대한 것이고, 대기 순서와 입장은 `variant_id`(SKU)별로 독립이다. 회원이 같은 드롭에서 가진 살아 있는 대기는 최대 1건이다. 다른 SKU로 진입하면 기존 대기를 `CLOSED`로 빼고 새 SKU의 `WAITING`을 만든다.
 

@@ -95,7 +95,7 @@ class DropReservationTransactionsTest {
         when(orders.find(7L)).thenReturn(Optional.of(new OrderView(7L, 2L, OrderType.DROP, OrderStatus.PENDING_PAYMENT, 0)));
         when(reservations.saveAndFlush(any(DropReservation.class))).thenAnswer(call -> call.getArgument(0));
         var queue = mock(DropQueueEntryRepository.class);
-        var admission = DropQueueEntry.waiting(1L, 2L, opens);
+        var admission = DropQueueEntry.waiting(1L, 2L, 3L, opens);
         admission.admit(opens, Duration.ofMinutes(5));
         when(queue.lockLatest(1L, 2L)).thenReturn(Optional.of(admission));
         var service = new DropReservationTransactions(drops, variants, slots, inventories, reservations,

@@ -18,6 +18,7 @@ public class DropQueueEntry {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     @Column(name = "drop_id", nullable = false) private Long dropId;
+    @Column(name = "variant_id", nullable = false) private Long variantId;
     @Column(name = "user_id", nullable = false) private Long userId;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 20)
     private DropQueueStatus status;
@@ -32,9 +33,10 @@ public class DropQueueEntry {
     @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC) @Column(name = "consumed_at")
     private Instant consumedAt;
 
-    public static DropQueueEntry waiting(Long dropId, Long userId, Instant now) {
+    public static DropQueueEntry waiting(Long dropId, Long userId, Long variantId, Instant now) {
         var entry = new DropQueueEntry();
         entry.dropId = dropId;
+        entry.variantId = variantId;
         entry.userId = userId;
         entry.status = DropQueueStatus.WAITING;
         entry.enteredAt = now;
@@ -51,6 +53,14 @@ public class DropQueueEntry {
         } else if (status == DropQueueStatus.ADMITTED && !now.isBefore(admittedUntil)) {
             status = DropQueueStatus.EXPIRED;
         }
+    }
+
+    public void close() {
+        if (live()) status = DropQueueStatus.CLOSED;
+    }
+
+    public void unavailable() {
+        if (live()) status = DropQueueStatus.UNAVAILABLE;
     }
 
     public void heartbeat(Instant now) { lastSeenAt = now; }

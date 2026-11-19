@@ -155,7 +155,7 @@ Drop 전용: 드롭 목록, 드롭 상세, 배송·결제 페이지, 결제 대�
 
 ## 7-1. SKU별 구매 입장 대기열 (DECIDED, 2026-11-19, #253)
 
-> 이 절은 정책이다. 구현(스키마, API, 입장 작업)은 아직 없고 현재 코드는 드롭 단위 대기열이다. 구현 전까지의 차이는 [API 계약 D4](../../contracts/api/drop.md)와 [transactions.md](transactions.md) D4에 표시한다.
+> 이 절의 SKU별 대기열은 #254에서 구현했다. API와 transaction 경계는 [API 계약 D4](../../contracts/api/drop.md)와 [transactions.md](transactions.md) D4에 정의한다.
 >
 > 같은 날 먼저 정한 안(`available = 0`이어도 `reserved > 0`이면 대기를 유지하고, 둘 다 0일 때만 종료)은 폐기했다. 대체 기록은 [superseded.md](../../decisions/superseded.md) LEGACY-12다. 이 절에 그 안은 남기지 않는다.
 

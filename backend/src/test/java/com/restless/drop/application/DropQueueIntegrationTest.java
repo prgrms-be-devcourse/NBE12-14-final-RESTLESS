@@ -35,6 +35,8 @@ class DropQueueIntegrationTest {
     @Autowired DropReservationService service;
     @Autowired DropQueueService queue;
     @Autowired DropQueueAdmissionJob job;
+    @Autowired DropQueueAdmissionTransactions batches;
+    @Autowired javax.sql.DataSource dataSource;
     @Autowired MutableClock clock;
     @Autowired MeterRegistry meters;
     private final Instant opens = Instant.parse("2026-11-20T03:00:00Z");
@@ -69,13 +71,17 @@ class DropQueueIntegrationTest {
     }
 
     @Test
-    void inv06SoldOutPreservesAdmissionAndReplayNeedsNoAdmission() {
-        queue.enter(drop, user);
+    void inv06SoldOutClosesAdmissionAndReplayNeedsNoAdmission() {
+        queue.enter(drop, user, variant);
         job.runOnce();
         jdbc.update("UPDATE drop_inventories SET available_quantity=0, sold_quantity=3 WHERE variant_id=?", variant);
         assertCode(() -> service.create(drop, user, "sold-out", request()), ErrorCode.DROP_SOLD_OUT);
-        assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.ADMITTED);
+        job.runOnce();
+        assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.UNAVAILABLE);
         jdbc.update("UPDATE drop_inventories SET available_quantity=3, sold_quantity=0 WHERE variant_id=?", variant);
+        assertCode(() -> service.create(drop, user, "closed-grant", request()), ErrorCode.DROP_ADMISSION_REQUIRED);
+        queue.enter(drop, user, variant);
+        job.runOnce();
         var created = service.create(drop, user, "success", request());
         assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.CONSUMED);
         clock.now = opens.plusSeconds(400);
@@ -85,7 +91,7 @@ class DropQueueIntegrationTest {
 
     @Test
     void inv06ExpiryBoundaryAndFailedOrderPreserveAdmission() {
-        queue.enter(drop, user);
+        queue.enter(drop, user, variant);
         job.runOnce();
         var invalid = new CreateDropReservationRequest(variant, "회원", "010", " ");
         assertThatIllegalArgumentException().isThrownBy(() -> service.create(drop, user, "retry", invalid));
@@ -93,7 +99,7 @@ class DropQueueIntegrationTest {
         clock.now = opens.plusSeconds(300);
         assertCode(() -> service.create(drop, user, "expired", request()), ErrorCode.DROP_ADMISSION_REQUIRED);
         assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.EXPIRED);
-        assertThat(queue.enter(drop, user).existing()).isFalse();
+        assertThat(queue.enter(drop, user, variant).existing()).isFalse();
     }
 
     @Test
@@ -104,7 +110,7 @@ class DropQueueIntegrationTest {
             var tasks = new java.util.ArrayList<java.util.concurrent.Future<DropQueueService.Entered>>();
             for (int i = 0; i < 8; i++) tasks.add(executor.submit(() -> {
                 start.await();
-                return queue.enter(drop, user);
+                return queue.enter(drop, user, variant);
             }));
             start.countDown();
             int created = 0;
@@ -117,15 +123,88 @@ class DropQueueIntegrationTest {
 
     @Test
     void heartbeatBoundaryClosesBefore404AndReentryGetsNewSequence() {
-        queue.enter(drop, user);
+        queue.enter(drop, user, variant);
         long first = jdbc.queryForObject("SELECT id FROM drop_queue_entries WHERE drop_id=? AND user_id=?", Long.class, drop, user);
         clock.now = opens.plusSeconds(30);
         assertThat(queue.me(drop, user)).isPresent();
         clock.now = opens.plusSeconds(61);
         assertThat(queue.me(drop, user)).isEmpty();
         assertThat(jdbc.queryForObject("SELECT status FROM drop_queue_entries WHERE id=?", String.class, first)).isEqualTo("CLOSED");
-        assertThat(queue.enter(drop, user).existing()).isFalse();
+        assertThat(queue.enter(drop, user, variant).existing()).isFalse();
         assertThat(jdbc.queryForObject("SELECT MAX(id) FROM drop_queue_entries WHERE drop_id=? AND user_id=?", Long.class, drop, user)).isGreaterThan(first);
+    }
+
+    @Test
+    void busySkuGateDoesNotBlockOtherSkuOrTx1() throws Exception {
+        queue.enter(drop, user, variant);
+        job.runOnce(); // Give this user a grant before holding the gate.
+        var second = admin.create(new CreateDropRequest(
+                jdbc.queryForObject("SELECT concert_id FROM drops WHERE id=?", Long.class, drop),
+                "other", "description", "url", opens, opens.plusSeconds(3600),
+                List.of(new CreateDropRequest.Variant("B", "L", 100L, 1)))).dropId();
+        admin.publish(second);
+        var otherSku = jdbc.queryForObject("SELECT id FROM drop_variants WHERE drop_id=?", Long.class, second);
+        queue.enter(second, user, otherSku);
+        try (var connection = dataSource.getConnection()) {
+            connection.setAutoCommit(false);
+            try (var statement = connection.prepareStatement("SELECT variant_id FROM drop_queue_gates WHERE variant_id=? FOR UPDATE")) {
+                statement.setLong(1, variant);
+                try (var rows = statement.executeQuery()) { assertThat(rows.next()).isTrue(); }
+            }
+            try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+                executor.submit(job::runOnce).get(3, java.util.concurrent.TimeUnit.SECONDS);
+                assertThat(queue.me(second, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.ADMITTED);
+                // TX1 must not acquire the worker gate, even while it is held by another connection.
+                var hold = executor.submit(() -> service.create(drop, user, "gate-independent", request()))
+                        .get(3, java.util.concurrent.TimeUnit.SECONDS);
+                assertThat(hold.replayed()).isFalse();
+            } finally { connection.rollback(); }
+        }
+    }
+
+    @Test
+    void closureRechecksAvailableInEachCommittedBatchAndTerminalPollingDoesNotHeartbeat() {
+        // Many users are inserted in one statement to keep the fixture small and realistic.
+        jdbc.update("""
+                INSERT INTO users (email, password_hash, nickname, role, status, created_at, updated_at)
+                SELECT CONCAT(UUID(), '@batch.test'), 'hash', 'batch', 'USER', 'ACTIVE', ?, ?
+                FROM information_schema.columns LIMIT 105
+                """, Timestamp.from(opens), Timestamp.from(opens));
+        jdbc.update("""
+                INSERT INTO drop_queue_entries (drop_id,user_id,variant_id,status,entered_at,last_seen_at)
+                SELECT ?,id,?,'WAITING',?,? FROM users WHERE nickname='batch'
+                """, drop, variant, Timestamp.from(opens), Timestamp.from(opens));
+        jdbc.update("UPDATE drop_inventories SET available_quantity=0,sold_quantity=3 WHERE variant_id=?", variant);
+        assertThat(batches.runBatch(variant)).isEqualTo(DropQueueAdmissionTransactions.Result.MORE);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_entries WHERE variant_id=? AND status='UNAVAILABLE'", Integer.class, variant)).isEqualTo(100);
+        jdbc.update("UPDATE drop_inventories SET available_quantity=3,sold_quantity=0 WHERE variant_id=?", variant);
+        batches.runBatch(variant);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_entries WHERE variant_id=? AND status='UNAVAILABLE'", Integer.class, variant)).isEqualTo(100);
+        var closedUser = jdbc.queryForObject("SELECT user_id FROM drop_queue_entries WHERE variant_id=? AND status='UNAVAILABLE' ORDER BY id LIMIT 1", Long.class, variant);
+        clock.now = opens.plusSeconds(10);
+        assertThat(queue.me(drop, closedUser).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.UNAVAILABLE);
+        assertThat(jdbc.queryForObject("SELECT last_seen_at FROM drop_queue_entries WHERE variant_id=? AND user_id=?", Timestamp.class, variant, closedUser).toInstant()).isEqualTo(opens);
+    }
+
+    @Test
+    void closureWaitsForConcurrentQueueReadInsteadOfLeavingLiveGrantBehind() throws Exception {
+        queue.enter(drop, user, variant);
+        jdbc.update("UPDATE drop_inventories SET available_quantity=0,sold_quantity=3 WHERE variant_id=?", variant);
+        try (var connection = dataSource.getConnection(); var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            connection.setAutoCommit(false);
+            try (var statement = connection.prepareStatement("SELECT id FROM drop_queue_entries WHERE drop_id=? AND user_id=? FOR UPDATE")) {
+                statement.setLong(1, drop);
+                statement.setLong(2, user);
+                try (var rows = statement.executeQuery()) { assertThat(rows.next()).isTrue(); }
+            }
+            var result = executor.submit(() -> batches.runBatch(variant));
+            try {
+                assertThatThrownBy(() -> result.get(300, java.util.concurrent.TimeUnit.MILLISECONDS))
+                        .isInstanceOf(java.util.concurrent.TimeoutException.class);
+            } finally { connection.rollback(); }
+            result.get(3, java.util.concurrent.TimeUnit.SECONDS);
+        }
+        assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.UNAVAILABLE);
     }
 
     private void assertCode(Runnable call, ErrorCode code) {

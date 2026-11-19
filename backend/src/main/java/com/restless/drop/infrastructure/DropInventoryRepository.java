@@ -6,6 +6,10 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 public interface DropInventoryRepository extends JpaRepository<DropInventory, Long> {
+    // Scalar nonlocking read avoids a stale managed inventory entity between closure batches.
+    @Query(value = "SELECT available_quantity FROM drop_inventories WHERE variant_id = :variantId", nativeQuery = true)
+    int available(Long variantId);
+
     /** EXP-01 comparison point: the only inventory hold SQL (INV-01, INV-02). */
     @Modifying
     @Query(value = """

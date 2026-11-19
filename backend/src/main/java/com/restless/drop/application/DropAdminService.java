@@ -22,6 +22,7 @@ public class DropAdminService {
     private final DropVariantRepository variants;
     private final DropInventoryRepository inventories;
     private final ConcertQueryService concerts;
+    private final DropQueueGateRepository queueGates;
     private final Clock clock;
 
     @Transactional
@@ -54,6 +55,7 @@ public class DropAdminService {
                 throw e;
             }
             inventories.save(DropInventory.initial(variant.getId(), sku.totalQuantity()));
+            queueGates.create(variant.getId());
         }
         return new Admin(drop.getId(), drop.getStatus());
     }
