@@ -216,9 +216,17 @@ docker run --rm -v "$PWD/perf:/perf:ro" -v "$PWD/.ai-output/perf:/out" \
 
 4. 점검: 응모가 끝나면 한 번, 마감(오픈 + 10분) 뒤 추첨이 끝나면 한 번 더 실행한다.
 
+EC2(perf 앱 서버)에서는 DB 정보를 `/opt/restless/perf.env`에서 읽으므로 행사 번호만 준다. 여러 개를 주면 차례로 본다.
+
+```bash
+cd ~/restless
+perf/scenarios/fanmeeting-check.sh 4 5
+```
+
+다른 곳에서는 DB 정보를 환경 변수로 준다. k6 요약과 비교하려면 행사 하나만 준다.
+
 ```bash
 export DB_HOST=<perf DB 호스트> DB_NAME=perf-restless DB_USERNAME=... DB_PASSWORD=... PERF_ALLOWED_DB_HOSTS=<perf DB 호스트>
-INVARIANTS_SQL=backend/src/test/resources/harness/fanmeeting-invariants.sql \
 EVENT_FILE=.ai-output/perf/fanmeeting-event.env SUMMARY_PATH=.ai-output/perf/fanmeeting-apply.json \
 perf/scenarios/fanmeeting-check.sh
 ```
@@ -257,16 +265,18 @@ perf/scenarios/fanmeeting-check.sh
 
 총 도착 수(대략 `PEAK_RATE` x (`RAMP`/2 + `HOLD` + 2.5초))가 참여자보다 많아야 모든 계정이 요청한다. 10만 명이면 `PEAK_RATE=5000`처럼 올리거나 `HOLD`를 늘린다. 남는 반복은 `skipped_no_account`로 센다.
 
-`fanmeeting-check.sh`
+`fanmeeting-check.sh [행사 번호 ...]`
 
 | 변수 | 뜻 |
 |---|---|
-| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`, `PERF_ALLOWED_DB_HOSTS`, `MYSQL` | `seed.sh`와 같음 |
-| `INVARIANTS_SQL` | 불변식 SQL. `-- name:` 블록마다 위반 행 수를 낸다. DB 전체를 검사한다 |
-| `EVENT_FILE` 또는 `EVENT_ID` | 응모 정합성과 추첨을 볼 행사 |
-| `SUMMARY_PATH` | 있으면 k6 201 수와 APPLIED 수를 비교한다 |
+| 인자 | 응모 정합성과 추첨을 볼 행사 번호. 여러 개면 차례로 본다. 없으면 `EVENT_ID`, 그다음 `EVENT_FILE` |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`, `PERF_ALLOWED_DB_HOSTS`, `MYSQL` | `seed.sh`와 같음. `DB_HOST`가 비어 있으면 `PERF_ENV_FILE`에서 읽는다 |
+| `PERF_ENV_FILE` | 기본 `/opt/restless/perf.env`. 있으면 `DB_URL`·`DB_USERNAME`·`DB_PASSWORD`를 읽고(읽기 권한이 없으면 `sudo`), 허용 호스트는 `DB_URL`의 호스트로 정한다. mysql이 없으면 `mysql:8.4` 컨테이너를 쓴다. 값은 화면에 남기지 않는다 |
+| `INVARIANTS_SQL` | 기본 `backend/src/test/resources/harness/fanmeeting-invariants.sql`. `-- name:` 블록마다 위반 행 수를 낸다. DB 전체를 한 번 검사한다 |
+| `EVENT_FILE` 또는 `EVENT_ID` | 인자가 없을 때 볼 행사 하나 |
+| `SUMMARY_PATH` | 있으면 k6 201 수와 APPLIED 수를 비교한다. 행사 하나일 때만 |
 
-불변식 위반이 있거나, 회원당 응모가 2건 이상이거나, 201 수와 APPLIED 수가 맞지 않으면 종료 코드 1이다. 연결 오류·5xx는 응답만 못 받고 커밋됐을 수 있어서, 그 건수 안에서는 APPLIED가 201보다 많아도 통과하고 차이를 적는다. 이때는 DB 수가 정답이다.
+불변식 위반이 있거나, 회원당 응모가 2건 이상이거나, 201 수와 APPLIED 수가 맞지 않으면 종료 코드 1이다. 행사 번호가 숫자가 아니거나 DB에 없거나 접속 정보가 없으면 2다. 연결 오류·5xx는 응답만 못 받고 커밋됐을 수 있어서, 그 건수 안에서는 APPLIED가 201보다 많아도 통과하고 차이를 적는다. 이때는 DB 수가 정답이다.
 
 ### 안전장치
 

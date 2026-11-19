@@ -27,9 +27,11 @@ Codex는 레포 루트에서 실행하면 이 파일을 자동으로 읽지 않�
 - TX1의 타이머 `drop.inventory.hold.update`, `drop.inventory.lock.held`, `drop.reservation.duration`은 성능 실험의 측정 기준이다. 이름, 태그 값, 재는 구간을 바꾸면 `docs/domains/drop/transactions.md`의 계측 표와 `backend/src/main/resources/application-perf.yml`의 히스토그램 설정을 같이 고친다.
 - 결과와 보고서는 레포에 올리지 않는다. 성능 측정 결과는 `.ai-output/perf/<날짜>-<실험>/`에 둔다.
 - 기본값이 있는 설정(예: `restless.drop.queue.required=true`)을 바꾸면, 그 기본값에 기대는 기존 테스트를 찾아 값을 명시한다.
-- 문서에 없는 정책은 멈추지 말고 문서에 가장 가까운 쪽으로 정한다. 정한 내용은 같은 PR에서 `policy.md`의 해당 절에 `PROPOSED`로 남긴다. 하네스 단계에서는 Codex가 보고서의 "대신 정한 것"에 적고 Claude가 옮긴다.
+- 문서에 없는 사항의 결정 범위는 `docs/testing/independent-verification.md`의 정책 결정 표를 따른다. 내부 구현 선택은 진행하고 기록한다. 공개 계약·핵심 불변식·사업 정책과 열린 질문은 사람의 결정 전 확정하지 않는다. `PROPOSED`는 승인이 아니다.
 
 ## 검증 (`backend/`에서)
+
+구현 검증·PR 승인 준비 전에 저장소 루트의 `tools/verification/skills/independent-verification/SKILL.md`를 읽고 따른다. Codex와 Claude 모두 commit·push·PR을 수행할 수 있다. 구현과 독립 검증의 분리는 유지한다.
 
 - 드롭 테스트: `./gradlew test --tests 'com.restless.drop.*'`
 - 모듈 경계: `./gradlew test --tests 'com.restless.architecture.*'`
