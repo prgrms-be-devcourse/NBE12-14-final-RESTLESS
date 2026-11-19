@@ -13,7 +13,7 @@
 | INV-03 | 예약, 확정, 반환, 환불 복원은 같은 SKU를 대상으로 한다 |
 | INV-04 | 드롭 주문 하나에는 SKU 한 종류, 수량 1개만 있다 |
 | INV-05 | 같은 사용자·드롭의 활성 구매 거래는 최대 1건이다 |
-| INV-06 | 유효한 구매권이 없으면 신규 예약을 만들 수 없다 |
+| INV-06 | 유효한 입장 허가가 없으면 신규 예약을 만들 수 없다 |
 | INV-07 | 같은 구매 요청을 재시도해도 예약, 주문, 결제가 중복 생성되지 않는다 |
 | INV-08 | PG 승인 요청 금액은 서버에 저장된 주문 스냅샷 금액과 같다 |
 | INV-09 | PG 승인과 내부 구매 확정이 모두 성공한 경우에만 `PAID`다 |
@@ -23,7 +23,7 @@
 | INV-13 | 확정된 주문의 상품명, SKU, 금액, 배송지는 원본이 바뀌어도 변하지 않는다 |
 | INV-14 | 판매 종료 후 새 예약을 만들지 않는다. 진행 중인 결제의 확인과 복구는 별도로 처리한다 |
 | INV-15 | 예약이 기록한 현재 결제 시도(`current_payment_id`)가 아닌 결제 결과로 예약, 재고, 주문을 바꾸지 않는다 |
-| INV-16 | 대기열을 쓸 때(`queue.required=true`) 커밋된 상태에서 SKU별 미사용 유효 `ADMITTED` 수는 그 SKU의 `available`을 넘지 않는다. 동시 입장 작업이 있어도 마찬가지다 (2026-11-19, #254 구현) |
-| INV-17 | SKU의 `available = 0`을 입장 작업이 관찰하고 끝난 시점에는 그 SKU의 `WAITING`과 미사용 유효 `ADMITTED`가 남지 않는다. `reserved` 수량과 무관하다. 다른 SKU의 대기와, 이미 성공한 점유(`CONSUMED`와 그 재고 예약)는 바뀌지 않는다. 종료된 구매권으로 신규 점유를 만들 수 없다 (2026-11-19, #254 구현) |
+| INV-16 | 입장 제어를 쓸 때(`queue.required=true`) 커밋된 상태에서 SKU별 미사용 유효 `ADMITTED` 수는 그 SKU의 `available`을 넘지 않는다. 동시 입장 허가 작업이 있어도 마찬가지다 (2026-11-19, #254 구현) |
+| INV-17 | SKU의 `available = 0`을 입장 허가 작업이 관찰하고 끝난 시점에는 그 SKU의 `WAITING`과 미사용 유효 `ADMITTED`가 남지 않는다. `reserved` 수량과 무관하다. 다른 SKU의 대기와, 이미 성공한 점유(`CONSUMED`와 그 재고 예약)는 바뀌지 않는다. 종료된 입장 허가로 신규 점유를 만들 수 없다 (2026-11-19, #254 구현) |
 
-INV-17은 진입 직후부터 입장 작업이 돌 때까지의 짧은 지연을 허용하는 형태라 SQL 검사로는 입장 작업 실행 뒤에만 의미가 있다. INV-16, INV-17의 SQL 검사는 `drop_queue_entries.variant_id`가 생긴 뒤에 `backend/src/test/resources/harness/drop-invariants.sql`에 넣는다. #254가 컬럼을 추가했다. SQL 검사는 보호된 하네스 브랜치에서 후속 반영하고 그때까지는 `DropSkuQueuePolicyAcceptanceTest`가 같은 조건을 API로 검증한다.
+INV-17은 진입 직후부터 입장 허가 작업이 돌 때까지의 짧은 지연을 허용하는 형태라 SQL 검사로는 입장 허가 작업 실행 뒤에만 의미가 있다. INV-16, INV-17의 SQL 검사는 `drop_queue_entries.variant_id`가 생긴 뒤에 `backend/src/test/resources/harness/drop-invariants.sql`에 넣는다. #254가 컬럼을 추가했다. SQL 검사는 보호된 하네스 브랜치에서 후속 반영하고 그때까지는 `DropSkuQueuePolicyAcceptanceTest`가 같은 조건을 API로 검증한다.

@@ -19,17 +19,17 @@ AI는 아래 항목을 임의로 확정하지 않는다. 구현에 영향을 주
 | 티켓팅·공통 결제 복구 계약 | 승인 시도 스키마, 전체 잠금 순서(결제 쪽은 결정: 결제 준비를 포함해 결제 행 → 도메인 행, [ADR-0003](../decisions/0003-payment-module-boundary.md), #73), 조회 간격·운영 담당·알림 채널, 미완료 시도 탐지, 안전한 재실행·최종 실패 조건 합의 필요. 공통 결제 쪽 조회 간격·미완료 시도 탐지·최종 실패 기준(NotFound 15분)은 #46에서 결정 ([대사 규칙](../operations/failure-handling.md#공통-결제-대사-46)). 남은 것은 티켓팅 쪽 항목 |
 | Drop과 Concert 연결의 필수 여부 | 팀 확인. 현재 구현은 필수 (`drops.concert_id` NOT NULL FK, 등록 API 필수). 선택으로 바꾸려면 새 마이그레이션과 계약 변경 |
 | 예약 TTL (초기 제안 5분) | PG UX 고려 후 확정 |
-| 구매권 TTL | DECIDED (2026-11-13): 입장 허가부터 5분 ([드롭 정책 7절](../domains/drop/policy.md#7-구매권-정책-decided-2026-11-13)) |
-| 재대기, 재입장 정책 | DECIDED (2026-11-13): 상태 조회가 30초보다 오래 끊기면 이탈. 다시 들어오면 새 순번 ([드롭 정책 7절](../domains/drop/policy.md#7-구매권-정책-decided-2026-11-13)) |
-| 대기열 FIFO 보장 수준 | DECIDED (2026-11-13): 대략적인 진입 순서. 정확한 선착순보다 처리 속도 우선. 2026-11-19부터 순서는 SKU별이며 DB 락 획득 순서를 구매 배정 순서로 쓰지 않는다 |
-| MySQL Queue SQL과 Worker 구조 | 구현됨 (#70): `drop_queue_entries`, 입장 작업 `dropQueueAdmissionJob` ([transactions.md](../domains/drop/transactions.md), [data-model.md](../domains/drop/data-model.md)) |
-| 드롭 SKU별 구매 입장 대기열 (#253) | DECIDED (2026-11-19, 같은 날 개정): 진입 때 SKU를 고르고 `variant_id`를 저장하며, 대기 순서와 입장은 SKU별이다. 추가 구매권 발급 가능 수는 `max(0, available - 미사용 유효 ADMITTED 수)`이고 기존 배치 제한도 적용한다. 동시 입장 작업이 초과 발급하면 안 된다. SKU의 `available = 0`이면 `reserved`와 무관하게 신규 진입과 발급을 중단하고 기존 `WAITING`과 미사용 `ADMITTED`를 종료한다. 이는 현재 구매 불가이며 최종 매진이 아니다. 재고가 반환되면 판매 기간 안에서 새 진입으로 재개하고 종료된 순번과 구매권은 복구하지 않는다. 이미 점유한 구매의 결제, 기한, 재결제, 복구는 그대로다. #254에서 구현했다 ([드롭 정책 7-1절](../domains/drop/policy.md#7-1-sku별-구매-입장-대기열-decided-2026-11-19-253)). 먼저 정한 안(`reserved > 0`이면 대기 유지)은 폐기했다 ([LEGACY-12](../decisions/superseded.md)) |
+| 입장 허가 유효시간 | DECIDED (2026-11-13): 입장 허가부터 5분 ([드롭 정책 7절](../domains/drop/policy.md#7-입장-허가-정책-decided-2026-11-13)) |
+| 재대기, 재입장 정책 | DECIDED (2026-11-13): 상태 조회가 30초보다 오래 끊기면 이탈. 다시 들어오면 새 입장 순번 ([드롭 정책 7절](../domains/drop/policy.md#7-입장-허가-정책-decided-2026-11-13)) |
+| 입장 제어 FIFO 보장 수준 | DECIDED (2026-11-13): 대략적인 진입 순서. 정확한 선착순보다 처리 속도 우선. 2026-11-19부터 순서는 SKU별이며 DB 락 획득 순서를 구매 배정 순서로 쓰지 않는다 |
+| MySQL Queue SQL과 Worker 구조 | 구현됨 (#70): `drop_queue_entries`, 입장 허가 작업 `dropQueueAdmissionJob` ([transactions.md](../domains/drop/transactions.md), [data-model.md](../domains/drop/data-model.md)) |
+| 드롭 SKU별 구매 입장 제어 (#253) | DECIDED (2026-11-19, 같은 날 개정): 진입 때 SKU를 고르고 `variant_id`를 저장하며, 입장 순번과 입장은 SKU별이다. 추가 입장 허가 가능 수는 `max(0, available - 미사용 유효 ADMITTED 수)`이고 기존 배치 제한도 적용한다. 동시 입장 허가 작업이 초과 허가하면 안 된다. SKU의 `available = 0`이면 `reserved`와 무관하게 신규 진입과 입장 허가를 중단하고 기존 `WAITING`과 미사용 `ADMITTED`를 종료한다. 이는 현재 구매 불가이며 최종 매진이 아니다. 재고가 반환되면 판매 기간 안에서 새 진입으로 재개하고 종료된 입장 순번과 입장 허가는 복구하지 않는다. 이미 점유한 구매의 결제, 기한, 재결제, 복구는 그대로다. #254에서 구현했다 ([드롭 정책 7-1절](../domains/drop/policy.md#7-1-sku별-구매-입장-제어-decided-2026-11-19-253)). 먼저 정한 안(`reserved > 0`이면 대기 유지)은 폐기했다 ([LEGACY-12](../decisions/superseded.md)) |
 | 드롭 품절 뒤 대기자 처리 (이전 OPEN 항목) | DECIDED (2026-11-19): 위 항목으로 결정됐다. `available = 0`이면 대기를 종료한다. 이전 성능 실험(2026-11-18)은 옛 동작(판매 기간 종료 전에는 품절만으로 대기를 닫지 않음)으로 측정했다 ([실험 계획](../testing/drop-performance-plan.md)) |
-| 드롭 대기 종료 상태와 API (#253) | DECIDED (2026-11-19): 새 대기 상태 `UNAVAILABLE`(후보 비교는 [드롭 정책 7-1절](../domains/drop/policy.md#7-1-sku별-구매-입장-대기열-decided-2026-11-19-253)). `GET .../queue/me`는 200 `UNAVAILABLE`, `POST .../queue/entries`는 `available = 0`이면 409 `DROP_SOLD_OUT`(메시지 현재 구매 불가), 종료된 구매권의 점유 요청은 403 `DROP_ADMISSION_REQUIRED`. 구현 때 CHECK 제약을 바꾸는 migration이 필요하다 |
-| 드롭 대기 종료의 동시성 처리 방식 (#253) | DECIDED (2026-11-19): 같은 SKU의 입장과 종료 트랜잭션을 DB 락으로 한 번에 하나씩 직렬화한다. 이미 처리 중이면 기다리지 않고 그 SKU만 건너뛴다. 서버 안 메모리 락은 쓰지 않는다. 사용자 구매(TX1)는 이 락을 잡지 않는다. 구체 수단(게이트 행 또는 이름 있는 락)은 구현 단계에서 고른다. 종료는 입장 작업이 `available = 0`을 관찰했을 때 수행하며 진입 직후 입장 작업 한 번의 주기만큼 지연을 허용한다. 입장 작업 주기는 1초다(2026-11-19 결정, 현재 기본값 유지) ([transactions.md D4](../domains/drop/transactions.md)) |
-| 드롭 같은 회원의 SKU 변경 진입 (#253) | DECIDED (2026-11-19): 새 SKU로 새로 `WAITING`하고 기존 SKU의 대기를 뺀다(`CLOSED`). 새 SKU가 `available = 0`이면 거절하고 기존 대기를 유지한다. 페이지를 나가면 기존 heartbeat 규칙(30초)으로 해제한다. 기존 대기가 `ADMITTED`(미사용 구매권)일 때도 같은 처리이며 2026-11-19에 사람이 확인했다 |
-| 드롭 구매권과 다른 SKU 점유 요청의 오류 코드 (#253) | DECIDED (2026-11-19): 403 `DROP_ADMISSION_REQUIRED`. 정상 화면에서는 생기지 않는 요청을 막는 방어 검사다 |
-| 판매 시작 직전 대기열 허용 여부 | 정책 확인. 현재 계약·구현은 판매 기간 밖 진입을 409 `DROP_NOT_ON_SALE`로 거절한다 ([drop.md](../contracts/api/drop.md) D4). 허용하려면 계약 변경 |
+| 드롭 대기 종료 상태와 API (#253) | DECIDED (2026-11-19): 새 대기 상태 `UNAVAILABLE`(후보 비교는 [드롭 정책 7-1절](../domains/drop/policy.md#7-1-sku별-구매-입장-제어-decided-2026-11-19-253)). `GET .../queue/me`는 200 `UNAVAILABLE`, `POST .../queue/entries`는 `available = 0`이면 409 `DROP_SOLD_OUT`(메시지 현재 구매 불가), 종료된 입장 허가의 점유 요청은 403 `DROP_ADMISSION_REQUIRED`. 구현 때 CHECK 제약을 바꾸는 migration이 필요하다 |
+| 드롭 대기 종료의 동시성 처리 방식 (#253) | DECIDED (2026-11-19): 같은 SKU의 입장과 종료 트랜잭션을 DB 락으로 한 번에 하나씩 직렬화한다. 이미 처리 중이면 기다리지 않고 그 SKU만 건너뛴다. 서버 안 메모리 락은 쓰지 않는다. 사용자 구매(TX1)는 이 락을 잡지 않는다. 구체 수단(게이트 행 또는 이름 있는 락)은 구현 단계에서 고른다. 종료는 입장 허가 작업이 `available = 0`을 관찰했을 때 수행하며 진입 직후 입장 허가 작업 한 번의 주기만큼 지연을 허용한다. 입장 허가 작업 주기는 1초다(2026-11-19 결정, 현재 기본값 유지) ([transactions.md D4](../domains/drop/transactions.md)) |
+| 드롭 같은 회원의 SKU 변경 진입 (#253) | DECIDED (2026-11-19): 새 SKU로 새로 `WAITING`하고 기존 SKU의 대기를 뺀다(`CLOSED`). 새 SKU가 `available = 0`이면 거절하고 기존 대기를 유지한다. 페이지를 나가면 기존 heartbeat 규칙(30초)으로 해제한다. 기존 대기가 `ADMITTED`(미사용 입장 허가)일 때도 같은 처리이며 2026-11-19에 사람이 확인했다 |
+| 드롭 입장 허가와 다른 SKU 점유 요청의 오류 코드 (#253) | DECIDED (2026-11-19): 403 `DROP_ADMISSION_REQUIRED`. 정상 화면에서는 생기지 않는 요청을 막는 방어 검사다 |
+| 판매 시작 직전 입장 신청 허용 여부 | 정책 확인. 현재 계약·구현은 판매 기간 밖 진입을 409 `DROP_NOT_ON_SALE`로 거절한다 ([drop.md](../contracts/api/drop.md) D4). 허용하려면 계약 변경 |
 | 회원, 주최자 권한 범위 | 팀 확인 |
 | 쿠폰의 드롭 결제 할인 연결 | 후순위 협의 |
 | 공연장·좌석 배치 등록/선택 | DECIDED: 배치는 초기 데이터로 운영자 등록. 미등록 배치는 화면 없이 자료 전달·검토 후 등록. 주최자는 등록 배치 선택, 예매 오픈 이후 변경 금지 ([상세](../domains/ticketing/venue-consistency.md)) |
@@ -39,7 +39,7 @@ AI는 아래 항목을 임의로 확정하지 않는다. 구현에 영향을 주
 | 프론트엔드 정적 배포 가능 여부 | 저장소 확인 |
 | Outbox/Kafka 채택 | [ADR-0001](../decisions/0001-event-handling.md) 재검토 조건에 따름 |
 | PostgreSQL 전환 | 비교 실험 후 |
-| Redis 대기열 전환 | 비교 실험 후 |
+| Redis 입장 제어 전환 | 비교 실험 후 |
 | 다중 EC2 도입 | 병목과 목표 확인 후 |
 
 ## Member 도메인 (검토 중)
