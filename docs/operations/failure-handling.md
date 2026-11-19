@@ -30,7 +30,7 @@
 | F-09 | PG 환불 취소 결과 불명확 | 테스트: `PaymentReconciliationTest.cancelUnknownCompletesWithStoredKind`, `cancellationUnknownCanBeRetriedRepeatedlyWithoutInvalidSelfTransition` |
 | F-10 | PG 취소 성공 후 서버 종료 | 대사가 같은 키로 취소를 다시 보낸다. 테스트: `PaymentReconciliationTest.staleCancelPendingRetriesSameKeyOutsideTx` |
 | F-11 | 예약 만료 Worker 중복 실행 | 테스트: `DropPaymentLifecycleIntegrationTest.twoExpiryWorkersReleaseOnceAndDisabledSchedulerLeavesRunnableJob`, `DropPaymentAcceptanceTest.approvalStartRacesExpiryWithOneOutcome` |
-| F-12 | 구매 대기열 저장소 장애 | TBD |
+| F-12 | 구매 입장 제어 저장소 장애 | TBD |
 | F-13 | 구매 확정 커밋 후 리스너 실행 전 서버 종료 (이벤트 유실) | [ADR-0001](../decisions/0001-event-handling.md) 관측 방법 참고 |
 
 ## 대상 장애 (Auction)

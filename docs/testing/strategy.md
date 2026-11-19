@@ -12,7 +12,7 @@
 | 프론트엔드 빌드 (CI와 동일) | `npm run build` |
 | 아키텍처 검사 (모듈 경계) | `./gradlew test --tests 'com.restless.architecture.*'` |
 | 드롭 수용 테스트 (블랙박스) | `./gradlew test --tests 'com.restless.drop.acceptance.*'` |
-| 동시성 테스트 (드롭·결제) | `./gradlew test --tests 'com.restless.drop.*' --tests 'com.restless.payment.*'` (재고 1개에 100명, 같은 키 동시 요청, 입장 작업 동시 실행, 승인 동시 요청 등) |
+| 동시성 테스트 (드롭·결제) | `./gradlew test --tests 'com.restless.drop.*' --tests 'com.restless.payment.*'` (재고 1개에 100명, 같은 키 동시 요청, 입장 허가 작업 동시 실행, 승인 동시 요청 등) |
 | 부하 테스트 시드 (perf DB) | 레포 루트에서 `perf/seed/seed.sh --scale base --profile perf` ([perf/seed](../../perf/seed/README.md)) |
 | 부하 테스트 | TBD |
 
@@ -65,7 +65,7 @@ JUnit 5, Spring Boot Test, MySQL Testcontainers, Mockito, k6. 필요하면 Redis
 
 테스트 작성 시 주의:
 
-- 드롭 대기열은 기본으로 켜져 있다(`restless.drop.queue.required=true`). 대기열을 검증하지 않는 드롭 테스트는 `restless.drop.queue.required=false`를 명시한다.
+- 드롭 입장 제어는 기본으로 켜져 있다(`restless.drop.queue.required=true`). 입장 제어를 검증하지 않는 드롭 테스트는 `restless.drop.queue.required=false`를 명시한다.
 - 결제 흐름 테스트가 가짜 결제 결과 Handler를 쓸 때는 실제 Handler와 같은 빈 이름(예: `dropPaymentResultHandler`)으로 등록하고 그 테스트 클래스에만 `spring.main.allow-bean-definition-overriding=true`를 준다. 같은 결제 대상에 Handler가 둘이면 운영 코드의 중복 검사가 컨텍스트를 실패시킨다.
 
 ## 7. PR 전 확인

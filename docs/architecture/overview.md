@@ -9,8 +9,8 @@
 | 빌드 | Gradle 단일 모듈, 도메인별 패키지 | PROPOSED |
 | DB | MySQL 8, 모든 도메인 공통 ([ADR-0002](../decisions/0002-common-conventions.md)) | DECIDED |
 | PostgreSQL | 비교 실험 후 판단 | EXPERIMENTAL |
-| 구매 대기열 | MySQL | DECIDED |
-| Redis 대기열 | MySQL과 비교 후 판단 | EXPERIMENTAL |
+| 구매 입장 제어 | MySQL | DECIDED |
+| Redis 입장 제어 | MySQL과 비교 후 판단 | EXPERIMENTAL |
 | 비즈니스 이벤트 | Spring Event Listener ([ADR-0001](../decisions/0001-event-handling.md)) | DECIDED |
 | Outbox, Kafka | ADR-0001 재검토 조건 충족 시 검토 | DEFERRED |
 | PG | 토스페이먼츠 테스트 | DECIDED |
@@ -33,7 +33,7 @@ backend/src/main/java/com/restless/
 ├── concert/
 ├── drop/
 │   ├── api/            # Controller
-│   ├── application/    # 유스케이스, 트랜잭션 경계, 대기열·만료 작업, 결제 Handler, DTO(dto/)
+│   ├── application/    # 유스케이스, 트랜잭션 경계, 입장 제어·만료 작업, 결제 Handler, DTO(dto/)
 │   ├── domain/         # 엔티티, 상태 전이
 │   └── infrastructure/ # Repository
 ├── order/ payment/
@@ -44,7 +44,7 @@ backend/src/main/java/com/restless/
 1. 각 도메인은 자기 비즈니스 규칙과 영속성을 책임진다.
 2. 다른 도메인의 Repository를 직접 참조하지 않는다.
 3. 결제와 도메인 상태를 한 DB 트랜잭션에서 바꿀 때는 결제 모듈이 트랜잭션을 열고 도메인의 `PaymentResultHandler`를 동기 호출한다 ([ADR-0003](../decisions/0003-payment-module-boundary.md)). 주문은 도메인이 `OrderService`로 같은 트랜잭션 안에서 만들고 바꾼다. 별도 Coordinator는 두지 않는다. 주문 상세는 두 가지 읽기 연결을 쓴다. 결제 대상은 도메인이 `order.application.OrderPayableResolver`를 구현해 알려 준다. 최근 결제는 결제 모듈의 `PaymentLookup`으로만 읽는다. 주문 모듈이 결제 모듈에서 쓸 수 있는 타입은 이것 하나다 (ArchUnit `OwnedModuleBoundaryTest`, #114).
-4. 대기열은 MySQL 구현으로 시작한다. Redis로 바꿀 때 구매 로직이 유지되도록 경계를 두되, 필요 이상으로 추상화하지 않는다.
+4. 입장 제어는 MySQL 구현으로 시작한다. Redis로 바꿀 때 구매 로직이 유지되도록 경계를 두되, 필요 이상으로 추상화하지 않는다.
 5. 후속 작업 리스너는 그 기능을 소유한 모듈에 둔다.
 6. Lombok은 `@Getter`, `@NoArgsConstructor(access = AccessLevel.PROTECTED)`, `@RequiredArgsConstructor`만 쓴다. `@Setter`, `@Data`는 쓰지 않는다. 상태 변경은 의도가 드러나는 메서드로 한다 (예: `reserve()`, `confirm()`).
 7. 공통 오류 처리는 `common/error`에 둔다.
@@ -81,6 +81,6 @@ Spring Boot → Toss Payments HTTPS API
 
 ## 4. 수평 확장 (EXPERIMENTAL)
 
-단일 서버의 실제 한계를 먼저 측정한다. 확장이 필요하면 다중 EC2, ALB, 공통 대기열 상태, 중복 스케줄러 방지, 전체 DB 연결 수, 경매 실시간 전달(SSE)의 서버 간 전달을 검토한다.
+단일 서버의 실제 한계를 먼저 측정한다. 확장이 필요하면 다중 EC2, ALB, 공통 입장 제어 상태, 중복 스케줄러 방지, 전체 DB 연결 수, 경매 실시간 전달(SSE)의 서버 간 전달을 검토한다.
 
 확장 목적이 처리량, 가용성, 무중단 배포 중 무엇인지 구분한다.

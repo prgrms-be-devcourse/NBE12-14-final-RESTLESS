@@ -3,7 +3,7 @@
 - 상태: Draft (2026-11-11)
 - 기준: MySQL 8, PK는 `BIGINT AUTO_INCREMENT`, 시각은 `DATETIME(6)` UTC ([ADR-0002](../decisions/0002-common-conventions.md))
 - 컬럼 정본은 아래 그림이다. 실제 DDL은 `backend/src/main/resources/db/migration/`에 있다.
-- 주문·결제·드롭 테이블은 그림 작성 뒤 마이그레이션으로 바뀌었다(결제의 `order_id` 제거, `payable_type`/`payable_id`/`idempotency_key` 등 추가, 드롭 대기열 추가). 이 테이블들은 마이그레이션이 정본이다.
+- 주문·결제·드롭 테이블은 그림 작성 뒤 마이그레이션으로 바뀌었다(결제의 `order_id` 제거, `payable_type`/`payable_id`/`idempotency_key` 등 추가, 드롭 입장 신청 테이블 추가). 이 테이블들은 마이그레이션이 정본이다.
 
 ![통합 ERD](erd.svg)
 
@@ -77,7 +77,7 @@ erDiagram
 
 ### 드롭
 
-- 구매 대기열은 `drop_queue_entries`다 (V20261113_1800, [data-model.md](../domains/drop/data-model.md)). 그림에는 아직 없다.
+- 입장 신청은 `drop_queue_entries` 행이다 (V20261113_1800, [data-model.md](../domains/drop/data-model.md)). 그림에는 아직 없다.
 - `drops.concert_id`는 현재 필수(NOT NULL FK)로 구현돼 있다. NULL 허용 여부는 팀 확인 대상으로 남아 있다.
 - 결제는 주문을 FK로 가리키지 않는다. `payments.payable_type`/`payable_id`로 결제 대상(드롭은 재고 점유 ID)을 가리킨다 ([ADR-0003](../decisions/0003-payment-module-boundary.md)).
 

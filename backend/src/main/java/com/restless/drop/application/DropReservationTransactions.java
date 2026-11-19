@@ -63,7 +63,7 @@ public class DropReservationTransactions {
         DropQueueEntry admission = null;
         if (settings.queueRequired()) {
             admission = queueEntries.lockLatest(dropId, userId)
-                    .filter(entry -> entry.validAdmission(clock.instant()))
+                    .filter(entry -> entry.getVariantId().equals(variant.getId()) && entry.validAdmission(clock.instant()))
                     .orElseThrow(() -> new BusinessException(ErrorCode.DROP_ADMISSION_REQUIRED));
         }
         // Keep the most contended inventory lock at the end of validation (EXP-01).

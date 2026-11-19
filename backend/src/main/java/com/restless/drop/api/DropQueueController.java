@@ -4,6 +4,8 @@ import com.restless.auth.LoginMember;
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
 import com.restless.drop.application.DropQueueService;
+import com.restless.drop.application.dto.EnterDropQueueRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -14,8 +16,9 @@ import org.springframework.web.bind.annotation.*;
 public class DropQueueController {
     private final DropQueueService service;
     @PostMapping("/entries")
-    public ResponseEntity<DropQueueService.View> enter(@PathVariable Long dropId, @LoginMember Long userId) {
-        var result = service.enter(dropId, userId);
+    public ResponseEntity<DropQueueService.View> enter(@PathVariable Long dropId, @LoginMember Long userId,
+            @Valid @RequestBody EnterDropQueueRequest request) {
+        var result = service.enter(dropId, userId, request.variantId());
         return ResponseEntity.status(result.existing() ? 200 : 201).body(result.body());
     }
     @GetMapping("/me")

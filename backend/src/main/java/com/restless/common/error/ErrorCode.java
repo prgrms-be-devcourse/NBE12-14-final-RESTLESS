@@ -70,7 +70,7 @@ public enum ErrorCode {
 
     DROP_INVALID_STATE(HttpStatus.CONFLICT, "드롭 상태가 올바르지 않습니다."),
     DROP_NOT_ON_SALE(HttpStatus.CONFLICT, "드롭 판매 기간이 아닙니다."),
-    DROP_SOLD_OUT(HttpStatus.CONFLICT, "드롭 재고가 소진되었습니다."),
+    DROP_SOLD_OUT(HttpStatus.CONFLICT, "현재 구매 불가"),
     DROP_ACTIVE_PURCHASE_EXISTS(HttpStatus.CONFLICT, "진행 중인 드롭 구매가 있습니다."),
     DROP_ADMISSION_REQUIRED(HttpStatus.FORBIDDEN, "드롭 구매권이 필요합니다."),
 

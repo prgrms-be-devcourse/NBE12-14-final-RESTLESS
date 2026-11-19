@@ -9,6 +9,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 @Component
 public class DropQueueMetrics {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(DropQueueMetrics.class);
     private final MeterRegistry registry;
     public DropQueueMetrics(MeterRegistry registry, DropQueueEntryRepository entries,
                             DropQueueSettings settings, Clock clock) {
@@ -21,9 +22,23 @@ public class DropQueueMetrics {
     public void closed(String reason) {
         afterCommit(() -> registry.counter("drop.queue.closed", "reason", reason).increment());
     }
+    public void unavailable() { afterCommit(() -> registry.counter("drop.queue.unavailable").increment()); }
+    public void skipped() { afterCommit(() -> registry.counter("drop.queue.skipped").increment()); }
+    public void gateMissing() { registry.counter("drop.queue.gate.missing").increment(); }
+    public void failed() { registry.counter("drop.queue.failure").increment(); }
     private void afterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override public void afterCommit() { action.run(); }
+            @Override public void afterCommit() {
+                try { action.run(); }
+                catch (RuntimeException error) {
+                    log.error("Drop queue metric failed errorType={}", error.getClass().getName());
+                    registry.counter("drop.queue.metric.failure").increment();
+                }
+            }
         });
     }
 }

@@ -1,5 +1,5 @@
 package com.restless.drop.domain;
 
 public enum DropQueueStatus {
-    WAITING, ADMITTED, CONSUMED, EXPIRED, CLOSED
+    WAITING, ADMITTED, CONSUMED, EXPIRED, CLOSED, UNAVAILABLE
 }

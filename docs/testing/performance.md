@@ -2,7 +2,7 @@
 
 ## 1. 연구 주제
 
-고동시성 한정판 드롭의 거래 정합성 보장과 Admission Control 기반 Throughput, Latency 최적화
+고동시성 한정판 드롭의 거래 정합성 보장과 유입 제어(Admission Control) 기반 Throughput, Latency 최적화
 
 핵심 질문: 한정된 재고에 구매 요청이 순간적으로 몰릴 때, 초과 판매와 중복 결제를 막으면서 높은 지속 처리량과 낮은 꼬리 지연을 어떻게 확보하는가?
 
@@ -11,16 +11,16 @@
 | 우선순위 | 목표 | 지표 |
 |---|---|---|
 | P0 | Consistency | 초과 예약, 초과 판매, 중복 주문, 중복 차감·반환, 불변식 위반 모두 0건 |
-| P0 | Throughput | 성공 예약 TPS, 구매 확정 TPS, 대기열 등록·조회 RPS, 최대 지속 처리량 |
-| P0 | Latency | 재고 예약, 대기열 API p50/p95/p99, 대기 체류 p95/p99, 전체 구매 소요 p95/p99 |
-| P0 | Admission Control | 입장 허가율 제어, DB 커넥션 풀과 Lock Wait 보호, 5xx·타임아웃 억제, 정상 품절·대기 안내와 서버 오류 구분 |
+| P0 | Throughput | 성공 예약 TPS, 구매 확정 TPS, 입장 신청·조회 RPS, 최대 지속 처리량 |
+| P0 | Latency | 재고 예약, 입장 제어 API p50/p95/p99, 대기 체류 p95/p99, 전체 구매 소요 p95/p99 |
+| P0 | 유입 제어 | 입장 허가율 제어, DB 커넥션 풀과 Lock Wait 보호, 5xx·타임아웃 억제, 정상 품절·대기 안내와 서버 오류 구분 |
 | 확장 | Scalability | 서버 증설 전후 처리량, 지연 비교 |
 | 확장 | Resilience | 장애 후 거래 복구 |
 | 확장 | Efficiency | 같은 자원에서 처리 가능한 거래량, 비용 |
 
 최종 기준: 정합성 위반 0건과 미리 정한 지연, 오류율 목표를 지키면서 달성 가능한 최대 지속 처리량을 높인다.
 
-드롭의 실행 전 목적·가설·목표는 [성능 실험 계획](drop-performance-plan.md), 부하·준비·예산은 [실행 절차](drop-performance-procedure.md), 집계·판정은 [측정 규약](drop-performance-measurement.md)에 정의한다. 이번 범위는 한정 수량 판매·병목·대기열·폴링 비용이며 PG 장애 복구 성능은 후속 과제다. 목표는 달성 결과나 운영 SLA가 아니다. 다른 도메인의 목표는 별도 계획을 따른다. 측정하지 않은 결과 수치는 쓰지 않는다.
+드롭의 실행 전 목적·가설·목표는 [성능 실험 계획](drop-performance-plan.md), 부하·준비·예산은 [실행 절차](drop-performance-procedure.md), 집계·판정은 [측정 규약](drop-performance-measurement.md)에 정의한다. 이번 범위는 한정 수량 판매·병목·입장 제어·폴링 비용이며 PG 장애 복구 성능은 후속 과제다. 목표는 달성 결과나 운영 SLA가 아니다. 다른 도메인의 목표는 별도 계획을 따른다. 측정하지 않은 결과 수치는 쓰지 않는다.
 
 ## 3. 반복 방법
 
@@ -36,8 +36,8 @@ Observe → Hypothesize → Change → Verify Correctness → Benchmark → Comp
 | ID | 주제 | 비교 | 측정 |
 |---|---|---|---|
 | EXP-01 | 재고 동시성 제어 | SELECT→UPDATE, 비관적 락, 조건부 UPDATE | 초과 예약, 성공 TPS, p95/p99, Lock Wait |
-| EXP-02 | Admission Control 효과 | 대기열 없음, MySQL 대기열 | 예약 TPS, 오류율, p95/p99, 대기시간, DB 사용량 |
-| EXP-03 | 대기열 저장소 | MySQL, Redis | 같은 API, 정책, 허가율, 유입 패턴, 재고, 서버 사양에서 비교 |
+| EXP-02 | 유입 제어 효과 | 입장 제어 끔, MySQL 입장 제어 | 예약 TPS, 오류율, p95/p99, 대기시간, DB 사용량 |
+| EXP-03 | 입장 제어 저장소 | MySQL, Redis | 같은 API, 정책, 허가율, 유입 패턴, 재고, 서버 사양에서 비교 |
 | EXP-04 | SQL, 트랜잭션 개선 | DB 왕복 수, 조건부 UPDATE, 트랜잭션 범위, 인덱스, Hot Row | 지연, 처리량 |
 | EXP-05 | DBMS (EXPERIMENTAL) | MySQL, PostgreSQL | 같은 스키마, 인덱스, 트랜잭션 조건 |
 | EXP-06 | 수평 확장 (EXPERIMENTAL) | 단일, 다중 서버 | 공유 DB 병목 분석 포함 |

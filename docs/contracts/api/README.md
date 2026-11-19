@@ -14,7 +14,7 @@
 | [auth.md](auth.md) | 회원가입, 로그인, 토큰, 프로필, 탈퇴, 인증 규칙 | 홍승연 |
 | [payment.md](payment.md) | 주문 조회, 결제 준비·승인·조회, 손님 환불 | 이태호 |
 | [ticketing.md](ticketing.md) | 공연, 회차, 좌석 선점, checkout, 발급 티켓 | 송혜민 |
-| [drop.md](drop.md) | 드롭 등록·조회, 대기열, 재고 점유 | 이태호 |
+| [drop.md](drop.md) | 드롭 등록·조회, 입장 제어, 재고 점유 | 이태호 |
 | [fanmeeting.md](fanmeeting.md) | 팬미팅 생성, 응모, 추첨 결과, 팬미팅 주문 | 홍승연 |
 | [auction.md](auction.md) | 경매, 입찰, 실시간 스트림, 크레딧 | 천종원 |
 | [common.md](common.md) | (나뉨) 예전 링크 안내용. `auth.md`, `payment.md`로 옮김 | - |
