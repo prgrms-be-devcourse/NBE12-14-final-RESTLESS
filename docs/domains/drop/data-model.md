@@ -97,7 +97,7 @@ SKU별 재고
 
 ## DROP_QUEUE_ENTRIES (DECIDED, D4)
 
-> SKU별 대기열은 `V20261119_1800__drop_sku_queue.sql`로 구현했다(#254). 기존 활성 대기는 CLOSED로 닫고, 소비된 이력은 연결된 점유 SKU를 우선 사용한다. 나머지 이력은 해당 드롭의 첫 SKU를 역사적 FK로 지정하며 기존 순번이나 구매권은 복구하지 않는다. SKU가 없는 비정상 드롭은 NOT NULL 검증에서 실패하므로 migration 전에 점검한다.
+> SKU별 대기열은 `V20261119_1800__drop_sku_queue_expand.sql`, `V20261119_1801__drop_sku_queue_backfill.sql`, `V20261119_1802__drop_sku_queue_constrain.sql`로 구현했다(#254). 기존 활성 대기는 CLOSED로 닫고, 소비된 이력은 연결된 점유 SKU를 우선 사용한다. 나머지 이력은 해당 드롭의 첫 SKU를 역사적 FK로 지정하며 기존 순번이나 구매권은 복구하지 않는다. SKU가 없는 비정상 드롭은 NOT NULL 검증에서 실패하므로 migration 전에 점검한다.
 
 - `id`: 서버가 발급하는 증가 PK. 대략적인 진입 순서에도 사용한다.
 - `drop_id`, `user_id`: 드롭·회원 FK.
@@ -118,7 +118,7 @@ SKU별 재고
 - `variant_id`: PK이자 `drop_variants.id` FK. SKU마다 한 행.
 - 입장과 종료 batch만 `FOR UPDATE SKIP LOCKED`로 락 획득한다. 게이트가 사용 중이면 즉시 건너뛰고 다음 주기에 재시도한다.
 - gate row lock은 transaction 종료 시 자동 해제된다. TX1과 PG 호출은 이 게이트를 사용하지 않는다.
-- 기존 SKU는 migration에서, 새 SKU는 운영자 생성 transaction에서 게이트를 만든다.
+- 기존 SKU는 expand migration에서, 새 SKU는 운영자 생성 transaction에서 게이트를 만든다. 작업이 누락 gate를 발견하면 로그와 `drop.queue.gate.missing` 합계를 남기고 별도 짧은 transaction의 INSERT IGNORE로 보완한 뒤 한 번 재시도한다.
 
 ## 공통 테이블 (Drop 소유 아님)
 

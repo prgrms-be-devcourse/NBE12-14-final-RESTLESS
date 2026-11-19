@@ -13,7 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class DropQueueAdmissionTransactions {
     static final int CLOSE_BATCH_SIZE = 100;
-    public enum Result { DONE, MORE, SKIPPED }
+    public enum Result { DONE, MORE, SKIPPED, MISSING }
     private final DropQueueGateRepository gates;
     private final DropQueueEntryRepository entries;
     private final DropVariantRepository variants;
@@ -26,7 +26,9 @@ public class DropQueueAdmissionTransactions {
     /** One short transaction per SKU batch. TX1 never touches the gate. */
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public Result runBatch(Long variantId) {
-        if (!gates.tryLock(variantId)) {
+        var gate = gates.tryLock(variantId);
+        if (gate == DropQueueGateRepository.LockResult.MISSING) return Result.MISSING;
+        if (gate == DropQueueGateRepository.LockResult.BUSY) {
             metrics.skipped();
             return Result.SKIPPED;
         }

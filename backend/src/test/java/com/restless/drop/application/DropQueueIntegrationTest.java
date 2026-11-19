@@ -29,6 +29,7 @@ import static org.assertj.core.api.Assertions.*;
 @SpringBootTest(properties = {"pg.provider=fake", "spring.docker.compose.enabled=false",
         "restless.drop.queue.required=true", "restless.drop.queue.admit-per-run=2"})
 @Import({TestcontainersConfiguration.class, DropQueueIntegrationTest.TimeConfig.class})
+@org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
 class DropQueueIntegrationTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired DropAdminService admin;
@@ -36,6 +37,7 @@ class DropQueueIntegrationTest {
     @Autowired DropQueueService queue;
     @Autowired DropQueueAdmissionJob job;
     @Autowired DropQueueAdmissionTransactions batches;
+    @Autowired DropQueueGateRepair gateRepair;
     @Autowired javax.sql.DataSource dataSource;
     @Autowired MutableClock clock;
     @Autowired MeterRegistry meters;
@@ -135,7 +137,8 @@ class DropQueueIntegrationTest {
     }
 
     @Test
-    void busySkuGateDoesNotBlockOtherSkuOrTx1() throws Exception {
+    void busySkuGateDoesNotBlockOtherSkuOrTx1(org.springframework.boot.test.system.CapturedOutput output) throws Exception {
+        var missingBefore = meters.counter("drop.queue.gate.missing").count();
         queue.enter(drop, user, variant);
         job.runOnce(); // Give this user a grant before holding the gate.
         var second = admin.create(new CreateDropRequest(
@@ -152,13 +155,17 @@ class DropQueueIntegrationTest {
                 try (var rows = statement.executeQuery()) { assertThat(rows.next()).isTrue(); }
             }
             try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
-                executor.submit(job::runOnce).get(3, java.util.concurrent.TimeUnit.SECONDS);
-                assertThat(queue.me(second, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.ADMITTED);
-                // TX1 must not acquire the worker gate, even while it is held by another connection.
-                var hold = executor.submit(() -> service.create(drop, user, "gate-independent", request()))
-                        .get(3, java.util.concurrent.TimeUnit.SECONDS);
-                assertThat(hold.replayed()).isFalse();
-            } finally { connection.rollback(); }
+                try {
+                    executor.submit(job::runOnce).get(3, java.util.concurrent.TimeUnit.SECONDS);
+                    assertThat(queue.me(second, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.ADMITTED);
+                    // TX1 must not acquire the worker gate, even while it is held by another connection.
+                    var hold = executor.submit(() -> service.create(drop, user, "gate-independent", request()))
+                            .get(3, java.util.concurrent.TimeUnit.SECONDS);
+                    assertThat(hold.replayed()).isFalse();
+                } finally { connection.rollback(); }
+            }
+            assertThat(meters.counter("drop.queue.gate.missing").count()).isEqualTo(missingBefore);
+            assertThat(output.getAll()).doesNotContain("Drop queue gate missing variantId=" + variant);
         }
     }
 
@@ -233,6 +240,43 @@ class DropQueueIntegrationTest {
         job.runOnce();
         assertThat(jdbc.queryForObject("SELECT status FROM drop_queue_entries WHERE drop_id=? AND user_id=? ORDER BY id DESC LIMIT 1",
                 String.class, drop, waitingUser)).isEqualTo("CLOSED");
+        assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.ADMITTED);
+    }
+
+    @Test
+    void missingGateIsRepairedAndAdmitsWithOneErrorAndUntaggedMetric(org.springframework.boot.test.system.CapturedOutput output) {
+        queue.enter(drop, user, variant);
+        jdbc.update("DELETE FROM drop_queue_gates WHERE variant_id=?", variant);
+        var before = meters.counter("drop.queue.gate.missing").count();
+        job.runOnce();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_gates WHERE variant_id=?", Integer.class, variant)).isEqualTo(1);
+        assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.ADMITTED);
+        assertThat(meters.counter("drop.queue.gate.missing").count()).isEqualTo(before + 1);
+        assertThat(meters.find("drop.queue.gate.missing").counter().getId().getTags()).isEmpty();
+        var errors = output.getAll().lines().filter(line -> line.contains("ERROR") && line.contains("Drop queue gate missing variantId=" + variant)).count();
+        assertThat(errors).isEqualTo(1);
+    }
+
+    @Test
+    void concurrentMissingGateRepairCommitsOneRowAndMakesProgress() throws Exception {
+        queue.enter(drop, user, variant);
+        jdbc.update("DELETE FROM drop_queue_gates WHERE variant_id=?", variant);
+        assertThat(batches.runBatch(variant)).isEqualTo(DropQueueAdmissionTransactions.Result.MISSING);
+        assertThat(batches.runBatch(variant)).isEqualTo(DropQueueAdmissionTransactions.Result.MISSING);
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var start = new java.util.concurrent.CountDownLatch(1);
+            var tasks = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+            for (int i = 0; i < 2; i++) tasks.add(executor.submit(() -> {
+                start.await();
+                gateRepair.createIfMissing(variant);
+                job.runOnce();
+                return null;
+            }));
+            start.countDown();
+            for (var task : tasks) task.get(3, java.util.concurrent.TimeUnit.SECONDS);
+        }
+        job.runOnce();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_gates WHERE variant_id=?", Integer.class, variant)).isEqualTo(1);
         assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.ADMITTED);
     }
 

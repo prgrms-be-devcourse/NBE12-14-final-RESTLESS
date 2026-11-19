@@ -111,6 +111,9 @@ PG 취소 결과가 불명확하면 재고를 복원하지 않는다.
 
 ### SKU별 입장과 종료 (#254)
 
+게이트 락 결과는 LOCKED / BUSY / MISSING이다. SKIP LOCKED 결과가 비면 nonlocking 존재 조회로 BUSY와 MISSING을 구분한다. MISSING이면 batch transaction을 종료한 뒤 ERROR 로그와 태그 없는 `drop.queue.gate.missing`을 남긴다. 별도 REQUIRES_NEW transaction에서 INSERT IGNORE로 보완하고 batch를 한 번 재시도한다. 재시도도 비면 건너뛴다. 정상 LOCKED와 BUSY 경로에는 INSERT를 하지 않으며 TX1은 이 복구 경로를 사용하지 않는다. 동시 repair의 INSERT는 PK 충돌 처리를 위해 짧게 기다릴 수 있지만 admission transaction을 유지한 채 기다리지 않는다.
+
+
 정책은 [policy.md 7-1절](policy.md#7-1-sku별-구매-입장-대기열-decided-2026-11-19-253)이다. 구매 입장 대기열, ADMITTED 권한, DB row lock 대기는 서로 다르다. 종료 상태(`UNAVAILABLE`)와 오류 코드는 확정이다. 동시성은 `drop_queue_gates`의 SKU별 행으로 직렬화한다. 게이트만 `FOR UPDATE SKIP LOCKED`로 읽고, 이미 사용 중인 SKU는 건너뛴다.
 
 - 진입: SKU(`variantId`)를 받아 그 SKU가 그 드롭 소속인지, 판매 중인지, `available > 0`인지 확인한다. `available = 0`이면 행을 만들지 않고 409 `DROP_SOLD_OUT`(현재 구매 불가)을 돌려준다. 이 확인은 재고 행을 잠그지 않는 읽기다. 구매 슬롯으로 같은 회원의 진입을 직렬화하고 최신 대기 행에 락 획득을 한다.

@@ -24,8 +24,13 @@ public class DropQueueMetrics {
     }
     public void unavailable() { afterCommit(() -> registry.counter("drop.queue.unavailable").increment()); }
     public void skipped() { afterCommit(() -> registry.counter("drop.queue.skipped").increment()); }
+    public void gateMissing() { registry.counter("drop.queue.gate.missing").increment(); }
     public void failed() { registry.counter("drop.queue.failure").increment(); }
     private void afterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override public void afterCommit() {
                 try { action.run(); }

@@ -36,6 +36,7 @@ class DropQueueAdmissionTransactionsTest {
 
     @Test
     void busyGateSkipsWithoutReadingInventoryOrEntries() {
+        when(gates.tryLock(1L)).thenReturn(DropQueueGateRepository.LockResult.BUSY);
         assertThat(worker.runBatch(1L)).isEqualTo(DropQueueAdmissionTransactions.Result.SKIPPED);
         verifyNoInteractions(entries, inventories, variants, drops);
         verify(metrics).skipped();
@@ -43,7 +44,7 @@ class DropQueueAdmissionTransactionsTest {
 
     @Test
     void inv16CountsGrantsBeforeReadingInventoryAndSubtractsExistingGrants() {
-        when(gates.tryLock(1L)).thenReturn(true);
+        when(gates.tryLock(1L)).thenReturn(DropQueueGateRepository.LockResult.LOCKED);
         when(entries.validGrantCount(1L, now)).thenReturn(2L);
         when(inventories.available(1L)).thenReturn(2);
         assertThat(worker.runBatch(1L)).isEqualTo(DropQueueAdmissionTransactions.Result.DONE);
@@ -55,7 +56,7 @@ class DropQueueAdmissionTransactionsTest {
 
     @Test
     void closureBatchDoesNotChangeConsumedEntryAndStopsAfterStockReturn() {
-        when(gates.tryLock(1L)).thenReturn(true);
+        when(gates.tryLock(1L)).thenReturn(DropQueueGateRepository.LockResult.LOCKED);
         when(inventories.available(1L)).thenReturn(0, 1);
         var batch = java.util.stream.LongStream.range(0, 100)
                 .mapToObj(id -> DropQueueEntry.waiting(2L, id, 1L, now)).toList();
@@ -74,7 +75,7 @@ class DropQueueAdmissionTransactionsTest {
 
     @Test
     void expiredWaitingIsSkippedWithoutSpendingAdmissionAllowance() {
-        when(gates.tryLock(1L)).thenReturn(true);
+        when(gates.tryLock(1L)).thenReturn(DropQueueGateRepository.LockResult.LOCKED);
         when(inventories.available(1L)).thenReturn(2);
         var variant = mock(DropVariant.class);
         when(variant.getDropId()).thenReturn(2L);
