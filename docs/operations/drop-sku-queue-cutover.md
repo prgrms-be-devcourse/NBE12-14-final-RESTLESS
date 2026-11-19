@@ -1,4 +1,4 @@
-# SKU 대기열 배포 전환 (#254, PR #255)
+# SKU 입장 제어 배포 전환 (#254, PR #255)
 
 이 릴리스는 **이미지 롤백만으로 되돌릴 수 없다**. 자동 배포는 dev merge 뒤 약 3분 안에 교체하며, 새 이미지가 180초 안에 health UP이 아니면 이전 이미지를 실행한다. migration 후 이전 코드는 `variant_id NOT NULL` 때문에 진입 INSERT가 실패하고 `UNAVAILABLE`을 읽지 못한다. 실패한 Flyway 기록은 이전 이미지의 기동도 막을 수 있다.
 
