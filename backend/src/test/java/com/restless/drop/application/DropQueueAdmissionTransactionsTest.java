@@ -24,6 +24,16 @@ class DropQueueAdmissionTransactionsTest {
             drops, inventories, new DropQueueSettings(Duration.ofSeconds(30), Duration.ofMinutes(5), 2),
             metrics, Clock.fixed(now, ZoneOffset.UTC));
 
+    @org.junit.jupiter.api.BeforeEach
+    void seedDrop() {
+        var variant = mock(DropVariant.class);
+        when(variant.getDropId()).thenReturn(2L);
+        when(variants.findById(1L)).thenReturn(Optional.of(variant));
+        var drop = Drop.draft(1L, "item", "description", "url", now.minusSeconds(60), now.plusSeconds(600), now);
+        drop.publish();
+        when(drops.findById(2L)).thenReturn(Optional.of(drop));
+    }
+
     @Test
     void busyGateSkipsWithoutReadingInventoryOrEntries() {
         assertThat(worker.runBatch(1L)).isEqualTo(DropQueueAdmissionTransactions.Result.SKIPPED);

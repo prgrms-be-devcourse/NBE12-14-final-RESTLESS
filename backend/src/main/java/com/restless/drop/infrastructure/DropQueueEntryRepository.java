@@ -26,6 +26,9 @@ public interface DropQueueEntryRepository extends JpaRepository<DropQueueEntry, 
     @Query(value = "SELECT * FROM drop_queue_entries WHERE variant_id=:variantId AND status IN ('WAITING','ADMITTED') ORDER BY id LIMIT :batch FOR UPDATE", nativeQuery = true)
     List<DropQueueEntry> lockLive(Long variantId, int batch);
 
+    @Query(value = "SELECT * FROM drop_queue_entries WHERE variant_id=:variantId AND status='WAITING' AND (:onSale = false OR last_seen_at < :cutoff) ORDER BY id LIMIT :batch FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    List<DropQueueEntry> lockStaleWaiting(Long variantId, boolean onSale, Instant cutoff, int batch);
+
     @Query(value = "SELECT COUNT(*) FROM drop_queue_entries WHERE status='WAITING' AND last_seen_at >= :cutoff", nativeQuery = true)
     long waitingCount(Instant cutoff);
 }

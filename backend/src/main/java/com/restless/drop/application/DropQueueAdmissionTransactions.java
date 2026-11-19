@@ -43,9 +43,21 @@ public class DropQueueAdmissionTransactions {
             return batch.size() == CLOSE_BATCH_SIZE ? Result.MORE : Result.DONE;
         }
         int allowance = (int) Math.min(Math.max(0L, available - grants), settings.admitPerRun());
-        if (allowance == 0) return Result.DONE;
         var variant = variants.findById(variantId).orElseThrow();
         var drop = drops.findById(variant.getDropId()).orElseThrow();
+        // Lifecycle cleanup must run even if valid grants already cover all available stock.
+        // Bound this batch too; MORE commits before processing any further stale rows.
+        var cleanupNow = clock.instant();
+        var stale = entries.lockStaleWaiting(variantId, drop.isOnSale(cleanupNow),
+                cleanupNow.minus(settings.heartbeatTimeout()), CLOSE_BATCH_SIZE);
+        for (var entry : stale) {
+            var now = clock.instant();
+            entry.refresh(now, settings.heartbeatTimeout(), drop.isOnSale(now));
+            if (entry.getStatus() == DropQueueStatus.CLOSED) metrics.closed("heartbeat_or_sale");
+        }
+        entries.flush();
+        if (stale.size() == CLOSE_BATCH_SIZE) return Result.MORE;
+        if (allowance == 0) return Result.DONE;
         int admitted = 0;
         while (admitted < allowance) {
             var batch = entries.lockWaiting(variantId, allowance - admitted);

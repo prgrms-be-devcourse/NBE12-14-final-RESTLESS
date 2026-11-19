@@ -207,6 +207,35 @@ class DropQueueIntegrationTest {
         assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.UNAVAILABLE);
     }
 
+    @Test
+    void staleWaitingClosesEvenWhenExistingGrantsCoverAllAvailableStock() {
+        assertCoveredWaitingCloses(opens.plusSeconds(31));
+    }
+
+    @Test
+    void saleEndedWaitingClosesEvenWhenExistingGrantsCoverAllAvailableStock() {
+        // Sale ends before the existing buyer's five-minute admission expires.
+        jdbc.update("UPDATE drops SET closes_at=? WHERE id=?", Timestamp.from(opens.plusSeconds(10)), drop);
+        assertCoveredWaitingCloses(opens.plusSeconds(11));
+    }
+
+    private void assertCoveredWaitingCloses(Instant later) {
+        jdbc.update("UPDATE drop_inventories SET available_quantity=1,sold_quantity=2 WHERE variant_id=?", variant);
+        queue.enter(drop, user, variant);
+        job.runOnce();
+        jdbc.update("""
+                INSERT INTO users (email,password_hash,nickname,role,status,created_at,updated_at)
+                VALUES (?, 'hash', 'waiting', 'USER', 'ACTIVE', ?, ?)
+                """, "wait-" + UUID.randomUUID() + "@test", Timestamp.from(opens), Timestamp.from(opens));
+        var waitingUser = jdbc.queryForObject("SELECT MAX(id) FROM users", Long.class);
+        queue.enter(drop, waitingUser, variant);
+        clock.now = later;
+        job.runOnce();
+        assertThat(jdbc.queryForObject("SELECT status FROM drop_queue_entries WHERE drop_id=? AND user_id=? ORDER BY id DESC LIMIT 1",
+                String.class, drop, waitingUser)).isEqualTo("CLOSED");
+        assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.ADMITTED);
+    }
+
     private void assertCode(Runnable call, ErrorCode code) {
         assertThatThrownBy(call::run).isInstanceOfSatisfying(BusinessException.class,
                 e -> assertThat(e.getErrorCode()).isEqualTo(code));
