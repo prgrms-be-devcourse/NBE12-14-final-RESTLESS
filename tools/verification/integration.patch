@@ -37,6 +37,15 @@ diff --git a/tools/harness/guard/guard.py b/tools/harness/guard/guard.py
      "restless/ticketing", "restless/fanmeeting", "restless/auction",
      "restless/concert", "restless/credit", "restless/coupon",
      "drop/AGENTS.md", "drop/CLAUDE.md",
+@@ -79,7 +80,7 @@
+ # Signs that a shell command writes files. Harmless redirects are stripped first.
+ WRITES = re.compile(
+     r"(>|\btee\b|\bsed\b[^|;&]*\s-i|\bperl\b[^|;&]*\s-[a-z]*i|\bmv\b|\brm\b|\bcp\b|\bln\b|\bchmod\b|"
+-    r"\btruncate\b|\bdd\b|\binstall\b|\bpatch\b|\bpython3?\b|\bnode\b|\bruby\b|\bawk\b[^|;&]*-i|"
++    r"\btruncate\b|\bdd\b|\binstall\b|(?<![.\w])patch\b|\bpython3?\b|\bnode\b|\bruby\b|\bawk\b[^|;&]*-i|"
+     r"\bgit\s+(checkout|restore|rm|mv|apply|am|stash|reset|clean)\b|\bapply_patch\b)"
+ )
+ HARMLESS_REDIRECT = re.compile(r"\d?>\s*/dev/null|\d>&\d|&>\s*/dev/null")
 @@ -125,10 +126,10 @@
      agent=True for the Codex hook (an agent edits), False for pre-commit (a commit on a branch)."""
      if REPORT.match(path) and op in ("add", "update"):
@@ -202,7 +211,7 @@ diff --git a/tools/harness/guard/test_guard.py b/tools/harness/guard/test_guard.
   ("versioned guard (shell)", {"tool_name": "shell", "tool_input": {"command": "echo x > tools/harness/guard/guard.py"}}, (B, B, B)),
   ("run versioned harness-check", {"tool_name": "shell", "tool_input": {"command": "bash tools/harness/harness-check.sh > .ai-output/x.log 2>&1"}}, (0, 0, 0)),
   # Known gap: the shell check matches path text, so cd + relative path is not seen here.
-@@ -50,13 +50,21 @@
+@@ -50,13 +50,24 @@
   ("git commit", {"tool_name": "shell", "tool_input": {"command": "git commit -m 'feat(drop): add stock hold' -- backend"}}, (0, 0, 0)),
   ("commit --no-verify", {"tool_name": "shell", "tool_input": {"command": "git commit --no-verify -m x"}}, (B, B, B)),
   ("commit -nm", {"tool_name": "shell", "tool_input": {"command": "git commit -nm x"}}, (B, B, B)),
@@ -213,6 +222,9 @@ diff --git a/tools/harness/guard/test_guard.py b/tools/harness/guard/test_guard.
 + ("run guard tests", {"tool_name": "shell", "tool_input": {"command": "python3 tools/harness/guard/test_guard.py ."}}, (0, 0, 0)),
 + ("check integration patch", {"tool_name": "shell", "tool_input": {"command": "git apply --reverse --check tools/verification/integration.patch"}}, (0, 0, 0)),
 + ("stage verification patch", {"tool_name": "shell", "tool_input": {"command": "git add tools/verification/integration.patch"}}, (0, 0, 0)),
++ ("read verification patch", {"tool_name": "shell", "tool_input": {"command": "cat tools/verification/integration.patch"}}, (0, 0, 0)),
++ ("diff verification patch", {"tool_name": "shell", "tool_input": {"command": "git diff HEAD -- tools/verification/integration.patch"}}, (0, 0, 0)),
++ ("patch writer still blocked", {"tool_name": "shell", "tool_input": {"command": "patch tools/harness/guard/guard.py < change.diff"}}, (B, B, B)),
 + ("checker chained write blocked", {"tool_name": "shell", "tool_input": {"command": "python3 tools/harness/guard/test_guard.py .; echo x > tools/harness/guard/guard.py"}}, (B, B, B)),
 + ("checker redirect to guard blocked", {"tool_name": "shell", "tool_input": {"command": "python3 tools/harness/guard/test_guard.py . > tools/harness/guard/guard.py"}}, (B, B, B)),
 + ("write verification via shell blocked", {"tool_name": "shell", "tool_input": {"command": "echo x > tools/verification/skills/independent-verification/SKILL.md"}}, (B, B, B)),
