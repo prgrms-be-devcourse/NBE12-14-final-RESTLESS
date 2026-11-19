@@ -132,7 +132,7 @@ PG 취소 결과가 불명확하면 재고를 복원하지 않는다.
 2. 미사용 유효 ADMITTED 수 `c`를 센다 (`status = 'ADMITTED' AND now < admitted_until`).
 3. 그다음 재고 행에서 `available_quantity`를 읽는다. `reserved_quantity`는 보지 않는다.
 4. 분기:
-   - `available = 0`: 이 SKU의 `WAITING`과 미사용 `ADMITTED`를 종료 상태로 바꾼다. 행을 잠근 뒤 아직 그 상태인 행만 바꾸는 조건부 UPDATE다. `CONSUMED`인 행과 그 점유는 건드리지 않는다. 한 트랜잭션이 너무 커지지 않도록 일정 개수씩 나눠 처리하고, 나눈 묶음마다 `available`을 다시 읽어 0이 아니면 거기서 멈춘다.
+   - `available = 0`: 이 SKU의 `WAITING`과 미사용 `ADMITTED`를 종료 상태로 바꾼다. 행을 잠근 뒤 아직 그 상태인 행만 바꾸는 조건부 UPDATE다. 대기 행 락은 짧게 끝나므로(TX1, 상태 조회 한 번) 다른 트랜잭션이 쥔 대기 행은 `SKIP LOCKED`로 건너뛰지 않고 락을 기다린다. 건너뛰면 살아 있는 행이 남아 INV-17을 어긴다. 기다리지 않고 건너뛰는 것은 SKU 게이트 락뿐이다. `CONSUMED`인 행과 그 점유는 건드리지 않는다. 한 트랜잭션이 너무 커지지 않도록 일정 개수씩 나눠 처리하고, 나눈 묶음마다 `available`을 다시 읽어 0이 아니면 거기서 멈춘다.
    - `available - c <= 0`: 남은 재고가 이미 구매권으로 덮였다. 입장시키지 않고 끝낸다. 대기는 유지한다.
    - 그 밖: `n = min(available - c, admit-per-run)`. 같은 SKU의 `WAITING`을 `id` 오름차순으로 `n`명까지 `ADMITTED`로 바꾼다. 이탈자는 CLOSED로 닫고 건너뛴다.
 5. Commit

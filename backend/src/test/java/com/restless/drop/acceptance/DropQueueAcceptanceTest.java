@@ -137,7 +137,7 @@ class DropQueueAcceptanceTest extends DropAcceptanceSupport {
     }
 
     @Test
-    @DisplayName("입장 작업 두 개가 동시에 돌아도 같은 회원을 두 번 입장시키지 않는다")
+    @DisplayName("입장 작업 두 개가 동시에 돌아도 같은 회원을 두 번 입장시키지 않는다. 같은 SKU를 처리 중이면 한 작업이 건너뛸 수 있고, 다음 실행에서 진행된다")
     void concurrentAdmissionJobsDoNotDoubleAdmit() throws Exception {
         DropFixture drop = onSaleDrop(10);
         List<Long> users = new ArrayList<>();
@@ -151,8 +151,17 @@ class DropQueueAcceptanceTest extends DropAcceptanceSupport {
                 () -> { runJob("dropQueueAdmissionJob"); return null; });
         concurrently(2, jobs);
 
+        // 같은 SKU를 다른 작업이 처리 중이면 기다리지 않고 건너뛴다 (policy 7-1절, transactions D4).
+        // 한 작업만 처리하면 2명(배치 제한), 둘 다 처리하면 4명이다. 중복 입장과 초과 입장은 없어야 한다.
         long admitted = users.stream().filter(u -> "ADMITTED".equals(queueMe(u, drop).string("$.status"))).count();
-        assertThat(admitted).isEqualTo(4);
+        assertThat(admitted).isIn(2L, 4L);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_entries WHERE drop_id = ? AND status = 'ADMITTED'",
+                Long.class, drop.dropId())).as("회원당 입장 행은 하나다").isEqualTo(admitted);
+
+        // 건너뛴 작업의 몫은 다음 실행에서 진행된다.
+        runJob("dropQueueAdmissionJob");
+        long afterNextRun = users.stream().filter(u -> "ADMITTED".equals(queueMe(u, drop).string("$.status"))).count();
+        assertThat(afterNextRun).isEqualTo(admitted + 2);
     }
 
     @Test
