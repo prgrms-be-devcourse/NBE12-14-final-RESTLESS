@@ -52,8 +52,9 @@ JOIN (SELECT s.n + 1 AS variant_id,
 WHERE v.drop_id = 1;
 
 -- 기본 0. 대기 상태 조회처럼 대기열이 차 있는 상황을 볼 때만 scale.yml에서 켠다.
-INSERT INTO drop_queue_entries (drop_id, user_id, status, entered_at, last_seen_at)
-SELECT 1, s.n + 1, 'WAITING', @t0, @t0
+-- 대기열은 SKU별이다. 핫 드롭 SKU에 계정 순서대로 돌려 가며 나눈다.
+INSERT INTO drop_queue_entries (drop_id, user_id, variant_id, status, entered_at, last_seen_at)
+SELECT 1, s.n + 1, 1 + MOD(s.n, @hot_variants), 'WAITING', @t0, @t0
 FROM _perf_seq s
 WHERE s.n < @hot_queue_prefill;
 
@@ -132,9 +133,9 @@ LEFT JOIN (SELECT variant_id, COUNT(*) AS total, SUM(status = 'CONFIRMED') AS so
 WHERE v.drop_id <> 1;
 
 -- 실제 구매 흐름처럼 점유마다 소비된 입장 1건과 비어 있는 구매 슬롯 1건을 남긴다.
-INSERT INTO drop_queue_entries (drop_id, user_id, status, entered_at, last_seen_at, admitted_at, admitted_until,
-                                consumed_at)
-SELECT r.drop_id, r.user_id, 'CONSUMED',
+INSERT INTO drop_queue_entries (drop_id, user_id, variant_id, status, entered_at, last_seen_at, admitted_at,
+                                admitted_until, consumed_at)
+SELECT r.drop_id, r.user_id, r.variant_id, 'CONSUMED',
        r.created_at - INTERVAL 2 MINUTE,
        r.created_at - INTERVAL 1 MINUTE,
        r.created_at - INTERVAL 1 MINUTE,
@@ -173,3 +174,6 @@ JOIN (SELECT @warm_variant_first + s.n AS variant_id,
       FROM _perf_seq s
       WHERE s.n < @hot_variants) q ON q.variant_id = v.id
 WHERE v.drop_id = @warm_drop_id AND @warm_stock > 0;
+
+-- SKU마다 입장 허가 게이트가 하나 있어야 한다. 없으면 앱이 오류 로그와 함께 만든다. 모든 SKU 행을 만든 뒤 마지막에 둔다.
+INSERT INTO drop_queue_gates (variant_id) SELECT id FROM drop_variants;

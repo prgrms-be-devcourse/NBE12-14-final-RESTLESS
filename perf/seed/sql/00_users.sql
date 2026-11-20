@@ -63,6 +63,12 @@ SELECT @users + 2 + s.n,
 FROM _perf_seq s
 WHERE s.n < @organizers;
 
+-- 기본 배송지. 받는 분은 회원 닉네임, 연락처는 회원 ID순으로 010-0000-0001부터 1씩 올리고, 주소는 모두 판교역 광장이다.
+UPDATE users
+SET default_recipient = nickname,
+    default_phone     = CONCAT('010-', LPAD(id DIV 10000, 4, '0'), '-', LPAD(id MOD 10000, 4, '0')),
+    default_address   = '경기도 성남시 분당구 판교역로 160';
+
 -- 원문은 perf-rt-<salt>-<id>. lib/tokens.py가 같은 규칙으로 CSV에 쓴다.
 INSERT INTO refresh_tokens (id, user_id, token_hash, family_id, expires_at, created_at)
 SELECT u.id,
