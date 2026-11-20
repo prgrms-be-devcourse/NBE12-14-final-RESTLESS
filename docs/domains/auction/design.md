@@ -1,6 +1,6 @@
 ### ERD
 
-![auction_erd (1).png](attachment:f3ae966c-b802-4b4d-b5a1-2b0d175df956:auction_erd_(1).png)
+> 그림: 경매 ERD 그림은 노션 원본에만 있다. 현재 스키마는 [통합 ERD](../../architecture/erd.md)를 본다.
 
 ### **1. 서비스 개요와 구현 범위**
 

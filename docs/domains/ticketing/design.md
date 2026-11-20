@@ -74,7 +74,7 @@ MVP에서는 **지정석만 지원**하며, 비지정석·티켓 양도·부분 
 
 예매 시간 정책
 
-![스크린샷 2026-11-06 오후 1.54.48.png](attachment:949f92af-9d5d-48b1-86a9-2255ba5090b5:%E1%84%89%E1%85%B3%E1%84%8F%E1%85%B3%E1%84%85%E1%85%B5%E1%86%AB%E1%84%89%E1%85%A3%E1%86%BA_2026-11-06_%E1%84%8B%E1%85%A9%E1%84%92%E1%85%AE_1.54.48.png)
+> 그림: 예매 시간 정책 스크린샷은 노션 원본에만 있다.
 
 
 | 정책       | 기준                      |
@@ -439,14 +439,14 @@ flowchart LR
   ## [6] 상태 머신
   ### 6.1 예약 상태 머신
 
-  ![mermaid-diagram.png](attachment:7748375c-37e7-4e98-8646-16736e32ac39:mermaid-diagram.png)
+  > 그림: 이 다이어그램은 노션 원본에만 있다.
 
   `RECONCILING`에서 실패가 확정되었을 때 결제 기한이 남아 있다면 `PAYMENT_PENDING`으로 복귀해 재시도를 허용한다.
 
   기한 내 서버에 기록·커밋된 유효 승인 시도는 성공 통지가 늦어도 확정한다. 상세 기한 판정과 예외는 [transactions.md 8절](transactions.md#8-결제-기한-인정-기준-decided-2026-11-12)을 따른다.
   ### 6.2 좌석 상태 머신
 
-  ![mermaid-diagram (1).png](attachment:608eace4-9856-4cc7-b747-112c4adc2465:mermaid-diagram_(1).png)
+  > 그림: 이 다이어그램은 노션 원본에만 있다.
 
   `TicketSeat`의 `HELD`는 결제 진행 중에도 유지된다. 결제 결과가 불명확한 경우에도 마찬가지다.
   ### 6.3 선점 이력 상태
@@ -462,23 +462,23 @@ flowchart LR
   ## [7] 시퀀스 다이어그램
   ### 7.1 좌석 선점
 
-  ![mermaid-diagram (2).png](attachment:fb8062e9-98b4-4f45-bb61-2b431c14b7c1:mermaid-diagram_(2).png)
+  > 그림: 이 다이어그램은 노션 원본에만 있다.
 
   실제 구현에서는 멱등성 키의 처리 중 상태와 결과 저장도 트랜잭션 및 UNIQUE 제약조건으로 보호해야 한다.
   ### 7.2 결제 및 예약 확정
 
-  ![mermaid-diagram (3).png](attachment:78d50aa6-64f0-4915-9690-066dad29f193:mermaid-diagram_(3).png)
+  > 그림: 이 다이어그램은 노션 원본에만 있다.
 
   결제 요청·결과 반영의 경계는 [transactions.md](transactions.md)를 따른다. API와 결제 시도 스키마는 후속 공통 계약에서 구체화한다.
   ### 7.3 선점 만료 및 재선점
 
-  ![mermaid-diagram (4).png](attachment:1484674a-29cf-40be-971e-dcd6b5ceddfc:mermaid-diagram_(4).png)
+  > 그림: 이 다이어그램은 노션 원본에만 있다.
 
   이 과정에서 기존 예약이 `PAYMENT_PENDING` 또는 `RECONCILING`이라면 단순히 선점 기한이 지났다는 이유로 해제하지 않는다.
   ## [8] ERD, API 명세, 이벤트 계약
   ### 8.1 ERD
 
-  ![mermaid-diagram (5).png](attachment:138adfb5-c489-4de8-9d46-61b0071ea38b:mermaid-diagram_(5).png)
+  > 그림: 이 다이어그램은 노션 원본에만 있다.
 
   공연장 좌석 배치와 회차별 판매 좌석을 분리했기 때문에 동일한 좌석 배치를 여러 공연 회차에서 재사용가능
   ### 8.2 주요 DB 제약조건
