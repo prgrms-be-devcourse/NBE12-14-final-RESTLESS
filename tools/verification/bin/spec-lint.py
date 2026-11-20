@@ -5,9 +5,9 @@
 
 오류(종료 코드 1):
   E1 이슈 번호가 제목이나 앞부분에 없다
-  E2 작업 선택을 맡기는 문구 ("다음 이슈", "알아서 골라" 등)
+  E2 작업 선택을 맡기는 문구 ("다음 이슈 진행해", "알아서 골라" 등)
   E3 작업 폴더가 worktree인데 git에 없는 도구(tools/harness, .ai-output/harness) 실행을 요구한다
-  E4 작업 폴더가 worktree인데 보고서나 로그 경로가 상대 경로다 (worktree 삭제 때 함께 사라진다)
+  E4 작업 폴더가 worktree인데 .ai-output 경로가 상대 경로다 (worktree 삭제 때 함께 사라진다)
 경고:
   W1 기준 SHA가 없다
   W2 "하지 않을 것" 절이 없다
@@ -28,11 +28,20 @@ def main_checkout():
 
 
 MAIN = main_checkout()
-UNTRACKED_TOOLS = re.compile(r"tools/harness|\.ai-output/harness/")
-NEGATION = re.compile(r"돌리지 않|실행하지 않|돌릴 수 없|실행되지 않|못 돌|못했다|수정하지 않|읽지도|바꾸지 않|고치지 않|금지")
-AMBIGUOUS = re.compile(r"다음 이슈|알아서 (골라|정해|선택)|아무 이슈|적당한 이슈|남은 이슈 중")
+UNTRACKED_TOOLS = re.compile(r"tools/harness|\.ai-output/harness/|harness-check\.sh")
+NEGATION = re.compile(r"돌리지 않|실행하지 않|돌릴 수 없|실행되지 않|실행할 수 없|못 돌|못했다|수정하지 않|읽지도|바꾸지 않|고치지 않|금지")
+AMBIGUOUS = re.compile(r"다음 이슈(를|도)?\s*(진행|해|하|작업|골라|시작)|알아서 (골라|정해|선택)|아무 이슈|적당한 이슈|남은 이슈 중")
+# A comma before another code span joins a list that shares one verb, so it does not end the clause.
+CLAUSE_END = re.compile(r"[.;]\s|,(?!\s*`)|$")
 HEX = r"(?<![0-9a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}(?![0-9a-f])"
 REL_OUTPUT = re.compile(r"(?<![\w/])`?(\.ai-output/[^\s`)]+)")
+
+
+def negated_after(line, end):
+    """A Korean clause puts its verb after the object, so a negation counts only between the
+    mention and the end of its clause. A negation earlier in the line belongs to another clause."""
+    clause = line[end:end + CLAUSE_END.search(line[end:]).start()]
+    return bool(NEGATION.search(clause))
 
 
 def lint(path):
@@ -48,16 +57,16 @@ def lint(path):
         if AMBIGUOUS.search(l):
             errors.append(f"E2 {i}행: 작업 선택을 맡기는 문구: {l.strip()[:60]}")
 
-    m = re.search(r"(?:작업 폴더|저장소):\s*`?(/[^\s`(]+)", text)
-    folder = m.group(1).rstrip("/") if m else None
+    m = re.search(r"(?:작업 폴더|저장소):\s*`?([~/][^\s`(]+)", text)
+    folder = os.path.expanduser(m.group(1)).rstrip("/") if m else None
     worktree = folder is not None and folder != MAIN
     if worktree:
         for i, l in enumerate(lines, 1):
-            if UNTRACKED_TOOLS.search(l) and not NEGATION.search(l):
+            if any(not negated_after(l, t.end()) for t in UNTRACKED_TOOLS.finditer(l)):
                 errors.append(f"E3 {i}행: worktree({folder})에 없는 도구 요구: {l.strip()[:70]}")
-            for out in REL_OUTPUT.findall(l):
-                if ("보고서" in l or ".log" in out or "report" in out) and not NEGATION.search(l):
-                    errors.append(f"E4 {i}행: 상대 경로 {out}. {MAIN}/{out} 로 쓸 것")
+            for out in REL_OUTPUT.finditer(l):
+                if not negated_after(l, out.end()):
+                    errors.append(f"E4 {i}행: 상대 경로 {out.group(1)}. {MAIN}/{out.group(1)} 로 쓸 것")
     if folder is None:
         warns.append("작업 폴더 줄이 없어 worktree 검사를 건너뜀")
 

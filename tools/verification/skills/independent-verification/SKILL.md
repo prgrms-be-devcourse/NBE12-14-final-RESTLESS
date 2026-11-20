@@ -26,7 +26,7 @@ description: Use when an agent verifies a RESTLESS implementation or prepares it
 2. Spec: 요청 누락·잘못된 동작·범위 초과.
 3. Assumptions: 명세 자체의 누락·모순과 공유 가정의 근거.
 
-저장소 `docs/testing/strategy.md`에서 변경 유형별 검사를 선택하고 선택/제외 이유를 적는다. 직접 실행한 명령·종료 코드·로그·대상 SHA, 환경과 DB/PG mock 설정, dirty diff 식별을 남긴다. 드롭은 dev 사본의 하네스를 포함해 기존 검증 절차를 따른다. 코드가 바뀌면 이전 결과의 적용 범위를 재평가하고 필요한 검사를 다시 실행한다. 작성자 로그는 참고 증거로 표시한다. 테스트 강도와 변이 시험은 [체크리스트](../../checklist.md) 2절, build 증거와 로그 위치는 3절, 재검증 범위는 4절을 따른다.
+저장소 `docs/testing/strategy.md`에서 변경 유형별 검사를 선택하고 선택/제외 이유를 적는다. 직접 실행한 명령, 종료 코드, 로그, 대상 SHA, 환경과 DB/PG mock 설정, dirty diff 식별을 남긴다. 드롭은 dev 사본의 하네스를 포함해 기존 검증 절차를 따른다. 코드가 바뀌면 이전 결과의 적용 범위를 재평가하고 필요한 검사를 다시 실행한다. 작성자 로그는 참고 증거로 표시한다. 테스트 강도와 변이 시험은 [체크리스트](../../checklist.md) 2절, build 증거와 로그 위치는 3절, 재검증 범위는 4절을 따른다.
 
 정책의 경계는 기존 루트 지침이 우선한다. [검증 절차](../../../../docs/testing/independent-verification.md)의 표는 그 경계를 명료화하는 채택 대기 제안이다. 미채택을 근거로 기존 보호를 완화하지 않는다. 명세의 빈칸을 근거로 핵심 정책을 확정하지 않는다.
 

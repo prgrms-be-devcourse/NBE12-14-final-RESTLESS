@@ -17,16 +17,19 @@ precheck에 해당 유형의 반례를 모두 적는다. 해당 없으면 이유
 ## 2. 테스트 강도
 
 - 새 테스트는 기준 SHA에서 단언 실패로 red가 되는지 확인한다. 컴파일 오류나 준비 오류는 red가 아니다.
-- 아래 경로를 바꾼 변경은 변이 시험이 필수다. 미완료 결제 재확인 작업(`PaymentReconciler`, `PaymentTransactions`), 재고 점유와 정산, 결제 상태 전이.
+- 아래 경로를 바꾼 변경은 변이 시험이 필수다. review.md에 변이 결과를 적는다.
+  - 미완료 결제 재확인 작업: `payment/application/PaymentReconciler.java`, `payment/application/PaymentTransactions.java`
+  - 결제 상태 전이: `payment/domain/**`
+  - 재고 점유와 정산: `drop/**` 중 이름에 `Inventory`나 `Reservation`이 들어간 파일
 - 변이는 하네스 목록(`tools/harness/mutants/*.json`, 개인 파일)이 있으면 `test-strength.py mutants --file <목록>`으로 실행한다. 목록에 없는 변이를 손으로 넣었으면 파일과 원문 문자열을 기록하고 목록 추가를 제안한다. 적용에 실패한 변이는 잡힘과 생존이 아니라 미적용으로 따로 센다 (L8).
 - 알려진 변이를 모두 잡았다는 것과 검증이 완전하다는 것은 다르다. 경로 우회 같은 반례는 별도 probe로 확인한다 (L1).
 
 ## 3. 실행 증거
 
 - 전체 build는 같은 대상 SHA의 CI `backend` 작업 결과를 증거로 쓸 수 있다. 조건은 셋이다.
-  1. CI가 실행한 head SHA가 검증 SHA와 같다.
-  2. 변경에 `.github/workflows/`, `backend/build.gradle`, `backend/settings.gradle`, `backend/gradle/` 수정이 없다.
-  3. CI 테스트 결과 artifact(`backend-test-results`)에서 테스트 수와 실패 0을 확인해 review.md에 적는다.
+  1. CI 실행의 PR head SHA가 검증 SHA와 같다. PR CI는 그 시점 base와 합친 병합본을 build하므로, 검증 SHA 자체보다 머지 결과에 가깝다.
+  2. 변경에 `.github/workflows/`, `backend/build.gradle`, `backend/settings.gradle`, `backend/gradle/`, `backend/gradlew`, `frontend/package.json` 수정이 없다.
+  3. CI 테스트 결과 artifact(`backend-test-results`)에서 테스트 수와 실패 0을 확인해 review.md에 적는다. artifact는 7일 보관이라 그 뒤에는 직접 build한다.
 - 하나라도 어긋나면 검증자가 직접 `./gradlew build`를 실행한다. 대상 테스트와 변이 시험은 항상 직접 실행한다.
 - 로그와 임시 probe 결과는 메인 폴더의 `.ai-output/verification/<issue>/`에 절대 경로로 쓴다. worktree 안의 `.ai-output`은 worktree 삭제 때 사라진다 (L6).
 
@@ -45,10 +48,12 @@ FAIL 뒤 수정을 같은 검증자 계열에게 변경분만 다시 보게 할 
 
 | 변경 종류 | 경로 | 요구 |
 |---|---|---|
-| 코드 | 문서 밖 파일이 하나라도 있음 | head SHA의 독립 PASS |
-| 정책 문서 | `docs/domains/**`, `docs/contracts/**`, `docs/decisions/**`, `docs/product/open-questions.md` | head SHA의 독립 PASS와 사람 확인 |
-| 코드 설명 문서 | `docs/operations/**`, `docs/architecture/**`, `docs/testing/**` | 문서와 코드 대조만 하는 가벼운 검증. build 불필요 |
-| 서식 문서 | 그 밖의 문서, 오타, 링크, 색인 | 검증 없음. PR 본문에 `독립 검증 없음: <이유>` |
+| 코드 | 문서가 아닌 파일이 하나라도 있음. 문서는 `docs/` 아래와 저장소 루트의 `.md`뿐이다. `tools/`, `backend/` 아래 `.md`와 모든 `AGENTS.md`, `CLAUDE.md`, `SKILL.md`는 코드다 | head SHA의 독립 PASS |
+| 정책 문서 | `docs/domains/**`, `docs/contracts/**`, `docs/decisions/**`, `docs/product/**`, `docs/testing/**`, `docs/operations/failure-handling.md` | head SHA의 독립 PASS와 사람 확인 |
+| 코드 설명 문서 | 나머지 `docs/operations/**`, `docs/architecture/**` | head SHA의 판정 기록. 문서와 코드 대조만 하는 가벼운 검증이라 build 불필요 |
+| 서식 문서 | 그 밖의 문서. 오타, 링크, 색인 | 검증 없음. PR 본문에 `독립 검증 없음: <이유>` |
+
+결제 핵심 경로(2절)를 바꾼 PR은 review.md에 변이 결과가 없으면 막힌다. 판정 기록은 review.md의 마지막 비어 있지 않은 줄만 읽는다.
 
 SHA가 다르면 재검증하거나, 두 트리의 차이를 확인해 빠진 파일을 review.md에 적는다. 2026-11-20에 #274는 프로덕션 코드가 같았지만 검증받은 테스트 4개가 빠진 채 머지됐다.
 
@@ -57,4 +62,4 @@ SHA가 다르면 재검증하거나, 두 트리의 차이를 확인해 빠진 �
 지시서는 [codex-task-spec.md](codex-task-spec.md)로 쓰고, 넘기기 전에 `python3 tools/verification/bin/spec-lint.py <지시서>`를 실행한다.
 - 이슈 번호를 하나로 고정한다. 다음 작업은 새 지시서로 넘긴다 (L4).
 - 작업 폴더가 worktree이면 그 폴더의 `git ls-files`에 있는 도구만 실행하게 한다 (L5).
-- 보고서와 로그 경로는 메인 폴더 절대 경로로 쓴다 (L6).
+- 보고서와 로그 등 `.ai-output` 경로는 메인 폴더 절대 경로로 쓴다 (L6).
