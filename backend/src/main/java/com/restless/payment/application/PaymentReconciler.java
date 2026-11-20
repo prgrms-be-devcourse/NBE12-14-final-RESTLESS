@@ -153,6 +153,13 @@ public class PaymentReconciler {
             }
         } catch (RuntimeException error) {
             failure("apply", p.id(), error);
+            // The apply transaction rolled back its check time. Record it separately so this
+            // payment does not stay at the head of the candidate list.
+            try {
+                transactions.recordApprovalCheck(p.id(), p.status());
+            } catch (RuntimeException checkError) {
+                failure("record_check", p.id(), checkError);
+            }
         }
     }
 

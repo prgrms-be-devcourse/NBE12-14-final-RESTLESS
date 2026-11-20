@@ -447,6 +447,41 @@ class PaymentReconciliationTest {
     }
 
     @Test
+    void failedApplyDoesNotKeepPaymentAtHeadOfCandidates() {
+        var stuck = prepare(1);
+        change(stuck, x -> x.startProcessing("stuck", NOW.minusSeconds(10)));
+        var healthy = prepare(2);
+        change(healthy, x -> x.startProcessing("healthy", NOW.minusSeconds(5)));
+        for (var p : List.of(stuck, healthy)) pg.results.put(p.pgOrderId(), approved(p));
+        age(31);
+        var limited =
+                new PaymentReconciler(
+                        payments,
+                        transactions,
+                        pg,
+                        clock,
+                        new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+                        new PaymentReconciliationProperties(
+                                1,
+                                Duration.ofSeconds(30),
+                                Duration.ofSeconds(10),
+                                Duration.ofSeconds(30),
+                                Duration.ofMinutes(15)));
+        handler.throwApproved = true;
+        limited.runOnce();
+        assertThat(payment(stuck).getStatus()).isEqualTo(PaymentStatus.PROCESSING);
+        assertThat(payment(stuck).getUpdatedAt()).isEqualTo(clock.now);
+
+        handler.throwApproved = false;
+        age(62);
+        limited.runOnce();
+        assertThat(payment(healthy).getStatus()).isEqualTo(PaymentStatus.APPROVED);
+        assertThat(payment(stuck).getStatus()).isEqualTo(PaymentStatus.PROCESSING);
+        limited.runOnce();
+        assertThat(payment(stuck).getStatus()).isEqualTo(PaymentStatus.APPROVED);
+    }
+
+    @Test
     void batchLimitSelectsOldestFirst() {
         var recent = prepare(1);
         processing(recent);
