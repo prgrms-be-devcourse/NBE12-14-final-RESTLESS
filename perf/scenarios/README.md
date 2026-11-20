@@ -22,6 +22,10 @@ perf/scenarios/run-ticketing.sh page 100
 
 다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 요약 결과는 `.ai-output/perf/ticketing-<시나리오>/summary-<UTC 날짜시간>.json`, HTML 보고서는 같은 폴더의 `report-<UTC 날짜시간>.html`에 자동 저장된다. 예: `.ai-output/perf/ticketing-spread/summary-20261118T010203Z.json`. 실행 중에는 `http://localhost:5665`에서 대시보드를 볼 수 있다. 실행기가 기본으로 대시보드와 HTML 내보내기를 켜므로 별도 k6 환경변수를 지정하지 않아도 된다.
 
+`burst`는 준비된 각 사용자가 정해진 시각에 좌석 조회를 한 번씩 보낸다. 예를 들어 `perf/scenarios/run-ticketing.sh burst 5000`은 서로 다른 미사용 토큰 5,000개가 필요하다. 실행 전 좌석 및 관리 지표 확인 요청이 각각 한 번 추가된다. 기본적으로 준비 완료 20초 후 시작하며 `BURST_DELAY_SECONDS=30`으로 조절한다. `DURATION`은 적용되지 않고 `MAX_DURATION`(기본 5분)에 준비 대기와 응답 대기를 포함한다. `ticket_poll_requests`와 오류 임계값으로 완료 여부를 확인하고, `ticket_burst_start_delay`의 p95·최댓값으로 실제 요청 시작이 얼마나 퍼졌는지 살핀다. 이 값은 요청 전 로컬 시각 기준이며 서버 도착 시각은 아니다. 부하 생성기 성능이나 VU 초기화 때문에 설정 인원이 정확히 동시에 도착한다고 보장하지 않는다. 각 테스트 환경에 필요한 수만큼의 유효하고 미사용인 계정을 준비한다.
+
+좌석 응답 압축 비교는 같은 서버와 데이터 조건에서 `SEAT_ENCODING=identity perf/scenarios/run-ticketing.sh burst 500`과 `SEAT_ENCODING=gzip perf/scenarios/run-ticketing.sh burst 500`을 각각 실행한다. 기본값은 identity다. gzip을 요청했는데 준비 요청에서 압축되지 않으면 테스트를 중단하며, 본 요청의 `ticket_seat_encoding_errors`와 `ticket_seat_gzip_responses`로 적용 여부를 확인한다. 2KB 미만 응답은 서버가 압축하지 않으므로 gzip 비교에 적합하지 않다. 요약의 `conditions.seatEncoding`, `data_received`, 응답 시간과 서버 CPU를 함께 비교한다. 서버는 회차별 좌석 조회 JSON에만 압축을 적용한다. `HTTP_COMPRESSION_ENABLED=false`로 압축을 끌 수 있고 변경 후 앱을 재시작해야 한다.
+
 ### 테스트 중 서버 지표를 CSV로 수집
 
 `run-ticketing.sh`가 테스트 시작 전 수집기를 자동으로 시작하고, 테스트 종료 후 마지막 지표를 저장한다. 관리 포트에 연결되지 않으면 테스트를 시작하지 않는다. 기본 간격은 2초이며 `INTERVAL=5`로 바꿀 수 있다. 별도 수집이 필요할 때는 아래 명령을 실행하고 `Ctrl-C`로 종료한다.

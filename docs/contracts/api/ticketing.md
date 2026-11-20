@@ -130,6 +130,8 @@
 ```
 
 `seatId`는 회차별 판매 좌석 ID이며 `venueSeatId`는 물리 좌석 ID다.
+
+좌석 JSON이 2KB 이상이고 클라이언트가 gzip을 허용하면 서버는 gzip으로 응답할 수 있다. 압축 해제 후 JSON 필드와 의미는 동일하다. 압축은 이 좌석 조회 API에만 적용하며 `HTTP_COMPRESSION_ENABLED=false`로 비활성화할 수 있다.
 상태는 `AVAILABLE`, `HELD`, `SOLD` 중 하나다. 현재 상태를 조회하며 만료 처리나 선점은 수행하지 않는다.
 회차에 판매 좌석이 없으면 빈 배열을 반환한다. 없는 회차는 `404 NOT_FOUND`,
 Long으로 변환할 수 없는 performanceId는 `400 INVALID_REQUEST`로 응답한다.
