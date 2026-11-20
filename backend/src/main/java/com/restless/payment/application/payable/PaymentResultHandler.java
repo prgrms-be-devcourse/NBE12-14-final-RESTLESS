@@ -19,7 +19,7 @@ import java.util.Optional;
  * <ul>
  *   <li><b>업무상 받을 수 없음</b>(예약 만료, 결제 기한 초과 등)은 {@link ApprovalDecision#reject(String)}로 반환한다.
  *       결제 모듈이 승인 시작을 막거나, 이미 승인된 돈은 보상 취소한다.</li>
- *   <li><b>기술 오류</b>(DB 오류 등)는 예외로 던진다. 전체가 롤백되고 결제는 PROCESSING/UNKNOWN으로 남아 대사가 재시도한다.
+ *   <li><b>기술 오류</b>(DB 오류 등)는 예외로 던진다. 전체가 롤백되고 결제는 PROCESSING/UNKNOWN으로 남아 미완료 결제 재확인 작업이 재시도한다.
  *       업무 거절을 예외로 표현하지 않는다.</li>
  *   <li>PG 호출, 외부 HTTP 호출 등 느린 I/O를 하지 않는다. 트랜잭션과 잠금 시간이 길어진다.</li>
  *   <li>결제 모듈이 결제 행을 먼저 잠근 뒤 호출한다. 구현체는 자기 도메인 행만 잠근다. 결제 행을 다시 잠그지 않는다.</li>
@@ -59,7 +59,7 @@ public interface PaymentResultHandler {
     ApprovalDecision onApprovalStarting(Long payableId, PaymentAttemptContext attempt);
 
     /**
-     * PG 승인이 확인됨 (드롭 TX3). 정상 응답과 대사 스케줄러의 재조회 확인 모두 이 메서드로 온다.
+     * PG 승인이 확인됨 (드롭 TX3). 정상 응답과 미완료 결제 재확인 작업의 재조회 확인 모두 이 메서드로 온다.
      * 구매를 확정한다 (예: 예약 CONFIRMED, 재고 reserved -1 sold +1, 주문 PAID).
      * 기한 판정 기준은 도메인 정책이 정한다 ({@link ApprovedPayment} 참고).
      *
@@ -109,12 +109,12 @@ public interface PaymentResultHandler {
     /**
      * PG가 손님 환불 취소를 최종 거절했을 때, 공통 TX-C/TX-R2에서 호출한다.
      * 결제 행 → 환불 행 잠금과 상태 재확인 뒤 환불 FAILED·결제 APPROVED 복귀와 같은
-     * 트랜잭션 안에서 실행된다. 대사 취소 재시도의 최종 거절도 같은 경로를 쓴다.
+     * 트랜잭션 안에서 실행된다. 미완료 결제 재확인 작업의 취소 재시도 최종 거절도 같은 경로를 쓴다.
      * 도메인의 환불 대기는 운영 확인 상태로 바꾼다 (예: REFUND_PENDING → REFUND_REVIEW).
      *
      * <p>기본 구현은 아무것도 하지 않는다. CUSTOMER_REFUND에만 호출하고 COMPENSATION에는
      * 호출하지 않는다. 재고·좌석은 복원하지 않는다. PG/외부 I/O를 하지 않으며 기술 오류는
-     * 예외로 던진다. 예외가 나면 결제·환불·도메인 변경이 함께 롤백되고 대사가 재확인한다.
+     * 예외로 던진다. 예외가 나면 결제, 환불, 도메인 변경이 함께 롤백되고 미완료 결제 재확인 작업이 다시 확인한다.
      *
      * @param refund 저장된 결제 ID와 CUSTOMER_REFUND 종류
      */

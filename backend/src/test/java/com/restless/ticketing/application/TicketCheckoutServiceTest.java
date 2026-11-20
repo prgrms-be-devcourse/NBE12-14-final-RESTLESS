@@ -1159,7 +1159,7 @@ class TicketCheckoutServiceTest {
 
         @ParameterizedTest(name = "{displayName} [PG 응답={0}]")
         @ValueSource(strings = {"APPROVED", "UNKNOWN", "FAILED"})
-        @DisplayName("등록한 TICKET Handler로 공통 준비·승인·실패·불명확 대사가 실제 예약에 반영된다")
+        @DisplayName("등록한 TICKET Handler로 공통 준비, 승인, 실패, 불명확 결과의 재확인이 실제 예약에 반영된다")
         void commonPaymentUsesRegisteredTicketHandler(String outcome) {
             var reservation = reserve();
             var checkout = checkout(reservation);

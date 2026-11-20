@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
     "pg.provider=fake",
     "spring.docker.compose.enabled=false",
     "spring.main.allow-bean-definition-overriding=true",
-    // 수동 대사를 검증하므로 IntelliJ JUnit 직접 실행에서도 자동 실행을 끈다.
+    // 재확인 작업을 직접 실행해 검증하므로 IntelliJ JUnit 직접 실행에서도 자동 실행을 끈다.
     "restless.payment.reconcile.enabled=false"
 })
 @Import({TestcontainersConfiguration.class, PaymentReconciliationTest.Config.class})
