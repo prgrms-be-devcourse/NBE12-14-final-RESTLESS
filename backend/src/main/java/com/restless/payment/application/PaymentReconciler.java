@@ -169,9 +169,11 @@ public class PaymentReconciler {
             c = transactions.cancellation(p.id(), p.status());
         } catch (RuntimeException error) {
             failure("cancel_prepare", p.id(), error);
+            recordCancelCheck(p.id(), p.status());
             return;
         }
         if (c == null) {
+            recordCancelCheck(p.id(), p.status());
             processed("cancel", "skipped");
             return;
         }
@@ -199,13 +201,17 @@ public class PaymentReconciler {
                 // Recheck under locks after query before sending the same idempotent cancellation.
                 c = transactions.cancellation(p.id(), p.status());
                 if (c != null) cancel(c, p.status(), true);
-                else processed("cancel", "skipped");
+                else {
+                    recordCancelCheck(p.id(), p.status());
+                    processed("cancel", "skipped");
+                }
             } else {
-                transactions.recordCancelCheck(p.id(), p.status());
+                recordCancelCheck(p.id(), p.status());
                 processed("cancel", "unresolved");
             }
         } catch (RuntimeException error) {
             failure("cancel_apply", p.id(), error);
+            recordCancelCheck(p.id(), p.status());
         }
     }
 
@@ -237,6 +243,16 @@ public class PaymentReconciler {
                             .toLowerCase(Locale.ROOT));
         } catch (RuntimeException error) {
             failure("cancel_apply", c.paymentId(), error);
+            recordCancelCheck(c.paymentId(), expected);
+        }
+    }
+
+    private void recordCancelCheck(Long paymentId, PaymentStatus expected) {
+        // Keep cadence outside the rolled-back business transaction, without invoking callbacks.
+        try {
+            transactions.recordCancelCheck(paymentId, expected);
+        } catch (RuntimeException error) {
+            failure("record_check", paymentId, error);
         }
     }
 

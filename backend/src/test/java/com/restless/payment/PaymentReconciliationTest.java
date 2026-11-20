@@ -606,6 +606,9 @@ class PaymentReconciliationTest {
         assertThat(failure("cancel_apply")).isEqualTo(before + 1);
         handler.throwRefunded = false;
         reconciler.runOnce();
+        assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.CANCEL_UNKNOWN);
+        age(41); // The failed apply recorded a check at 31s; retry after the 10s interval.
+        reconciler.runOnce();
         assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.CANCELLED);
         assertThat(
                         jdbc.queryForObject(
