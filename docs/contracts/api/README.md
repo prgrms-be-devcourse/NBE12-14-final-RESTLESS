@@ -103,6 +103,7 @@ API를 찾을 때 쓰는 색인이다. 요청·응답·오류는 문서 열의 �
 | 공연 | GET | `/api/concerts/{concertId}` | 공개 | 구현 | [ticketing.md](ticketing.md) |
 | 공연 | GET | `/api/concerts/{concertId}/performances` | 공개 | 구현 | [ticketing.md](ticketing.md) |
 | 티켓팅 | GET | `/api/performances/{performanceId}/seats` | 로그인 | 구현 | [ticketing.md](ticketing.md) |
+| 티켓팅 | GET | `/api/performances/{performanceId}/booking-availability` | 로그인 | 구현 | [ticketing.md](ticketing.md#본인-회차별-구매-한도-조회) |
 | 티켓팅 | POST | `/api/ticket-reservations` | 로그인 | 구현 | [ticketing.md](ticketing.md) |
 | 티켓팅 | GET | `/api/ticket-reservations/active` | 로그인 | 구현 | [ticketing.md](ticketing.md) |
 | 티켓팅 | GET | `/api/ticket-reservations/{reservationId}` | 로그인 | 구현 | [ticketing.md](ticketing.md) |
