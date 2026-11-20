@@ -109,7 +109,7 @@ class DropPaymentAcceptanceTest extends DropAcceptanceSupport {
     }
 
     @Test
-    @DisplayName("결제 결과를 모르면 재고를 돌려주지 않고, 만료 작업도 건드리지 않는다. 대사가 승인을 확인하면 구매가 확정된다 (INV-10)")
+    @DisplayName("결제 결과를 모르면 재고를 돌려주지 않고, 만료 작업도 건드리지 않는다. 미완료 결제 재확인 작업이 승인을 확인하면 구매가 확정된다 (INV-10)")
     void unknownResultProtectsStockUntilReconciled() {
         DropFixture drop = onSaleDrop(1);
         Long user = newUser();

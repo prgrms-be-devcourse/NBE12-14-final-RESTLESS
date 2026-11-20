@@ -66,7 +66,7 @@ public class AuctionStreams {
         this.timeoutMs = timeoutMs;
         meters.gauge("auction.stream.connections", subscribers,
                 map -> map.values().stream().mapToInt(Set::size).sum());
-        // 다른 스케줄러(경매 종료, 결제 대사)와 스레드를 나누지 않아야 0.2초 간격이 밀리지 않는다.
+        // 다른 스케줄러(경매 종료, 미완료 결제 재확인 작업)와 스레드를 나누지 않아야 0.2초 간격이 밀리지 않는다.
         this.flusher = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofPlatform().name("auction-stream-flush").daemon().factory());
         flusher.scheduleWithFixedDelay(this::flushSafely, flushIntervalMs, flushIntervalMs, TimeUnit.MILLISECONDS);
