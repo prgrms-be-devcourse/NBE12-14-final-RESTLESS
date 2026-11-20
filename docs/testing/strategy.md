@@ -14,7 +14,7 @@
 | 드롭 수용 테스트 (블랙박스) | `./gradlew test --tests 'com.restless.drop.acceptance.*'` |
 | 동시성 테스트 (드롭·결제) | `./gradlew test --tests 'com.restless.drop.*' --tests 'com.restless.payment.*'` (재고 1개에 100명, 같은 키 동시 요청, 입장 허가 작업 동시 실행, 승인 동시 요청 등) |
 | 부하 테스트 시드 (perf DB) | 레포 루트에서 `perf/seed/seed.sh --scale base --profile perf` ([perf/seed](../../perf/seed/README.md)) |
-| 부하 테스트 | TBD |
+| 부하 테스트 | [perf/README](../../perf/README.md)의 k6 시나리오. 드롭 실험은 [실행 절차](drop-performance-procedure.md)를 따른다 |
 
 ## 2. 기술
 
