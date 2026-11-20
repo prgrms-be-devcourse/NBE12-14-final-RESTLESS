@@ -19,6 +19,7 @@
 | DB 배포 | RDS MySQL | PROPOSED |
 | 프론트 배포 | S3 + CloudFront | PROPOSED |
 | 다중 서버 | 단일 서버 병목 확인 후 | EXPERIMENTAL |
+| 요청 횟수 제한 | 앱 인터셉터와 서버 메모리 고정 창 카운터. 서버가 2대 이상이면 한도가 서버별로 나뉜다 ([ADR-0004](../decisions/0004-request-rate-limit.md)) | DECIDED |
 | 실시간 경매 | SSE (서버 → 클라이언트). 입찰은 일반 POST ([경매 정책 8절](../domains/auction/policy.md)) | PROPOSED |
 | 팬 채팅 | MVP 제외 | DEFERRED |
 

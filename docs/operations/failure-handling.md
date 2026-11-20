@@ -106,6 +106,46 @@ DB 결제 잠금과 상태 재확인으로 최종 Handler 반영은 한 번만 �
 확인 시각 기록 자체가 실패하면 `payment.reconcile.failure{stage=record_check}`에만 집계하고 나머지 건을 계속 처리한다.
 이미 상태가 바뀐 결제에는 확인 시각을 쓰지 않는다.
 
+### 승인 결과 반영 실패와 복구 (#269, #270, #273)
+
+PG는 승인했는데 승인 결과를 반영하는 트랜잭션(드롭 문서의 TX3, 코드의 공통 TX-B)이 끝나지 못하면 돈은 빠졌고 DB는 그 사실을 모른다.
+원인은 반영 중 예외(정산 불일치, 커넥션 부족, 잠금 대기 초과)와 서버 종료다.
+TX2가 PG 호출 전에 커밋한 승인 시작 기록이 있어서, 미완료 결제 재확인 작업(이 문서의 대사)이 이 결제를 찾아 PG에 조회하고 같은 반영 로직을 다시 실행한다.
+
+반영이 롤백된 직후의 상태는 아래와 같다. 통합 테스트로 확인했다.
+
+| 대상 | 상태 |
+|---|---|
+| 결제 | `PROCESSING` |
+| 예약 | `CONFIRMING` |
+| 주문 | `PAYMENT_CONFIRMING` |
+| 재고 | 점유(`reserved`) 그대로. 부분 반영 없음 |
+| 슬롯 | 그 예약이 계속 소유 |
+
+- 만료 작업은 `RESERVED`만 처리하므로 이 예약을 풀지 않는다. 사용자의 취소는 `DROP_INVALID_STATE`로 거절된다. 복구되기 전에는 구매를 취소하거나 다시 결제할 수 없다.
+- 원인이 사라지면 다음 재확인에서 결제 `APPROVED`, 예약 `CONFIRMED`, 주문 `PAID`로 확정된다. 같은 재확인을 반복해도 중복 반영은 없다.
+
+**후보 막힘 방지 (#269).** 재확인 작업은 `updated_at`이 오래된 순서로 상태별 `batch-size`건만 읽는다.
+반영이 롤백되면 같은 트랜잭션 안의 `updated_at` 갱신도 되돌아간다. 계속 실패하는 결제가 `batch-size`건 이상이면 같은 건이 앞자리를 차지해 뒤의 정상 결제가 처리되지 못했다.
+
+- 승인 경로(`PROCESSING`, `UNKNOWN`): 실패하면 `PaymentTransactions.recordApprovalCheck`가 별도 짧은 트랜잭션에서 결제 행을 잠그고 상태를 다시 확인한 뒤 `updated_at`만 기록한다. 결제와 예약 상태, Handler 콜백은 바꾸지 않는다.
+- 취소 경로: 위 설정과 후보 조회 절의 `recordCancelCheck`가 같은 일을 한다 (#275).
+- 실패한 건은 `processing-stale-after`(30초)나 `unknown-retry-after`(10초)가 지난 뒤에 다시 후보가 되고, 그 사이 뒤의 건이 처리된다. 기록 자체가 실패하면 `payment.reconcile.failure{stage=record_check}`에만 집계한다.
+- **아직 막힐 수 있는 경로:** 기한이 지난 `READY`를 닫는 작업은 `expires_at` 순서로 후보를 읽는다. 확인 시각을 기록해도 순서가 바뀌지 않아서, 닫기가 계속 실패하면 뒤의 `READY` 만료가 막힐 수 있다. #275에서 재현만 했고 고치지 않았다 ([열린 결정 사항](../product/open-questions.md)).
+
+**영구 실패 (#273).** 정산 불일치처럼 원인이 계속되면 위 상태가 그대로 남고 자동으로 끝나지 않는다.
+재시도 횟수 상한이나 시간 기준 종료가 없다. NotFound 15분 기준은 PG가 명시적 NotFound를 답한 경우에만 적용된다.
+알 수 있는 신호와 한계는 아래 관측 절에 있다. 처리 방식은 사람이 정한다 ([열린 결정 사항](../product/open-questions.md)).
+
+검증 테스트는 아래와 같다.
+
+| 테스트 | 확인하는 것 |
+|---|---|
+| `DropApprovalRollbackRecoveryIntegrationTest` | 반영 롤백 뒤 상태 유지, 만료와 취소가 건드리지 않음, 복구 (#270) |
+| `DropSettlementMismatchRecoveryIntegrationTest` | 정산 불일치로 영구 실패할 때의 동작 (#273) |
+| `PaymentReconciliationTest` | 승인 경로의 후보 막힘 방지 (#269) |
+| `PaymentCancelReconciliationStarvationTest` | 취소 경로의 후보 막힘 방지 (#275) |
+
 ### 관측과 운영 한계
 
 - `payment.reconcile.processed{target=processing|unknown|ready_expired|cancel,result=...}`: 건별 처리 결과.
@@ -113,6 +153,10 @@ DB 결제 잠금과 상태 재확인으로 최종 Handler 반영은 한 번만 �
 - `payment.unknown.count`, `payment.unknown.oldest.age.seconds`: 마지막 실행 시 집계한 UNKNOWN 수와 최초 UNKNOWN 진입부터의 최대 나이. 나이는 현재 Clock으로 계산하며 음수는 0으로 제한한다.
 - `payment.reconcile.cancel.retry`: 실제 취소 재시도 수 (태그 없음). 환불별로 시계열이 늘지 않게 ID는 태그 대신 로그(`paymentId`, `refundId`)로 남긴다.
 - `payment.reconcile.anomaly{reason}`, `payment.amount.mismatch`: 운영 확인이 필요한 데이터/PG 불일치.
+- 계속 실패하는 승인 반영은 `payment.reconcile.failure{stage=apply}`와 ERROR 로그(`paymentId`, 예외 종류)로만 알 수 있다. 값은 고유 결제 수가 아니라 실패 시도 수다.
+- `payment.unknown.count`는 `UNKNOWN`만 센다. `PROCESSING`으로 오래 남은 결제는 세지 않는다.
+- 재확인에 실패할 때마다 `updated_at`이 갱신되므로 `updated_at`으로는 오래 걸린 결제를 찾을 수 없다. 승인 시작 시각 `approval_started_at`으로 찾는다.
+- 이 장애의 운영 절차와 알림 규칙은 아직 없다.
 
 티켓팅의 [불명확 5분 운영 확인](../domains/ticketing/transactions.md#9-불명확-결과의-운영-확인-전환-decided-2026-11-12)을 위해
 UNKNOWN 나이를 제공한다. **운영 확인 등록 여부 저장, 중복 없는 알림 및 실제 알림 채널은 이번 구현에 포함하지 않는다.**
