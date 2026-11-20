@@ -2,7 +2,7 @@
 
 > 상태: 각 도메인 문서의 머리말을 따른다. 문서 머리말 양식과 상태 용어는 [contracts/README.md](../README.md)에 있다.
 >
-> 마지막 확인: 2026-11-16 (엔드포인트 색인을 컨트롤러와 `SecurityConfig`에서 다시 만듦)
+> 마지막 확인: 2026-11-20 (#271 공통 429 응답 추가. 엔드포인트 색인은 2026-11-16 대조)
 
 - 경로: `/api/...` ([ADR-0002](../../decisions/0002-common-conventions.md))
 - 인증: JWT Bearer. 토큰, Refresh 쿠키, 공개 경로, 역할 규칙은 [인증·회원 API](auth.md#인증-규칙)에 있다.
@@ -51,6 +51,7 @@
    | 지원하지 않는 메서드 | 405 | `METHOD_NOT_ALLOWED` | |
    | 업로드 크기 초과 | 413 | `FILE_SIZE_EXCEEDED` | |
    | 지원하지 않는 Content-Type | 415 | `UNSUPPORTED_MEDIA_TYPE` | |
+   | 요청 횟수 한도 초과 ([한도](common.md#요청-횟수-제한), `Retry-After` 초) | 429 | `TOO_MANY_REQUESTS` | |
    | 그 밖의 예외 | 500 | `INTERNAL_ERROR` | (로그에 스택과 traceId) |
 
 4. 오류 코드는 `도메인_상황` 대문자 스네이크 케이스로 쓴다. 정상 거절(품절, 이미 받음)은 409 또는 422, 서버 오류는 5xx로 구분한다.

@@ -27,7 +27,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 
-@SpringBootTest
+@SpringBootTest(properties = "restless.ratelimit.enabled=false")
 @Import(TestcontainersConfiguration.class)
 @AutoConfigureMockMvc
 class RefreshTokenApiTest {

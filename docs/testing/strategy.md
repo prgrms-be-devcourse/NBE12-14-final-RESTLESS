@@ -60,6 +60,7 @@ JUnit 5, Spring Boot Test, MySQL Testcontainers, Mockito, k6. 필요하면 Redis
 | 설정 | 값 | 이유 |
 |---|---|---|
 | `restless.auction.scheduler.enabled`, `restless.payment.reconcile.enabled`, `restless.drop.expiry.enabled`, `restless.drop.queue.scheduler.enabled`, `restless.fanmeeting.worker.enabled` | `false` | 주기 작업이 다른 테스트의 데이터 준비와 겹치지 않게 한다. 작업 빈은 남아 있으므로 해당 테스트가 직접 호출하거나 `@SpringBootTest(properties)`로 다시 켠다 |
+| `restless.ratelimit.enabled` | `false` | 같은 IP로 반복하는 기존 API 테스트가 요청 제한에 걸리지 않게 한다. 제한 검증 테스트는 `true`를 명시한다 |
 | `user.timezone` | `UTC` | JDBC `Timestamp`로 넣은 테스트 데이터와 JPA `TIMESTAMP_UTC` 컬럼이 호스트 시간대와 상관없이 같은 시각을 가리키게 한다 |
 | `spring.test.context.cache.maxSize` | `4` | 캐시된 Spring 컨텍스트마다 DB 연결이 남는다. 전체 실행 중 MySQL 컨테이너가 메모리 부족(OOMKilled, exit 137)으로 죽은 적이 있어 개수를 제한한다 |
 
