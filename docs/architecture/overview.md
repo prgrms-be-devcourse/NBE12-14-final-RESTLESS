@@ -4,23 +4,23 @@
 
 | 영역 | 현재 결정 | 상태 |
 |---|---|---|
-| 애플리케이션 | Spring Boot 모듈러 모놀리스 | DECIDED |
-| 언어 | Java 21, Spring Boot 4.1.x | DECIDED |
+| 애플리케이션 | Spring Boot 모듈러 모놀리스 | IMPLEMENTED |
+| 언어 | Java 21, Spring Boot 4.1.x | IMPLEMENTED |
 | 빌드 | Gradle 단일 모듈, 도메인별 패키지 | PROPOSED |
-| DB | MySQL 8, 모든 도메인 공통 ([ADR-0002](../decisions/0002-common-conventions.md)) | DECIDED |
+| DB | MySQL 8, 모든 도메인 공통 ([ADR-0002](../decisions/0002-common-conventions.md)) | IMPLEMENTED |
 | PostgreSQL | 비교 실험 후 판단 | EXPERIMENTAL |
-| 구매 입장 제어 | MySQL | DECIDED |
+| 구매 입장 제어 | MySQL | IMPLEMENTED |
 | Redis 입장 제어 | MySQL과 비교 후 판단 | EXPERIMENTAL |
 | 비즈니스 이벤트 | Spring Event Listener ([ADR-0001](../decisions/0001-event-handling.md)) | DECIDED |
 | Outbox, Kafka | ADR-0001 재검토 조건 충족 시 검토 | DEFERRED |
-| PG | 토스페이먼츠 테스트 | DECIDED |
-| 테스트 | JUnit 5, Testcontainers, k6 | DECIDED |
-| 백엔드 배포 | 단일 EC2 + Docker | PROPOSED |
-| DB 배포 | RDS MySQL | PROPOSED |
+| PG | 토스페이먼츠 테스트 | IMPLEMENTED |
+| 테스트 | JUnit 5, Testcontainers, k6 | IMPLEMENTED |
+| 백엔드 배포 | 단일 EC2 + Docker | IMPLEMENTED |
+| DB 배포 | RDS MySQL | IMPLEMENTED |
 | 프론트 배포 | S3 + CloudFront | PROPOSED |
 | 다중 서버 | 단일 서버 병목 확인 후 | EXPERIMENTAL |
-| 요청 횟수 제한 | 앱 인터셉터와 서버 메모리 고정 창 카운터. 서버가 2대 이상이면 한도가 서버별로 나뉜다 ([ADR-0004](../decisions/0004-request-rate-limit.md)) | DECIDED |
-| 실시간 경매 | SSE (서버 → 클라이언트). 입찰은 일반 POST ([경매 정책 8절](../domains/auction/policy.md)) | PROPOSED |
+| 요청 횟수 제한 | 앱 인터셉터와 서버 메모리 고정 창 카운터. 서버가 2대 이상이면 한도가 서버별로 나뉜다 ([ADR-0004](../decisions/0004-request-rate-limit.md)) | IMPLEMENTED |
+| 실시간 경매 | SSE (서버 → 클라이언트). 입찰은 일반 POST ([경매 정책 8절](../domains/auction/policy.md)) | IMPLEMENTED |
 | 팬 채팅 | MVP 제외 | DEFERRED |
 
 모듈러 모놀리스의 핵심은 배포 단위 하나 안에서 도메인 소유권과 의존성을 명확히 나누는 것이다.

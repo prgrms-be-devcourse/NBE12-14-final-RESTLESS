@@ -15,4 +15,4 @@
 | LEGACY-09 | 실제 배송, 운송장 기능 포함 | 배송지 스냅샷까지만 제공 |
 | LEGACY-10 | Kotlin 중심 | Java |
 | LEGACY-11 | 쿠폰(선착순 발급) 도메인 | 팬미팅 추첨 도메인([fanmeeting](../domains/fanmeeting/README.md)). 쿠폰 코드와 설계 문서는 삭제했다(#156) |
-| LEGACY-12 | SKU별 대기열에서 `available = 0`, `reserved > 0`이면 신규 입장만 중단하고 `WAITING`과 미사용 `ADMITTED`는 유지, 둘 다 0일 때만 종료 (2026-11-19 오전 안, #253) | `available = 0`이면 `reserved`와 무관하게 신규 진입과 발급을 중단하고 기존 `WAITING`과 미사용 `ADMITTED`를 종료. 재고가 반환되면 새 진입으로 재개하고 종료된 순번과 구매권은 복구하지 않는다 ([드롭 정책 7-1절](../domains/drop/policy.md#7-1-sku별-구매-입장-제어-decided-2026-11-19-253)) |
+| LEGACY-12 | SKU별 대기열에서 `available = 0`, `reserved > 0`이면 신규 입장만 중단하고 `WAITING`과 미사용 `ADMITTED`는 유지, 둘 다 0일 때만 종료 (2026-11-19 오전 안, #253) | `available = 0`이면 `reserved`와 무관하게 신규 진입과 입장 허가를 중단하고 기존 `WAITING`과 미사용 `ADMITTED`를 종료. 재고가 반환되면 새 진입으로 재개하고 종료된 입장 순번과 입장 허가는 복구하지 않는다 ([드롭 정책 7-1절](../domains/drop/policy.md#7-1-sku별-구매-입장-제어-decided-2026-11-19-253)) |

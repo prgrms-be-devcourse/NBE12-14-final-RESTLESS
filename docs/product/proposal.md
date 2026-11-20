@@ -13,9 +13,9 @@
 | 프론트엔드 프레임워크 | Next.js, TypeScript | Vite 7 + React 19 + TypeScript | `frontend/package.json`, `frontend/vite.config.ts` |
 | 프론트엔드 배포 | EC2에서 Next.js를 Docker로 실행 | S3 + CloudFront 정적 배포 (PROPOSED) | [architecture/overview.md](../architecture/overview.md) 1·3절 |
 | 구매 대기열 저장소 | Redis 기반 대기열·입장 제어 | MySQL로 결정·구현 (#70), Redis는 비교 실험 후 (EXPERIMENTAL) | [architecture/overview.md](../architecture/overview.md), [open-questions.md](open-questions.md) |
-| 경매 실시간 전달 | SSE | 경매 정책·계약은 SSE. 아키텍처 개요에는 "WebSocket 후보"로 남아 있음 | [auction/policy.md](../domains/auction/policy.md), [contracts/api/auction.md](../contracts/api/auction.md) |
+| 경매 실시간 전달 | SSE | 차이 없음. 경매 정책, 계약, 아키텍처 개요 모두 SSE이고 구현했다 (2026-11-20 확인) | [auction/policy.md](../domains/auction/policy.md), [contracts/api/auction.md](../contracts/api/auction.md) |
 | 통합 브랜치·승인 | `develop`, 최소 2인 승인 | `dev`, 승인 없이 CI 통과 후 머지 (2026-11-13 팀 결정) | [CONTRIBUTING.md](../../CONTRIBUTING.md) |
-| 쿠폰 도메인 | 언급 없음 | 문서·패키지 존재 | [domains/coupon](../domains/coupon/), `backend/.../coupon` |
+| 쿠폰 도메인 | 언급 없음 | 삭제했다 (#156). 팬미팅 추첨 도메인으로 대체 | [폐기한 가정 LEGACY-11](../decisions/superseded.md) |
 | 일정 | 4주 WBS (11/30 기능 고정, 12/5 발표) | 5단계 Phase (11/1 ~ 12/7) | [roadmap.md](roadmap.md) |
 
 ---

@@ -1,6 +1,6 @@
 # ADR-0004. 요청 횟수 제한: 앱 안의 인터셉터로 시작
 
-- 상태: Accepted
+- 상태: IMPLEMENTED
 - 날짜: 2026-11-20
 - 관련: #271, PR #278, [공통 API 계약의 요청 횟수 제한](../contracts/api/common.md#요청-횟수-제한)
 
