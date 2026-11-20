@@ -20,13 +20,13 @@ bash backend/scripts/seed/seed.sh --yes    # 묻지 않고 실행
 
 ## 계정
 
-비밀번호는 모두 `0000`이다. 형식은 perf 시드와 같다.
+비밀번호는 모두 `0000`이다. 연락처와 주소 규칙은 perf 시드와 같다.
 
-| ID | 이메일 | 역할 |
-|---|---|---|
-| 1~10 | user1@fanq.com ~ user10@fanq.com | USER |
-| 901~903 | organizer1@fanq.com ~ organizer3@fanq.com | ORGANIZER |
-| 999 | admin@fanq.com | ADMIN |
+| ID | 이메일 | 역할 | 닉네임 |
+|---|---|---|---|
+| 1~100 | user001@fanq.com ~ user100@fanq.com | USER | user-001 ~ user-100 |
+| 901~910 | organizer001@fanq.com ~ organizer010@fanq.com | ORGANIZER | organizer-001 ~ organizer-010 |
+| 999 | admin@fanq.com | ADMIN | FANQ Administrator |
 
 모든 계정에 기본 배송지가 있다. 받는 분은 닉네임, 연락처는 회원 ID로 정한 `010-0000-0001` 형식, 주소는 판교역 광장(경기도 성남시 분당구 판교역로 160)이다.
 
