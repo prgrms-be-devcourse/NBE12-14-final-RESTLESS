@@ -30,3 +30,18 @@ SET default_recipient = nickname,
     default_phone     = CONCAT('010-', LPAD(id DIV 10000, 4, '0'), '-', LPAD(id MOD 10000, 4, '0')),
     default_address   = '경기도 성남시 분당구 판교역로 160'
 WHERE id < 1000;
+
+-- 최초 크레딧. 공통 계정마다 지갑을 만들고 10,000,000 크레딧을 지급한다. 지갑 ID는 회원 ID와 같다.
+SET @seed_initial_credit = 10000000;
+
+INSERT INTO credit_wallets (credit_wallet_id, user_id, balance_amount, reserved_amount, created_at, updated_at)
+SELECT id, id, @seed_initial_credit, 0, @seed_now, @seed_now
+FROM users
+WHERE id < 1000;
+
+INSERT INTO credit_transactions (credit_transaction_id, credit_wallet_id, credit_hold_id, transaction_type, balance_delta,
+                                 reserved_delta, balance_after, reserved_after, operation_key, created_at)
+SELECT credit_wallet_id, credit_wallet_id, NULL, 'GRANT', @seed_initial_credit, 0, @seed_initial_credit, 0,
+       CONCAT('SEED-GRANT:', user_id), @seed_now
+FROM credit_wallets
+WHERE user_id < 1000;
