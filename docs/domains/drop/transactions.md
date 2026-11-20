@@ -2,13 +2,13 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/application/`
 >
-> 마지막 확인: 2026-11-19 (#254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
+> 마지막 확인: 2026-11-20 (#285 TX3 롤백 뒤 상태를 `DropApprovalRollbackRecoveryIntegrationTest`, 장애 처리 문서와 대조. 용어 정리. 2026-11-19 #254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
 
 PG 호출 중에는 DB 트랜잭션을 열어 두지 않는다.
 
 TX2~TX5의 드롭 쪽 단계는 결제 모듈이 같은 트랜잭션에서 호출하는 `PaymentResultHandler` 드롭 구현 안에서 수행한다 ([ADR-0003](../../decisions/0003-payment-module-boundary.md)).
 
-## TX1. 재고 예약 + 주문 생성
+## TX1. 재고 점유 + 주문 생성
 
 하나의 MySQL 트랜잭션에서:
 
@@ -58,7 +58,7 @@ TX2~TX5의 드롭 쪽 단계는 결제 모듈이 같은 트랜잭션에서 호�
 3. 재고와 구매 슬롯은 그대로 둔다 (예약 보호). 일반 만료 작업은 반환하지 않는다 (INV-10)
 4. 조건이 맞지 않으면 아무것도 바꾸지 않는다
 
-이후 결제 모듈의 대사 작업이 PG를 조회해 TX3, TX4-a, 보상 취소 중 하나로 이어 간다.
+이후 결제 모듈의 미완료 결제 재확인 작업이 PG를 조회해 TX3, TX4-a, 보상 취소 중 하나로 이어 간다.
 
 ## TX3. 구매 확정
 
@@ -76,6 +76,8 @@ PG 승인이 확인된 뒤 하나의 트랜잭션에서:
 10. Commit
 
 승인 시각(`approvedAt`)이 예약 기한 뒤여도 확정한다. 기한은 TX2에서 판정했다.
+
+TX3가 롤백되면 결제는 `PROCESSING`, 예약은 `CONFIRMING`, 주문은 `PAYMENT_CONFIRMING`으로 남는다. 재고와 슬롯도 그대로다. 미완료 결제 재확인 작업이 PG를 다시 조회해 TX3를 다시 실행한다. 상세와 한계는 [장애 처리 문서](../../operations/failure-handling.md#승인-결과-반영-실패와-복구-269-270-273)에 있다.
 
 비핵심 후속 작업은 커밋 후 Spring Event Listener로 처리한다. Outbox 기록은 넣지 않는다 ([ADR-0001](../../decisions/0001-event-handling.md)).
 
@@ -154,9 +156,6 @@ PG 취소 결과가 불명확하면 재고를 복원하지 않는다.
 
 ### SKU별 입장과 종료 (#254)
 
-게이트 락 결과는 LOCKED / BUSY / MISSING이다. SKIP LOCKED 결과가 비면 nonlocking 존재 조회로 BUSY와 MISSING을 구분한다. MISSING이면 batch transaction을 종료한 뒤 ERROR 로그와 태그 없는 `drop.queue.gate.missing`을 남긴다. 별도 REQUIRES_NEW transaction에서 INSERT IGNORE로 보완하고 batch를 한 번 재시도한다. 재시도도 비면 건너뛴다. 정상 LOCKED와 BUSY 경로에는 INSERT를 하지 않으며 TX1은 이 복구 경로를 사용하지 않는다. 동시 repair의 INSERT는 PK 충돌 처리를 위해 짧게 기다릴 수 있지만 admission transaction을 유지한 채 기다리지 않는다.
-
-
 정책은 [policy.md 7-1절](policy.md#7-1-sku별-구매-입장-제어-decided-2026-11-19-253)이다. 구매 입장 제어, 입장 허가 (ADMITTED), DB row lock 대기는 서로 다르다. 종료 상태(`UNAVAILABLE`)와 오류 코드는 확정이다. 동시성은 `drop_queue_gates`의 SKU별 행으로 직렬화한다. 게이트만 `FOR UPDATE SKIP LOCKED`로 읽고, 이미 사용 중인 SKU는 건너뛴다.
 
 - 진입: SKU(`variantId`)를 받아 그 SKU가 그 드롭 소속인지, 판매 중인지, `available > 0`인지 확인한다. `available = 0`이면 행을 만들지 않고 409 `DROP_SOLD_OUT`(현재 구매 불가)을 돌려준다. 이 확인은 재고 행을 잠그지 않는 읽기다. 구매 슬롯으로 같은 회원의 진입을 직렬화하고 최신 대기 행에 락 획득을 한다.
@@ -184,10 +183,17 @@ PG 취소 결과가 불명확하면 재고를 복원하지 않는다.
 - 3번에서 `c`를 먼저 읽고 `available`을 나중에 읽는다. TX1은 `available -1`과 `ADMITTED -1`(CONSUMED)을 같은 커밋에서 하므로 둘의 차는 TX1로 줄지 않는다. 순서를 반대로 읽으면 사이에 TX1이 끼어 초과 허가할 수 있다. 이 순서에서는 TX1이 끼면 적게 발급할 뿐이다.
 - 직렬화 대기와 DB row lock 대기는 입장 허가 작업 안에서 짧게 끝나야 한다. 사용자의 입장 순번을 정하는 데 쓰지 않는다 (순서는 `id`).
 
+게이트 행이 없을 때의 복구:
+
+- 게이트 락 결과는 LOCKED, BUSY, MISSING이다. SKIP LOCKED 결과가 비면 잠그지 않는 존재 조회로 BUSY와 MISSING을 구분한다.
+- MISSING이면 batch transaction을 끝낸 뒤 ERROR 로그와 태그 없는 `drop.queue.gate.missing`을 남긴다. 별도 REQUIRES_NEW transaction에서 INSERT IGNORE로 게이트를 만들고 batch를 한 번 재시도한다. 재시도도 비면 건너뛴다.
+- 정상 LOCKED와 BUSY 경로에는 INSERT가 없다. TX1은 이 복구 경로를 쓰지 않는다.
+- 동시 복구의 INSERT는 PK 충돌 처리 때문에 짧게 기다릴 수 있다. 그래도 admission transaction을 쥔 채 기다리지 않는다.
+
 TX1과의 관계:
 
 - TX1 조건부 재고 UPDATE(`available - 1`, `reserved + 1`)는 재고 확보의 최종 검증이다. 입장 허가가 있어도 재고가 없으면 품절(409 `DROP_SOLD_OUT`)이다.
-- TX1은 그 SKU의 입장 허가가고 아직 `ADMITTED`인 것만 받아들인다. 다른 SKU의 입장 허가나 종료된 입장 허가로 점유할 수 없다. 입장 허가 소비(CONSUMED)는 재고 점유 성공과 같은 트랜잭션이다 (현재와 같다).
+- TX1은 그 SKU의 입장 허가이고 아직 `ADMITTED`인 것만 받아들인다. 다른 SKU의 입장 허가나 종료된 입장 허가로 점유할 수 없다. 입장 허가 소비(CONSUMED)는 재고 점유 성공과 같은 트랜잭션이다 (현재와 같다).
 - 같은 멱등성 키의 기존 결과는 입장 허가 검증 없이 반환한다 (현재와 같다). 대기 종료가 이미 성공한 점유의 재시도 응답을 바꾸지 않는다.
 - 결제 성공(TX3)은 `reserved -1`, `sold +1`이고 `available`은 바뀌지 않는다. 진입과 입장 허가가 재개되지 않는다.
 - 점유 반환(TX4 결제 실패 기한 뒤, TX4-b 만료, TX5 `COMPENSATION`)은 `available +1`이다. 판매 기간 안이면 다음 진입과 다음 입장 실행부터 재개된다. 종료된 입장 순번과 입장 허가는 복구하지 않는다.
@@ -207,10 +213,10 @@ TX1과의 관계:
 | F5 | 종료가 `available = 0`을 읽은 뒤 커밋 전에 재고 반환 | 이미 종료한 행은 복구하지 않는다. 묶음마다 `available`을 다시 읽어 남은 묶음은 종료하지 않는다. 사용자는 새로 진입한다. 점유나 재고에는 영향이 없다 | 정책 규칙 6 |
 | F6 | 진입이 `available > 0`을 읽고 행을 만드는 사이에 재고가 0이 됨 | `WAITING`이 잠시 남는다. 다음 입장 실행이 종료한다. 그 사이 TX1은 입장 허가가 없어 점유할 수 없다 | 진입 확인은 잠금 없는 읽기. 지연은 입장 허가 작업 한 번의 주기 안 |
 | F7 | 재고 반환과 입장이 겹침 | 반환 전에 종료된 사용자는 복구되지 않는다. 반환 뒤 진입한 사용자부터 입장 허가로 전이한다. 반환 전 진입한 사용자는 `available = 0`이라 이미 거절됐다 | 정책 규칙 6 |
-| F8 | PG 결과 불명확인 점유가 `available = 0`의 원인 | 재고는 반환되지 않고 입장 제어는 현재 구매 불가를 유지한다. 입장 제어 쪽에서 점유 상태를 바꾸지 않는다. 대사가 실패를 확정하면 그때 TX4가 재고를 반환하고 재개된다 | INV-10 |
+| F8 | PG 결과 불명확인 점유가 `available = 0`의 원인 | 재고는 반환되지 않고 입장 제어는 현재 구매 불가를 유지한다. 입장 제어 쪽에서 점유 상태를 바꾸지 않는다. 미완료 결제 재확인 작업이 실패를 확정하면 그때 TX4가 재고를 반환하고 재개된다 | INV-10 |
 | F9 | 종료된 입장 허가로 점유 요청 | 403 `DROP_ADMISSION_REQUIRED`. 재고 수량은 바뀌지 않는다. 이후 재고가 반환돼도 그 입장 허가는 살아나지 않는다 | INV-06 |
 | F10 | 종료 중에 같은 멱등성 키로 성공한 점유를 재요청 | 기존 결과를 그대로 반환한다 | INV-07, TX1 1번 |
-| F11 | 종료와 결제 승인 시작(TX2), 재결제가 겹침 | 대기 종료는 예약 행을 잠그지 않고 바꾸지 않는다. 결제, 기한, 재결제는 8절 그대로다 | 정책 규칙 7 |
+| F11 | 종료와 결제 승인 시작(TX2), 재결제가 겹침 | 대기 종료는 예약 행을 잠그지 않고 바꾸지 않는다. 결제, 기한, 재결제는 [policy.md 8절](policy.md#8-재고-점유-정책) 그대로다 | 정책 규칙 7 |
 | F12 | 상태 조회가 종료와 겹침 | 조회는 대기 행을 잠근다. 종료가 먼저면 종료 상태를, 조회가 먼저면 `WAITING`을 돌려주고 다음 조회에서 종료 상태를 본다. heartbeat는 종료된 행에 쓰지 않는다 | 대기 행 잠금 |
 
 `drop.queue.admitted`, `drop.queue.unavailable`, `drop.queue.skipped`는 태그 없는 합계이며 commit 후 증가한다. 작업 실패는 로그와 `drop.queue.failure`, 후속 메트릭 실패는 로그와 `drop.queue.metric.failure`로 남긴다. 메트릭은 태그에 SKU ID를 넣지 않는다 (끝없이 늘어나는 값). SKU별 입장 수나 현재 구매 불가 SKU 수는 태그 없는 합계나 로그로 본다.

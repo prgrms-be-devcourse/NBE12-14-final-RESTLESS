@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/resources/db/migration/V*__drop_*.sql`, `backend/src/main/java/com/restless/drop/domain/`
 >
-> 마지막 확인: 2026-11-19 (#254 SKU별 입장 제어 migration과 대조. 나머지는 2026-11-14 #92 구현과 대조)
+> 마지막 확인: 2026-11-20 (#285 용어를 재고 점유로 통일. 2026-11-19 #254 SKU별 입장 제어 migration과 대조. 나머지는 2026-11-14 #92 구현과 대조)
 
 ![Drop ERD](drop-erd.png)
 
@@ -61,7 +61,7 @@ SKU별 재고
 
 ## DROP_RESERVATIONS
 
-재고 예약과 구매 결과 이력
+재고 점유와 구매 결과 이력
 
 | 컬럼 | 의미 |
 |---|---|

@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/domain/`, `backend/src/main/java/com/restless/order/domain/`, `backend/src/main/java/com/restless/payment/domain/`
 >
-> 마지막 확인: 2026-11-19 (#253 SKU별 입장 제어 정책 반영. 2절은 목표 상태이고 구현 전이다. 나머지는 2026-11-14 #92 구현과 대조)
+> 마지막 확인: 2026-11-20 (#285 용어 정리, 2절은 #254에서 구현됐다. 2026-11-19 #253 SKU별 입장 제어 정책 반영. 나머지는 2026-11-14 #92 구현과 대조)
 
 Order, Payment, Reservation 상태는 따로 저장하고, 조합 간 정합성을 검증한다.
 
@@ -45,12 +45,12 @@ ADMITTED → UNAVAILABLE
 끝난 상태의 원인은 서로 다르다: `CONSUMED` 사용 완료(구매 성공), `EXPIRED` 허가 만료(입장 허가 유효시간 `admitted_until` 경과), `CLOSED` 대기 종료(입장 대기 중 이탈 또는 판매 기간 종료), `UNAVAILABLE` 구매 불가 종료(그 SKU의 `available = 0`).
 
 - `UNAVAILABLE`, `CONSUMED`, `EXPIRED`, `CLOSED`는 끝난 상태다. 다시 `WAITING`이나 `ADMITTED`가 되지 않는다. 재고가 반환돼 `available > 0`이 되어도 종료된 입장 순번과 입장 허가는 복구하지 않고, 사용자는 새 `WAITING` 행으로 다시 진입한다.
-- 종료는 상태 전이다. 행을 지우지 않고 thread를 끝내지 않는다. 이미 `CONSUMED`인 행과 그 점유(재고 예약)는 종료 대상이 아니고 취소되지 않는다.
+- 종료는 상태 전이다. 행을 지우지 않고 thread를 끝내지 않는다. 이미 `CONSUMED`인 행과 그 점유는 종료 대상이 아니고 취소되지 않는다.
 - `ADMITTED`는 구매를 시도할 권한이며 재고 확보를 뜻하지 않는다. `UNAVAILABLE`이 된 입장 허가로는 신규 점유를 만들 수 없다 (INV-06).
 - 현재 구매 불가(`available = 0`)는 최종 매진이 아니다. 입장 신청 행에 별도 "품절" 상태를 두지 않는다.
 - 입장 대기(`WAITING`), 입장 허가(`ADMITTED`), DB row lock 대기는 서로 다르다 ([policy.md 7-1절](policy.md#7-1-sku별-구매-입장-제어-decided-2026-11-19-253)).
 
-## 3. 재고 예약 상태
+## 3. 재고 점유 상태
 
 ```text
 RESERVED
