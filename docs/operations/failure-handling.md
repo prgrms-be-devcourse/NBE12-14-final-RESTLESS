@@ -19,16 +19,16 @@
 
 | ID | 장애 | 상태 |
 |---|---|---|
-| F-01 | 재고 예약 후 Order 생성 실패 | 테스트: `DropReservationIntegrationTest.inv01AndInv07OrderFailureRollsBackInventorySlotAndOrderThenSameKeyCanRetry` (전체 롤백) |
+| F-01 | 재고 점유 후 Order 생성 실패 | 테스트: `DropReservationIntegrationTest.inv01AndInv07OrderFailureRollsBackInventorySlotAndOrderThenSameKeyCanRetry` (전체 롤백) |
 | F-02 | MySQL Deadlock, Lock Timeout | 일부: 결제 준비·승인 시작 잠금 순환은 `PaymentFlowTest.prepareAndApprovalStartOverlapWithoutDeadlockOr500` (#73). 일반 Lock Timeout은 TBD |
 | F-03 | PG 승인 거절 | 테스트: `DropPaymentAcceptanceTest.failureBeforeDeadlineKeepsHoldForRetry`, `failureAfterDeadlineReleasesStock`, `PaymentFlowTest.pgRejectedCommitsFailureAndAttemptContext` |
 | F-04 | PG 승인 타임아웃 | 테스트: `PaymentFlowTest.inv10_timeoutAndLostResponseRemainUnknown`, `DropPaymentAcceptanceTest.unknownResultProtectsStockUntilReconciled` |
 | F-05 | PG 승인 성공 후 응답 유실 | 테스트: `PaymentReconciliationTest.lostResponseRecoversActualApprovalWithoutApprovingAgain` |
-| F-06 | PG 승인 직후 서버 종료 | 대사가 PROCESSING을 재조회한다. 테스트: `PaymentReconciliationTest.staleProcessingApprovedUsesStoredAttemptOnce` |
-| F-07 | PG 승인 후 DB 구매 확정 실패 | 테스트: `PaymentFlowTest.technicalFailureRollsBackResultAndReturnsProcessing`, `PaymentReconciliationTest.handlerExceptionRollsBackAndDoesNotBlockNextPayment` |
+| F-06 | PG 승인 직후 서버 종료 | 미완료 결제 재확인 작업이 PROCESSING을 재조회한다. 테스트: `PaymentReconciliationTest.staleProcessingApprovedUsesStoredAttemptOnce` |
+| F-07 | PG 승인 후 DB 구매 확정 실패 | 테스트: `PaymentFlowTest.technicalFailureRollsBackResultAndReturnsProcessing`, `PaymentReconciliationTest.handlerExceptionRollsBackAndDoesNotBlockNextPayment`, `DropApprovalRollbackRecoveryIntegrationTest` (#270) |
 | F-08 | 중복 승인 결과 처리 | 테스트: `DropPaymentAcceptanceTest.duplicateConfirmationsApplyOnce`, `PaymentReconciliationTest.reconciliationRacesUserConfirmButApprovesOnce` |
 | F-09 | PG 환불 취소 결과 불명확 | 테스트: `PaymentReconciliationTest.cancelUnknownCompletesWithStoredKind`, `cancellationUnknownCanBeRetriedRepeatedlyWithoutInvalidSelfTransition` |
-| F-10 | PG 취소 성공 후 서버 종료 | 대사가 같은 키로 취소를 다시 보낸다. 테스트: `PaymentReconciliationTest.staleCancelPendingRetriesSameKeyOutsideTx` |
+| F-10 | PG 취소 성공 후 서버 종료 | 미완료 결제 재확인 작업이 같은 키로 취소를 다시 보낸다. 테스트: `PaymentReconciliationTest.staleCancelPendingRetriesSameKeyOutsideTx` |
 | F-11 | 예약 만료 Worker 중복 실행 | 테스트: `DropPaymentLifecycleIntegrationTest.twoExpiryWorkersReleaseOnceAndDisabledSchedulerLeavesRunnableJob`, `DropPaymentAcceptanceTest.approvalStartRacesExpiryWithOneOutcome` |
 | F-12 | 구매 입장 제어 저장소 장애 | TBD |
 | F-13 | 구매 확정 커밋 후 리스너 실행 전 서버 종료 (이벤트 유실) | [ADR-0001](../decisions/0001-event-handling.md) 관측 방법 참고 |
@@ -48,7 +48,7 @@
 | A-07 | SSE 연결 끊김, 전송 실패 | 입찰·확보는 그대로, 로그와 `auction.stream.failure{stage}`. 테스트: `AuctionStreamTest.연결이_끊겨도_입찰과_확보는_그대로다_INV_AU_09` |
 | A-08 | 입찰·종료 커밋 후 서버 종료로 실시간 전송 유실 | 클라이언트가 재접속할 때 상세 API로 최신 상태를 받는다. 보정 작업 없음 |
 
-## 공통 결제 대사 (#46)
+## 미완료 결제 재확인 작업 (#46)
 
 결제 모듈이 미완료 결제를 조회하고 [ADR-0003](../decisions/0003-payment-module-boundary.md)의 동기 Handler로 도메인을 함께 확정한다.
 승인은 **재요청하지 않고 조회만** 한다. PG 호출 전후 DB 트랜잭션을 분리하며 결과 반영 시 결제 행 → 환불 행 → Handler의 도메인 행 순으로 잠근다.
@@ -80,7 +80,7 @@
 
 ### 설정과 후보 조회
 
-`restless.payment.reconcile` 아래 설정이다. 테스트는 Gradle systemProperty로 enabled=false를 주고 `runOnce()`를 직접 실행한다. 수동 대사를 검증하는 PaymentReconciliationTest는 @SpringBootTest에도 enabled=false를 명시해 IntelliJ JUnit 직접 실행에서도 같은 조건을 보장한다.
+`restless.payment.reconcile` 아래 설정이다. 테스트는 Gradle systemProperty로 enabled=false를 주고 `runOnce()`를 직접 실행한다. 재확인 작업을 직접 실행해 검증하는 PaymentReconciliationTest는 @SpringBootTest에도 enabled=false를 명시해 IntelliJ JUnit 직접 실행에서도 같은 조건을 보장한다.
 
 | 설정 | 기본값 | 의미 |
 |---|---|---|
@@ -110,7 +110,7 @@ DB 결제 잠금과 상태 재확인으로 최종 Handler 반영은 한 번만 �
 
 PG는 승인했는데 승인 결과를 반영하는 트랜잭션(드롭 문서의 TX3, 코드의 공통 TX-B)이 끝나지 못하면 돈은 빠졌고 DB는 그 사실을 모른다.
 원인은 반영 중 예외(정산 불일치, 커넥션 부족, 잠금 대기 초과)와 서버 종료다.
-TX2가 PG 호출 전에 커밋한 승인 시작 기록이 있어서, 미완료 결제 재확인 작업(이 문서의 대사)이 이 결제를 찾아 PG에 조회하고 같은 반영 로직을 다시 실행한다.
+TX2가 PG 호출 전에 커밋한 승인 시작 기록이 있어서, 미완료 결제 재확인 작업이 이 결제를 찾아 PG에 조회하고 같은 반영 로직을 다시 실행한다.
 
 반영이 롤백된 직후의 상태는 아래와 같다. 통합 테스트로 확인했다.
 
@@ -160,7 +160,7 @@ TX2가 PG 호출 전에 커밋한 승인 시작 기록이 있어서, 미완료 �
 
 티켓팅의 [불명확 5분 운영 확인](../domains/ticketing/transactions.md#9-불명확-결과의-운영-확인-전환-decided-2026-11-12)을 위해
 UNKNOWN 나이를 제공한다. **운영 확인 등록 여부 저장, 중복 없는 알림 및 실제 알림 채널은 이번 구현에 포함하지 않는다.**
-운영 확인이 필요해도 결제와 자원을 시간만으로 해제하지 않으며 대사를 계속한다.
+운영 확인이 필요해도 결제와 자원을 시간만으로 해제하지 않으며 재확인을 계속한다.
 
 ## PG 설정
 
@@ -169,5 +169,5 @@ UNKNOWN 나이를 제공한다. **운영 확인 등록 여부 저장, 중복 없
 | `pg.provider` | 없으면 `toss`. dev 프로필은 `${PG_PROVIDER:fake}`, perf 프로필은 `fake` 고정 | `fake`면 실제 PG를 부르지 않는 Fake PG를 쓴다. 부하 테스트는 perf 프로필로 띄우고, 가짜 PG가 아니면 기동이 실패한다. Fake PG는 prod 프로필에서 만들어지지 않는다 |
 | `toss.secret-key` (환경 변수 `TOSS_SECRET_KEY`) | 없음 | `toss`일 때 필수. 비어 있으면 기동이 실패한다 (모든 결제가 401로 UNKNOWN에 쌓이는 것을 막음). 서버에서만 읽는다 |
 | `toss.base-url` | `https://api.tosspayments.com` | 결제 승인·조회·취소 호출 대상 |
-| `toss.connect-timeout`, `toss.read-timeout` | 3초, 30초 | 읽기 타임아웃이면 결과를 UNKNOWN으로 두고 대사가 확인한다 |
+| `toss.connect-timeout`, `toss.read-timeout` | 3초, 30초 | 읽기 타임아웃이면 결과를 UNKNOWN으로 두고 미완료 결제 재확인 작업이 확인한다 |
 | `pg.fake.*` | perf: 승인 지연 `PG_FAKE_APPROVE_DELAY` 300ms, 비율 `PG_FAKE_REJECT_RATE`·`PG_FAKE_UNKNOWN_RATE`·`PG_FAKE_LOST_RESPONSE_RATE` 0 | Fake PG 응답 설정 (테스트·부하 테스트용). 300ms는 측정값이 아닌 가정이다 |

@@ -70,10 +70,10 @@ current_payment_id는 NULL 허용 UNIQUE이며, DB CHECK는 ID/시각의 부분 
 payment_result_pending은 수락한 승인 결과 또는 필요한 보상 취소가 미확정임을 뜻한다. 예약 상태 PAYMENT_PENDING은 checkout 직후와 승인 진행 중 모두 쓰므로 이를 구분하는 별도 필드다. 성공 확정에서는 이 필드를 false로 바꾸고 시도 ID/시각을 보존한다. 내부 최종 실패 처리에서도 이 필드를 false로 바꾼다. 자동 만료는 이 필드로 미확정 시도를 보호한다. 보상 취소가 확인되면 같은 시도에 한해 false로 바꾼다. 정상 환불·운영 알림은 후속이다.
 승인 전 READY 만료 실패의 approvalStartedAt은 null일 수 있다. 정상 환불과 보상 취소를 구분하고 예매 확정 전 보상 취소에 confirmed_count 감소를 적용하지 않는다.
 
-## 공통 대사와 checkout의 관계
+## 미완료 결제 재확인 작업과 checkout의 관계
 
-공통 결제는 PaymentReconciler/PaymentReconciliationScheduler로 미완료 승인·취소를 재조회하고 같은 Handler로 결과를 반영한다. 기준과 주기는 [공통 대사 운영 계약](../../operations/failure-handling.md#공통-결제-대사-46)을 따른다.
-checkout은 payments 행을 생성하지 않으므로 공통 대사 후보가 아니다. 주문만 연결된 PAYMENT_PENDING 예약의 결제 기한 만료를 공통 대사가 대신 정리하지 않는다. 승인 미시도·최종 실패 예약은 티켓팅의 결제 기한 만료 작업이 정리한다. 공통 Handler가 등록돼 결제 시도·결과 callback도 연결됐다.
+공통 결제는 PaymentReconciler/PaymentReconciliationScheduler로 미완료 승인, 취소를 재조회하고 같은 Handler로 결과를 반영한다. 기준과 주기는 [미완료 결제 재확인 작업 운영 계약](../../operations/failure-handling.md#미완료-결제-재확인-작업-46)을 따른다.
+checkout은 payments 행을 생성하지 않으므로 미완료 결제 재확인 작업의 후보가 아니다. 주문만 연결된 PAYMENT_PENDING 예약의 결제 기한 만료를 미완료 결제 재확인 작업이 대신 정리하지 않는다. 승인 미시도, 최종 실패 예약은 티켓팅의 결제 기한 만료 작업이 정리한다. 공통 Handler가 등록돼 결제 시도, 결과 callback도 연결됐다.
 공통 UNKNOWN 최초 시각·나이 메트릭은 구현됐지만 티켓팅의 불명확 5분 운영 확인 등록·중복 없는 알림은 후속이며 좌석 보호 정책을 바꾸지 않는다.
 
 ## 단계별 구현: 승인 시도 기록 기반 (2026-11-13)

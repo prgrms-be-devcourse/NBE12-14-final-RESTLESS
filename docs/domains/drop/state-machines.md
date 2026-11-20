@@ -120,7 +120,7 @@ CANCEL_UNKNOWN → CANCELLED / APPROVED
 | 전이 | 쓰는 경우 |
 |---|---|
 | READY → FAILED | 승인을 시작하지 않은 시도를 닫는다. 닫힌 시도는 승인되지 않는다. 사유: 기한(`expires_at`) 경과(`EXPIRED`), 같은 대상의 새 키 결제 준비로 교체(`SUPERSEDED`), Handler의 승인 시작 거절(`APPROVAL_REJECTED`) |
-| UNKNOWN → FAILED | PG 재조회가 최종 NotApproved이거나, 승인 시작 후 15분 이상 지난 명시적 NotFound일 때만 쓴다. Unknown/통신 오류/처리 중은 실패로 추측하지 않는다 ([대사 규칙](../../operations/failure-handling.md#공통-결제-대사-46)) |
+| UNKNOWN → FAILED | PG 재조회가 최종 NotApproved이거나, 승인 시작 후 15분 이상 지난 명시적 NotFound일 때만 쓴다. Unknown/통신 오류/처리 중은 실패로 추측하지 않는다 ([재확인 규칙](../../operations/failure-handling.md#미완료-결제-재확인-작업-46)) |
 | CANCEL_PENDING → APPROVED | PG가 취소를 거절했다고 확정 응답한 경우. 결제는 승인 상태로 돌아간다 |
 | CANCEL_UNKNOWN → APPROVED | 같은 멱등성 키의 취소 재시도가 명시적 Rejected를 돌려준 경우. 조회 Approved만으로 되돌리지 않고 동일 취소를 재시도한다 |
 
