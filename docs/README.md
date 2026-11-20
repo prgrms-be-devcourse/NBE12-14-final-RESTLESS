@@ -20,7 +20,8 @@
 |---|---|
 | 공연·티켓팅 테이블/컬럼 확인 | [데이터 사전](domains/ticketing/data-dictionary.md), [티켓팅 문서 색인](domains/ticketing/README.md), [통합 ERD](architecture/erd.md) |
 | 도메인 기능 구현 | domains/<도메인>/ 전체, contracts/api/<도메인>.md, architecture/overview.md 2절, architecture/erd.md |
-| 재고, 결제, 환불 로직 변경 | domains/drop/invariants.md, transactions.md, state-machines.md, operations/failure-handling.md, decisions/0003-payment-module-boundary.md |
+| 재고, 결제, 환불 로직 변경 | domains/drop/invariants.md, transactions.md, state-machines.md, operations/failure-handling.md, decisions/0003-payment-module-boundary.md, contracts/api/payment.md |
+| 요청 횟수 제한 변경 | [ADR-0004](decisions/0004-request-rate-limit.md), [API 공통 규칙의 요청 횟수 제한](contracts/api/README.md#요청-횟수-제한) |
 | 이벤트, 알림 작업 | decisions/0001-event-handling.md, contracts/events/drop.md |
 | 경매 등록, 입찰, 종료, 크레딧 | domains/auction/ 전체 (design.md는 원본), contracts/api/auction.md |
 | 팬미팅 응모, 추첨, 결제, 승격 | domains/fanmeeting/ 전체, contracts/api/fanmeeting.md, contracts/events/fanmeeting.md |

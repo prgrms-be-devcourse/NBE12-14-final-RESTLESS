@@ -9,28 +9,8 @@
 | 오류 응답 규칙 | [README 공통 규칙 3](README.md#공통-규칙) |
 | 공연 | [ticketing.md](ticketing.md) |
 | 주문, 결제 | [payment.md](payment.md) |
+| 요청 횟수 제한 (2026-11-20 추가분) | [README 요청 횟수 제한](README.md#요청-횟수-제한) |
 
 ## 요청 횟수 제한
 
-오류 응답은 [README 공통 규칙 3](README.md#공통-규칙)의 JSON 형식을 따른다.
-
-| 상황 | 상태 | code | details |
-|---|---|---|---|
-| 요청 횟수 한도 초과 | 429 | `TOO_MANY_REQUESTS` | |
-
-429 응답의 `Retry-After` 헤더는 재시도까지 기다릴 초를 올림하여 준다.
-기본값은 아래와 같으며 `restless.ratelimit.*`로 변경할 수 있다.
-
-| Method | Endpoint | 기준 | 한도 |
-|---|---|---|---|
-| POST | `/api/auth/login` | IP | 1분에 20회 |
-| POST | `/api/auth/signup` | IP | 1분에 10회 |
-| POST | `/api/auth/refresh` | IP | 1분에 30회 |
-| POST | `/api/drops/{dropId}/queue/entries` | 로그인 사용자 ID | 10초에 5회 |
-| GET, HEAD | `/api/drops/{dropId}/queue/me` | 로그인 사용자 ID | 1초에 5회 |
-
-Spring MVC가 같은 상태 조회 handler에 연결하는 HEAD는 GET과 동일한 사용자 counter를 소모한다.
-첫 요청부터 고정 길이의 창을 센다. 규칙별로 분리하며 사용자 한도는 dropId와 무관하게 합산한다.
-IP는 `request.getRemoteAddr()` 기준이며 `X-Forwarded-For`를 사용하지 않는다.
-429로 거절된 상태 조회는 heartbeat를 갱신하지 않는다. 위 5개 외의 경로는 제한하지 않는다.
-`restless.ratelimit.enabled=false`면 제한을 끈다. perf 프로필과 일반 테스트에서는 끈다.
+[README 공통 규칙의 요청 횟수 제한](README.md#요청-횟수-제한)으로 옮겼다 (2026-11-20). 예전 링크를 위해 이 절 제목을 남긴다.
