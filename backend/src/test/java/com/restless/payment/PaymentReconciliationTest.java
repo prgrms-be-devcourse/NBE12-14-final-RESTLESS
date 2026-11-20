@@ -729,6 +729,7 @@ class PaymentReconciliationTest {
         final AtomicInteger queries = new AtomicInteger();
         volatile Runnable duringQuery = () -> {}, afterApproval = () -> {};
         volatile PgCancelCommand lastCancel;
+        volatile String queriedOrderId;
 
         ObservedPg(FakePgClient fake) {
             super(fake);
@@ -742,12 +743,14 @@ class PaymentReconciliationTest {
             duringQuery = () -> {};
             afterApproval = () -> {};
             lastCancel = null;
+            queriedOrderId = null;
         }
 
         @Override
         public PgQueryResult query(String id) {
             txSeen |= TransactionSynchronizationManager.isActualTransactionActive();
             queries.incrementAndGet();
+            queriedOrderId = id;
             duringQuery.run();
             return results.containsKey(id) ? results.get(id) : fake.query(id);
         }
