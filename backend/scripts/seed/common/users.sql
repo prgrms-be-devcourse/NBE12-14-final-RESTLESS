@@ -1,23 +1,32 @@
--- 로컬 공통 계정. 모든 도메인 시드가 이 계정을 같이 쓴다.
--- ID 1~999는 공통 계정 구역이다. 비밀번호는 모두 fanq1234 (BCrypt).
--- 앱에는 메일 발송 기능이 없어 이 주소로 메일이 나가지 않는다.
+-- 로컬 공통 계정. 모든 도메인 시드가 이 계정을 같이 쓴다. 형식은 perf 시드(perf/seed/sql/00_users.sql)와 같다.
+-- ID 1~999는 공통 계정 구역이다.
+--   일반 회원 n(1..10): ID n, user<n>@fanq.com
+--   주최자 n(1..3):     ID 900 + n, organizer<n>@fanq.com
+--   관리자:             ID 999, admin@fanq.com
+-- 비밀번호는 모두 0000 (BCrypt). 앱에는 메일 발송 기능이 없어 이 주소로 메일이 나가지 않는다.
+-- 계정을 늘리려면 아래 WHERE의 개수만 바꾼다.
 
 SET @seed_now = UTC_TIMESTAMP(6);
-SET @seed_password_hash = '$2y$10$vNv/O2ax3qJVU4T7wdnQkuVA9dqcewr2IEfmj3pWSVTi2SGXnmS3y';
+SET @seed_password_hash = '$2y$10$y6OOQqM1Leen.h4r02zhS.toyPydGqZ6rOBGO1MybH6UaYBdTtMQC';
 
-INSERT INTO users (id, email, password_hash, nickname, role, status,
-                   default_recipient, default_phone, default_address, created_at, updated_at)
-VALUES (1, 'admin@fanq.local', @seed_password_hash, '관리자', 'ADMIN', 'ACTIVE',
-        NULL, NULL, NULL, @seed_now, @seed_now),
-       (2, 'organizer@fanq.local', @seed_password_hash, '주최자', 'ORGANIZER', 'ACTIVE',
-        NULL, NULL, NULL, @seed_now, @seed_now),
-       (11, 'user1@fanq.local', @seed_password_hash, '팬1', 'USER', 'ACTIVE',
-        '팬1', '010-0000-0011', '서울특별시 송파구 올림픽로 424', @seed_now, @seed_now),
-       (12, 'user2@fanq.local', @seed_password_hash, '팬2', 'USER', 'ACTIVE',
-        '팬2', '010-0000-0012', '서울특별시 송파구 올림픽로 424', @seed_now, @seed_now),
-       (13, 'user3@fanq.local', @seed_password_hash, '팬3', 'USER', 'ACTIVE',
-        '팬3', '010-0000-0013', '서울특별시 송파구 올림픽로 424', @seed_now, @seed_now),
-       (14, 'user4@fanq.local', @seed_password_hash, '팬4', 'USER', 'ACTIVE',
-        '팬4', '010-0000-0014', '서울특별시 송파구 올림픽로 424', @seed_now, @seed_now),
-       (15, 'user5@fanq.local', @seed_password_hash, '팬5', 'USER', 'ACTIVE',
-        '팬5', '010-0000-0015', '서울특별시 송파구 올림픽로 424', @seed_now, @seed_now);
+INSERT INTO users (id, email, password_hash, nickname, role, status, created_at, updated_at)
+WITH RECURSIVE s (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM s WHERE n < 10)
+SELECT n, CONCAT('user', n, '@fanq.com'), @seed_password_hash, CONCAT(n, '번 회원'), 'USER', 'ACTIVE',
+       @seed_now, @seed_now
+FROM s;
+
+INSERT INTO users (id, email, password_hash, nickname, role, status, created_at, updated_at)
+WITH RECURSIVE s (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM s WHERE n < 3)
+SELECT 900 + n, CONCAT('organizer', n, '@fanq.com'), @seed_password_hash, CONCAT('organizer-', n), 'ORGANIZER',
+       'ACTIVE', @seed_now, @seed_now
+FROM s;
+
+INSERT INTO users (id, email, password_hash, nickname, role, status, created_at, updated_at)
+VALUES (999, 'admin@fanq.com', @seed_password_hash, 'FANQ Administrator', 'ADMIN', 'ACTIVE', @seed_now, @seed_now);
+
+-- 기본 배송지. 받는 분은 닉네임, 연락처는 회원 ID로 010-0000-0001 형식, 주소는 모두 판교역 광장이다.
+UPDATE users
+SET default_recipient = nickname,
+    default_phone     = CONCAT('010-', LPAD(id DIV 10000, 4, '0'), '-', LPAD(id MOD 10000, 4, '0')),
+    default_address   = '경기도 성남시 분당구 판교역로 160'
+WHERE id < 1000;

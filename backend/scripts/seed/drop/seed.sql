@@ -19,7 +19,7 @@ INSERT INTO venues (id, name, address, timezone, status, created_at)
 VALUES (2001, 'KSPO DOME', '서울특별시 송파구 올림픽로 424', 'Asia/Seoul', 'ACTIVE', @seed_now);
 
 INSERT INTO concerts (id, venue_id, seller_id, title, status, created_at)
-VALUES (2001, 2001, 2, 'NOVA:LINE 2026 TOUR <AFTERGLOW> IN SEOUL', 'SCHEDULED', @seed_now);
+VALUES (2001, 2001, 901, 'NOVA:LINE 2026 TOUR <AFTERGLOW> IN SEOUL', 'SCHEDULED', @seed_now);
 
 INSERT INTO drops (id, concert_id, title, description, image_url, opens_at, closes_at, status, created_at)
 VALUES (1, 2001, 'NOVA:LINE <AFTERGLOW> 공식 응원봉 한정판',
