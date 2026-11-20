@@ -27,8 +27,9 @@
 | POST | `/api/auth/signup` | IP | 1분에 10회 |
 | POST | `/api/auth/refresh` | IP | 1분에 30회 |
 | POST | `/api/drops/{dropId}/queue/entries` | 로그인 사용자 ID | 10초에 5회 |
-| GET | `/api/drops/{dropId}/queue/me` | 로그인 사용자 ID | 1초에 5회 |
+| GET, HEAD | `/api/drops/{dropId}/queue/me` | 로그인 사용자 ID | 1초에 5회 |
 
+Spring MVC가 같은 상태 조회 handler에 연결하는 HEAD는 GET과 동일한 사용자 counter를 소모한다.
 첫 요청부터 고정 길이의 창을 센다. 규칙별로 분리하며 사용자 한도는 dropId와 무관하게 합산한다.
 IP는 `request.getRemoteAddr()` 기준이며 `X-Forwarded-For`를 사용하지 않는다.
 429로 거절된 상태 조회는 heartbeat를 갱신하지 않는다. 위 5개 외의 경로는 제한하지 않는다.

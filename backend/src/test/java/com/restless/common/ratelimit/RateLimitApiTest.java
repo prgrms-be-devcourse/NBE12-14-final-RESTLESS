@@ -101,7 +101,7 @@ class RateLimitApiTest {
     }
 
     @Test
-    void fixedWindowResetsAtBoundaryAndRetryRoundsUp() throws Exception {
+    void fixedWindowResetsAtBoundaryAndReappliesLimitWithRoundedRetry() throws Exception {
         start(Map.of("restless.ratelimit.login.limit", "1"));
         call(HttpMethod.POST, "/api/auth/login", null, "ip").andExpect(status().isOk());
         context.getBean(MutableClock.class).advanceMillis(59_001);
@@ -109,6 +109,36 @@ class RateLimitApiTest {
                 .andExpect(status().isTooManyRequests()).andExpect(header().string("Retry-After", "1"));
         context.getBean(MutableClock.class).advanceMillis(999);
         call(HttpMethod.POST, "/api/auth/login", null, "ip").andExpect(status().isOk());
+        call(HttpMethod.POST, "/api/auth/login", null, "ip")
+                .andExpect(status().isTooManyRequests()).andExpect(header().string("Retry-After", "60"));
+    }
+
+    @Test
+    void headRequestsShareGetStatusLimitThroughGetMapping() throws Exception {
+        start(Map.of("restless.ratelimit.queue-status.limit", "1"));
+        String path = "/api/drops/1/queue/me";
+        call(HttpMethod.HEAD, path, "1", "ip").andExpect(status().isOk());
+        call(HttpMethod.HEAD, path, "1", "ip")
+                .andExpect(status().isTooManyRequests()).andExpect(header().string("Retry-After", "1"));
+        call(HttpMethod.GET, path, "1", "ip")
+                .andExpect(status().isTooManyRequests()).andExpect(jsonPath("$.code").value("TOO_MANY_REQUESTS"));
+        call(HttpMethod.GET, path, "2", "ip").andExpect(status().isOk());
+        call(HttpMethod.HEAD, path, "2", "ip").andExpect(status().isTooManyRequests());
+        assertThat(context.getBean(Endpoints.class).calls.get()).isEqualTo(2);
+    }
+
+    @Test
+    void otherMethodsDoNotInvokeGetMappingOrConsumeStatusLimit() throws Exception {
+        start(Map.of("restless.ratelimit.queue-status.limit", "1"));
+        String path = "/api/drops/1/queue/me";
+        for (HttpMethod method : new HttpMethod[]{HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH, HttpMethod.DELETE}) {
+            call(method, path, "1", "ip").andExpect(status().isMethodNotAllowed());
+        }
+        call(HttpMethod.OPTIONS, path, "1", "ip").andExpect(status().isOk());
+        call(HttpMethod.TRACE, path, "1", "ip").andExpect(status().is4xxClientError());
+        assertThat(context.getBean(Endpoints.class).calls.get()).isZero();
+        call(HttpMethod.GET, path, "1", "ip").andExpect(status().isOk());
+        assertThat(context.getBean(Endpoints.class).calls.get()).isEqualTo(1);
     }
 
     @Test
@@ -217,11 +247,14 @@ class RateLimitApiTest {
     static class Endpoints {
         final AtomicInteger calls = new AtomicInteger();
         @RequestMapping({"/api/auth/login", "/api/auth/signup", "/api/auth/refresh", "/api/auth/logout",
-                "/api/drops/{dropId}/queue/entries", "/api/drops/{dropId}/queue/me",
+                "/api/drops/{dropId}/queue/entries",
                 "/api/payments", "/api/drops/{dropId}/reservations",
                 "/api/drops/{dropId}/reservations/{reservationId}/cancel", "/api/auth/login/extra",
                 "/api/drops/{dropId}"})
         Map<String, Object> respond() { return Map.of("calls", calls.incrementAndGet()); }
+
+        @GetMapping("/api/drops/{dropId}/queue/me")
+        Map<String, Object> queueStatus() { return Map.of("calls", calls.incrementAndGet()); }
     }
 
     static class MutableClock extends Clock {

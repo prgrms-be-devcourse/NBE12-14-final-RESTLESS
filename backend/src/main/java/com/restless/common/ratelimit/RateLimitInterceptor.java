@@ -51,7 +51,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                 default -> null;
             };
         }
-        return "GET".equals(method) && "/api/drops/{dropId}/queue/me".equals(path)
+        // Spring MVC는 GetMapping에 HEAD도 연결한다. 같은 사용자 counter로 heartbeat 쓰기를 보호한다.
+        return ("GET".equals(method) || "HEAD".equals(method))
+                && "/api/drops/{dropId}/queue/me".equals(path)
                 ? RequestRateLimiter.RuleName.QUEUE_STATUS : null;
     }
 
