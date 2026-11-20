@@ -12,7 +12,7 @@
 |---|---|---|
 | Fan Meeting | 팬미팅 응모, 추첨, 당첨자 결제 | [domains/fanmeeting](../domains/fanmeeting/) |
 | Ticketing | 지정 좌석 콘서트 예매, PG 결제 | [domains/ticketing](../domains/ticketing/) |
-| Drop | 한정판 굿즈 판매, 구매 입장 제어, 재고 예약, PG 결제 | [domains/drop](../domains/drop/) |
+| Drop | 한정판 굿즈 판매, 구매 입장 제어, 재고 점유, PG 결제 | [domains/drop](../domains/drop/) |
 | Auction | 실시간 입찰, 경매 | [domains/auction](../domains/auction/) |
 
 공통 모듈 후보: Auth/Member, Order, Payment, Checkout(Purchase Coordinator), Event, Statistics, Common Error/Security
