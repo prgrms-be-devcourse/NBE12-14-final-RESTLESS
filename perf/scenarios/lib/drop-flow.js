@@ -14,7 +14,7 @@ const PAY_TIMEOUT_MS = durationMs(PAY_TIMEOUT);
 const queueEnter = new Counter('drop_queue_enter');
 const queuePoll = new Counter('drop_queue_poll');
 const payment = new Counter('drop_payment');
-// 회원 한 명의 최종 결과: paid, payment_pending, payment_failed, sold_out, queue_closed,
+// 회원 한 명의 최종 결과: paid, payment_pending, payment_failed, sold_out, unavailable, queue_closed,
 // admission_expired, unfinished(관측 종료까지 대기), error.
 const memberResult = new Counter('drop_member_result');
 // 회원 도착 후 첫 API의 평가 지연 (off는 재고 점유, on은 대기 진입).
@@ -28,9 +28,10 @@ function json(res) {
   try { return res.json() || {}; } catch (e) { return {}; }
 }
 
-// POST /queue/entries. status: WAITING, ADMITTED, NOT_ON_SALE, ERROR.
-export function enterQueue(user, tags = {}, dropId = DROP_ID) {
-  const res = http.post(`${BASE_URL}/api/drops/${dropId}/queue/entries`, null, {
+// POST /queue/entries {variantId}. 진입한 SKU의 재고 점유에만 입장 허가가 쓰인다.
+// status: WAITING, ADMITTED, SOLD_OUT(그 SKU의 available = 0), NOT_ON_SALE, ERROR.
+export function enterQueue(user, variantId, tags = {}, dropId = DROP_ID) {
+  const res = http.post(`${BASE_URL}/api/drops/${dropId}/queue/entries`, JSON.stringify({ variantId }), {
     headers: authHeaders(user),
     tags: { name: 'POST /api/drops/{id}/queue/entries', ...tags },
     timeout: HTTP_TIMEOUT,
@@ -39,26 +40,43 @@ export function enterQueue(user, tags = {}, dropId = DROP_ID) {
   let status = 'ERROR';
   if (res.status === 201 || res.status === 200) status = body.status === 'ADMITTED' ? 'ADMITTED' : 'WAITING';
   else if (res.status === 409 && body.code === 'DROP_NOT_ON_SALE') status = 'NOT_ON_SALE';
-  // 한 번만 진입하므로 201 WAITING만 정상이다. 200(기존 대기)은 계정 재사용을 뜻한다.
-  const kind = observe(res, res.status !== 201, { api: 'enter', ...tags });
-  const result = kind !== 'response' ? kind : res.status === 201 ? 'entered' : status === 'ERROR' ? `http_${res.status}` : `existing_${status.toLowerCase()}`;
+  else if (res.status === 409 && body.code === 'DROP_SOLD_OUT') status = 'SOLD_OUT';
+  const mismatch = (res.status === 201 || res.status === 200) && body.variantId !== variantId;
+  // 한 번만 진입하므로 201 WAITING과 현재 구매 불가(409 DROP_SOLD_OUT)만 정상이다.
+  // 200(기존 대기)은 계정 재사용을 뜻한다. 응답 SKU가 요청과 다르면 서버나 스크립트가 틀렸다.
+  const kind = observe(res, mismatch || (res.status !== 201 && status !== 'SOLD_OUT'), { api: 'enter', ...tags });
+  let result = `existing_${status.toLowerCase()}`;
+  if (kind !== 'response') result = kind;
+  else if (mismatch) result = 'variant_mismatch';
+  else if (res.status === 201) result = 'entered';
+  else if (status === 'SOLD_OUT') result = 'sold_out';
+  else if (status === 'ERROR' || status === 'NOT_ON_SALE') result = `http_${res.status}`;
   queueEnter.add(1, { result, ...tags });
   return { status, position: body.position, res };
 }
 
-// GET /queue/me. status: WAITING, ADMITTED, EXPIRED, CONSUMED, CLOSED(404), ERROR.
-export function pollQueue(user, tags = {}, dropId = DROP_ID) {
+// GET /queue/me. status: WAITING, ADMITTED, EXPIRED, CONSUMED, UNAVAILABLE, CLOSED(404), ERROR.
+// UNAVAILABLE은 그 SKU가 현재 구매 불가가 되어 대기나 미사용 입장 허가가 끝났다는 뜻이다.
+export function pollQueue(user, variantId, tags = {}, dropId = DROP_ID) {
   const res = http.get(`${BASE_URL}/api/drops/${dropId}/queue/me`, {
     headers: authHeaders(user),
     tags: { name: 'GET /api/drops/{id}/queue/me', ...tags },
     timeout: HTTP_TIMEOUT,
   });
   let status = 'ERROR';
-  if (res.status === 200) status = json(res).status || 'ERROR';
-  else if (res.status === 404) status = 'CLOSED';
+  let mismatch = false;
+  if (res.status === 200) {
+    const body = json(res);
+    status = body.status || 'ERROR';
+    mismatch = body.variantId !== variantId;
+  } else if (res.status === 404) status = 'CLOSED';
   // 404는 이탈·판매 종료로 닫힌 대기다. 정상 응답이지만 결과로 따로 센다.
-  const kind = observe(res, status === 'ERROR', { api: 'poll', ...tags });
-  queuePoll.add(1, { result: kind !== 'response' ? kind : status === 'ERROR' ? `http_${res.status}` : status.toLowerCase(), ...tags });
+  const kind = observe(res, status === 'ERROR' || mismatch, { api: 'poll', ...tags });
+  let result = status.toLowerCase();
+  if (kind !== 'response') result = kind;
+  else if (status === 'ERROR') result = `http_${res.status}`;
+  else if (mismatch) result = 'variant_mismatch';
+  queuePoll.add(1, { result, ...tags });
   return status;
 }
 
