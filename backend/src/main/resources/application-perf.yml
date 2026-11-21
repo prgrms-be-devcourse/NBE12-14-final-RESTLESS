@@ -41,6 +41,7 @@ management:
         drop.reservation.duration: true
         drop.inventory.hold.update: true
         drop.inventory.lock.held: true
+        drop.inventory.lock.completion: true
         payment.pg.approve: true
 
 # k6는 한 IP에서 호출하므로 앱 내부 요청 제한을 끈다.

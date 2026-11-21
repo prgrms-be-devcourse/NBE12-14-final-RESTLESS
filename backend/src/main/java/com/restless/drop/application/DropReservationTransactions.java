@@ -104,16 +104,31 @@ public class DropReservationTransactions {
      * Times the SKU row lock from the hold UPDATE returning to the transaction ending (commit or rollback).
      * Measured in the application, so it adds the UPDATE reply and the commit round trip to the time the
      * database holds the lock. Tags are bounded: committed, rolled_back, unknown.
+     * #325: {@code drop.inventory.lock.completion} times only the last part, from the transaction manager
+     * starting to complete (any flush, then the JDBC commit or rollback) to its end. The rest of
+     * {@code lock.held} is the work between the UPDATE reply and that point.
      */
     private void recordInventoryLockHeld(long lockAcquired) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) return;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            private long completionStarted;
+
+            @Override
+            public void beforeCompletion() {
+                completionStarted = System.nanoTime();
+            }
+
             @Override
             public void afterCompletion(int status) {
+                long ended = System.nanoTime();
                 var outcome = status == STATUS_COMMITTED ? "committed"
                         : status == STATUS_ROLLED_BACK ? "rolled_back" : "unknown";
                 meters.timer("drop.inventory.lock.held", "outcome", outcome)
-                        .record(System.nanoTime() - lockAcquired, TimeUnit.NANOSECONDS);
+                        .record(ended - lockAcquired, TimeUnit.NANOSECONDS);
+                if (completionStarted != 0) {
+                    meters.timer("drop.inventory.lock.completion", "outcome", outcome)
+                            .record(ended - completionStarted, TimeUnit.NANOSECONDS);
+                }
             }
         });
     }

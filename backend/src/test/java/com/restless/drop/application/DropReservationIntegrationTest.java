@@ -140,9 +140,16 @@ class DropReservationIntegrationTest {
         assertThat(lockHeld("rolled_back")).isEqualTo(rolledBack);
         assertThat(lockHeld("committed")).isEqualTo(committed);
 
+        var completedCommit = completion("committed");
+        var heldSumBefore = lockHeldSeconds("committed");
+        var completionSumBefore = completionSeconds("committed");
         service.create(drop, user, "timed", request());
         assertThat(lockHeld("committed")).isEqualTo(committed + 1);
         assertThat(holdUpdate("held")).isEqualTo(held + 1);
+        // #325: the completion part is timed once per held lock and lies inside the lock-held interval.
+        assertThat(completion("committed")).isEqualTo(completedCommit + 1);
+        assertThat(completionSeconds("committed") - completionSumBefore).isPositive()
+                .isLessThanOrEqualTo(lockHeldSeconds("committed") - heldSumBefore);
 
         // The remaining stock is gone: total 1 = reserved 1 keeps INV-01.
         jdbc.update("UPDATE drop_inventories SET total_quantity = 1, available_quantity = 0 WHERE variant_id = ?", variant);
@@ -165,6 +172,7 @@ class DropReservationIntegrationTest {
     @Test
     void inv14AndInv01SaleCloseDuringInventoryLockWaitRollsBackEveryEarlierWrite() throws Exception {
         var rolledBack = lockHeld("rolled_back");
+        var completedRollback = completion("rolled_back");
         var closes = opens.plusSeconds(3600);
         try (var blocker = dataSource.getConnection(); var observer = dataSource.getConnection()) {
             blocker.setAutoCommit(false);
@@ -184,6 +192,7 @@ class DropReservationIntegrationTest {
                             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DROP_NOT_ON_SALE));
         }
         assertThat(lockHeld("rolled_back")).isEqualTo(rolledBack + 1);
+        assertThat(completion("rolled_back")).isEqualTo(completedRollback + 1);
         assertUnchanged();
         assertThat(jdbc.queryForObject("SELECT reserved_quantity FROM drop_inventories WHERE variant_id = ?", Integer.class, variant)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM orders WHERE user_id = ?", Integer.class, user)).isZero();
@@ -205,6 +214,18 @@ class DropReservationIntegrationTest {
 
     private long lockHeld(String outcome) {
         return meters.timer("drop.inventory.lock.held", "outcome", outcome).count();
+    }
+
+    private long completion(String outcome) {
+        return meters.timer("drop.inventory.lock.completion", "outcome", outcome).count();
+    }
+
+    private double completionSeconds(String outcome) {
+        return meters.timer("drop.inventory.lock.completion", "outcome", outcome).totalTime(TimeUnit.SECONDS);
+    }
+
+    private double lockHeldSeconds(String outcome) {
+        return meters.timer("drop.inventory.lock.held", "outcome", outcome).totalTime(TimeUnit.SECONDS);
     }
 
     private long holdUpdate(String result) {

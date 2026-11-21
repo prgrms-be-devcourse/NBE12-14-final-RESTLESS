@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/application/`
 >
-> 마지막 확인: 2026-11-21 (#322 TX1 순서 변경: 재고 UPDATE를 마지막으로. 2026-11-20 #285 TX3 롤백 뒤 상태를 `DropApprovalRollbackRecoveryIntegrationTest`, 장애 처리 문서와 대조. 용어 정리. 2026-11-19 #254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
+> 마지막 확인: 2026-11-21 (#325 완료 단계 타이머 추가. #322 TX1 순서 변경: 재고 UPDATE를 마지막으로. 2026-11-20 #285 TX3 롤백 뒤 상태를 `DropApprovalRollbackRecoveryIntegrationTest`, 장애 처리 문서와 대조. 용어 정리. 2026-11-19 #254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
 
 PG 호출 중에는 DB 트랜잭션을 열어 두지 않는다.
 
@@ -29,11 +29,12 @@ Notion 원본은 재고 예약이 1번이다. #322 전에는 슬롯 확인 직�
 
 | 타이머 | 구간 | 태그 |
 |---|---|---|
-| `drop.inventory.hold.update` | 2번 재고 UPDATE 호출. 잠금 대기를 포함한다 | `result`: held, sold_out |
+| `drop.inventory.hold.update` | 5번 재고 UPDATE 호출. 잠금 대기를 포함한다 | `result`: held, sold_out |
 | `drop.inventory.lock.held` | UPDATE가 끝난 시각부터 트랜잭션 종료까지 | `outcome`: committed, rolled_back, unknown |
+| `drop.inventory.lock.completion` | `lock.held` 중 트랜잭션 완료 단계. 완료 시작(flush, JDBC commit 또는 rollback)부터 끝까지 (#325) | `outcome`: committed, rolled_back, unknown |
 | `drop.reservation.duration` | TX1 전체 | `result`: created, replayed, sold_out, not_on_sale, active_exists, rejected, error |
 
-`drop.inventory.lock.held`는 앱에서 잰다. DB가 잠금을 쥔 시간에 UPDATE 응답과 커밋 왕복이 더해진다. 품절 UPDATE는 행을 바꾸지 않아 이 타이머에 들어가지 않는다.
+`lock.held`에서 `lock.completion`을 빼면 UPDATE 응답 뒤 커밋 전까지의 시간이다. `drop.inventory.lock.held`는 앱에서 잰다. DB가 잠금을 쥔 시간에 UPDATE 응답과 커밋 왕복이 더해진다. 품절 UPDATE는 행을 바꾸지 않아 이 타이머에 들어가지 않는다.
 
 ## TX2. PG 승인 시작
 
