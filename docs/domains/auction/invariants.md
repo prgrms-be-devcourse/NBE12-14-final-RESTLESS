@@ -2,11 +2,11 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/auction/domain/`, `backend/src/main/java/com/restless/credit/domain/`, `backend/src/main/resources/db/migration/V*__auction_*.sql`, `backend/src/test/resources/harness/auction-invariants.sql`
 >
-> 마지막 확인: 2026-11-16 (#155 불변식 SQL 파일 분리와 함께 고침)
+> 마지막 확인: 2026-11-21 (#316 크레딧 충전 INV-AU-16·17 추가)
 
 동시 요청이나 재시도가 있어도 반드시 지켜야 하는 조건이다. 단위, 통합, 동시성 테스트의 기준이며, 테스트 이름이나 주석에 `INV-AU-xx`를 붙여 추적한다.
 
-INV-AU-01 ~ 13은 원본([design.md](design.md) 8절)이고, 14 ~ 15는 크레딧 장부를 검증하려고 추가했다.
+INV-AU-01 ~ 13은 원본([design.md](design.md) 8절)이고, 14 ~ 15는 크레딧 장부를 검증하려고, 16 ~ 17은 PG 충전(#316, [policy.md](policy.md) 7.1절)을 검증하려고 추가했다.
 
 | ID | 불변식 | 지키는 방법 |
 |---|---|---|
@@ -21,10 +21,12 @@ INV-AU-01 ~ 13은 원본([design.md](design.md) 8절)이고, 14 ~ 15는 크레�
 | INV-AU-09 | 화면 이탈이나 연결 끊김으로 입찰이 무효화되지 않는다 | 입찰과 확보는 연결 상태를 참조하지 않는다. SSE는 읽기 전용이다 |
 | INV-AU-10 | 연장으로 종료 시각이 앞당겨지지 않는다 | `ends_at = max(ends_at, 수락 시각 + 연장 시간)`. DB CHECK `base_ends_at <= ends_at` |
 | INV-AU-11 | 종료 시각 이후의 입찰은 수락되지 않는다 | 입찰은 잠금 안에서 `지금 < ends_at`을 확인한다. 종료는 같은 잠금을 잡고 `ends_at <= 지금`을 다시 확인한다 |
-| INV-AU-12 | 같은 요청은 중복 반영되지 않는다 (입찰, 확보, 차감, 연장) | 입찰 `UNIQUE(bidder_user_id, request_key)`, 크레딧 내역 `UNIQUE(operation_key)`, 확보 `UNIQUE(auction_bid_id)`, 결과 PK |
+| INV-AU-12 | 같은 요청은 중복 반영되지 않는다 (입찰, 확보, 차감, 연장, 충전 주문, 충전 지급) | 입찰 `UNIQUE(bidder_user_id, request_key)`, 크레딧 내역 `UNIQUE(operation_key)`, 확보 `UNIQUE(auction_bid_id)`, 결과 PK, 충전 주문 `UNIQUE(user_id, request_key)`·`UNIQUE(paid_payment_id)`, 충전 지급 내역 `operation_key = CHARGE:<충전 주문 ID>` |
 | INV-AU-13 | 낙찰 결과와 크레딧 차감은 함께 반영된다 | 결과 저장, 확보 `CAPTURED`, 지갑 차감을 한 트랜잭션에서 한다 |
 | INV-AU-14 | 지갑의 `reserved_amount` = 그 지갑의 `HELD` 확보 금액 합계 | 확보·해제·차감 때 지갑과 확보를 같은 트랜잭션에서 바꾼다 |
 | INV-AU-15 | 지갑의 `balance_amount`, `reserved_amount` = 그 지갑의 `credit_transactions` 변화량 합계 | 지갑을 바꿀 때마다 내역을 같은 트랜잭션에서 한 건 기록한다 |
+| INV-AU-16 | `PAID` 충전 주문마다 `CHARGE` 내역이 정확히 1건이고, 금액이 같고, 그 주문 회원의 지갑이다. `READY` 충전 주문에는 `CHARGE` 내역이 없고, 충전 주문 없는 `CHARGE` 내역도 없다 | 충전 주문 행을 잠근 뒤 `READY`일 때만 지갑 지급·내역·`PAID`를 한 트랜잭션에서 한다. 실패·불명확은 아무것도 바꾸지 않는다 |
+| INV-AU-17 | `PAID` 충전 주문의 `paid_payment_id`는 그 충전 주문의 `CREDIT_CHARGE` 결제이고, 같은 회원·같은 금액이며 `APPROVED`다 | 결제 모듈이 승인을 확인한 뒤 결과 처리기를 부르고, 처리기는 승인 금액이 충전 금액과 다르면 거절한다 |
 
 ## 확인 방법
 
@@ -33,10 +35,12 @@ INV-AU-01 ~ 13은 원본([design.md](design.md) 8절)이고, 14 ~ 15는 크레�
 | INV-AU-01, 03, 04, 05 | 동시 입찰 테스트: 같은 금액 N건 동시 요청 시 1건만 수락, 판매자·최고 입찰자·금액 부족 요청은 거절되고 아무것도 저장되지 않음 |
 | INV-AU-02 | 종료를 동시에 여러 번 실행해도 결과 행 1건. 결과 행 직접 중복 INSERT가 PK에서 거부됨 |
 | INV-AU-06 | 한 회원이 여러 경매에 동시 입찰해 사용 가능액을 넘기는 테스트. `reserved > balance` 직접 UPDATE가 CHECK에서 거부됨 |
-| INV-AU-07, 08, 14, 15 | 불변식 SQL (아래 절) |
+| INV-AU-07, 08, 14, 15, 16 | 불변식 SQL (아래 절) |
 | INV-AU-09 | SSE 연결을 끊은 뒤에도 입찰·확보가 그대로인지 확인 (`AuctionStreamTest`) |
 | INV-AU-10, 11 | 종료 직전 입찰과 종료 스케줄러 경합 테스트. `ends_at`이 줄어들지 않고, `ends_at` 이후 `accepted_at`인 입찰이 없음 |
 | INV-AU-12 | 같은 키 동시 재전송 시 입찰·확보·내역·연장이 1번씩만 반영 |
+| INV-AU-16 | 같은 결제 승인 두 번·동시 확정·재확인 작업 확정에도 지급 1번, 지급 중 DB 오류면 지갑·충전 주문·결제가 함께 롤백 (`CreditChargeApiTest`, `CreditChargeHandlerTest`, `CreditChargeFailureTest`) |
+| INV-AU-17 | 결제 흐름 테스트에서 `assertPaidBy`로 결제 행과 대조. 처리기 직접 호출 테스트는 가짜 결제 ID를 쓰므로 SQL 블록에 넣지 않았다 |
 | INV-AU-13 | 차감 뒤 결과 저장에서 예외를 넣어 차감·결과·종료가 함께 롤백되고, 다시 종료하면 한 번만 차감되는지 확인 (`AuctionCloseFailureTest.차감_뒤_결과_저장에서_실패하면_차감까지_함께_롤백되고_다시_종료하면_한_번만_차감된다_INV_AU_13`). 정상 종료 뒤에는 `SOLD` 결과의 낙찰 입찰이 마지막 입찰이고 그 확보가 `CAPTURED`인지 `AuctionFixtures.assertInvariants`가 확인한다 |
 
 ## 불변식 SQL
@@ -50,6 +54,7 @@ INV-AU-01 ~ 13은 원본([design.md](design.md) 8절)이고, 14 ~ 15는 크레�
 | INV-AU-03 | 다음 입찰은 이전 입찰 + 최소 인상액 이상 |
 | INV-AU-11 | 종료된 경매에 종료 시각 이후 수락된 입찰이 없다 |
 | INV-AU-13 | `SOLD`는 마지막 입찰이고 그 확보는 `CAPTURED` |
+| INV-AU-16 | `PAID` 충전 주문과 `CHARGE` 내역이 1:1이고 금액·회원이 같다 |
 | 상태 조합 ([state-machines.md](state-machines.md) 6절) | `CLOSED`와 결과 행은 함께 있다, 종료된 경매에 `HELD`가 없다, `UNSOLD`에는 입찰이 없다 |
 
 - **테스트:** 데이터를 바꾸는 경매 테스트는 끝에 `AuctionFixtures.assertInvariants()`로 모든 블록을 실행한다.
@@ -73,5 +78,14 @@ INV-AU-01 ~ 13은 원본([design.md](design.md) 8절)이고, 14 ~ 15는 크레�
 | `auctions` `extension_duration_seconds` CHECK 30 ~ 300 | 정책 4절 |
 | `auctions.status`, `credit_holds.status`, `credit_transactions.transaction_type`, `auction_results.result_type` 값 CHECK | 상태 오기입 방지 |
 | `auctions` 인덱스 `(status, starts_at)`, `(status, ends_at)` | 스케줄러 조회 |
+
+충전(#316)은 `V20261121_0900__auction_add_credit_charges.sql`로 추가했다.
+
+| 제약 | 관련 불변식 |
+|---|---|
+| `credit_charges` UNIQUE `(user_id, request_key)`, UNIQUE `(paid_payment_id)` | INV-AU-12 |
+| `credit_charges` 금액 CHECK 1,000 ~ 1,000,000, 1,000 단위 | 정책 7.1절 |
+| `credit_charges` 상태 CHECK: `READY`면 지급 결제·시각 없음, `PAID`면 둘 다 있음 | INV-AU-16 |
+| `credit_transactions.transaction_type`에 `CHARGE`, `payments.payable_type`에 `CREDIT_CHARGE` 추가 | 상태 오기입 방지 |
 
 보강하지 않은 차이: `ck_auctions_prices`는 `starting_price_amount >= 0`이라 정책(시작가 1 이상, policy.md 4절)보다 느슨하다. 1 이상은 요청 검증과 `Auction` 생성에서 막는다.

@@ -19,7 +19,7 @@
 
 ### 1. 결제 대상은 `(payable_type, payable_id)`로 식별한다
 
-- `payments`에 `payable_type`(`DROP`, `TICKET`, `FAN_MEETING`)과 `payable_id`를 둔다. 결제 대상 테이블로 가는 물리 FK는 두지 않는다.
+- `payments`에 `payable_type`(`DROP`, `TICKET`, `FAN_MEETING`, `CREDIT_CHARGE`)과 `payable_id`를 둔다. 결제 대상 테이블로 가는 물리 FK는 두지 않는다.
 - 팬미팅은 `fan_meeting_orders`를 그대로 쓴다. 팬미팅 스키마와 문서는 바꾸지 않는다.
 - 토스 `orderId`로 쓸 `pg_order_id VARCHAR(64) UNIQUE`를 결제 시도마다 서버가 만든다.
 - `payment_key`는 NULL을 허용한다. 승인을 시작할 때(READY → PROCESSING) 채운다.
