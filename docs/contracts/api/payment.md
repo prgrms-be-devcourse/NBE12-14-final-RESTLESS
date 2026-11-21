@@ -6,7 +6,7 @@
 >
 > 관련 코드: `backend/src/main/java/com/restless/order/`, `backend/src/main/java/com/restless/payment/`
 >
-> 마지막 확인: 2026-11-16 (엔드포인트를 컨트롤러와 대조. `common.md`에서 분리. 이전 이력: #44, #45~#47, #73, #101, #109)
+> 마지막 확인: 2026-11-21 (#314 최근 결제 조회 추가. `common.md`에서 분리. 이전 이력: #44, #45~#47, #73, #101, #109)
 
 오류 응답 형식은 [README 공통 규칙 3](README.md#공통-규칙)을 따른다. 결제를 쓰는 도메인: [드롭](drop.md), [티켓팅](ticketing.md), [팬미팅](fanmeeting.md).
 
@@ -19,6 +19,7 @@
 | POST | `/api/payments` | 결제 준비. 새 시도 201, 같은 키 재요청 200 | 구현 |
 | POST | `/api/payments/confirm` | 토스 승인. 승인 200, 처리 중/불명확 202, 최종 거절 409 | 구현 |
 | GET | `/api/payments/{paymentId}` | 본인 결제 조회 200 | 구현 |
+| GET | `/api/payments/latest?payableType=FAN_MEETING&payableId=10` | 본인 대상의 최근 결제 시도 200, 이력 없음 204 | 구현 |
 | POST | `/api/payments/{paymentId}/refunds` | 손님 전액 환불. 완료 200, 처리 중/불명확 202, 거절/상태 충돌 409 | 구현 |
 
 기존 초안의 `/api/payments/orders/{orderId}`는 `/api/payments/{paymentId}`로 변경했다.
@@ -26,6 +27,14 @@
 결제 대상은 `(payableType, payableId)`로 식별하며 `orderId`는 승인 요청에서만 우리 `pgOrderId`를 뜻한다.
 모든 결제 API는 Bearer 로그인이 필요하다(토큰 없음/만료/위조는 401 `UNAUTHORIZED`).
 회원 ID는 토큰의 `@LoginMember`에서만 받고 본문에서 받지 않는다.
+
+### 최근 결제 시도 조회
+
+`GET /api/payments/latest?payableType=FAN_MEETING&payableId=10`은 본인의 해당 대상에 대한 가장 최근 시도를 `{ "paymentId": 12, "status": "UNKNOWN" }`로 반환한다. `payableType`은 `DROP`, `TICKET`, `FAN_MEETING`이고 `payableId`는 양수이며 둘 다 필수다. 잘못된 값은 400이다.
+
+- 이력이 없거나 타인 소유 대상이면 동일하게 본문 없는 204다. 대상의 존재 여부를 노출하지 않는다.
+- 조회는 결제를 생성하거나 PG를 호출하지 않는다. 반환된 ID로 `GET /api/payments/{paymentId}`를 조회해 결과 확인을 이어 간다.
+- 팬미팅 자체 주문처럼 공통 주문 상세를 쓰지 않는 화면도 PG 복귀와 새로고침 뒤 결제 상태를 복원할 수 있다. 실패 후 재시도가 있으면 과거 FAILED 대신 가장 최근 시도를 준다.
 
 ### 내 주문 목록
 

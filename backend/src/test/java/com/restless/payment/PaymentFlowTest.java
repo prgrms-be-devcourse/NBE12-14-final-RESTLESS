@@ -402,6 +402,45 @@ class PaymentFlowTest {
     }
 
     @Test
+    void latestAttemptSeparatesPayableTypesAndDoesNotCreatePayments() throws Exception {
+        String auth = "Bearer " + tokens.issue(user, "USER").value();
+        var expected = new EnumMap<PayableType, Long>(PayableType.class);
+        for (PayableType type : PayableType.values()) {
+            var p = payments.saveAndFlush(Payment.ready(type, 123L, user, 39000,
+                    "latest-" + type, NOW.plusSeconds(300), NOW));
+            expected.put(type, p.getId());
+        }
+        for (var entry : expected.entrySet()) {
+            mvc.perform(get("/api/payments/latest").header("Authorization", auth)
+                            .param("payableType", entry.getKey().name()).param("payableId", "123"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.paymentId").value(entry.getValue()))
+                    .andExpect(jsonPath("$.status").value("READY"));
+        }
+        assertThat(payments.count()).isEqualTo(3);
+    }
+
+    @Test
+    void latestAttemptRequiresAuthenticationAndValidTarget() throws Exception {
+        mvc.perform(get("/api/payments/latest").param("payableType", "DROP").param("payableId", "123"))
+                .andExpect(status().isUnauthorized());
+        String auth = "Bearer " + tokens.issue(user, "USER").value();
+        for (String id : List.of("0", "-1", "bad")) {
+            mvc.perform(get("/api/payments/latest").header("Authorization", auth)
+                            .param("payableType", "DROP").param("payableId", id))
+                    .andExpect(status().isBadRequest());
+        }
+        mvc.perform(get("/api/payments/latest").header("Authorization", auth).param("payableId", "123"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/payments/latest").header("Authorization", auth)
+                        .param("payableType", "DROP"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/payments/latest").header("Authorization", auth)
+                        .param("payableType", "INVALID").param("payableId", "123"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void sameKeyConcurrentPrepareReturnsOneRowAndSameId() throws Exception {
         var results = parallel(20, i -> prepare("same"));
         assertThat(results.stream().map(PreparePaymentResult::paymentId).distinct()).hasSize(1);

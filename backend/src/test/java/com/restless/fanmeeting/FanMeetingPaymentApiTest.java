@@ -2,6 +2,9 @@ package com.restless.fanmeeting;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.restless.payment.application.payable.ApprovalDecision;
 import com.restless.payment.application.payable.ApprovedPayment;
@@ -30,6 +33,70 @@ class FanMeetingPaymentApiTest extends FanMeetingOrderApiSupport {
     @BeforeEach
     void resetFakePg() {
         fakePg.reset();
+    }
+
+    @Test
+    @DisplayName("주문 재조회로 승인된 최근 결제 ID와 상태를 복원한다")
+    void 주문에서_승인된_결제를_조회한다() throws Exception {
+        WinnerOrder order = winnerOrder();
+        Prepared payment = prepare(order.bearer(), order.orderId(), "approved");
+        fakePg.willApprove(payment.pgOrderId());
+        confirm(order.bearer(), payment);
+
+        mockMvc.perform(get("/api/payments/latest").param("payableType", "FAN_MEETING")
+                        .param("payableId", order.orderId().toString())
+                        .header("Authorization", order.bearer()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paymentId").value(payment.paymentId()))
+                .andExpect(jsonPath("$.status").value("APPROVED"));
+    }
+
+    @Test
+    @DisplayName("결과 불명 주문 재조회는 UNKNOWN 결제를 돌려줘 같은 시도를 계속 조회할 수 있다")
+    void 주문에서_결과_불명_결제를_조회한다() throws Exception {
+        WinnerOrder order = winnerOrder();
+        Prepared payment = prepare(order.bearer(), order.orderId(), "unknown-view");
+        fakePg.willTimeout(payment.pgOrderId());
+        confirm(order.bearer(), payment);
+
+        mockMvc.perform(get("/api/payments/latest").param("payableType", "FAN_MEETING")
+                        .param("payableId", order.orderId().toString())
+                        .header("Authorization", order.bearer()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paymentId").value(payment.paymentId()))
+                .andExpect(jsonPath("$.status").value("UNKNOWN"));
+    }
+
+    @Test
+    @DisplayName("실패 뒤 재준비한 주문은 이전 FAILED 대신 최신 READY 결제를 돌려준다")
+    void 주문에서_최신_시도를_조회한다() throws Exception {
+        WinnerOrder order = winnerOrder();
+        Prepared first = prepare(order.bearer(), order.orderId(), "failed-view");
+        fakePg.willReject(first.pgOrderId(), "REJECT_CARD_COMPANY");
+        confirm(order.bearer(), first);
+        Prepared retry = prepare(order.bearer(), order.orderId(), "retry-view");
+
+        mockMvc.perform(get("/api/payments/latest").param("payableType", "FAN_MEETING")
+                        .param("payableId", order.orderId().toString())
+                        .header("Authorization", order.bearer()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paymentId").value(retry.paymentId()))
+                .andExpect(jsonPath("$.status").value("READY"));
+    }
+
+    @Test
+    @DisplayName("결제 이력 없는 대상은 204이고 다른 회원에게 결제 정보가 노출되지 않는다")
+    void 결제_조회는_본인_주문에_한정한다() throws Exception {
+        WinnerOrder order = winnerOrder();
+        mockMvc.perform(get("/api/payments/latest").param("payableType", "FAN_MEETING")
+                        .param("payableId", order.orderId().toString())
+                        .header("Authorization", order.bearer()))
+                .andExpect(status().isNoContent());
+        prepare(order.bearer(), order.orderId(), "private-view");
+        mockMvc.perform(get("/api/payments/latest").param("payableType", "FAN_MEETING")
+                        .param("payableId", order.orderId().toString())
+                        .header("Authorization", token("USER")))
+                .andExpect(status().isNoContent());
     }
 
     // ---- 공통 결제 API로 끝까지 ----
