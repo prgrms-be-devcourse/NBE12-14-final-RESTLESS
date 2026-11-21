@@ -7,6 +7,9 @@ import com.restless.drop.application.dto.CreateDropRequest;
 import com.restless.drop.application.dto.CreateDropReservationRequest;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Timestamp;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import javax.sql.DataSource;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -31,6 +34,7 @@ import static org.assertj.core.api.Assertions.*;
 @Import({TestcontainersConfiguration.class, DropReservationIntegrationTest.TimeConfig.class})
 class DropReservationIntegrationTest {
     @Autowired JdbcTemplate jdbc;
+    @Autowired DataSource dataSource;
     @Autowired DropAdminService admin;
     @Autowired DropReservationService service;
     @Autowired DropReservationSettings settings;
@@ -129,15 +133,16 @@ class DropReservationIntegrationTest {
         var rolledBack = lockHeld("rolled_back");
         var held = holdUpdate("held");
         var soldOut = holdUpdate("sold_out");
-        // The order fails after the stock hold, so the row lock ends with a rollback.
+        // #322: the order fails before the stock hold, so the SKU row is never touched.
         var invalidShipping = new CreateDropReservationRequest(variant, "회원", "010", " ");
         assertThatIllegalArgumentException().isThrownBy(() -> service.create(drop, user, "timed", invalidShipping));
-        assertThat(lockHeld("rolled_back")).isEqualTo(rolledBack + 1);
+        assertThat(holdUpdate("held")).isEqualTo(held);
+        assertThat(lockHeld("rolled_back")).isEqualTo(rolledBack);
         assertThat(lockHeld("committed")).isEqualTo(committed);
 
         service.create(drop, user, "timed", request());
         assertThat(lockHeld("committed")).isEqualTo(committed + 1);
-        assertThat(holdUpdate("held")).isEqualTo(held + 2);
+        assertThat(holdUpdate("held")).isEqualTo(held + 1);
 
         // The remaining stock is gone: total 1 = reserved 1 keeps INV-01.
         jdbc.update("UPDATE drop_inventories SET total_quantity = 1, available_quantity = 0 WHERE variant_id = ?", variant);
@@ -153,8 +158,49 @@ class DropReservationIntegrationTest {
         // A sold-out UPDATE changes no row, so it is timed as an update but never as a held lock.
         assertThat(holdUpdate("sold_out")).isEqualTo(soldOut + 1);
         assertThat(lockHeld("committed")).isEqualTo(committed + 1);
-        assertThat(lockHeld("rolled_back")).isEqualTo(rolledBack + 1);
+        assertThat(lockHeld("rolled_back")).isEqualTo(rolledBack);
         assertThat(meters.timer("drop.reservation.duration", "result", "sold_out").count()).isEqualTo(soldOutTimed + 1);
+    }
+
+    @Test
+    void inv14AndInv01SaleCloseDuringInventoryLockWaitRollsBackEveryEarlierWrite() throws Exception {
+        var rolledBack = lockHeld("rolled_back");
+        var closes = opens.plusSeconds(3600);
+        try (var blocker = dataSource.getConnection(); var observer = dataSource.getConnection()) {
+            blocker.setAutoCommit(false);
+            try (var lock = blocker.prepareStatement("SELECT 1 FROM drop_inventories WHERE variant_id = ? FOR UPDATE")) {
+                lock.setLong(1, variant);
+                lock.executeQuery().close();
+            }
+            var attempt = CompletableFuture.runAsync(() -> service.create(drop, user, "crossing", request()));
+            // #322 writes the reservation before the stock UPDATE; seeing it uncommitted means TX1 has
+            // passed every pre-lock check and reads the clock again only after the SKU lock.
+            observer.setTransactionIsolation(java.sql.Connection.TRANSACTION_READ_UNCOMMITTED);
+            awaitUncommittedReservation(observer);
+            clock.now = closes;
+            blocker.commit();
+            assertThatThrownBy(() -> attempt.get(10, TimeUnit.SECONDS)).cause()
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DROP_NOT_ON_SALE));
+        }
+        assertThat(lockHeld("rolled_back")).isEqualTo(rolledBack + 1);
+        assertUnchanged();
+        assertThat(jdbc.queryForObject("SELECT reserved_quantity FROM drop_inventories WHERE variant_id = ?", Integer.class, variant)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM orders WHERE user_id = ?", Integer.class, user)).isZero();
+    }
+
+    private void awaitUncommittedReservation(java.sql.Connection observer) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        try (var count = observer.prepareStatement("SELECT COUNT(*) FROM drop_reservations WHERE drop_id = ?")) {
+            count.setLong(1, drop);
+            while (System.nanoTime() < deadline) {
+                try (var rows = count.executeQuery()) {
+                    if (rows.next() && rows.getInt(1) == 1) return;
+                }
+                Thread.sleep(20);
+            }
+        }
+        fail("TX1 did not write its reservation before the stock UPDATE");
     }
 
     private long lockHeld(String outcome) {
@@ -183,7 +229,7 @@ class DropReservationIntegrationTest {
     }
 
     static class MutableClock extends Clock {
-        Instant now = Instant.EPOCH;
+        volatile Instant now = Instant.EPOCH;
         @Override public ZoneId getZone() { return ZoneOffset.UTC; }
         @Override public Clock withZone(ZoneId zone) { return Clock.fixed(now, zone); }
         @Override public Instant instant() { return now; }

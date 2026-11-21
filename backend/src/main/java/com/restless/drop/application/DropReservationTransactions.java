@@ -66,18 +66,6 @@ public class DropReservationTransactions {
                     .filter(entry -> entry.getVariantId().equals(variant.getId()) && entry.validAdmission(clock.instant()))
                     .orElseThrow(() -> new BusinessException(ErrorCode.DROP_ADMISSION_REQUIRED));
         }
-        // Keep the most contended inventory lock at the end of validation (EXP-01).
-        long updateStarted = System.nanoTime();
-        int held = inventories.holdOne(variant.getId());
-        long lockAcquired = System.nanoTime();
-        // Includes the wait for the SKU row lock. A sold-out UPDATE changes no row and keeps no lock.
-        meters.timer("drop.inventory.hold.update", "result", held == 0 ? "sold_out" : "held")
-                .record(lockAcquired - updateStarted, TimeUnit.NANOSECONDS);
-        if (held == 0) throw new BusinessException(ErrorCode.DROP_SOLD_OUT);
-        recordInventoryLockHeld(lockAcquired);
-        // The UPDATE may have waited across closesAt; reject and roll back its decrement in that case.
-        now = clock.instant();
-        requireOnSale(drop, now);
         if (admission != null && !admission.validAdmission(now)) {
             throw new BusinessException(ErrorCode.DROP_ADMISSION_REQUIRED);
         }
@@ -87,13 +75,29 @@ public class DropReservationTransactions {
                 new CreateOrderCommand.ShippingAddress(request.recipient(), request.phone(), request.address())));
         var reservation = reservations.saveAndFlush(DropReservation.reserved(dropId, variant.getId(), userId,
                 orderId, key, now.plus(settings.ttl()), now));
-        if (admission != null) {
-            now = clock.instant();
-            if (!admission.validAdmission(now)) throw new BusinessException(ErrorCode.DROP_ADMISSION_REQUIRED);
-            admission.consume(now);
-        }
+        if (admission != null) admission.consume(now);
         slot.occupy(reservation.getId(), now);
-        return new Result(created(reservation), false);
+        // Built here because it reads the order amount, which would be one more round trip inside the lock.
+        var response = created(reservation);
+        // #322: every other write reaches the database before the most contended row is locked, so the
+        // SKU row lock covers only this UPDATE and the commit. A rejection below rolls all of them back.
+        slots.flush();
+        long updateStarted = System.nanoTime();
+        int held = inventories.holdOne(variant.getId());
+        long lockAcquired = System.nanoTime();
+        // Includes the wait for the SKU row lock. A sold-out UPDATE changes no row and keeps no lock.
+        meters.timer("drop.inventory.hold.update", "result", held == 0 ? "sold_out" : "held")
+                .record(lockAcquired - updateStarted, TimeUnit.NANOSECONDS);
+        if (held == 0) throw new BusinessException(ErrorCode.DROP_SOLD_OUT);
+        recordInventoryLockHeld(lockAcquired);
+        // The UPDATE may have waited across closesAt or the admission deadline (INV-14, INV-06).
+        // These checks read only the clock, so they add no database round trip inside the lock.
+        var afterLock = clock.instant();
+        requireOnSale(drop, afterLock);
+        if (admission != null && !afterLock.isBefore(admission.getAdmittedUntil())) {
+            throw new BusinessException(ErrorCode.DROP_ADMISSION_REQUIRED);
+        }
+        return new Result(response, false);
     }
 
     /**

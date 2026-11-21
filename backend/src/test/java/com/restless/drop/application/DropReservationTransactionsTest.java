@@ -22,7 +22,7 @@ import static org.mockito.Mockito.*;
 
 class DropReservationTransactionsTest {
     @Test
-    void inv14InventoryLockWaitCrossingSaleCloseRejectsBeforeOrderCreation() {
+    void inv14InventoryLockWaitCrossingSaleCloseRejectsAfterOtherWritesAreFlushed() {
         var drops = mock(DropRepository.class);
         var variants = mock(DropVariantRepository.class);
         var slots = mock(DropPurchaseSlotRepository.class);
@@ -59,12 +59,13 @@ class DropReservationTransactionsTest {
                 new CreateDropReservationRequest(3L, "회원", "010", "서울")))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DROP_NOT_ON_SALE));
-        verifyNoInteractions(orders);
-        verify(reservations, never()).saveAndFlush(any());
+        // #322: the SKU lock is taken last; the transaction rollback undoes the earlier writes
+        // (DropReservationIntegrationTest checks that against MySQL).
+        assertInventoryLockedLast(orders, reservations, slots, inventories);
     }
 
     @Test
-    void inv06InventoryLockWaitCrossingAdmissionExpiryRejectsBeforeOrderCreation() {
+    void inv06InventoryLockWaitCrossingAdmissionExpiryRejectsAfterOtherWritesAreFlushed() {
         var drops = mock(DropRepository.class);
         var variants = mock(DropVariantRepository.class);
         var slots = mock(DropPurchaseSlotRepository.class);
@@ -105,8 +106,17 @@ class DropReservationTransactionsTest {
                 new CreateDropReservationRequest(3L, "회원", "010", "서울")))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DROP_ADMISSION_REQUIRED));
-        assertThat(admission.getStatus()).isEqualTo(DropQueueStatus.ADMITTED);
-        verifyNoInteractions(orders);
-        verify(reservations, never()).saveAndFlush(any());
+        assertInventoryLockedLast(orders, reservations, slots, inventories);
+    }
+
+    private static void assertInventoryLockedLast(OrderService orders, DropReservationRepository reservations,
+            DropPurchaseSlotRepository slots, DropInventoryRepository inventories) {
+        var order = inOrder(orders, reservations, slots, inventories);
+        order.verify(orders).create(any());
+        order.verify(reservations).saveAndFlush(any(DropReservation.class));
+        order.verify(orders).find(7L);
+        order.verify(slots).flush();
+        order.verify(inventories).holdOne(3L);
+        order.verifyNoMoreInteractions();
     }
 }

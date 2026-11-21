@@ -82,7 +82,7 @@
 
 - 수량 필드는 없다. 주문 하나 = SKU 한 종류, 수량 1 (INV-04).
 - 판매 가능 = 게시됨(`SCHEDULED` 또는 `OPEN`)이고 `opensAt <= 서버 시각 < closesAt`. `OPEN` 전환은 판정에 영향이 없다. `CLOSED`·`CANCELLED`는 시각과 관계없이 판매하지 않는다 (#92).
-- 하나의 트랜잭션: 판매 기간·상태 확인 → 구매 슬롯 점유(INV-05) → SKU 재고 조건부 차감(`available - 1`, `reserved + 1`) → 공통 주문(PENDING_PAYMENT, 금액 = 서버 가격, 배송지 스냅샷) 생성 → 재고 점유(RESERVED, 기한 = 지금 + TTL) 저장. 재고 점유가 주문을 NOT NULL FK로 가리켜서 주문을 먼저 만든다.
+- 하나의 트랜잭션: 판매 기간과 상태 확인 → 구매 슬롯 점유(INV-05) → 공통 주문(PENDING_PAYMENT, 금액 = 서버 가격, 배송지 스냅샷) 생성 → 재고 점유(RESERVED, 기한 = 지금 + TTL) 저장 → SKU 재고 조건부 차감(`available - 1`, `reserved + 1`). 재고 점유가 주문을 NOT NULL FK로 가리켜서 주문을 먼저 만든다. 재고 차감은 재고 행 락을 짧게 쥐려고 마지막에 하고, 재고가 없거나 락 대기 중 판매가 끝나면 앞의 쓰기가 모두 롤백된다 (#322).
 - 201
 ```json
 { "reservationId": 5, "orderId": 7, "status": "RESERVED", "amount": 39000, "expiresAt": "..." }
