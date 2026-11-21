@@ -9,5 +9,7 @@ public enum CreditTransactionType {
     /** 추월: 묶인 금액 − */
     RELEASE,
     /** 낙찰: 보유 −, 묶인 금액 − */
-    CAPTURE
+    CAPTURE,
+    /** PG 충전 승인: 보유 + */
+    CHARGE
 }
