@@ -190,6 +190,21 @@ class CreditChargeHandlerTest extends CreditChargeTestSupport {
     }
 
     @Test
+    @DisplayName("승인 금액이 충전 금액과 다르면 거절해 보상 취소하게 하고 지급하지 않는다 (INV-AU-17)")
+    void 금액이_다른_승인은_거절한다() throws Exception {
+        Long user = f.user("USER");
+        Long chargeId = newCharge(user, 10_000);
+
+        ApprovalDecision decision = inTx(() -> handler().onApproved(chargeId,
+                approved(FAKE_PAYMENT_IDS.incrementAndGet(), 9_000, Instant.now())));
+
+        assertThat(decision.rejected()).isTrue();
+        assertNotGranted(user, chargeId);
+        assertThat(balance(user)).isZero();
+        f.assertInvariants();
+    }
+
+    @Test
     @DisplayName("결제 실패·결과 불명확 통지는 아무것도 바꾸지 않는다")
     void 실패와_불명확은_지급하지_않는다() throws Exception {
         Long user = f.user("USER");
@@ -215,6 +230,24 @@ class CreditChargeHandlerTest extends CreditChargeTestSupport {
 
         assertNotGranted(user, chargeId);
         assertThat(balance(user)).isZero();
+    }
+
+    @Test
+    @DisplayName("지급은 결제 모듈 트랜잭션과 함께 롤백된다. 처리기가 받은 뒤 결제 쪽이 롤백되면 지갑·내역·충전 주문 모두 그대로")
+    void 결제_트랜잭션이_롤백되면_지급도_롤백된다() throws Exception {
+        Long user = f.user("USER");
+        Long chargeId = newCharge(user, 10_000);
+        ApprovedPayment payment = approved(FAKE_PAYMENT_IDS.incrementAndGet(), 10_000, Instant.now());
+
+        new org.springframework.transaction.support.TransactionTemplate(transactionManager)
+                .executeWithoutResult(status -> {
+                    assertThat(handler().onApproved(chargeId, payment).accepted()).isTrue();
+                    status.setRollbackOnly(); // 예: 결제 행 상태 저장이 뒤에서 실패
+                });
+
+        assertNotGranted(user, chargeId);
+        assertThat(balance(user)).isZero();
+        f.assertInvariants();
     }
 
     // ---- 환불 ----

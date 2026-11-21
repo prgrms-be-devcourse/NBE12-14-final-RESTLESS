@@ -31,6 +31,7 @@ public class AuctionFixtures {
     }
 
     public void clean() {
+        jdbc.update("DELETE FROM credit_charges");
         jdbc.update("DELETE FROM credit_transactions");
         jdbc.update("DELETE FROM credit_holds");
         jdbc.update("DELETE FROM credit_wallets");

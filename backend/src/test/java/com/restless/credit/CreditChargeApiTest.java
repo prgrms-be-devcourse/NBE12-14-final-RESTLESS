@@ -123,6 +123,36 @@ class CreditChargeApiTest extends CreditChargeTestSupport {
     }
 
     @Test
+    @DisplayName("C-11 같은 요청 키·같은 금액이 동시에 와도 충전 주문은 하나, 한쪽은 201·다른 쪽은 200")
+    void 같은_요청_키가_동시에_와도_주문은_하나다() throws Exception {
+        for (int round = 0; round < 10; round++) {
+            Long user = f.user("USER");
+            java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+            try {
+                java.util.concurrent.Callable<MvcResult> call = () -> {
+                    start.await();
+                    return createCharge(user, 10_000, "race");
+                };
+                var a = pool.submit(call);
+                var b = pool.submit(call);
+                start.countDown();
+                MvcResult ra = a.get(10, java.util.concurrent.TimeUnit.SECONDS);
+                MvcResult rb = b.get(10, java.util.concurrent.TimeUnit.SECONDS);
+
+                assertThat(java.util.List.of(ra.getResponse().getStatus(), rb.getResponse().getStatus()))
+                        .as("round %d: %s / %s", round, contentOf(ra), contentOf(rb))
+                        .containsExactlyInAnyOrder(201, 200);
+                assertThat(JsonPath.<Object>read(contentOf(ra), "$.chargeId"))
+                        .isEqualTo(JsonPath.read(contentOf(rb), "$.chargeId"));
+                assertThat(chargeCount(user)).isEqualTo(1);
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+    }
+
+    @Test
     @DisplayName("다른 회원이 같은 요청 키를 써도 서로 영향이 없다")
     void 요청_키는_회원마다_따로다() throws Exception {
         Long a = f.user("USER");

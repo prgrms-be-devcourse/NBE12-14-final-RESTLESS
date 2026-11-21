@@ -59,3 +59,18 @@ WHERE r.result_type = 'UNSOLD' AND EXISTS (SELECT 1 FROM auction_bids b WHERE b.
 -- name: INV-AU-11 종료 시각 이후 수락된 입찰이 없다
 SELECT b.auction_bid_id FROM auction_bids b JOIN auctions a ON a.auction_id = b.auction_id
 WHERE a.status = 'CLOSED' AND b.accepted_at >= a.ends_at;
+
+-- name: INV-AU-16 PAID 충전 주문은 CHARGE 내역이 정확히 1건이고 금액과 지갑 주인이 같다. READY에는 CHARGE 내역이 없다
+SELECT c.credit_charge_id FROM credit_charges c
+LEFT JOIN credit_transactions t
+       ON t.transaction_type = 'CHARGE' AND t.operation_key = CONCAT('CHARGE:', c.credit_charge_id)
+LEFT JOIN credit_wallets w ON w.credit_wallet_id = t.credit_wallet_id
+GROUP BY c.credit_charge_id, c.status, c.amount, c.user_id
+HAVING (c.status = 'PAID' AND (COUNT(t.operation_key) <> 1 OR MAX(t.balance_delta) <> c.amount
+                               OR MAX(t.reserved_delta) <> 0 OR MAX(w.user_id) <> c.user_id))
+    OR (c.status = 'READY' AND COUNT(t.operation_key) <> 0);
+
+-- name: INV-AU-16 CHARGE 내역마다 PAID 충전 주문이 있다
+SELECT t.operation_key FROM credit_transactions t
+LEFT JOIN credit_charges c ON t.operation_key = CONCAT('CHARGE:', c.credit_charge_id) AND c.status = 'PAID'
+WHERE t.transaction_type = 'CHARGE' AND c.credit_charge_id IS NULL;
