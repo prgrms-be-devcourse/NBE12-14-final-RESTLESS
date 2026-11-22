@@ -4,7 +4,9 @@
 >
 > 마지막 확인: 2026-11-22 (#330 재고 버킷 분할 migration V20261122_1400, 1401과 대조. 2026-11-20 #285 용어를 재고 점유로 통일. 2026-11-19 #254 SKU별 입장 제어 migration과 대조. 나머지는 2026-11-14 #92 구현과 대조)
 
-![Drop ERD](drop-erd.png)
+![Drop ERD](drop-erd.svg)
+
+그림은 `drop-erd.py`가 그린다. 드롭 migration이 컬럼을 바꾸면 그 파일의 표를 고치고 `python3 docs/domains/drop/drop-erd.py`를 실행한다.
 
 아래는 논리 모델이다. 실제 DDL은 `backend/src/main/resources/db/migration/`의 `V*__drop_*.sql`이 정본이다.
 
