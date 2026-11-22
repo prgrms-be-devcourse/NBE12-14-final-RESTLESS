@@ -501,14 +501,14 @@ class DropSkuQueuePolicyAcceptanceTest extends DropAcceptanceSupport {
         assertThat(status(user, drop)).isEqualTo("ADMITTED");
 
         // 재고가 갑자기 0이 된 상황(전환 시점에 남은 구매권)을 만든다. 정합성 SQL을 위해 반드시 되돌린다.
-        jdbc.update("UPDATE drop_inventories SET available_quantity = 0, sold_quantity = 2 WHERE variant_id = ?", drop.variant());
+        DropStock.setAvailable(jdbc, drop.variant(), 0);
         try {
             drain();
             assertThat(live(user, drop)).as("미사용 구매권도 종료").isFalse();
             Response denied = reserve(user, drop.dropId(), drop.variant(), UUID.randomUUID().toString());
             assertThat(denied.status()).as(denied.body()).isNotEqualTo(201);
         } finally {
-            jdbc.update("UPDATE drop_inventories SET available_quantity = 2, sold_quantity = 0 WHERE variant_id = ?", drop.variant());
+            DropStock.setAvailable(jdbc, drop.variant(), 2);
         }
 
         drain();
