@@ -43,8 +43,17 @@ public class TicketPaymentResultHandler implements PaymentResultHandler {
     }
 
     @Override
+    public ApprovalDecision onRefundRequesting(Long payableId, RefundContext refund) {
+        return payments.requestCustomerRefund(payableId, refund);
+    }
+
+    @Override
+    public void onRefundRejected(Long payableId, RefundContext refund) {
+        payments.onRefundRejected(payableId, refund);
+    }
+
+    @Override
     public void onRefunded(Long payableId, RefundContext refund) {
         payments.onRefunded(payableId, refund);
     }
-    // 정상 환불 요청은 공통 계약의 REFUND_NOT_SUPPORTED, 거절 통지는 기본 no-op을 유지한다.
 }

@@ -75,7 +75,7 @@ PG 호출 중에는 DB 트랜잭션을 유지하지 않는다. 주문·결제 �
 - 결제 확정: 선점 CONFIRMED, 좌석 SOLD/기존 포인터 유지, reserved_count 감소 및 confirmed_count 증가.
 - 환불 확정: 좌석 AVAILABLE/NULL, confirmed_count 감소, 예약·발급 티켓 취소 반영. 선점 CONFIRMED 이력 보존.
 - PAYMENT_PENDING 또는 RECONCILING은 최초 선점 만료 시각만으로 반환하지 않는다. 승인 미시도·모든 시도 최종 실패의 결제 기한 반환과 진행 중 시도 보호는 [만료 설계](expiration.md)를 따른다.
-- 결제·환불 결과 불명확 시 소유권을 유지한다. 결제 기한은 [트랜잭션 설계](transactions.md)를 따른다. PG 재확인 주기와 운영 전환은 별도 설계 대상이다.
+- 결제·환불 결과 불명확 시 소유권을 유지한다. 결제 기한은 [트랜잭션 설계](transactions.md)를 따르며 PG 결과 재확인은 [공통 결제 작업](../../operations/failure-handling.md#미완료-결제-재확인-작업-46)이 담당한다. 운영 확인 등록과 알림의 세부 규칙은 별도 범위다.
 
 ## 5. DB 제약과 구현 차이
 

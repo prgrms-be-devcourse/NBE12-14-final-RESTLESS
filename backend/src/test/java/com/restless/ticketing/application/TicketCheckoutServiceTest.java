@@ -798,6 +798,162 @@ class TicketCheckoutServiceTest {
                                        PaymentAttemptContext attempt) { }
 
     @Nested
+    @DisplayName("정상 환불 요청 내부 검증")
+    class CustomerRefundRequest {
+        private AcceptedReservation confirmed() {
+            var accepted = acceptStart();
+            assertThat(paymentTransaction(() -> paymentService.onApproved(accepted.reservation().reservationId(), approved(accepted))))
+                    .isEqualTo(ApprovalDecision.accept());
+            return accepted;
+        }
+
+        @Test
+        @DisplayName("전액 환불 대기와 주문 변경은 함께 롤백되며 수락 시 티켓·좌석·구매 수량을 보존한다")
+        void requestIsAtomicAndKeepsResources() {
+            var accepted = confirmed();
+            var context = new RefundContext(accepted.attempt().paymentId(), PaymentRefundKind.CUSTOMER_REFUND);
+            Long id = accepted.reservation().reservationId();
+            assertThatThrownBy(() -> paymentTransaction(() -> {
+                assertThat(paymentService.requestCustomerRefund(id, context)).isEqualTo(ApprovalDecision.accept());
+                throw new InjectedFailure();
+            })).isInstanceOf(InjectedFailure.class);
+            assertThat(jdbc.queryForObject("SELECT status FROM ticket_reservations WHERE id=?", String.class, id)).isEqualTo("CONFIRMED");
+            assertThat(orders.find(accepted.checkout().orderId()).orElseThrow().status()).isEqualTo(OrderStatus.PAID);
+            assertThat(paymentTransaction(() -> paymentService.requestCustomerRefund(id, context))).isEqualTo(ApprovalDecision.accept());
+            assertThat(jdbc.queryForObject("SELECT status FROM ticket_reservations WHERE id=?", String.class, id)).isEqualTo("REFUND_PENDING");
+            assertThat(orders.find(accepted.checkout().orderId()).orElseThrow().status()).isEqualTo(OrderStatus.REFUND_PENDING);
+            assertThat(jdbc.queryForObject("SELECT confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", Integer.class,
+                    fixture.firstUserId(), fixture.performanceId())).isEqualTo(2);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=? AND status='SOLD' AND current_hold_id IS NOT NULL", Integer.class, fixture.performanceId())).isEqualTo(2);
+            assertThat(tickets.findAllByReservationIdOrderByPerformanceSeatIdAsc(id)).allSatisfy(ticket -> assertThat(ticket.getStatus()).isEqualTo("ISSUED"));
+            assertThat(paymentTransaction(() -> paymentService.requestCustomerRefund(id, context))).isEqualTo(ApprovalDecision.reject("TICKET_NOT_REFUNDABLE"));
+        }
+
+        @Test
+        @DisplayName("결제 ID·종류·사용 티켓과 환불 마감 직전·정각·이후를 검증한다")
+        void rejectsIneligibleRequestAndDeadlineBoundary() {
+            var accepted = confirmed();
+            Long id = accepted.reservation().reservationId();
+            Long paymentId = accepted.attempt().paymentId();
+            var context = new RefundContext(paymentId, PaymentRefundKind.CUSTOMER_REFUND);
+            assertThat(paymentTransaction(() -> paymentService.requestCustomerRefund(id, new RefundContext(paymentId + 1, PaymentRefundKind.CUSTOMER_REFUND)))).isEqualTo(ApprovalDecision.reject("TICKET_NOT_REFUNDABLE"));
+            assertThat(paymentTransaction(() -> paymentService.requestCustomerRefund(id, new RefundContext(paymentId, PaymentRefundKind.COMPENSATION)))).isEqualTo(ApprovalDecision.reject("TICKET_INVALID_REFUND"));
+            paymentTransaction(() -> {
+                var reservation = reservations.findById(id).orElseThrow();
+                Instant boundary = databaseNow();
+                Instant start = boundary.plusSeconds(3600);
+                assertThat(reservation.canRequestRefund(paymentId, boundary.minusNanos(1000), start)).isTrue();
+                assertThat(reservation.canRequestRefund(paymentId, boundary, start)).isFalse();
+                assertThat(reservation.canRequestRefund(paymentId, boundary.plusNanos(1000), start)).isFalse();
+                return null;
+            });
+            jdbc.update("UPDATE performances SET starts_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 59 MINUTE), booking_closes_at=DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 MINUTE) WHERE id=?", fixture.performanceId());
+            assertThat(paymentTransaction(() -> paymentService.requestCustomerRefund(id, context))).isEqualTo(ApprovalDecision.reject("TICKET_REFUND_DEADLINE_PASSED"));
+            jdbc.update("UPDATE performances SET starts_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 2 HOUR) WHERE id=?", fixture.performanceId());
+            jdbc.update("UPDATE tickets SET status='USED', used_at=UTC_TIMESTAMP(6) WHERE reservation_id=?", id);
+            assertThat(paymentTransaction(() -> paymentService.requestCustomerRefund(id, context))).isEqualTo(ApprovalDecision.reject("TICKET_NOT_REFUNDABLE"));
+            assertThat(jdbc.queryForObject("SELECT status FROM ticket_reservations WHERE id=?", String.class, id)).isEqualTo("CONFIRMED");
+            assertThat(orders.find(accepted.checkout().orderId()).orElseThrow().status()).isEqualTo(OrderStatus.PAID);
+        }
+
+        @Test
+        @DisplayName("동시 환불 요청은 하나만 대기로 전환하고 확정 좌석을 반환하지 않는다")
+        void concurrentRequestsKeepConfirmedSeats() throws Exception {
+            var accepted = confirmed();
+            Long id = accepted.reservation().reservationId();
+            var context = new RefundContext(accepted.attempt().paymentId(), PaymentRefundKind.CUSTOMER_REFUND);
+            var ready = new CountDownLatch(2);
+            var start = new CountDownLatch(1);
+            var pool = Executors.newFixedThreadPool(2);
+            try {
+                Callable<ApprovalDecision> action = () -> {
+                    ready.countDown();
+                    await(start);
+                    return paymentTransaction(() -> paymentService.requestCustomerRefund(id, context));
+                };
+                var first = pool.submit(action);
+                var second = pool.submit(action);
+                assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+                start.countDown();
+                assertThat(List.of(first.get(15, TimeUnit.SECONDS), second.get(15, TimeUnit.SECONDS)))
+                        .containsExactlyInAnyOrder(ApprovalDecision.accept(), ApprovalDecision.reject("TICKET_NOT_REFUNDABLE"));
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=? AND status='SOLD' AND current_hold_id IS NOT NULL", Integer.class, fixture.performanceId())).isEqualTo(2);
+                assertThat(jdbc.queryForObject("SELECT confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", Integer.class, fixture.firstUserId(), fixture.performanceId())).isEqualTo(2);
+            } finally {
+                start.countDown();
+                pool.shutdownNow();
+                assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("손님 환불 공통 결제 연동")
+    class CustomerRefundResult {
+        @ParameterizedTest(name = "{displayName} [{0}]")
+        @ValueSource(strings = {"SUCCESS", "UNKNOWN", "ROLLBACK", "REJECTED"})
+        @DisplayName("PG 환불 결과에 따라 확정 자원을 원자적으로 반환하거나 보호한다")
+        void handlesRefundResult(String outcome) {
+            var reservation = reserve();
+            var checkout = checkout(reservation);
+            var payment = commonPayments.prepare(new PreparePaymentCommand(fixture.firstUserId(), PayableType.TICKET,
+                    reservation.reservationId(), "customer-refund-prepare"));
+            fakePg.willApprove(payment.pgOrderId());
+            commonPayments.confirm(new ConfirmPaymentCommand(fixture.firstUserId(), "customer-key-" + payment.paymentId(),
+                    payment.pgOrderId(), payment.amount()));
+            doAnswer(invocation -> {
+                assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                if (outcome.equals("REJECTED")) return new PgCancelResult.Rejected("CANCEL_REJECTED", "rejected");
+                Object result = callOriginal(invocation);
+                return outcome.equals("UNKNOWN") ? new PgCancelResult.Unknown("response lost", null) : result;
+            }).when(fakePg).cancel(any(PgCancelCommand.class));
+            if (outcome.equals("ROLLBACK")) {
+                var failOnce = new AtomicBoolean(true);
+                doAnswer(invocation -> {
+                    Object result = callOriginal(invocation);
+                    if (failOnce.compareAndSet(true, false)) {
+                        entityManager.flush();
+                        throw new InjectedFailure();
+                    }
+                    return result;
+                }).when(orderTarget()).changeStatus(checkout.orderId(), OrderStatus.REFUNDED);
+            }
+            var command = new RefundPaymentCommand(fixture.firstUserId(), payment.paymentId(), "refund-key", "refund");
+            if (outcome.equals("REJECTED")) {
+                assertThatThrownBy(() -> commonRefunds.refund(command)).isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.PAYMENT_REFUND_REJECTED));
+            } else {
+                assertThat(commonRefunds.refund(command).status()).isEqualTo(outcome.equals("SUCCESS")
+                        ? PaymentRefundStatus.COMPLETED : outcome.equals("UNKNOWN") ? PaymentRefundStatus.UNKNOWN : PaymentRefundStatus.REQUESTED);
+            }
+            if (!outcome.equals("SUCCESS")) {
+                assertThat(reservationStatus(reservation.reservationId())).isEqualTo(outcome.equals("REJECTED") ? "REFUND_RECONCILING" : "REFUND_PENDING");
+                assertThat(orders.find(checkout.orderId()).orElseThrow().status()).isEqualTo(outcome.equals("REJECTED") ? OrderStatus.REFUND_REVIEW : OrderStatus.REFUND_PENDING);
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=? AND status='SOLD'", Integer.class, fixture.performanceId())).isEqualTo(2);
+                assertThat(tickets.findAllByReservationIdOrderByPerformanceSeatIdAsc(reservation.reservationId())).allSatisfy(t -> assertThat(t.getStatus()).isEqualTo("ISSUED"));
+                if (outcome.equals("REJECTED")) {
+                    assertThatThrownBy(() -> commonRefunds.refund(command)).isInstanceOf(BusinessException.class);
+                    doAnswer(invocation -> callOriginal(invocation)).when(fakePg).cancel(any(PgCancelCommand.class));
+                    assertThat(commonRefunds.refund(new RefundPaymentCommand(fixture.firstUserId(), payment.paymentId(), "retry-key", "retry")).status())
+                            .isEqualTo(PaymentRefundStatus.COMPLETED);
+                } else {
+                    reconciler.runOnce();
+                }
+            }
+            assertThat(commonPayments.get(payment.paymentId(), fixture.firstUserId()).status()).isEqualTo(PaymentStatus.CANCELLED);
+            assertThat(reservationStatus(reservation.reservationId())).isEqualTo("CANCELLED");
+            assertThat(orders.find(checkout.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.REFUNDED);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=? AND status='AVAILABLE' AND current_hold_id IS NULL", Integer.class, fixture.performanceId())).isEqualTo(3);
+            assertThat(jdbc.queryForObject("SELECT confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", Integer.class, fixture.firstUserId(), fixture.performanceId())).isZero();
+            assertThat(tickets.findAllByReservationIdOrderByPerformanceSeatIdAsc(reservation.reservationId())).allSatisfy(t -> {
+                assertThat(t.getStatus()).isEqualTo("CANCELLED");
+                assertThat(t.getCancelledAt()).isNotNull();
+            });
+            if (!outcome.equals("REJECTED")) assertThat(commonRefunds.refund(command).status()).isEqualTo(PaymentRefundStatus.COMPLETED);
+        }
+    }
+
+    @Nested
     @DisplayName("결제 실패와 불명확 결과")
     class ApprovalFailure {
         @ParameterizedTest(name = "{displayName} [불명확 경유={0}]")
@@ -1137,7 +1293,7 @@ class TicketCheckoutServiceTest {
         }
 
         @ParameterizedTest(name = "{displayName} [{0}]")
-        @ValueSource(strings = {"OLD_ATTEMPT", "CUSTOMER_REFUND", "CONFIRMED", "SEAT_OWNER", "RESERVED_COUNT"})
+        @ValueSource(strings = {"OLD_ATTEMPT", "CONFIRMED", "SEAT_OWNER", "RESERVED_COUNT"})
         @DisplayName("환불 종류·시도·상태·소유권 불일치는 변경 없이 운영 확인 로그와 메트릭을 남긴다")
         void incompatibleRefundDoesNotMutateResources(String mismatch) {
             var accepted = acceptStart();
@@ -1193,9 +1349,6 @@ class TicketCheckoutServiceTest {
             assertThat(numbers).hasSize(2);
             assertThat(commonPayments.confirm(command).status()).isEqualTo(PaymentStatus.APPROVED);
             assertThat(tickets.findAllByReservationIdOrderByPerformanceSeatIdAsc(reservation.reservationId()).stream().map(Ticket::getTicketNo).toList()).isEqualTo(numbers);
-            assertThatThrownBy(() -> commonRefunds.refund(new RefundPaymentCommand(fixture.firstUserId(), payment.paymentId(), "refund", "customer refund")))
-                    .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.PAYMENT_NOT_REFUNDABLE));
-            org.mockito.Mockito.verify(fakePg, org.mockito.Mockito.never()).cancel(any(PgCancelCommand.class));
         }
 
         @ParameterizedTest(name = "{displayName} [보상 결과={0}]")

@@ -4,6 +4,7 @@ import com.restless.order.application.OrderService;
 import com.restless.order.application.OrderView;
 import com.restless.order.domain.OrderStatus;
 import com.restless.order.domain.OrderType;
+import com.restless.concert.application.ConcertQueryService;
 import com.restless.payment.application.payable.ApprovalDecision;
 import com.restless.payment.application.payable.ApprovedPayment;
 import com.restless.payment.application.payable.PayableSnapshot;
@@ -31,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +58,7 @@ public class TicketPaymentService {
     private final OrderService orders;
     private final JdbcTemplate jdbc;
     private final MeterRegistry metrics;
+    private final ConcertQueryService concerts;
 
     /**
      * 결제 대상은 예약 ID다. 공통 결제는 활성 결제 행을 먼저 잠근 뒤 이 조회를 호출한다.
@@ -241,10 +244,59 @@ public class TicketPaymentService {
         orders.changeStatus(order.orderId(), OrderStatus.PAYMENT_REVIEW);
     }
 
+    /** 공통 환불 요청과 같은 트랜잭션에서 좌석을 유지하며 환불 대기로 전환한다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public ApprovalDecision requestCustomerRefund(Long reservationId, RefundContext refund) {
+        Objects.requireNonNull(refund, "refund");
+        if (refund.kind() != PaymentRefundKind.CUSTOMER_REFUND || refund.paymentId() <= 0) {
+            return ApprovalDecision.reject("TICKET_INVALID_REFUND");
+        }
+        LockedReservation locked = lockReservation(reservationId).orElse(null);
+        if (locked == null) return ApprovalDecision.reject("TICKET_RESERVATION_NOT_FOUND");
+        TicketReservation reservation = locked.reservation();
+        if ((reservation.getStatus() != TicketReservationStatus.CONFIRMED
+                && reservation.getStatus() != TicketReservationStatus.REFUND_RECONCILING)
+                || reservation.isPaymentResultPending() || !refund.paymentId().equals(reservation.getCurrentPaymentId())
+                || !hasCheckout(reservation)) {
+            return ApprovalDecision.reject("TICKET_NOT_REFUNDABLE");
+        }
+        List<HeldSeat> lockedSeats = lockReservationSeats(reservation);
+        OrderView order = validateOrder(reservation, orders.find(reservation.getOrderId()));
+        OrderStatus expected = reservation.getStatus() == TicketReservationStatus.CONFIRMED
+                ? OrderStatus.PAID : OrderStatus.REFUND_REVIEW;
+        validateConfirmedReservation(locked, lockedSeats, order, expected);
+        List<Ticket> issued = tickets.findAllByReservationIdOrderByPerformanceSeatIdAsc(reservation.getId());
+        if (issued.stream().anyMatch(ticket -> !"ISSUED".equals(ticket.getStatus())
+                || ticket.getUsedAt() != null || ticket.getCancelledAt() != null)) {
+            return ApprovalDecision.reject("TICKET_NOT_REFUNDABLE");
+        }
+        long amount = 0;
+        for (HeldSeat held : lockedSeats) amount = Math.addExact(amount, held.hold().getPriceAmount());
+        if (amount != order.totalAmount()) throw new IllegalStateException("확정 좌석 가격과 주문 금액이 다릅니다.");
+        var descriptions = concerts.getTicketSeatDescriptions(Set.of(reservation.getPerformanceId()),
+                Set.of(lockedSeats.getFirst().seat().getVenueSeatId()));
+        if (descriptions.size() != 1 || !descriptions.getFirst().performanceId().equals(reservation.getPerformanceId())) {
+            throw new IllegalStateException("예약 회차와 좌석 정보가 일치하지 않습니다.");
+        }
+        Instant startsAt = descriptions.getFirst().startsAt();
+        Instant now = databaseNow();
+        if (!reservation.canRequestRefund(refund.paymentId(), now, startsAt)) {
+            return ApprovalDecision.reject("TICKET_REFUND_DEADLINE_PASSED");
+        }
+        reservation.requestRefund(refund.paymentId(), now, startsAt);
+        if (order.status() == OrderStatus.REFUND_REVIEW) orders.changeStatus(order.orderId(), OrderStatus.PAID);
+        orders.changeStatus(order.orderId(), OrderStatus.REFUND_PENDING);
+        return ApprovalDecision.accept();
+    }
+
     /** 취소 확정 이전에는 기존 미확정 시도 보호를 유지한다. 정상 환불과 발급 전 보상을 구분한다. */
     @Transactional(propagation = Propagation.MANDATORY)
     public void onRefunded(Long reservationId, RefundContext refund) {
         Objects.requireNonNull(refund, "refund");
+        if (refund.kind() == PaymentRefundKind.CUSTOMER_REFUND) {
+            completeCustomerRefund(reservationId, refund);
+            return;
+        }
         if (refund.kind() != PaymentRefundKind.COMPENSATION) {
             compensationAnomaly(reservationId, refund.paymentId(), "UNSUPPORTED_REFUND");
             return;
@@ -277,6 +329,43 @@ public class TicketPaymentService {
         reservation.completeCompensation(refund.paymentId());
         orders.changeStatus(order.orderId(), OrderStatus.CANCELLED);
         // DB 예외는 전파한다. 결제, 환불, 티켓팅 변경 전체가 롤백되고 미완료 결제 재확인 작업이 재처리한다.
+    }
+
+    /** 최종 거절은 좌석과 티켓을 유지하고 운영 확인 상태로 남긴다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void onRefundRejected(Long reservationId, RefundContext refund) {
+        Objects.requireNonNull(refund, "refund");
+        if (refund.kind() != PaymentRefundKind.CUSTOMER_REFUND) throw new IllegalArgumentException("손님 환불만 거절 처리할 수 있습니다.");
+        LockedReservation locked = lockReservation(reservationId).orElseThrow();
+        TicketReservation reservation = locked.reservation();
+        if (!reservation.matchesCustomerRefund(refund.paymentId())) throw new IllegalStateException("환불 결제 또는 예약 상태가 일치하지 않습니다.");
+        OrderView order = validateOrder(reservation, orders.find(reservation.getOrderId()));
+        if (reservation.getStatus() == TicketReservationStatus.REFUND_RECONCILING && order.status() == OrderStatus.REFUND_REVIEW) return;
+        if (order.status() != OrderStatus.REFUND_PENDING) throw new IllegalStateException("환불 대기 주문이 아닙니다.");
+        reservation.rejectRefund(refund.paymentId());
+        orders.changeStatus(order.orderId(), OrderStatus.REFUND_REVIEW);
+    }
+
+    private void completeCustomerRefund(Long reservationId, RefundContext refund) {
+        LockedReservation locked = lockReservation(reservationId).orElseThrow();
+        TicketReservation reservation = locked.reservation();
+        if (reservation.getStatus() == TicketReservationStatus.CANCELLED && refund.paymentId().equals(reservation.getCurrentPaymentId())) return;
+        if (!reservation.matchesCustomerRefund(refund.paymentId()) || !hasCheckout(reservation)) {
+            throw new IllegalStateException("환불 결제 또는 예약 상태가 일치하지 않습니다.");
+        }
+        List<HeldSeat> lockedSeats = lockReservationSeats(reservation);
+        OrderView order = validateOrder(reservation, orders.find(reservation.getOrderId()));
+        if (order.status() != OrderStatus.REFUND_PENDING && order.status() != OrderStatus.REFUND_REVIEW) {
+            throw new IllegalStateException("환불 대기 또는 확인 중인 주문이 아닙니다.");
+        }
+        validateConfirmedReservation(locked, lockedSeats, order, order.status());
+        List<Ticket> issued = tickets.findAllByReservationIdOrderByPerformanceSeatIdAsc(reservation.getId());
+        Instant now = databaseNow();
+        for (Ticket ticket : issued) ticket.cancelForRefund(now);
+        for (HeldSeat held : lockedSeats) held.seat().releaseSold(held.hold().getId());
+        locked.limit().refund(lockedSeats.size());
+        reservation.completeRefund(refund.paymentId());
+        orders.changeStatus(order.orderId(), OrderStatus.REFUNDED);
     }
 
     private void compensationAnomaly(Long reservationId, Long paymentId, String reason) {
@@ -359,8 +448,12 @@ public class TicketPaymentService {
     }
 
     private void validateConfirmedReservation(LockedReservation locked, List<HeldSeat> lockedSeats, OrderView order) {
+        validateConfirmedReservation(locked, lockedSeats, order, OrderStatus.PAID);
+    }
+
+    private void validateConfirmedReservation(LockedReservation locked, List<HeldSeat> lockedSeats, OrderView order, OrderStatus expectedStatus) {
         List<Ticket> issued = tickets.findAllByReservationIdOrderByPerformanceSeatIdAsc(locked.reservation().getId());
-        if (order.status() != OrderStatus.PAID || issued.size() != lockedSeats.size()
+        if (order.status() != expectedStatus || issued.size() != lockedSeats.size()
                 || locked.limit().getConfirmedCount() < lockedSeats.size()) {
             throw new IllegalStateException("확정된 예약의 주문·티켓·구매 수량이 일치하지 않습니다.");
         }

@@ -112,6 +112,8 @@ MVP에서는 **지정석만 지원**하며, 비지정석·티켓 양도·부분 
 
 ### 예약 상태 변화
 
+아래는 최초 설계 상태도다. 현재 공통 환불 계약에는 불명확 콜백이 없어 환불 결과 불명확 시 예약은 REFUND_PENDING을 유지한다. PG 최종 거절은 CONFIRMED로 복귀하지 않고 REFUND_RECONCILING으로 남긴다. 공통 결제 상태와 실제 처리 상세는 [Handler 문서](payment-handler.md#정상-환불-요청-내부-준비-2026-11-22)를 따른다.
+
 ```mermaid
 flowchart TD
     A["HELD · 좌석 선점"] -->|결제 시작| B["PAYMENT_PENDING"]
