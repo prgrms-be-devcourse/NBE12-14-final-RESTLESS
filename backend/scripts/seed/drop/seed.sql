@@ -44,14 +44,27 @@ VALUES (1, 1, 'LIGHTSTICK-BLACK', '블랙', 49000, TRUE),
        (6, 3, 'HOODIE-M', 'M', 69000, TRUE),
        (7, 3, 'HOODIE-L', 'L', 69000, TRUE);
 
-INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity)
-VALUES (1, 30, 30, 0, 0),
-       (2, 20, 20, 0, 0),
-       (3, 1, 1, 0, 0),
-       (4, 50, 50, 0, 0),
-       (5, 50, 50, 0, 0),
-       (6, 10, 10, 0, 0),
-       (7, 10, 10, 0, 0);
+-- 재고는 버킷에 나뉜다 (ADR-0005). 드롭 등록 API와 같이 SKU마다 min(4, 총재고)개로 나누고 나머지는 앞 버킷부터 1개씩.
+-- drop_inventories의 수량 컬럼은 생성 때 값으로 멈춘다. 읽는 값은 total_quantity와 bucket_count뿐이다.
+INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity, bucket_count)
+VALUES (1, 30, 30, 0, 0, 4),
+       (2, 20, 20, 0, 0, 4),
+       (3, 1, 1, 0, 0, 1),
+       (4, 50, 50, 0, 0, 4),
+       (5, 50, 50, 0, 0, 4),
+       (6, 10, 10, 0, 0, 4),
+       (7, 10, 10, 0, 0, 4);
+
+INSERT INTO drop_inventory_buckets
+    (variant_id, bucket_no, total_quantity, available_quantity, reserved_quantity, sold_quantity)
+WITH RECURSIVE seq (n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM seq WHERE n < 15)
+SELECT i.variant_id, s.n,
+       FLOOR(i.total_quantity / i.bucket_count) + (s.n < MOD(i.total_quantity, i.bucket_count)),
+       FLOOR(i.total_quantity / i.bucket_count) + (s.n < MOD(i.total_quantity, i.bucket_count)),
+       0, 0
+FROM drop_inventories i
+JOIN seq s ON s.n < i.bucket_count
+WHERE i.variant_id BETWEEN 1 AND 7;
 
 -- SKU마다 입장 허가 게이트가 하나 있어야 한다. 드롭 등록 API도 SKU를 만들 때 함께 만든다.
 INSERT INTO drop_queue_gates (variant_id)

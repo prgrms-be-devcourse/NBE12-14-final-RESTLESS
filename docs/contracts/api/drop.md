@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/api/`, `backend/src/main/java/com/restless/drop/application/dto/`, `backend/src/test/java/com/restless/drop/acceptance/`
 >
-> 마지막 확인: 2026-11-20 (#285 상태 표기 갱신, 대기열 경로의 429를 #278 `application.yml`, `QueueRateLimitIntegrationTest`와 대조. 2026-11-19 #253 SKU별 입장 제어 정책의 계약 반영. D4는 #254 SKU별 입장 제어 구현과 대조했다. 나머지는 2026-11-14 기준: #92 등록 검증과 판매 상태, #41 탈퇴 제한, #97 탈퇴 동의, #105 검색과 정렬, #109 주문 상세 결제 대상)
+> 마지막 확인: 2026-11-22 (#330 재고 버킷 분할. D1 등록과 D2 트랜잭션 문장, D2 품절 판정의 뜻을 고쳤다. 요청, 응답, 오류 코드는 그대로다. 2026-11-20 #285 상태 표기 갱신, 대기열 경로의 429를 #278 `application.yml`, `QueueRateLimitIntegrationTest`와 대조. 2026-11-19 #253 SKU별 입장 제어 정책의 계약 반영. D4는 #254 SKU별 입장 제어 구현과 대조했다. 나머지는 2026-11-14 기준: #92 등록 검증과 판매 상태, #41 탈퇴 제한, #97 탈퇴 동의, #105 검색과 정렬, #109 주문 상세 결제 대상)
 
 - 상태: v1 IMPLEMENTED (2026-11-13 합의). 수용 테스트(`backend/src/test/java/com/restless/drop/acceptance/`)가 이 계약을 기준으로 판정한다.
 - Base URL: `/api` ([ADR-0002](../../decisions/0002-common-conventions.md)). 오류는 공통 형식 `{code, message, details, traceId, timestamp}` ([common.md](common.md)).
@@ -41,7 +41,7 @@
 
 - 201 `{ "dropId": 1, "status": "DRAFT" }`
 - `opensAt`이 과거여도 등록할 수 있다 (게시하면 바로 판매 시작). 등록 직후 상태는 항상 `DRAFT`다.
-- 각 SKU의 재고는 `total = available = totalQuantity`, `reserved = 0`, `sold = 0`으로 시작한다.
+- 각 SKU의 재고는 `total = available = totalQuantity`, `reserved = 0`, `sold = 0`으로 시작한다. 서버는 이 재고를 `min(설정 K, totalQuantity)`개의 재고 버킷으로 나눠 저장한다. SKU 수량은 버킷 합이다 ([ADR-0005](../../decisions/0005-drop-inventory-buckets.md)).
 - 검증 400 `INVALID_REQUEST`: 필수값, `opensAt < closesAt`, `closesAt > 서버 시각`(이미 끝난 판매 기간 금지. 시작 시각은 지나도 됨), SKU 1개 이상, `skuCode` 중복 없음, `priceAmount >= 1`(0원 주문은 결제 준비가 `FREE_ORDER`로 거절하므로 등록에서 막는다, #92), `totalQuantity >= 1`.
 - 없는 `concertId` 404 `NOT_FOUND`. 로그인 안 함 401, ADMIN 아님 403.
 
@@ -70,7 +70,7 @@
 }
 ```
 - `saleStatus`: 판매 판정(D2)과 같은 기준이다. 게시 상태가 판매 가능(`SCHEDULED`, `OPEN`)이 아니면(`CLOSED` 등) 시각과 관계없이 `ENDED`. 판매 가능 상태이면 서버 시각 기준 `UPCOMING`(시작 전) / `ON_SALE`(`opensAt <= now < closesAt`) / `ENDED`(종료 후) (#92).
-- `soldOut`: 그 SKU의 `available_quantity = 0`. 재고 점유 중인 수량은 구매 가능 수량이 아니다. "현재 구매 불가"라는 뜻이며 최종 매진이 아니다. 재고가 반환되면 다시 `false`가 된다.
+- `soldOut`: 그 SKU의 구매 가능 수량(재고 버킷 `available` 합) = 0. 재고 점유 중인 수량은 구매 가능 수량이 아니다. "현재 구매 불가"라는 뜻이며 최종 매진이 아니다. 재고가 반환되면 다시 `false`가 된다.
 
 ## D2. 재고 점유 + 주문 생성
 
@@ -82,7 +82,7 @@
 
 - 수량 필드는 없다. 주문 하나 = SKU 한 종류, 수량 1 (INV-04).
 - 판매 가능 = 게시됨(`SCHEDULED` 또는 `OPEN`)이고 `opensAt <= 서버 시각 < closesAt`. `OPEN` 전환은 판정에 영향이 없다. `CLOSED`·`CANCELLED`는 시각과 관계없이 판매하지 않는다 (#92).
-- 하나의 트랜잭션: 판매 기간과 상태 확인 → 구매 슬롯 점유(INV-05) → 공통 주문(PENDING_PAYMENT, 금액 = 서버 가격, 배송지 스냅샷) 생성 → 재고 점유(RESERVED, 기한 = 지금 + TTL) 저장 → SKU 재고 조건부 차감(`available - 1`, `reserved + 1`). 재고 점유가 주문을 NOT NULL FK로 가리켜서 주문을 먼저 만든다. 재고 차감은 재고 행 락을 짧게 쥐려고 마지막에 하고, 재고가 없거나 락 대기 중 판매가 끝나면 앞의 쓰기가 모두 롤백된다 (#322).
+- 하나의 트랜잭션: 판매 기간과 상태 확인 → 구매 슬롯 점유(INV-05) → 공통 주문(PENDING_PAYMENT, 금액 = 서버 가격, 배송지 스냅샷) 생성 → 재고 점유(RESERVED, 기한 = 지금 + TTL) 저장 → 그 SKU의 재고 버킷 하나에서 조건부 차감(`available - 1`, `reserved + 1`). 재고 점유가 주문을 NOT NULL FK로 가리켜서 주문을 먼저 만든다. 재고 차감은 재고 락을 짧게 쥐려고 마지막에 하고, 재고가 없거나 락 대기 중 판매가 끝나면 앞의 쓰기가 모두 롤백된다 (#322). 서버는 잠기지 않은 버킷을 고르고, 점유가 가져간 버킷을 기록한다 (#330).
 - 201
 ```json
 { "reservationId": 5, "orderId": 7, "status": "RESERVED", "amount": 39000, "expiresAt": "..." }
@@ -91,7 +91,7 @@
 - 오류:
   - 404 `NOT_FOUND`: 드롭·SKU 없음, 게시되지 않음, SKU가 그 드롭 소속이 아님
   - 409 `DROP_NOT_ON_SALE`: 판매 시작 전, 종료 후 (INV-14)
-  - 409 `DROP_SOLD_OUT`: 그 SKU 구매 가능 수량 0
+  - 409 `DROP_SOLD_OUT`: 그 SKU 구매 가능 수량 0. 판정 시점에 모든 재고 버킷의 커밋된 구매 가능 수량이 0이었다는 뜻이다. 그 직후 반환이 커밋되면 곧바로 다시 살 수 있다. 버킷 분할 전에도 같은 창이 있었다 (2026-11-22 결정 D3)
   - 409 `DROP_ACTIVE_PURCHASE_EXISTS`: 같은 회원이 같은 드롭에서 진행 중인 거래가 있음 (INV-05)
   - 403 `DROP_ADMISSION_REQUIRED`: 입장 제어 사용 시 유효한 입장 허가 없음 (D4, INV-06). 종료된 입장 허가, 요청 `variantId`와 다른 SKU의 입장 허가도 같은 오류로 거절한다 (2026-11-19 결정. 정상 화면에서는 생기지 않는 요청을 막는 방어 검사다)
   - 400 `INVALID_REQUEST`: 키·배송지 검증

@@ -122,7 +122,8 @@ class DropReservationIntegrationTest {
         int bucket = DropStock.bucketOf(jdbc, result.body().reservationId());
         assertThat(jdbc.queryForList("SELECT bucket_no FROM drop_inventory_buckets WHERE variant_id = ? AND version = 1",
                 Integer.class, variant)).containsExactly(bucket);
-        assertThat(DropStock.buckets(jdbc, variant).get(bucket)).containsEntry("reserved", 1).containsEntry("available", 0);
+        var held = DropStock.buckets(jdbc, variant).get(bucket);
+        assertThat(held).containsEntry("reserved", 1).containsEntry("available", held.get("total") - 1);
         assertThat(jdbc.queryForMap("SELECT item_type, item_ref_id, item_name_snapshot, option_name_snapshot, unit_price_snapshot, quantity FROM order_items WHERE order_id = ?", result.body().orderId()))
                 .containsEntry("item_type", "DROP_VARIANT").containsEntry("item_ref_id", variant)
                 .containsEntry("item_name_snapshot", "상품").containsEntry("option_name_snapshot", "M")

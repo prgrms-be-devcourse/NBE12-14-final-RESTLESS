@@ -25,6 +25,7 @@ INSERT INTO perf_seed_meta (k, v) VALUES
     ('organizers', @organizers),
     ('contention_ratio', @ratio),
     ('drop_hot_id', 1),
+    ('drop_bucket_count', @bucket_count),
     ('drop_hot_stock', @hot_stock),
     ('drop_hot_participants', @hot_stock * @ratio),
     ('drop_warm_id', IF(@warm_stock > 0, @warm_drop_id, 0)),

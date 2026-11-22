@@ -25,6 +25,7 @@ perf/seed/seed.sh --scale base --profile perf
 | `--refresh` | 스냅샷 복원 뒤 실험 전에 실행. 핫 드롭·경매 기간과 Refresh Token 만료를 지금 기준으로 다시 맞추고 CSV를 다시 만든다 |
 | `--verify` | 점검만 |
 | `AUCTION_CLOSE_IN_MINUTES=2 ... --refresh` | AU-7·8의 종료 시각을 현재 + 2분으로 설정 |
+| `DROP_BUCKET_COUNT=1 ...` | 판매 중 SKU의 재고 버킷 수 K를 바꾼다. 기본은 `scale.yml`의 `drop_bucket_count`(4)다. 같은 날 K=1 기준 실행에 쓴다 (ADR-0005) |
 
 로컬에서는 `--scale small`을 쓰고, mysql 클라이언트가 없으면 `MYSQL="docker exec -i -e MYSQL_PWD <컨테이너> mysql"`로 컨테이너 안의 클라이언트를 쓴다.
 
