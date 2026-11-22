@@ -22,6 +22,13 @@ public class DropReservation {
     private Long dropId;
     @Column(name = "variant_id", nullable = false)
     private Long variantId;
+    /**
+     * Stock bucket this hold took (ADR-0005, INV-03). Inserted as 0, then set by the TX1 hold UPDATE in native SQL.
+     * Not updatable so a later flush of this entity can never write the stale 0 back over it.
+     */
+    @JdbcTypeCode(SqlTypes.TINYINT)
+    @Column(name = "bucket_no", nullable = false, updatable = false)
+    private int bucketNo;
     @Column(name = "user_id", nullable = false)
     private Long userId;
     @Column(name = "order_id", nullable = false)

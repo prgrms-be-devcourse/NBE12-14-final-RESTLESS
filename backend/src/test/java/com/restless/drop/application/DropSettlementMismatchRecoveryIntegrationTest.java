@@ -1,5 +1,6 @@
 package com.restless.drop.application;
 
+import com.restless.drop.acceptance.DropStock;
 import com.restless.TestcontainersConfiguration;
 import com.restless.common.error.BusinessException;
 import com.restless.drop.application.dto.CreateDropRequest;
@@ -73,22 +74,23 @@ class DropSettlementMismatchRecoveryIntegrationTest {
                 new CreateDropReservationRequest(variant, "회원", "010", "서울")).body();
     }
 
-    // INV-01: preserve the DB CHECK while making the inventory disagree with its hold.
+    // INV-01: preserve the bucket CHECK while making the hold's bucket (bucket 0, K = 1) disagree with its hold.
     // INV-02, INV-05, INV-09, INV-10, INV-11, INV-15: no partial settlement or release.
     @Test
     void inv09PermanentSettlementMismatchRetriesWithoutBlockingOthersUntilStockIsRepaired() {
         var broken = processing(reservation, order);
         stock(0, 1, 0);
-        assertThat(jdbc.update("UPDATE drop_inventories SET reserved_quantity = 0, available_quantity = 1 WHERE variant_id = ?", variant))
+        assertThat(jdbc.update("UPDATE drop_inventory_buckets SET reserved_quantity = 0, available_quantity = 1 WHERE variant_id = ? AND bucket_no = 0", variant))
                 .isEqualTo(1);
-        var brokenStock = jdbc.queryForMap("SELECT * FROM drop_inventories WHERE variant_id = ?", variant);
+        var brokenStock = jdbc.queryForMap("SELECT * FROM drop_inventory_buckets WHERE variant_id = ?", variant);
 
         // Another SKU in the same drop: the first failing payment precedes this healthy one.
         var timestamp = Timestamp.from(now);
         jdbc.update("INSERT INTO drop_variants (drop_id, sku_code, option_name, price_amount, is_active) VALUES (?, ?, 'L', 39000, true)",
                 drop, UUID.randomUUID().toString());
         Long healthyVariant = jdbc.queryForObject("SELECT id FROM drop_variants WHERE drop_id = ? AND option_name = 'L'", Long.class, drop);
-        jdbc.update("INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity, version) VALUES (?, 1, 1, 0, 0, 0)", healthyVariant);
+        jdbc.update("INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity, bucket_count) VALUES (?, 1, 1, 0, 0, 1)", healthyVariant);
+        jdbc.update("INSERT INTO drop_inventory_buckets (variant_id, bucket_no, total_quantity, available_quantity, reserved_quantity, sold_quantity) VALUES (?, 0, 1, 1, 0, 0)", healthyVariant);
         // The purchase slot is per user/drop, so use another buyer.
         String email = UUID.randomUUID() + "@d3.test";
         jdbc.update("INSERT INTO users (email, password_hash, nickname, role, status, created_at, updated_at) VALUES (?, 'hash', 'healthy', 'USER', 'ACTIVE', ?, ?)", email, timestamp, timestamp);
@@ -107,8 +109,8 @@ class DropSettlementMismatchRecoveryIntegrationTest {
         assertThat(payments.get(healthy.paymentId(), healthyUser).status()).isEqualTo(PaymentStatus.APPROVED);
         assertThat(jdbc.queryForObject("SELECT status FROM drop_reservations WHERE id = ?", String.class, healthyHold.reservationId())).isEqualTo("CONFIRMED");
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id = ?", String.class, healthyHold.orderId())).isEqualTo("PAID");
-        assertThat(jdbc.queryForMap("SELECT available_quantity, reserved_quantity, sold_quantity FROM drop_inventories WHERE variant_id = ?", healthyVariant))
-                .containsEntry("available_quantity", 0).containsEntry("reserved_quantity", 0).containsEntry("sold_quantity", 1);
+        assertThat(DropStock.totals(jdbc, healthyVariant))
+                .containsEntry("available", 0).containsEntry("reserved", 0).containsEntry("sold", 1);
         assertThat(jdbc.queryForObject("SELECT active_reservation_id FROM drop_purchase_slots WHERE drop_id = ? AND user_id = ?", Long.class, drop, healthyUser)).isNull();
 
         for (int attempt = 2; attempt <= 6; attempt++) {
@@ -122,7 +124,7 @@ class DropSettlementMismatchRecoveryIntegrationTest {
             reconciler.runOnce();
             pending(broken.paymentId());
             assertThat(applyFailures()).isEqualTo(failures + attempt);
-            assertThat(jdbc.queryForMap("SELECT * FROM drop_inventories WHERE variant_id = ?", variant)).isEqualTo(brokenStock);
+            assertThat(jdbc.queryForMap("SELECT * FROM drop_inventory_buckets WHERE variant_id = ?", variant)).isEqualTo(brokenStock);
             assertThat(pg.query(broken.pgOrderId())).isInstanceOf(PgQueryResult.Approved.class);
             // These gauges only include UNKNOWN, so they miss this PROCESSING failure.
             assertThat(meters.get("payment.unknown.count").gauge().value()).isZero();
@@ -137,9 +139,9 @@ class DropSettlementMismatchRecoveryIntegrationTest {
         job.runOnce();
         pending(broken.paymentId());
         assertThat(applyFailures()).isEqualTo(failures + 6);
-        assertThat(jdbc.queryForMap("SELECT * FROM drop_inventories WHERE variant_id = ?", variant)).isEqualTo(brokenStock);
+        assertThat(jdbc.queryForMap("SELECT * FROM drop_inventory_buckets WHERE variant_id = ?", variant)).isEqualTo(brokenStock);
 
-        assertThat(jdbc.update("UPDATE drop_inventories SET reserved_quantity = 1, available_quantity = 0 WHERE variant_id = ?", variant)).isEqualTo(1);
+        assertThat(jdbc.update("UPDATE drop_inventory_buckets SET reserved_quantity = 1, available_quantity = 0 WHERE variant_id = ? AND bucket_no = 0", variant)).isEqualTo(1);
         clock.now = clock.instant().plusSeconds(30);
         reconciler.runOnce();
         confirmed(broken.paymentId());
@@ -194,9 +196,8 @@ class DropSettlementMismatchRecoveryIntegrationTest {
         return jdbc.queryForObject("SELECT active_reservation_id FROM drop_purchase_slots WHERE drop_id = ? AND user_id = ?", Long.class, drop, user);
     }
     private void stock(int available, int reserved, int sold) {
-        assertThat(jdbc.queryForMap("SELECT total_quantity, available_quantity, reserved_quantity, sold_quantity FROM drop_inventories WHERE variant_id = ?", variant))
-                .containsEntry("total_quantity", 1).containsEntry("available_quantity", available)
-                .containsEntry("reserved_quantity", reserved).containsEntry("sold_quantity", sold);
+        assertThat(DropStock.totals(jdbc, variant)).containsEntry("total", 1).containsEntry("available", available)
+                .containsEntry("reserved", reserved).containsEntry("sold", sold);
     }
 
     @TestConfiguration(proxyBeanMethods = false)

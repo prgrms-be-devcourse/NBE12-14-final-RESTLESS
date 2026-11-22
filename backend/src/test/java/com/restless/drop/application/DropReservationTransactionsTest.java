@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class DropReservationTransactionsTest {
@@ -44,10 +45,12 @@ class DropReservationTransactionsTest {
         when(slot.getActiveReservationId()).thenReturn(null);
         when(slots.lockById(new DropPurchaseSlot.Id(1L, 2L))).thenReturn(slot);
         when(clock.instant()).thenReturn(opens);
-        when(inventories.holdOne(3L)).thenAnswer(call -> {
+        when(inventories.bucketCount(3L)).thenReturn(1);
+        when(inventories.pickFrom(3L, 0)).thenReturn(Optional.of(0));
+        when(inventories.holdInBucket(any(), eq(3L), eq(0))).thenAnswer(call -> {
             // The inventory UPDATE returns only after the competing transaction releases its lock.
             when(clock.instant()).thenReturn(closes);
-            return 1;
+            return 2;
         });
         when(orders.create(any())).thenReturn(7L);
         when(orders.find(7L)).thenReturn(Optional.of(new OrderView(7L, 2L, OrderType.DROP, OrderStatus.PENDING_PAYMENT, 0)));
@@ -87,10 +90,12 @@ class DropReservationTransactionsTest {
         when(slot.getActiveReservationId()).thenReturn(null);
         when(slots.lockById(new DropPurchaseSlot.Id(1L, 2L))).thenReturn(slot);
         when(clock.instant()).thenReturn(opens);
-        when(inventories.holdOne(3L)).thenAnswer(call -> {
+        when(inventories.bucketCount(3L)).thenReturn(1);
+        when(inventories.pickFrom(3L, 0)).thenReturn(Optional.of(0));
+        when(inventories.holdInBucket(any(), eq(3L), eq(0))).thenAnswer(call -> {
             // The inventory UPDATE returns only after the competing transaction releases its lock.
             when(clock.instant()).thenReturn(opens.plusSeconds(300));
-            return 1;
+            return 2;
         });
         when(orders.create(any())).thenReturn(7L);
         when(orders.find(7L)).thenReturn(Optional.of(new OrderView(7L, 2L, OrderType.DROP, OrderStatus.PENDING_PAYMENT, 0)));
@@ -116,7 +121,9 @@ class DropReservationTransactionsTest {
         order.verify(reservations).saveAndFlush(any(DropReservation.class));
         order.verify(orders).find(7L);
         order.verify(slots).flush();
-        order.verify(inventories).holdOne(3L);
+        order.verify(inventories).bucketCount(3L);
+        order.verify(inventories).pickFrom(3L, 0);
+        order.verify(inventories).holdInBucket(any(), eq(3L), eq(0));
         order.verifyNoMoreInteractions();
     }
 }

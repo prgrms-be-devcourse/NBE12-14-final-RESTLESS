@@ -23,6 +23,7 @@ public class DropAdminService {
     private final DropInventoryRepository inventories;
     private final ConcertQueryService concerts;
     private final DropQueueGateRepository queueGates;
+    private final DropInventorySettings inventorySettings;
     private final Clock clock;
 
     @Transactional
@@ -54,7 +55,12 @@ public class DropAdminService {
                 }
                 throw e;
             }
-            inventories.save(DropInventory.initial(variant.getId(), sku.totalQuantity()));
+            // Head row first: the buckets reference it. Same transaction, so the SKU appears with all its stock.
+            var inventory = inventories.saveAndFlush(DropInventory.initial(variant.getId(), sku.totalQuantity(),
+                    inventorySettings.bucketCount()));
+            for (int bucket = 0; bucket < inventory.getBucketCount(); bucket++) {
+                inventories.insertBucket(variant.getId(), bucket, inventory.bucketQuantity(bucket));
+            }
             queueGates.create(variant.getId());
         }
         return new Admin(drop.getId(), drop.getStatus());

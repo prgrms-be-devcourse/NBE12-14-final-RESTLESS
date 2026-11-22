@@ -28,7 +28,7 @@ class DropAdminServiceTest {
         var inventories = mock(DropInventoryRepository.class);
         var concerts = mock(ConcertQueryService.class);
         var now = Instant.parse("2040-01-01T00:00:00Z");
-        var service = new DropAdminService(drops, variants, inventories, concerts, mock(DropQueueGateRepository.class), Clock.fixed(now, ZoneOffset.UTC));
+        var service = new DropAdminService(drops, variants, inventories, concerts, mock(DropQueueGateRepository.class), new DropInventorySettings(4), Clock.fixed(now, ZoneOffset.UTC));
         for (Instant close : new Instant[] {now.minusNanos(1), now}) {
             var request = new CreateDropRequest(1L, "상품", "설명", "url", now.minusSeconds(60), close,
                     List.of(new CreateDropRequest.Variant("A", "M", 1L, 1)));
@@ -45,7 +45,7 @@ class DropAdminServiceTest {
         var inventories = mock(DropInventoryRepository.class);
         var concerts = mock(ConcertQueryService.class);
         var now = Instant.EPOCH;
-        var service = new DropAdminService(drops, variants, inventories, concerts, mock(DropQueueGateRepository.class), Clock.fixed(now, ZoneOffset.UTC));
+        var service = new DropAdminService(drops, variants, inventories, concerts, mock(DropQueueGateRepository.class), new DropInventorySettings(4), Clock.fixed(now, ZoneOffset.UTC));
         when(drops.save(any(Drop.class))).thenAnswer(invocation -> invocation.getArgument(0));
         var sqlFailure = new SQLException("Duplicate entry", "23000", 1062);
         when(variants.save(any(DropVariant.class))).thenThrow(new DataIntegrityViolationException("duplicate",

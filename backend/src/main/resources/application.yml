@@ -34,6 +34,9 @@ restless:
       limit: 5
       window: 1s
   drop:
+    inventory:
+      # ADR-0005: stock buckets per new SKU, min(this, total). 1..16, read only at creation.
+      bucket-count: 4
     queue:
       required: true
       heartbeat-timeout: 30s
