@@ -22,6 +22,10 @@ perf/scenarios/run-ticketing.sh page 100
 
 다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 요약 결과는 `.ai-output/perf/ticketing-<시나리오>/summary-<UTC 날짜시간>.json`, HTML 보고서는 같은 폴더의 `report-<UTC 날짜시간>.html`에 자동 저장된다. 예: `.ai-output/perf/ticketing-spread/summary-20261118T010203Z.json`. 실행 중에는 `http://localhost:5665`에서 대시보드를 볼 수 있다. 실행기가 기본으로 대시보드와 HTML 내보내기를 켜므로 별도 k6 환경변수를 지정하지 않아도 된다.
 
+`burst`는 준비된 각 사용자가 정해진 시각에 좌석 조회를 한 번씩 보낸다. 예를 들어 `perf/scenarios/run-ticketing.sh burst 5000`은 서로 다른 미사용 토큰 5,000개가 필요하다. 실행 전 좌석 및 관리 지표 확인 요청이 각각 한 번 추가된다. 기본적으로 준비 완료 20초 후 시작하며 `BURST_DELAY_SECONDS=30`으로 조절한다. `DURATION`은 적용되지 않고 `MAX_DURATION`(기본 5분)에 준비 대기와 응답 대기를 포함한다. `ticket_poll_requests`와 오류 임계값으로 완료 여부를 확인하고, `ticket_burst_start_delay`의 p95·최댓값으로 실제 요청 시작이 얼마나 퍼졌는지 살핀다. 이 값은 요청 전 로컬 시각 기준이며 서버 도착 시각은 아니다. 부하 생성기 성능이나 VU 초기화 때문에 설정 인원이 정확히 동시에 도착한다고 보장하지 않는다. 각 테스트 환경에 필요한 수만큼의 유효하고 미사용인 계정을 준비한다.
+
+좌석 응답 압축 비교는 같은 서버와 데이터 조건에서 `SEAT_ENCODING=identity perf/scenarios/run-ticketing.sh burst 500`과 `SEAT_ENCODING=gzip perf/scenarios/run-ticketing.sh burst 500`을 각각 실행한다. 기본값은 identity다. gzip을 요청했는데 준비 요청에서 압축되지 않으면 테스트를 중단하며, 본 요청의 `ticket_seat_encoding_errors`와 `ticket_seat_gzip_responses`로 적용 여부를 확인한다. 2KB 미만 응답은 서버가 압축하지 않으므로 gzip 비교에 적합하지 않다. 요약의 `conditions.seatEncoding`, `data_received`, 응답 시간과 서버 CPU를 함께 비교한다. 서버는 회차별 좌석 조회 JSON에만 압축을 적용한다. `HTTP_COMPRESSION_ENABLED=false`로 압축을 끌 수 있고 변경 후 앱을 재시작해야 한다.
+
 ### 테스트 중 서버 지표를 CSV로 수집
 
 `run-ticketing.sh`가 테스트 시작 전 수집기를 자동으로 시작하고, 테스트 종료 후 마지막 지표를 저장한다. 관리 포트에 연결되지 않으면 테스트를 시작하지 않는다. 기본 간격은 2초이며 `INTERVAL=5`로 바꿀 수 있다. 별도 수집이 필요할 때는 아래 명령을 실행하고 `Ctrl-C`로 종료한다.
@@ -42,11 +46,11 @@ macOS에서 실행하면 같은 폴더에 `mac-<UTC 날짜시간>.csv`도 자동
 | 파일 | 실험 | 내용 |
 |---|---|---|
 | [drop-reservation-spike.js](drop-reservation-spike.js) | EXP-01 쓰기 기준선 | 판매 시작 순간 핫 드롭 재고 점유 스파이크. 대기열 없음 |
-| [drop-reservation-step.js](drop-reservation-step.js) | EXP-01 용량 측정 | 도착률을 계단식으로 올려 무릎 지점과 최대 지속 처리량을 찾는다. 대기열 없음 |
-| [drop-sale.js](drop-sale.js) | 드롭 H, EXP-02 | 한정 재고 판매. 대기열 off/on을 같은 도착 시간표로 비교하고 결제까지 잇는다 |
-| [drop-reservation-capacity.js](drop-reservation-capacity.js) | 드롭 B1·B2, EXP-01·04 | 성공 점유 경로의 연속 증가 탐색과 고정 도착률 유지 |
-| [drop-queue-poll.js](drop-queue-poll.js) | 드롭 Q | 대기자 N명을 고정하고 상태 조회 비용을 잰다 |
-| [prom-collect.sh](prom-collect.sh) | 드롭 H·B·Q | 관리 포트의 Prometheus 텍스트를 5초 간격으로 파일에 남긴다 |
+| [drop-reservation-step.js](drop-reservation-step.js) | EXP-01 용량 측정 | 도착률을 계단식으로 올려 포화 시작점과 최대 지속 처리량을 찾는다. 대기열 없음 |
+| [drop-sale.js](drop-sale.js) | 드롭 대표 판매 측정, EXP-02 | 한정 재고 판매. 대기열 off/on을 같은 도착 시간표로 비교하고 결제까지 잇는다 |
+| [drop-reservation-capacity.js](drop-reservation-capacity.js) | 드롭 용량 측정, EXP-01, 04 | 성공 점유 경로의 연속 증가 탐색과 고정 도착률 유지 |
+| [drop-queue-poll.js](drop-queue-poll.js) | 드롭 대기열 폴링 측정 | 대기자 N명을 고정하고 상태 조회 비용을 잰다 |
+| [prom-collect.sh](prom-collect.sh) | 드롭 성능 측정 전부 | 관리 포트의 Prometheus 텍스트를 5초 간격으로 파일에 남긴다 |
 | [auction-burst.js](auction-burst.js) | AU-1~4 | 두 판(기본 8,000건 → 10,000건)을 한 번에 보내는 경매 API 부하 |
 | [auction-sse.mjs](auction-sse.mjs) | AU-5 | SSE 연결 계단, 유지, 가격 변경 전달 지연 |
 | [auction-run.sh](auction-run.sh) | AU-1~5 | 서버 지표 수집과 시나리오 실행, 결과 파일 관리 |
@@ -54,13 +58,13 @@ macOS에서 실행하면 같은 폴더에 `mac-<UTC 날짜시간>.csv`도 자동
 | `fanmeeting-*` ([설명](fanmeeting.md)) | 팬미팅 S1, FM-EXP-05 | 오픈·마감 응모 몰림, 추첨, 결과 조회 폭주. `fanmeeting-s1.sh` 하나로 한 회 실행 |
 
 드롭 시나리오는 [lib/drop-reservation.js](lib/drop-reservation.js)의 호스트 안전장치, 요청, 결과 분류, 집계, 요약을 같이 쓴다. 대기열과 결제 요청은 [lib/drop-flow.js](lib/drop-flow.js)에 있다.
-H·B·Q 시나리오는 [드롭 성능 실험 계획](../../docs/testing/drop-performance-plan.md)의 실험이다. 아래 [드롭 성능 실험 시나리오](#드롭-성능-실험-시나리오)에 사용법이 있다.
+드롭 측정 시나리오는 [드롭 성능 개선 계획](../../docs/testing/drop-performance-plan.md)의 측정에 쓴다. 아래 [드롭 성능 측정 시나리오](#드롭-성능-측정-시나리오)에 사용법이 있다.
 
 ## drop-reservation-spike.js
 
 `POST /api/drops/{id}/reservations`만 친다. 대기열과 결제는 재지 않는다.
 
-- 대기열은 끈다. 입장 작업이 1초 간격으로 드롭마다 100명(`admit-per-run`)만 허가해서 대기열을 켜면 이 값이 처리량 상한이 된다. 그러면 재고 경합이 보이지 않는다. 대기열 효과는 EXP-02에서 잰다.
+- 대기열은 끈다. 입장 작업이 1초 간격으로 SKU마다 100명(`admit-per-run`)만 허가해서 대기열을 켜면 이 값이 처리량 상한이 된다. 그러면 재고 경합이 보이지 않는다. 대기열 효과는 EXP-02에서 잰다.
 - 부하 모델은 `ramping-arrival-rate`다. 도착률을 `RAMP` 동안 `PEAK_RATE`까지 올리고 `HOLD` 동안 유지한 뒤 5초에 걸쳐 내린다.
 - 반복마다 `users.csv`의 다른 행을 쓴다. 한 계정은 테스트에서 한 번만 요청한다. 경쟁률은 쓰는 행 수로 정한다. 참여자는 총재고 x `RATIO`다.
 - SKU는 계정 순서대로 돌아가며 고른다. 핫 드롭 SKU 3개의 재고가 거의 같아서 셋이 비슷한 시점에 품절된다.
@@ -150,7 +154,7 @@ small 시드는 재고 100개, 참여자 1,000명이다. 첫 실행은 시드 �
 ## drop-reservation-step.js
 
 스파이크와 같은 요청을 계단식 도착률로 보낸다. 계단마다 `STEP_RAMP` 동안 올리고 `STEP_HOLD` 동안 유지한다.
-p95가 꺾이거나 5xx, 타임아웃이 생기는 무릎 지점을 찾는다. 그 직전 계단이 최대 지속 처리량이다.
+p95가 꺾이거나 5xx, 타임아웃이 생기는 포화 시작점을 찾는다. 그 직전 계단이 최대 지속 처리량이다.
 
 ### 재고를 크게 두는 이유
 
@@ -187,12 +191,12 @@ k6 run perf/scenarios/drop-reservation-step.js
 - 요청은 `stage` 태그를 단다. 유지 구간은 도착률 값이고, 오르는 구간은 `ramp`다. 요약은 유지 구간만 계단별로 보여 준다.
 - 계단별 `achieved`는 유지 구간 요청 수를 유지 시간으로 나눈 값이다. 목표보다 낮으면 `dropped_iterations`와 노트북 CPU를 먼저 본다.
 - 결과 분류와 정합성 판정은 스파이크와 같다. 측정 뒤 `seed.sh --verify`를 실행한다.
-- 무릎 지점은 계단별 k6 지연과 오류율로 판단한다. k6 지연에는 집 네트워크 왕복이 섞이므로 테스트 전 왕복 지연을 같이 기록한다.
+- 포화 시작점은 계단별 k6 지연과 오류율로 판단한다. k6 지연에는 집 네트워크 왕복이 섞이므로 테스트 전 왕복 지연을 같이 기록한다.
 - 계단별 서버 지연이 필요하면 계단을 따로 실행하고 실행마다 `/actuator/prometheus` 전후 값을 저장한다.
 
-## 드롭 성능 실험 시나리오
+## 드롭 성능 측정 시나리오
 
-[목표](../../docs/testing/drop-performance-plan.md), [실행 절차](../../docs/testing/drop-performance-procedure.md), [측정 규약](../../docs/testing/drop-performance-measurement.md)의 실험 H·B·Q를 돌린다.
+[목표](../../docs/testing/drop-performance-plan.md), [실행 절차](../../docs/testing/drop-performance-procedure.md), [측정 규약](../../docs/testing/drop-performance-measurement.md)의 측정을 돌린다. 대표 판매 측정은 `drop-sale.js`, 용량 측정은 `drop-reservation-capacity.js`, 대기열 폴링 측정은 `drop-queue-poll.js`다.
 실행 명령은 위 스파이크와 같고 스크립트 이름과 환경 변수만 다르다. 원자료를 남기려면 `k6 run --out json=<결과 폴더>/<이름>.raw.json`을 붙인다.
 
 ### 공통 집계
@@ -210,10 +214,11 @@ k6 run perf/scenarios/drop-reservation-step.js
 - arrival-rate는 첫 작업을 1/도착률 초 뒤에 시작한다. 계획보다 한 건 적게 시작하는 것은 정상이다.
 - 창 기준 중단은 k6가 실행 중에 판정하지 못한다. 실행 중에는 사람이 보고, 판정은 끝난 뒤 요약과 원자료로 한다.
 
-### drop-sale.js (H)
+### drop-sale.js (대표 판매 측정)
 
 회원 한 명이 iteration 하나다. off는 도착 즉시 재고를 점유한다. on은 대기 진입 뒤 `POLL_SECONDS`마다 상태를 조회하고 입장하면 점유한다. 점유에 성공하면 결제 준비와 승인까지 보낸다.
 앱의 `RESTLESS_DROP_QUEUE_REQUIRED`가 `QUEUE`와 같아야 한다. 시드는 sale이다. base로도 돌지만 워밍업이 없다.
+on은 회원마다 SKU 하나를 계정 순서대로 돌아가며 정하고 진입, 조회, 점유에 같은 SKU를 쓴다. off의 점유와 같은 배정이다. 입장 허가는 진입한 SKU의 점유에만 통한다.
 시드에 워밍업 드롭이 있으면 판매 전에 그 드롭으로 같은 흐름을 먼저 보낸다. 워밍업은 핫 드롭 재고와 참여 계정을 쓰지 않고 요약의 판매 결과에서 빠진다.
 
 | 변수 | 기본값 | 뜻 |
@@ -230,12 +235,13 @@ k6 run perf/scenarios/drop-reservation-step.js
 | `WINDOW_SECONDS` | 10 | 창 길이 |
 | `MAX_VUS`, `PRE_VUS` | on은 참여자 수, off는 3000 | on은 대기 중인 회원마다 VU 하나를 쓴다 |
 
-- 축소 조건은 시드 스케일과 `PEAK_RATE`를 함께 바꾼다. H-small은 `--scale sale_small`에 `PEAK_RATE=500`, H-mini는 `--scale sale_mini`에 `PEAK_RATE=200`이다.
-- 요약의 `member results`가 회원별 최종 결과다. `paid`, `sold_out`, `unfinished`, `queue_closed`, `admission_expired`, `payment_pending`, `payment_failed`, `error`로 나뉜다.
+- 축소 조건은 시드 스케일과 `PEAK_RATE`를 함께 바꾼다. 500명 축소는 `--scale sale_small`에 `PEAK_RATE=500`, 200명 축소는 `--scale sale_mini`에 `PEAK_RATE=200`이다.
+- 요약의 `member results`가 회원별 최종 결과다. `paid`, `sold_out`, `unavailable`, `unfinished`, `queue_closed`, `admission_expired`, `payment_pending`, `payment_failed`, `error`로 나뉜다.
+- on의 `sold_out`에는 점유 품절과 진입 거절(그 SKU의 `available = 0`, 409 `DROP_SOLD_OUT`)이 함께 들어간다. `unavailable`은 대기 중 재고가 0이 되어 조회가 `UNAVAILABLE`을 받은 회원이다. 최종 매진은 아니다.
 - `first response`는 도착 뒤 첫 API의 평가 지연이다. `queue wait`는 진입 응답부터 입장을 확인한 시각까지다. `arrival to paid`는 도착부터 결제 승인까지다.
 - on에서 생성기가 참여자만큼 VU를 만들지 못하면 `dropped_iterations`가 생긴다. 그 실행은 원래 조건을 만들지 못한 것이다.
 
-### drop-reservation-capacity.js (B1, B2)
+### drop-reservation-capacity.js (용량 측정)
 
 대기열을 끄고 점유 TTL을 실행 시간보다 길게 둔다(`RESTLESS_DROP_RESERVATION_TTL=PT30M`). 시드는 capacity다. SKU 1개 대조는 capacity_single을 쓴다.
 워밍업과 측정은 별도 시나리오다. 워밍업은 `users.csv` 앞 `WARM_RATE` x `WARM` 행을 쓰고 측정은 그 뒤 행을 쓴다.
@@ -254,14 +260,15 @@ k6 run perf/scenarios/drop-reservation-step.js
 기본 ramp의 계획 도착 수는 106,200건이다. 요약의 창 표는 계획 수, 시작 수, 신규 점유 수, 평가 지연, 예상 밖 오류율을 보여 준다. 신규 성공률의 분모는 계획 수다.
 
 ```bash
--e MODE=ramp                    # B1 연속 증가 탐색
--e MODE=hold -e RATE=300        # B2 300건/초 3분 유지
+-e MODE=ramp                    # 연속 증가로 후보 찾기
+-e MODE=hold -e RATE=300        # 300건/초 3분 유지로 C 확인
 ```
 
-### drop-queue-poll.js (Q)
+### drop-queue-poll.js (대기열 폴링 측정)
 
 대기열을 켜고 입장 작업을 끈다(`RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED=false`). 시드는 대기열을 미리 채우지 않는다.
 회원은 `ENTER_RATE`로 진입하고 진입하자마자 조회를 시작해 측정이 끝날 때까지 이어 간다. 구간은 fill, settle, warmup, measure 순서다.
+대기자는 계정 순서대로 핫 SKU에 나뉘어 진입한다. 입장 순번은 SKU마다 따로 센다. `drop_queue_waiting`은 SKU를 합친 인원이다.
 
 | 변수 | 기본값 | 뜻 |
 |---|---|---|

@@ -25,6 +25,7 @@ perf/seed/seed.sh --scale base --profile perf
 | `--refresh` | 스냅샷 복원 뒤 실험 전에 실행. 핫 드롭·경매 기간과 Refresh Token 만료를 지금 기준으로 다시 맞추고 CSV를 다시 만든다 |
 | `--verify` | 점검만 |
 | `AUCTION_CLOSE_IN_MINUTES=2 ... --refresh` | AU-7·8의 종료 시각을 현재 + 2분으로 설정 |
+| `DROP_BUCKET_COUNT=1 ...` | 판매 중 SKU의 재고 버킷 수 K를 바꾼다. 기본은 `scale.yml`의 `drop_bucket_count`(4)다. 같은 날 K=1 기준 실행에 쓴다 (ADR-0005) |
 
 로컬에서는 `--scale small`을 쓰고, mysql 클라이언트가 없으면 `MYSQL="docker exec -i -e MYSQL_PWD <컨테이너> mysql"`로 컨테이너 안의 클라이언트를 쓴다.
 
@@ -96,6 +97,8 @@ ID를 명시적으로 넣어서 시나리오가 값을 예측할 수 있다. 앱
 | 회원 | `fanq{ID}@fanq.com` | `{ID}번 회원` |
 | 관리자 | `admin@fanq.com` | FANQ Administrator |
 | 주최자 n | `organizer{n}@fanq.com` | `organizer-{n}` |
+
+기본 배송지는 모든 계정에 채운다. 받는 분은 닉네임, 연락처는 계정 ID순으로 `010-0000-0001`부터 1씩 올린 값, 주소는 판교역 광장(경기도 성남시 분당구 판교역로 160)이다.
 
 공연장은 실제 공연장의 이름과 공개 주소다. KSPO DOME, 고척스카이돔, 잠실실내체육관, 인스파이어 아레나, 장충체육관, 블루스퀘어, 벡스코, 킨텍스를 쓴다.
 아티스트, 투어, 굿즈는 실제 상표와 겹치지 않게 지어낸 이름이다. 핫 드롭은 `NOVA:LINE <AFTERGLOW> 공식 응원봉 한정판`이고, 배경 드롭은 공연의 아티스트와 굿즈 10종을 조합한다.

@@ -17,11 +17,11 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** 경매 통합 테스트용 데이터와 불변식 확인 (SQL은 harness/auction-invariants.sql). 시각은 UTC 벽시계 값으로 넣는다 (엔티티가 TIMESTAMP_UTC). */
-class AuctionFixtures {
+public class AuctionFixtures {
     final JdbcTemplate jdbc;
     final TransactionTemplate tx;
 
-    AuctionFixtures(JdbcTemplate jdbc) {
+    public AuctionFixtures(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
         this.tx = new TransactionTemplate(new DataSourceTransactionManager(jdbc.getDataSource()));
     }
@@ -30,7 +30,8 @@ class AuctionFixtures {
         return LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
     }
 
-    void clean() {
+    public void clean() {
+        jdbc.update("DELETE FROM credit_charges");
         jdbc.update("DELETE FROM credit_transactions");
         jdbc.update("DELETE FROM credit_holds");
         jdbc.update("DELETE FROM credit_wallets");
@@ -39,7 +40,7 @@ class AuctionFixtures {
         jdbc.update("DELETE FROM auctions");
     }
 
-    Long user(String role) {
+    public Long user(String role) {
         String email = "bid-test-" + UUID.randomUUID() + "@example.com";
         LocalDateTime now = utc(Instant.now());
         jdbc.update("""
@@ -54,7 +55,7 @@ class AuctionFixtures {
     }
 
     /** 지갑과 GRANT 내역을 함께 넣어 장부가 맞게 한다. */
-    void credit(Long userId, long amount) {
+    public void credit(Long userId, long amount) {
         LocalDateTime now = utc(Instant.now());
         jdbc.update("""
             INSERT INTO credit_wallets (user_id, balance_amount, reserved_amount, created_at, updated_at)
@@ -81,11 +82,11 @@ class AuctionFixtures {
     }
 
     /** 1분 전에 시작해 1시간 뒤 끝나는 진행 중 경매. */
-    Long openAuction(Long sellerId) {
+    public Long openAuction(Long sellerId) {
         return auction(sellerId, Instant.now().minusSeconds(60), Instant.now().plusSeconds(3600));
     }
 
-    long available(Long userId) {
+    public long available(Long userId) {
         Long v = jdbc.queryForObject("""
             SELECT COALESCE(MAX(balance_amount - reserved_amount), 0) FROM credit_wallets WHERE user_id = ?
             """, Long.class, userId);
@@ -100,7 +101,7 @@ class AuctionFixtures {
      * 불변식 SQL 파일({@code harness/auction-invariants.sql})의 쿼리를 모두 실행해, 어긴 행이 없는지 확인한다.
      * 같은 파일을 부하 테스트 뒤 점검에도 쓴다.
      */
-    void assertInvariants() {
+    public void assertInvariants() {
         INVARIANTS.forEach((name, sql) -> assertThat(jdbc.queryForList(sql)).as(name).isEmpty());
     }
 
@@ -167,7 +168,7 @@ class AuctionFixtures {
         return jdbc.queryForObject("SELECT status FROM auctions WHERE auction_id = ?", String.class, auctionId);
     }
 
-    long balance(Long userId) {
+    public long balance(Long userId) {
         return jdbc.queryForObject("SELECT balance_amount FROM credit_wallets WHERE user_id = ?", Long.class, userId);
     }
 }

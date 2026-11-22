@@ -33,8 +33,8 @@ import org.springframework.test.web.servlet.MvcResult;
 /**
  * 관통 테스트 (C72): 행사 생성부터 모집 완료까지 한 번에 이어서 돌리고, 매 단계 뒤에 불변식을 SQL로 확인한다.
  *
- * <p>상태를 DB로 직접 고치지 않는다. API를 부르고, 시계를 옮기고, 워커와 대사를 직접 부른다(스케줄러는 꺼져 있다).
- * DB는 검증하려고 읽기만 한다. 대사는 결제 모듈의 {@link PaymentReconciler#runOnce()}다: 결제 결과를 모르는 시도를
+ * <p>상태를 DB로 직접 고치지 않는다. API를 부르고, 시계를 옮기고, 워커와 미완료 결제 재확인 작업을 직접 부른다(스케줄러는 꺼져 있다).
+ * DB는 검증하려고 읽기만 한다. 미완료 결제 재확인 작업은 결제 모듈의 {@link PaymentReconciler#runOnce()}다: 결제 결과를 모르는 시도를
  * PG에 다시 물어 확정하고, 그 결과를 팬미팅 Handler로 알려 준다.
  */
 @DisplayName("팬미팅 관통: 행사 생성부터 모집 완료까지")
@@ -53,7 +53,7 @@ class FanMeetingWalkthroughTest extends FanMeetingPromotionSupport {
     }
 
     @Test
-    @DisplayName("C72 정원 3·예비 4·응모 8: 결제, 포기, 보류의 두 결말(대사가 승인 확인 / 실패 확정), 만료, 승격 3번, 야간, 모집 완료")
+    @DisplayName("C72 정원 3, 예비 4, 응모 8: 결제, 포기, 보류의 두 결말(재확인 작업이 승인 확인 / 실패 확정), 만료, 승격 3번, 야간, 모집 완료")
     void 행사_생성부터_모집_완료까지(CapturedOutput output) throws Exception {
         // ── 첫날 09:30 행사 생성: 오픈 10:00, 마감 10:10, 승격 마감은 모레 18:00 ─────────────────────
         clock.fixed = at(0, 9, 30);
@@ -120,12 +120,12 @@ class FanMeetingWalkthroughTest extends FanMeetingPromotionSupport {
                 .andExpect(jsonPath("$.orderId").value(r1));
         check(events, "첫 승격 뒤");
 
-        // ── 10:21 대사: PG에 다시 물으니 당첨 3은 승인돼 있었다 → 참가 확정 ────────────────────────
+        // ── 10:21 재확인 작업: PG에 다시 물으니 당첨 3은 승인돼 있었다 → 참가 확정 ────────────────────────
         clock.fixed = at(0, 10, 21);
         reconciler.runOnce();
         assertThat(orderStatus(w3)).isEqualTo("PAID");
         assertThat(selectionStatus(w3)).isEqualTo("CONFIRMED");
-        check(events, "대사가 승인을 확인한 뒤");
+        check(events, "재확인 작업이 승인을 확인한 뒤");
 
         // ── 11:20 예비 1번이 결제하지 않고 기한(11:20)이 됐다 → 만료, 예비 2번 승격 ────────────────
         clock.fixed = at(0, 11, 20);
@@ -144,7 +144,7 @@ class FanMeetingWalkthroughTest extends FanMeetingPromotionSupport {
         confirm(bearerOfOrder(r2), p5);
         assertThat(orderStatus(r2)).isEqualTo("PAYMENT_REVIEW");
 
-        // 11:31 대사가 물어도 PG에 기록이 없다. 아직 15분이 안 지나 실패로 단정하지 않는다.
+        // 11:31 재확인 작업이 물어도 PG에 기록이 없다. 아직 15분이 안 지나 실패로 단정하지 않는다.
         clock.fixed = at(0, 11, 31);
         reconciler.runOnce();
         assertThat(orderStatus(r2)).isEqualTo("PAYMENT_REVIEW");
@@ -161,7 +161,7 @@ class FanMeetingWalkthroughTest extends FanMeetingPromotionSupport {
         assertThat(occurrences(output, "FANMEETING_PAYMENT_REVIEW_STALE orderId=" + r2 + " ")).isEqualTo(1);
         check(events, "보류가 기한을 넘긴 뒤");
 
-        // ── 23:30 대사가 실패로 확정한다(15분 넘게 PG에 기록 없음). 기한이 지났으므로 만료. 밤이라 승격은 안 한다 ──
+        // ── 23:30 재확인 작업이 실패로 확정한다(15분 넘게 PG에 기록 없음). 기한이 지났으므로 만료. 밤이라 승격은 안 한다 ──
         clock.fixed = at(0, 23, 30);
         reconciler.runOnce();
         assertThat(orderStatus(r2)).isEqualTo("EXPIRED");
@@ -211,7 +211,7 @@ class FanMeetingWalkthroughTest extends FanMeetingPromotionSupport {
                 .andExpect(jsonPath("$.maxPromotedReserveRank").value(3))
                 .andExpect(jsonPath("$.reviews").isEmpty());
 
-        // 끝난 행사는 워커와 대사를 더 돌려도 그대로다.
+        // 끝난 행사는 워커와 재확인 작업을 더 돌려도 그대로다.
         clock.fixed = at(2, 18, 0);
         reconciler.runOnce();
         expiryWorker.expireDue();
@@ -228,7 +228,7 @@ class FanMeetingWalkthroughTest extends FanMeetingPromotionSupport {
 
     @Test
     @DisplayName("C73 무작위 시나리오(시드 고정): 행사 10개에 포기·0원 확정·승인·거절·결과 모름·늦은 승인·예비 탈퇴를 섞고, "
-            + "회차마다 대사 → 만료 → 승격을 돌려 불변식을 확인한다. 승격 마감 뒤에는 모든 행사가 모집 완료")
+            + "회차마다 재확인 작업 → 만료 → 승격을 돌려 불변식을 확인한다. 승격 마감 뒤에는 모든 행사가 모집 완료")
     void 무작위_시나리오에서도_불변식을_지킨다() throws Exception {
         for (long seed : new long[] {20261115L, 1L, 2L, 3L}) {
             fakePg.reset();
@@ -290,7 +290,7 @@ class FanMeetingWalkthroughTest extends FanMeetingPromotionSupport {
 
             clock.fixed = SWEEP_TIMES.get(round);
             reconciler.runOnce();
-            check(events, when + " 대사 뒤");
+            check(events, when + " 재확인 작업 뒤");
             expiryWorker.expireDue();
             check(events, when + " 만료 뒤");
             promotionWorker.promoteDue();
@@ -302,7 +302,7 @@ class FanMeetingWalkthroughTest extends FanMeetingPromotionSupport {
                     Integer.class)).as("%s: 탈퇴한 예비가 승격됨", when).isZero();
         }
 
-        // 승격 마감이 지났고 대사가 보류를 모두 풀었으므로, 모든 행사가 끝나 있어야 한다.
+        // 승격 마감이 지났고 재확인 작업이 보류를 모두 풀었으므로, 모든 행사가 끝나 있어야 한다.
         for (Long eventId : events) {
             assertThat(eventStatus(eventId)).as("%s, 행사 %d (행동: %s)", label, eventId, actions)
                     .isEqualTo("RECRUITMENT_COMPLETED");

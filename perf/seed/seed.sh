@@ -8,6 +8,7 @@
 #
 # 필요한 환경변수: DB_HOST, DB_NAME, DB_USERNAME, DB_PASSWORD, JWT_SECRET, PERF_ALLOWED_DB_HOSTS
 # 선택: DB_PORT(3306), MYSQL(mysql 클라이언트 명령. 예: "docker exec -i -e MYSQL_PWD perf-mysql mysql")
+#       DROP_BUCKET_COUNT(scale.yml drop_bucket_count를 덮어쓴다. K=1 기준 실행용)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -94,6 +95,10 @@ per_drop=$(( (SCALE_drop_bg_reservations + SCALE_drop_bg_drops - 1) / SCALE_drop
 (( per_drop <= SCALE_users )) || die "reservations per background drop $per_drop exceed users"
 (( SCALE_drop_hot_queue_prefill <= SCALE_users )) || die "drop_hot_queue_prefill exceeds users"
 (( SCALE_drop_warm_stock >= 0 )) || die "drop_warm_stock must not be negative"
+drop_bucket_count="${DROP_BUCKET_COUNT:-$SCALE_drop_bucket_count}"
+[[ "$drop_bucket_count" =~ ^[0-9]{1,2}$ ]] && (( 10#$drop_bucket_count >= 1 && 10#$drop_bucket_count <= 16 )) \
+  || die "drop_bucket_count must be 1..16"
+drop_bucket_count=$(( 10#$drop_bucket_count ))
 # 워밍업 드롭 ID는 배경 드롭 뒤, SKU ID는 배경 SKU 뒤다 (sql/20_drop.sql의 ID 규칙).
 warm_drop_id=$(( SCALE_drop_bg_drops + 2 ))
 warm_variant_first=$(( SCALE_drop_hot_variants + SCALE_drop_bg_drops * SCALE_drop_bg_variants_per_drop + 1 ))
@@ -116,7 +121,7 @@ SET @token_ttl_hours = $SCALE_token_ttl_hours, @hot_window_hours = $SCALE_hot_wi
 SET @hot_variants = $SCALE_drop_hot_variants, @hot_price = $SCALE_drop_hot_price;
 SET @hot_stock = $SCALE_drop_hot_stock, @hot_queue_prefill = $SCALE_drop_hot_queue_prefill;
 SET @warm_stock = $SCALE_drop_warm_stock, @warm_drop_id = $warm_drop_id, @warm_variant_first = $warm_variant_first;
-SET @bg_drops = $SCALE_drop_bg_drops, @bg_vpd = $SCALE_drop_bg_variants_per_drop;
+SET @bg_drops = $SCALE_drop_bg_drops, @bg_vpd = $SCALE_drop_bg_variants_per_drop, @bucket_count = $drop_bucket_count;
 SET @bg_reservations = $SCALE_drop_bg_reservations;
 SET @pct_confirmed = $SCALE_drop_bg_pct_confirmed, @pct_restored = $SCALE_drop_bg_pct_restored;
 SET @pct_released = $SCALE_drop_bg_pct_released;
@@ -160,15 +165,18 @@ write_tokens() {
           'closes_at', (SELECT closes_at FROM drops WHERE id = 1),
           'total_stock', $SCALE_drop_hot_stock,
           'variants', (SELECT JSON_ARRAYAGG(JSON_OBJECT('variant_id', v.id, 'sku', v.sku_code,
-                                                        'price', v.price_amount, 'total_quantity', i.total_quantity))
+                                                        'price', v.price_amount, 'total_quantity', i.total_quantity,
+                                                        'bucket_count', i.bucket_count))
                        FROM drop_variants v JOIN drop_inventories i ON i.variant_id = v.id
                        WHERE v.drop_id = 1),
+          'bucket_count', $drop_bucket_count,
           'warmup', IF($SCALE_drop_warm_stock = 0, NULL, JSON_OBJECT(
               'drop_id', $warm_drop_id,
               'total_stock', $SCALE_drop_warm_stock,
               'first_user_row', $participants,
               'variants', (SELECT JSON_ARRAYAGG(JSON_OBJECT('variant_id', v.id, 'sku', v.sku_code,
-                                                            'price', v.price_amount, 'total_quantity', i.total_quantity))
+                                                            'price', v.price_amount, 'total_quantity', i.total_quantity,
+                                                            'bucket_count', i.bucket_count))
                            FROM drop_variants v JOIN drop_inventories i ON i.variant_id = v.id
                            WHERE v.drop_id = $warm_drop_id))))))" > "$OUT/manifest.json"
   echo "out: $OUT/users.csv, staff.csv, manifest.json"
@@ -215,7 +223,7 @@ case "$MODE" in
   seed)
     [[ -n "${JWT_SECRET:-}" ]] || die "JWT_SECRET is required (same value as the perf app)"
     salt="$(python3 -c 'import secrets; print(secrets.token_hex(8))')"
-    echo "seed: scale=$SCALE users=$SCALE_users hot_stock=$SCALE_drop_hot_stock participants=$participants"
+    echo "seed: scale=$SCALE users=$SCALE_users hot_stock=$SCALE_drop_hot_stock participants=$participants drop_bucket_count=$drop_bucket_count"
     run_files "$salt" "$ROOT"/sql/[0-9][0-9]_*.sql
     write_tokens "$salt"
     verify

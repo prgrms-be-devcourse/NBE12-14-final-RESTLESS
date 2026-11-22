@@ -8,7 +8,7 @@ Codex는 레포 루트에서 실행하면 이 파일을 자동으로 읽지 않�
 - 계약: `docs/contracts/api/drop.md`. 요청·응답·오류 코드의 기준이고, 수용 테스트가 이 계약으로 판정한다.
 - 정책·불변식: `docs/domains/drop/` 의 `policy.md`, `invariants.md`, `state-machines.md`, `transactions.md`, `data-model.md`
 - 결제 연결: `docs/decisions/0003-payment-module-boundary.md`
-- 성능 실험: `docs/testing/drop-performance-plan.md`(목표·가설), `docs/testing/drop-performance-procedure.md`(실행 절차), `docs/testing/drop-performance-measurement.md`(집계·판정). 도구는 `perf/`에 있다. 재고 점유 경로를 고치기 전에 읽는다.
+- 성능 개선: `docs/testing/drop-performance-plan.md`(목표, 진행 방식, 병목 기록), `docs/testing/drop-performance-procedure.md`(측정 실행 절차), `docs/testing/drop-performance-measurement.md`(집계와 판정). 도구는 `perf/`에 있다. 재고 점유 경로를 고치기 전에 읽는다.
 
 ## 용어
 

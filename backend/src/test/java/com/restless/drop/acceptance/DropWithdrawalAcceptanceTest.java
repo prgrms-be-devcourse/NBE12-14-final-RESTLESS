@@ -37,8 +37,7 @@ class DropWithdrawalAcceptanceTest extends DropAcceptanceSupport {
 
         // 기한이 지나 점유를 반환하고 주문을 취소한 상태 (재고 보존식 유지: reserved -> available).
         jdbc.update("UPDATE drop_reservations SET status = 'EXPIRED' WHERE id = ?", hold.reservationId());
-        jdbc.update("UPDATE drop_inventories SET reserved_quantity = reserved_quantity - 1, available_quantity = available_quantity + 1 WHERE variant_id = ?",
-                drop.variantIds().get(0));
+        DropStock.release(jdbc, hold.reservationId());
         jdbc.update("UPDATE orders SET status = 'CANCELLED' WHERE id = ?", hold.orderId());
         assertWithdraws(user);
     }
@@ -92,8 +91,7 @@ class DropWithdrawalAcceptanceTest extends DropAcceptanceSupport {
     /** 결제 승인으로 구매가 확정된 상태 (재고 보존식 유지: reserved -> sold). */
     private void confirmPurchase(Hold hold, DropFixture drop) {
         jdbc.update("UPDATE drop_reservations SET status = 'CONFIRMED' WHERE id = ?", hold.reservationId());
-        jdbc.update("UPDATE drop_inventories SET reserved_quantity = reserved_quantity - 1, sold_quantity = sold_quantity + 1 WHERE variant_id = ?",
-                drop.variantIds().get(0));
+        DropStock.confirm(jdbc, hold.reservationId());
         jdbc.update("UPDATE orders SET status = 'PAID' WHERE id = ?", hold.orderId());
     }
 

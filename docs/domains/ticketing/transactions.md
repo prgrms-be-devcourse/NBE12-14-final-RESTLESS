@@ -5,13 +5,13 @@
 
 - 상태: DECIDED (2026-11-12, 담당자 합의).
 - 구현 상태: checkout·승인 시작·성공 발급·실패/불명확·자동 만료·보상 취소와 TicketPaymentResultHandler 등록을 구현했다. 정상 환불·결제창 UI·운영 알림은 후속이다. 실행 범위는 아래 단계별 검증 기록을 따른다.
-- 공통 승인·대사·손님 환불 계약은 ADR-0003과 [장애 처리 문서](../../operations/failure-handling.md)를 따른다. OPEN: 티켓팅 Handler·시도 저장 연결, 결제 이후 만료, 운영 확인 등록·알림의 담당과 세부 규칙.
+- 공통 승인, 미완료 결제 재확인 작업, 손님 환불 계약은 ADR-0003과 [장애 처리 문서](../../operations/failure-handling.md)를 따른다. OPEN: 결제 이후 만료, 운영 확인 등록, 알림의 담당과 세부 규칙. 티켓팅 Handler와 시도 저장 연결은 위 구현 상태대로 끝났다.
 
 ## 1. 책임과 연결
 
 티켓팅은 예약·좌석 소유권·구매 카운터·티켓을 소유한다.
 공통 주문은 구매자·내역·최종 금액을, 공통 결제는 PG 요청과 결과를 소유한다.
-checkout 주문 준비는 티켓팅 TicketCheckoutService가 공통 주문 Application Service를 통해 조정한다. 실제 승인·대사는 공통 결제가 동기 Handler로 티켓팅을 호출하는 후속 연결 범위다.
+checkout 주문 준비는 티켓팅 TicketCheckoutService가 공통 주문 Application Service를 통해 조정한다. 실제 승인과 미완료 결제 재확인 작업은 공통 결제가 동기 Handler `TicketPaymentResultHandler`로 티켓팅을 호출해 처리한다.
 다른 도메인의 Repository를 직접 접근하지 않는다.
 예약은 ticket_reservations.order_id로 공통 주문과 연결한다. 결제 대상은 payable_type/payable_id로 식별하며 payments.order_id는 전제하지 않는다.
 checkout은 TicketCheckoutService가 OrderService.create(CreateOrderCommand)를 호출한다. OrderService의 MANDATORY 계약으로 주문·항목과 예약 변경이 호출자 트랜잭션에 참여한다.
@@ -71,7 +71,7 @@ PG 성공 후 DB 확정 실패는 PG 결제 실패가 아니다. DB 변경은 �
 
 준비 커밋 후 PG 호출 전 서버 종료, PG 요청 타임아웃, 승인 성공 후 응답 유실·서버 종료도 영속 승인 시도로 복구한다.
 준비 기록만으로 요청이 실제 전송됐다고 단정하지 않는다. 결과 조회의 미존재·처리 중 응답만으로 즉시 실패 처리하거나 새 승인 시도를 만들지 않는다.
-공통 대사의 후보·주기·PG 결과별 분기와 최종 실패 기준은 [공통 대사 운영 계약](../../operations/failure-handling.md#공통-결제-대사-46)에 구현돼 있다. 티켓팅 Handler는 공통 대사 callback에 연결돼 있다. checkout만 완료된 주문·예약에는 결제 시도 행이 없어 공통 대사가 예약 기한 만료를 대신 처리하지 않으며, 티켓팅의 결제 기한 자동 만료 작업이 정리한다.
+미완료 결제 재확인 작업의 후보, 주기, PG 결과별 분기와 최종 실패 기준은 [미완료 결제 재확인 작업 운영 계약](../../operations/failure-handling.md#미완료-결제-재확인-작업-46)에 구현돼 있다. 티켓팅 Handler는 미완료 결제 재확인 작업의 callback에 연결돼 있다. checkout만 완료된 주문, 예약에는 결제 시도 행이 없어 미완료 결제 재확인 작업이 예약 기한 만료를 대신 처리하지 않으며, 티켓팅의 결제 기한 자동 만료 작업이 정리한다.
 진행 중·불명확 결과를 실패로 추정하여 좌석을 반환하지 않는다.
 
 ## 6. 이벤트 경계
@@ -129,13 +129,13 @@ AFTER_COMMIT 리스너가 결제 성공을 받아 핵심 예매 상태를 확정
 - 운영 확인 중에도 최종 결과가 확인될 때까지 자동 PG 결과 조회를 계속한다. 조회 횟수나 경과 시간만으로 실패 처리하거나 좌석을 반환하지 않는다.
 - 자동 조회에서 성공이 확인되면 동일 결과 반영 트랜잭션으로 확정한다. 최종 실패가 확인되면 남은 결제 기한에 따라 재시도 또는 해제한다.
 - 운영 확인 등록·알림은 동일 승인 시도에 대해 중복 처리하지 않는다. 자동 복구와 운영 처리가 겹쳐도 같은 멱등 결과 반영 절차를 사용한다.
-- 공통 payments.unknown_since_at에 최초 UNKNOWN 진입 시각을 보존하고 UNKNOWN 수·최대 나이 메트릭을 제공한다. 운영 확인 등록 여부의 저장과 중복 없는 알림은 아직 후속 구현이며 상세는 [공통 대사 운영 계약](../../operations/failure-handling.md)을 따른다.
+- 공통 payments.unknown_since_at에 최초 UNKNOWN 진입 시각을 보존하고 UNKNOWN 수, 최대 나이 메트릭을 제공한다. 운영 확인 등록 여부의 저장과 중복 없는 알림은 아직 후속 구현이며 상세는 [미완료 결제 재확인 작업 운영 계약](../../operations/failure-handling.md)을 따른다.
 - 운영자는 PG 사실을 확인해 처리한다. 근거 없는 강제 해제를 허용하지 않는다.
 
 미확정 사항:
 
-- 공통 대사 조회 간격은 운영 계약의 설정을 따른다. 실제 운영 알림 채널·수신 담당자는 미확정이다.
-- 공통 대사는 오래된 PROCESSING도 조회하고 최초 UNKNOWN 시각을 기록한다. 이를 티켓팅의 운영 확인 등록·알림으로 연결하는 작업은 후속이다.
+- 미완료 결제 재확인 작업의 조회 간격은 운영 계약의 설정을 따른다. 실제 운영 알림 채널, 수신 담당자는 미확정이다.
+- 미완료 결제 재확인 작업은 오래된 PROCESSING도 조회하고 최초 UNKNOWN 시각을 기록한다. 이를 티켓팅의 운영 확인 등록, 알림으로 연결하는 작업은 후속이다.
 - 공통 최종 실패 분기는 운영 계약을 따른다. 동일 승인 재전송 허용 범위와 공연 시작까지 미해결된 경우의 고객·입장·보상 절차는 별도 확인이 필요하다.
 
 검증 계획 (미실행):
@@ -184,12 +184,12 @@ MySQL 8.4 Testcontainers와 실제 Spring 트랜잭션·Repository·OrderService
 
 ## origin/dev 병합 후 검증 (2026-11-13)
 
-`origin/dev`의 `ebc4edb`(공통 대사 #53·전액 환불 #54)를 병합했다. 멱등성 문서 충돌은 checkout 구현 완료 내용을 보존해 해결했다.
+`origin/dev`의 `ebc4edb`(미완료 결제 재확인 작업 #53, 전액 환불 #54)를 병합했다. 멱등성 문서 충돌은 checkout 구현 완료 내용을 보존해 해결했다.
 OrderService.create의 MANDATORY와 주문 DTO 계약은 유지됐으며, checkout 서비스·잠금 순서·주문/기한 보존·PG 호출 경계의 코드 수정은 필요하지 않았다.
-티켓팅 문서에는 새 환불 요청·최종 거절 콜백, 공통 UNKNOWN 시각·대사 구현 현황 및 티켓팅 후속 범위를 반영했다.
+티켓팅 문서에는 새 환불 요청, 최종 거절 콜백, 공통 UNKNOWN 시각, 미완료 결제 재확인 작업 구현 현황 및 티켓팅 후속 범위를 반영했다.
 
 - `./gradlew test --tests 'com.restless.ticketing.application.TicketCheckoutServiceTest'`: checkout 13개 통과.
-- `./gradlew build`: 전체 424개 통과, 실패 0·오류 0·건너뜀 0개. 병합된 Flyway 마이그레이션 적용과 공통 결제 대사·환불 회귀 테스트를 포함한다.
+- `./gradlew build`: 전체 424개 통과, 실패 0, 오류 0, 건너뜀 0개. 병합된 Flyway 마이그레이션 적용과 공통 결제의 미완료 결제 재확인 작업과 환불 회귀 테스트를 포함한다.
 - 프론트엔드 변경은 없으며 별도 빌드는 실행하지 않았다. 티켓팅 Handler·결제 시도 연결·결제 이후 만료·운영 확인 등록/알림은 후속이다.
 
 ## 단계별 구현: 승인 시도 저장 기반 (2026-11-13)
@@ -243,4 +243,4 @@ TicketPaymentService.expirePayment는 Worker용 REQUIRES_NEW/READ_COMMITTED다. 
 
 TicketPaymentResultHandler는 TICKET/예약 ID로 등록됐다. load 및 상태 변경 callback은 기존 내부 서비스의 MANDATORY 트랜잭션에 참여한다. 새 트랜잭션을 여는 것은 Worker용 expirePayment뿐이며 공통 결제 callback에서 호출하지 않는다.
 
-업무상 승인 거절 후 공통 결제가 보상 취소를 수행하는 동안 티켓팅의 미확정 시도 보호를 유지한다. onRefunded(COMPENSATION)에서 현재 시도·예약 상태·전체 소유권·수량·주문을 확인하고 예약/선점/좌석/reserved/주문을 한 번에 반환한다. confirmed와 티켓은 변경하지 않는다. 과거 시도·확정 예약·종류/자원 불일치는 변경 없이 운영 확인으로 남기며, 실제 DB 오류는 전체 롤백하고 공통 대사로 재처리한다. 상세는 [Handler 문서](payment-handler.md#보상-취소공통-handler-등록-2026-11-16)를 따른다. 이전 단계의 Handler·보상 후속 표기는 당시 범위다.
+업무상 승인 거절 후 공통 결제가 보상 취소를 수행하는 동안 티켓팅의 미확정 시도 보호를 유지한다. onRefunded(COMPENSATION)에서 현재 시도, 예약 상태, 전체 소유권, 수량, 주문을 확인하고 예약/선점/좌석/reserved/주문을 한 번에 반환한다. confirmed와 티켓은 변경하지 않는다. 과거 시도, 확정 예약, 종류/자원 불일치는 변경 없이 운영 확인으로 남기며, 실제 DB 오류는 전체 롤백하고 미완료 결제 재확인 작업으로 재처리한다. 상세는 [Handler 문서](payment-handler.md#보상-취소공통-handler-등록-2026-11-16)를 따른다. 이전 단계의 Handler, 보상 후속 표기는 당시 범위다.

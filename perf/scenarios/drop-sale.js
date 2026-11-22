@@ -1,5 +1,5 @@
-// 대표 판매 시나리오 H: 한정 재고에 참여자가 한꺼번에 몰린다. 대기열 off/on을 같은 도착 시간표로 비교한다.
-// 계획은 docs/testing/drop-performance-plan.md, 절차는 drop-performance-procedure.md 3절. 사용법은 perf/scenarios/README.md.
+// 대표 판매 측정: 한정 재고에 참여자가 한꺼번에 몰린다. 대기열 off/on을 같은 도착 시간표로 비교한다.
+// 계획은 docs/testing/drop-performance-plan.md, 절차는 drop-performance-procedure.md 4절. 사용법은 perf/scenarios/README.md.
 //
 // off: 도착 즉시 재고 점유. on: 대기 진입 → POLL 간격으로 상태 조회 → 입장 후 재고 점유.
 // 점유에 성공하면 가짜 PG 결제까지 잇는다 (PAY=0이면 점유까지만).
@@ -11,7 +11,7 @@ import { sleep } from 'k6';
 import exec from 'k6/execution';
 import {
   DROP_ID, VARIANT_IDS, TOTAL_STOCK, manifest, loadUsers, baseThresholds, summaryTrendStats, checkTarget,
-  reserve, skipped, summarize, tracked, windowTag, durationMs, emptyThresholds, latencyLine, pct, ROW_OFFSET, HOT,
+  reserve, variantFor, skipped, summarize, tracked, windowTag, durationMs, emptyThresholds, latencyLine, pct, ROW_OFFSET, HOT,
 } from './lib/drop-reservation.js';
 import {
   enterQueue, pollQueue, pay, recordFirstResponse, recordQueueWait, recordMember, PAY_TIMEOUT,
@@ -21,7 +21,7 @@ const QUEUE = __ENV.QUEUE || 'off';
 if (!['off', 'on'].includes(QUEUE)) throw new Error(`QUEUE must be off or on: ${QUEUE}`);
 const PAY = __ENV.PAY !== '0';
 
-// 참여자 = 총재고 x 경쟁률. H는 1,000 x 10, H-small은 500 x 10(PEAK_RATE=500), H-mini는 200 x 10(PEAK_RATE=200).
+// 참여자 = 총재고 x 경쟁률. 대표 판매는 1,000 x 10, 축소는 500 x 10(PEAK_RATE=500), 200 x 10(PEAK_RATE=200).
 const RATIO = Number(__ENV.RATIO || manifest.contention_ratio);
 const PARTICIPANTS = Number(__ENV.PARTICIPANTS || TOTAL_STOCK * RATIO);
 const PEAK_RATE = Number(__ENV.PEAK_RATE || 1000);
@@ -59,7 +59,7 @@ if (WARMUP && warmSeed.first_user_row !== PARTICIPANTS) {
 }
 const users = loadUsers(PARTICIPANTS + WARM_COUNT);
 const WINDOWS = Math.ceil((INFLOW_MS + OBSERVE_MS) / 1000 / WINDOW_S);
-const RESULTS = ['paid', 'reserved', 'payment_pending', 'payment_failed', 'sold_out', 'queue_closed', 'admission_expired', 'unfinished', 'error'];
+const RESULTS = ['paid', 'reserved', 'payment_pending', 'payment_failed', 'sold_out', 'unavailable', 'queue_closed', 'admission_expired', 'unfinished', 'error'];
 const APIS = QUEUE === 'on' ? ['enter', 'poll', 'reserve'] : ['reserve'];
 if (PAY) APIS.push('prepare', 'confirm');
 
@@ -68,7 +68,8 @@ const SALE = 'scenario:sale';
 const subMetrics = [
   ...APIS.flatMap((api) => [`drop_eval_latency{api:${api},${SALE}}`, `drop_unexpected_error{api:${api},${SALE}}`]),
   ...RESULTS.flatMap((r) => [`drop_member_result{result:${r},${SALE}}`, `drop_member_total{result:${r},${SALE}}`]),
-  `drop_queue_poll{result:waiting,${SALE}}`, `drop_queue_poll{result:closed,${SALE}}`,
+  `drop_queue_poll{result:waiting,${SALE}}`, `drop_queue_poll{result:closed,${SALE}}`, `drop_queue_poll{result:unavailable,${SALE}}`,
+  `drop_queue_enter{result:sold_out,${SALE}}`,
   `drop_first_response{${SALE}}`, `drop_queue_wait{${SALE}}`, `iteration_started{${SALE}}`, `iteration_finished{${SALE}}`,
   `drop_sold_out{${SALE}}`, 'drop_member_result{scenario:warmup}', 'drop_member_result{result:paid,scenario:warmup}',
 ];
@@ -155,8 +156,12 @@ export function warmup() {
 function member(user, n, deadline, tag, target) {
   const startedMs = Date.now();
   if (QUEUE === 'on') {
-    const entered = enterQueue(user, tag(), target.dropId);
+    // 진입, 조회, 점유가 같은 SKU를 쓴다. 입장 허가는 진입한 SKU에만 통한다.
+    const variantId = variantFor(n, target);
+    const entered = enterQueue(user, variantId, tag(), target.dropId);
     recordFirstResponse(entered.res);
+    // 그 SKU가 이미 현재 구매 불가면 진입부터 거절된다. 점유의 품절과 같은 결과로 센다.
+    if (entered.status === 'SOLD_OUT') return recordMember('sold_out', startedMs);
     if (entered.status === 'ERROR' || entered.status === 'NOT_ON_SALE') return recordMember('error', startedMs);
     let status = entered.status;
     const enteredMs = Date.now();
@@ -164,9 +169,11 @@ function member(user, n, deadline, tag, target) {
     while (status === 'WAITING' || status === 'ERROR') {
       if (Date.now() + POLL_S * 1000 > deadline) return recordMember('unfinished', startedMs);
       sleep(POLL_S);
-      status = pollQueue(user, tag(), target.dropId);
+      status = pollQueue(user, variantId, tag(), target.dropId);
     }
     if (status === 'CLOSED') return recordMember('queue_closed', startedMs);
+    // 재고가 0이 되어 입장 허가 작업이 대기를 끝냈다. 최종 매진은 아니라서 품절과 나눠 센다.
+    if (status === 'UNAVAILABLE') return recordMember('unavailable', startedMs);
     if (status !== 'ADMITTED') return recordMember('admission_expired', startedMs);
     recordQueueWait(Date.now() - enteredMs);
   }
@@ -193,7 +200,8 @@ export function handleSummary(data) {
     ...APIS.map((api) => `${latencyLine(`eval ${api}`, m(`drop_eval_latency{api:${api},${SALE}}`))}  unexpected ${pct(m(`drop_unexpected_error{api:${api},${SALE}}`).rate)}`),
     ...(QUEUE === 'on' ? [
       latencyLine('queue wait', m(`drop_queue_wait{${SALE}}`)),
-      `  polls waiting ${m(`drop_queue_poll{result:waiting,${SALE}}`).count || 0}, closed ${m(`drop_queue_poll{result:closed,${SALE}}`).count || 0}`,
+      `  polls waiting ${m(`drop_queue_poll{result:waiting,${SALE}}`).count || 0}, closed ${m(`drop_queue_poll{result:closed,${SALE}}`).count || 0}, `
+        + `unavailable ${m(`drop_queue_poll{result:unavailable,${SALE}}`).count || 0}; enter rejected sold out ${m(`drop_queue_enter{result:sold_out,${SALE}}`).count || 0}`,
     ] : []),
     latencyLine('arrival to paid', m(`drop_member_total{result:paid,${SALE}}`)),
     latencyLine('arrival to sold out', m(`drop_member_total{result:sold_out,${SALE}}`)),

@@ -11,7 +11,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Shared atomic stock/order/slot settlement for payment callbacks, cancellation and expiry. */
+/**
+ * Shared atomic stock/order/slot settlement for payment callbacks, cancellation and expiry.
+ * Stock changes only the bucket the hold recorded (INV-03); anything but exactly one row rolls everything back.
+ */
 @Service
 @RequiredArgsConstructor
 @Transactional(propagation = Propagation.MANDATORY)
@@ -22,19 +25,19 @@ public class DropReservationSettlement {
     private final Clock clock;
 
     public void confirm(DropReservation reservation) {
-        requireOne(inventories.confirm(reservation.getVariantId()));
+        requireOne(inventories.confirm(reservation.getVariantId(), reservation.getBucketNo()));
         orders.changeStatus(reservation.getOrderId(), OrderStatus.PAID);
         clearSlot(reservation);
     }
 
     public void release(DropReservation reservation) {
-        requireOne(inventories.release(reservation.getVariantId()));
+        requireOne(inventories.release(reservation.getVariantId(), reservation.getBucketNo()));
         orders.changeStatus(reservation.getOrderId(), OrderStatus.CANCELLED);
         clearSlot(reservation);
     }
 
     public void restore(DropReservation reservation) {
-        requireOne(inventories.restore(reservation.getVariantId()));
+        requireOne(inventories.restore(reservation.getVariantId(), reservation.getBucketNo()));
         orders.changeStatus(reservation.getOrderId(), OrderStatus.REFUNDED);
         // A confirmed purchase already released its slot; a newer purchase may own it now.
     }

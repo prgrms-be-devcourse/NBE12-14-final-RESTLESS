@@ -130,15 +130,15 @@ SELECT 'check', 'seed baseline: one refresh token per account',
        ABS((SELECT COUNT(*) FROM refresh_tokens) - (@meta_users + @meta_staff));
 
 INSERT INTO _perf_checks
-SELECT 'check', 'seed baseline: hot drop total stock', ABS(COALESCE(SUM(i.total_quantity), 0) - @meta_hot_stock)
-FROM drop_inventories i
-JOIN drop_variants v ON v.id = i.variant_id
+SELECT 'check', 'seed baseline: hot drop total stock', ABS(COALESCE(SUM(b.total_quantity), 0) - @meta_hot_stock)
+FROM drop_inventory_buckets b
+JOIN drop_variants v ON v.id = b.variant_id
 WHERE v.drop_id = @meta_hot_drop;
 
 INSERT INTO _perf_checks
 SELECT 'check', 'seed baseline: hot drop untouched (all stock available, no holds)',
-       (SELECT COUNT(*) FROM drop_inventories i JOIN drop_variants v ON v.id = i.variant_id
-        WHERE v.drop_id = @meta_hot_drop AND i.available_quantity <> i.total_quantity)
+       (SELECT COUNT(*) FROM drop_inventory_buckets b JOIN drop_variants v ON v.id = b.variant_id
+        WHERE v.drop_id = @meta_hot_drop AND b.available_quantity <> b.total_quantity)
            + (SELECT COUNT(*) FROM drop_reservations WHERE drop_id = @meta_hot_drop)
            + (SELECT COUNT(*) FROM drop_purchase_slots WHERE drop_id = @meta_hot_drop);
 
@@ -149,29 +149,38 @@ FROM drop_reservations
 WHERE drop_id NOT IN (@meta_hot_drop, @meta_warm_drop);
 
 INSERT INTO _perf_checks
-SELECT 'check', 'seed baseline: warmup drop total stock', ABS(COALESCE(SUM(i.total_quantity), 0) - @meta_warm_stock)
-FROM drop_inventories i
-JOIN drop_variants v ON v.id = i.variant_id
+SELECT 'check', 'seed baseline: warmup drop total stock', ABS(COALESCE(SUM(b.total_quantity), 0) - @meta_warm_stock)
+FROM drop_inventory_buckets b
+JOIN drop_variants v ON v.id = b.variant_id
 WHERE v.drop_id = @meta_warm_drop;
 
+-- 판매 중 SKU의 버킷 수는 min(K, 재고)다 (ADR-0005). K는 시드 때 정한 값이다.
+SET @meta_bucket_count = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'drop_bucket_count');
+INSERT INTO _perf_checks
+SELECT 'check', 'seed baseline: on-sale SKU bucket count is min(K, stock)', COUNT(*)
+FROM drop_inventories i
+JOIN drop_variants v ON v.id = i.variant_id
+WHERE v.drop_id IN (@meta_hot_drop, @meta_warm_drop)
+  AND i.bucket_count <> GREATEST(LEAST(@meta_bucket_count, i.total_quantity), 1);
+
 -- Auction seed baseline. Metadata is written by 30_auction.sql.
-SET @auction_spread = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_spread');
-SET @auction_bg = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_bg');
-SET @auction_unsold_pct = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_bg_pct_unsold');
+SET @auction_spread = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'auction_spread');
+SET @auction_bg = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'auction_bg');
+SET @auction_unsold_pct = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'auction_bg_pct_unsold');
 INSERT INTO _perf_checks SELECT 'check', 'seed baseline: hot and spread auction count', ABS(COUNT(*) - (1 + @auction_spread)) FROM auctions WHERE auction_id BETWEEN 1 AND 1 + @auction_spread AND status = 'OPEN';
 INSERT INTO _perf_checks SELECT 'check', 'seed baseline: hot and spread no bids', COUNT(*) FROM auction_bids WHERE auction_id BETWEEN 1 AND 1 + @auction_spread;
 INSERT INTO _perf_checks SELECT 'check', 'seed baseline: background closed count', ABS(COUNT(*) - @auction_bg) FROM auctions WHERE auction_id BETWEEN 2 + @auction_spread AND 1 + @auction_spread + @auction_bg AND status = 'CLOSED';
 INSERT INTO _perf_checks SELECT 'check', 'seed baseline: background unsold count', ABS(COUNT(*) - FLOOR(@auction_bg * @auction_unsold_pct / 100)) FROM auction_results WHERE auction_id BETWEEN 2 + @auction_spread AND 1 + @auction_spread + @auction_bg AND result_type = 'UNSOLD';
 INSERT INTO _perf_checks SELECT 'check', 'seed baseline: wallet count', ABS((SELECT COUNT(*) FROM credit_wallets) - (SELECT COUNT(*) FROM users WHERE role = 'USER'));
 
-SET @extra_first = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_extra_first');
-SET @ending_first = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_ending_first');
-SET @ending_count = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_ending_count');
-SET @mass_first = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_mass_first');
-SET @mass_count = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_mass_count');
-SET @mass_bids = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_mass_bids');
-SET @heavy_users = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_heavy_users');
-SET @heavy_per = (SELECT CAST(v AS UNSIGNED) FROM perf_seed_meta WHERE k = 'auction_heavy_per_user');
+SET @extra_first = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'auction_extra_first');
+SET @ending_first = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'auction_ending_first');
+SET @ending_count = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'auction_ending_count');
+SET @mass_first = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'auction_mass_first');
+SET @mass_count = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'auction_mass_count');
+SET @mass_bids = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'auction_mass_bids');
+SET @heavy_users = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'auction_heavy_users');
+SET @heavy_per = (SELECT CAST(v AS SIGNED) FROM perf_seed_meta WHERE k = 'auction_heavy_per_user');
 INSERT INTO _perf_checks SELECT 'check', 'seed baseline: heavy users history', COUNT(*) FROM users u WHERE u.id BETWEEN @meta_users - @heavy_users + 1 AND @meta_users AND (SELECT COUNT(DISTINCT b.auction_id) FROM auction_bids b WHERE b.bidder_user_id = u.id AND b.auction_id BETWEEN @extra_first AND @ending_first - 1) < @heavy_per;
 INSERT INTO _perf_checks SELECT 'check', 'seed baseline: ending auction count and state', ABS(CAST(COUNT(*) AS SIGNED) - CAST(@ending_count AS SIGNED)) FROM auctions a WHERE a.auction_id BETWEEN @ending_first AND @ending_first + @ending_count - 1 AND a.status = 'OPEN' AND NOT EXISTS (SELECT 1 FROM auction_bids b WHERE b.auction_id = a.auction_id);
 INSERT INTO _perf_checks SELECT 'check', 'seed baseline: mass close auctions and time', ABS(CAST(COUNT(*) AS SIGNED) - CAST(@mass_count AS SIGNED)) + IF(COUNT(DISTINCT ends_at) = 1, 0, 1) FROM auctions WHERE auction_id BETWEEN @mass_first AND @mass_first + @mass_count - 1 AND status = 'OPEN';
@@ -192,6 +201,8 @@ FROM (SELECT 'rows users' AS name, (SELECT COUNT(*) FROM users) AS value
       UNION ALL SELECT 'rows payments', (SELECT COUNT(*) FROM payments)
       UNION ALL SELECT 'rows payment_refunds', (SELECT COUNT(*) FROM payment_refunds)
       UNION ALL SELECT 'hot drop total stock', @meta_hot_stock
+      UNION ALL SELECT 'drop bucket count K', @meta_bucket_count
+      UNION ALL SELECT 'rows drop_inventory_buckets', (SELECT COUNT(*) FROM drop_inventory_buckets)
       UNION ALL SELECT 'completed refunds per mille of payments',
                        (SELECT ROUND(1000 * COUNT(*) / NULLIF((SELECT COUNT(*) FROM payments), 0))
                         FROM payment_refunds WHERE status = 'COMPLETED')) t;

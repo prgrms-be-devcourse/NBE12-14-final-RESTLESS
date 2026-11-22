@@ -12,9 +12,9 @@
 | 프론트엔드 빌드 (CI와 동일) | `npm run build` |
 | 아키텍처 검사 (모듈 경계) | `./gradlew test --tests 'com.restless.architecture.*'` |
 | 드롭 수용 테스트 (블랙박스) | `./gradlew test --tests 'com.restless.drop.acceptance.*'` |
-| 동시성 테스트 (드롭·결제) | `./gradlew test --tests 'com.restless.drop.*' --tests 'com.restless.payment.*'` (재고 1개에 100명, 같은 키 동시 요청, 입장 작업 동시 실행, 승인 동시 요청 등) |
+| 동시성 테스트 (드롭·결제) | `./gradlew test --tests 'com.restless.drop.*' --tests 'com.restless.payment.*'` (재고 1개에 100명, 같은 키 동시 요청, 입장 허가 작업 동시 실행, 승인 동시 요청 등) |
 | 부하 테스트 시드 (perf DB) | 레포 루트에서 `perf/seed/seed.sh --scale base --profile perf` ([perf/seed](../../perf/seed/README.md)) |
-| 부하 테스트 | TBD |
+| 부하 테스트 | [perf/README](../../perf/README.md)의 k6 시나리오. 드롭은 [성능 개선 계획](drop-performance-plan.md)의 반복을 따르고, 측정은 [실행 절차](drop-performance-procedure.md)대로 한다 |
 
 ## 2. 기술
 
@@ -60,12 +60,13 @@ JUnit 5, Spring Boot Test, MySQL Testcontainers, Mockito, k6. 필요하면 Redis
 | 설정 | 값 | 이유 |
 |---|---|---|
 | `restless.auction.scheduler.enabled`, `restless.payment.reconcile.enabled`, `restless.drop.expiry.enabled`, `restless.drop.queue.scheduler.enabled`, `restless.fanmeeting.worker.enabled` | `false` | 주기 작업이 다른 테스트의 데이터 준비와 겹치지 않게 한다. 작업 빈은 남아 있으므로 해당 테스트가 직접 호출하거나 `@SpringBootTest(properties)`로 다시 켠다 |
+| `restless.ratelimit.enabled` | `false` | 같은 IP로 반복하는 기존 API 테스트가 요청 제한에 걸리지 않게 한다. 제한 검증 테스트는 `true`를 명시한다 |
 | `user.timezone` | `UTC` | JDBC `Timestamp`로 넣은 테스트 데이터와 JPA `TIMESTAMP_UTC` 컬럼이 호스트 시간대와 상관없이 같은 시각을 가리키게 한다 |
 | `spring.test.context.cache.maxSize` | `4` | 캐시된 Spring 컨텍스트마다 DB 연결이 남는다. 전체 실행 중 MySQL 컨테이너가 메모리 부족(OOMKilled, exit 137)으로 죽은 적이 있어 개수를 제한한다 |
 
 테스트 작성 시 주의:
 
-- 드롭 대기열은 기본으로 켜져 있다(`restless.drop.queue.required=true`). 대기열을 검증하지 않는 드롭 테스트는 `restless.drop.queue.required=false`를 명시한다.
+- 드롭 입장 제어는 기본으로 켜져 있다(`restless.drop.queue.required=true`). 입장 제어를 검증하지 않는 드롭 테스트는 `restless.drop.queue.required=false`를 명시한다.
 - 결제 흐름 테스트가 가짜 결제 결과 Handler를 쓸 때는 실제 Handler와 같은 빈 이름(예: `dropPaymentResultHandler`)으로 등록하고 그 테스트 클래스에만 `spring.main.allow-bean-definition-overriding=true`를 준다. 같은 결제 대상에 Handler가 둘이면 운영 코드의 중복 검사가 컨텍스트를 실패시킨다.
 
 ## 7. PR 전 확인

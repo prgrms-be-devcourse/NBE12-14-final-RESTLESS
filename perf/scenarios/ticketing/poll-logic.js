@@ -3,8 +3,13 @@ import exec from 'k6/execution';
 import { sleep } from 'k6';
 
 export function runPoll(data, context) {
-  const { base, performanceId, users, entry, vus, participants, mode, headers, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency } = context;
+  const { base, performanceId, users, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, burstStartDelay } = context;
   const user = users[exec.vu.idInTest - 1];
+  if (mode === 'burst') {
+    const wait = data.burstAt - Date.now();
+    if (wait > 0) sleep(wait / 1000);
+    burstStartDelay.add(Date.now() - data.burstAt);
+  }
   // VU 시작 시점을 3초 구간에 분산한다. 이후 요청 시작 간격은 최소 3초다.
   if (entry === 'spread' && exec.vu.iterationInScenario === 0) sleep(3 * (exec.vu.idInTest - 1) / (mode === 'mixed' ? participants : vus));
   const start = Date.now();
@@ -12,7 +17,7 @@ export function runPoll(data, context) {
   let res;
   if (mode === 'page' && phase === 'entry') {
     const responses = http.batch([
-      ['GET', `${base}/api/performances/${performanceId}/seats`, null, { headers: headers(user), tags: { name: 'GET seats', phase } }],
+      ['GET', `${base}/api/performances/${performanceId}/seats`, null, { headers: seatHeaders(user), tags: { name: 'GET seats', phase } }],
       ['GET', `${base}/api/performances/${performanceId}/booking-availability`, null, { headers: headers(user), tags: { name: 'GET booking availability', phase } }],
     ]);
     res = responses[0];
@@ -21,9 +26,11 @@ export function runPoll(data, context) {
     try { const body = availability.json(); valid = availability.status === 200 && ['maximum', 'confirmed', 'reserved', 'remaining'].every(key => Number.isInteger(body[key])) && Object.prototype.hasOwnProperty.call(body, 'activeReservation'); } catch (_) { /* malformed */ }
     availabilityRequests.add(1); availabilityErrors.add(!valid); count(valid ? 'availability_ok' : 'availability_error', !valid); availabilityLatency.add(availability.timings.duration);
   } else {
-    res = http.get(`${base}/api/performances/${performanceId}/seats`, { headers: headers(user), tags: { name: 'GET seats', phase } });
+    res = http.get(`${base}/api/performances/${performanceId}/seats`, { headers: seatHeaders(user), tags: { name: 'GET seats', phase } });
   }
+  if ((res.headers['Content-Encoding'] || '').toLowerCase() === 'gzip') seatGzipResponses.add(1);
+  seatEncodingErrors.add(!encodingMatches(res));
   let ok = false; try { ok = res.status === 200 && Array.isArray(res.json()) && res.json().length === data.seatCount; } catch (_) { /* malformed */ }
   pollRequests.add(1); pollErrors.add(!ok); count(ok ? 'poll_ok' : 'poll_error', !ok); pollLatency.add(res.timings.duration, { outcome: ok ? 'ok' : 'error', phase });
-  sleep(Math.max(0, (3000 - (Date.now() - start)) / 1000));
+  if (mode !== 'burst') sleep(Math.max(0, (3000 - (Date.now() - start)) / 1000));
 }

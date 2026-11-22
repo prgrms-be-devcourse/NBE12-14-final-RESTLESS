@@ -276,7 +276,7 @@ public class TicketPaymentService {
         releasePendingResources(locked, lockedSeats, databaseNow());
         reservation.completeCompensation(refund.paymentId());
         orders.changeStatus(order.orderId(), OrderStatus.CANCELLED);
-        // DB 예외는 전파한다. 결제·환불·티켓팅 변경 전체가 롤백되고 공통 대사가 재처리한다.
+        // DB 예외는 전파한다. 결제, 환불, 티켓팅 변경 전체가 롤백되고 미완료 결제 재확인 작업이 재처리한다.
     }
 
     private void compensationAnomaly(Long reservationId, Long paymentId, String reason) {

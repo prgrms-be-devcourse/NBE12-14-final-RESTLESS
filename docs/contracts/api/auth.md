@@ -6,7 +6,7 @@
 >
 > 관련 코드: `backend/src/main/java/com/restless/auth/`, `backend/src/main/java/com/restless/member/`
 >
-> 마지막 확인: 2026-11-16 (엔드포인트, 공개 경로를 `SecurityConfig`와 대조. `common.md`에서 분리)
+> 마지막 확인: 2026-11-20 (#290 요청 횟수 제한 한 줄을 `application.yml`과 대조해 추가. 2026-11-16 엔드포인트, 공개 경로를 `SecurityConfig`와 대조. `common.md`에서 분리)
 
 오류 응답 형식은 [README 공통 규칙 3](README.md#공통-규칙)을 따른다.
 
@@ -21,6 +21,8 @@
 | GET | `/api/me/profile` | 내 프로필, 기본 배송지 → 200 프로필 | 구현 |
 | PATCH | `/api/me/profile` | 닉네임, 기본 배송지 수정 → 200 바뀐 프로필 | 구현 |
 | POST | `/api/me/withdraw` | 탈퇴 `{password, paidOrderNoticeAgreed}` → 204 | 구현 |
+
+로그인, 가입, 갱신은 요청 횟수를 제한한다. 한도를 넘으면 429 `TOO_MANY_REQUESTS`와 `Retry-After`를 준다 ([한도](README.md#요청-횟수-제한)).
 
 ### 프로필
 

@@ -28,6 +28,9 @@ common:
   organizers: 10
   drop_hot_variants: 3
   drop_hot_price: 59000
+  # 판매 중 SKU(핫, 워밍업)의 재고 버킷 수 K (ADR-0005). SKU마다 min(K, 재고). 1~16.
+  # 같은 날 K=1 기준 실행은 scale.yml을 고치지 않고 DROP_BUCKET_COUNT=1 seed.sh ...로 덮어쓴다.
+  drop_bucket_count: 4
   # 핫 드롭 대기열에 미리 넣을 WAITING 행 수. 0이면 대기열 등록 자체를 측정한다.
   drop_hot_queue_prefill: 0
   # 워밍업 전용 드롭의 총재고. 0이면 만들지 않는다. 핫 드롭과 SKU 수·가격이 같고 판매 중이다.

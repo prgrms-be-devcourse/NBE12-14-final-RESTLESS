@@ -7,6 +7,7 @@ Usage: perf/scenarios/run-ticketing.sh SCENARIO USERS
 
 SCENARIO:
   spread, simultaneous       좌석 조회 (3초 폴링)
+  burst                      정해진 시각에 좌석 조회 1회
   page                       페이지 진입: 좌석·구매 가능 정보 조회
   hot, overlap               인기 좌석 또는 겹치는 좌석 선점 경쟁
   distributed, replay        서로 다른 좌석 선점 또는 멱등성 재요청
@@ -16,13 +17,13 @@ USERS는 전체 테스트 사용자 수다. 예: run-ticketing.sh spread 100
 필수 환경변수: BASE_URL, PERFORMANCE_ID, MANAGEMENT_URL, PERF_ALLOWED_APP_HOSTS
 인증: USERS_CSV 또는 SETUP=self (시드 계정 로그인)
 선택 환경변수: DURATION, MAX_DURATION, HOT_SEATS, HOLD_DELAY_SECONDS,
-              POLL_ENTRY (mixed만), MANAGEMENT_URL, K6_BIN
+              POLL_ENTRY (mixed만), BURST_DELAY_SECONDS, SEAT_ENCODING, MANAGEMENT_URL, K6_BIN
 HELP
 }
 if [[ "${1:-}" == '-h' || "${1:-}" == '--help' ]]; then usage; exit 0; fi
 [[ $# == 2 ]] || { usage >&2; exit 2; }
 scenario="$1"
-case "$scenario" in spread|simultaneous|page|hot|overlap|distributed|replay|mixed|mixed-distributed) ;; *) echo "알 수 없는 시나리오: $scenario" >&2; usage >&2; exit 2;; esac
+case "$scenario" in spread|simultaneous|burst|page|hot|overlap|distributed|replay|mixed|mixed-distributed) ;; *) echo "알 수 없는 시나리오: $scenario" >&2; usage >&2; exit 2;; esac
 [[ "$2" =~ ^[1-9][0-9]{0,5}$ ]] || { echo 'USERS는 1~999999 사이의 양의 정수여야 합니다.' >&2; exit 2; }
 users="$2"
 for name in BASE_URL PERFORMANCE_ID MANAGEMENT_URL PERF_ALLOWED_APP_HOSTS; do
@@ -44,6 +45,7 @@ export HOT_SEATS="${HOT_SEATS:-1}" MAX_DURATION="${MAX_DURATION:-5m}"
 export HOLD_DELAY_SECONDS="${HOLD_DELAY_SECONDS:-3}" MIXED_HOLD=hot
 case "$scenario" in
   spread|simultaneous) export MODE=poll POLL_ENTRY="$scenario" DURATION="${DURATION:-2m}" ;;
+  burst) export MODE=burst POLL_ENTRY=simultaneous ;;
   page) export MODE=page POLL_ENTRY="${POLL_ENTRY:-spread}" DURATION="${DURATION:-2m}" ;;
   hot|overlap|distributed|replay) export MODE="$scenario" POLL_ENTRY=spread DURATION="${DURATION:-2m}" ;;
   mixed|mixed-distributed)
@@ -70,7 +72,7 @@ export K6_WEB_DASHBOARD_PORT="${K6_WEB_DASHBOARD_PORT:-5665}"
 export K6_WEB_DASHBOARD_EXPORT="${K6_WEB_DASHBOARD_EXPORT:-$run_dir/report-$timestamp.html}"
 printf '시나리오: %s | 사용자: %s | 실행 ID: %s\n' "$scenario" "$users" "$RUN_ID"
 if [[ "$MODE" == mixed ]]; then printf '조회: %s명 | 선점: %s명\n' "$PARTICIPANTS" "$HOLD_PARTICIPANTS"; fi
-if [[ "$MODE" != poll && "$MODE" != page ]]; then printf '선점 요청으로 테스트 데이터가 변경됩니다. 실험 간 초기 상태를 확인하세요.\n'; fi
+if [[ "$MODE" != poll && "$MODE" != page && "$MODE" != burst ]]; then printf '선점 요청으로 테스트 데이터가 변경됩니다. 실험 간 초기 상태를 확인하세요.\n'; fi
 printf '요약 JSON: %s\nHTML 보고서: %s\n실행 중 대시보드: http://localhost:%s\n' "$SUMMARY_PATH" "$K6_WEB_DASHBOARD_EXPORT" "$K6_WEB_DASHBOARD_PORT"
 command -v python3 >/dev/null || { echo 'python3를 찾을 수 없습니다.' >&2; exit 2; }
 if [[ -n "${TICKETING_K6_CONFIG:-}" && ! -r "$TICKETING_K6_CONFIG" ]]; then

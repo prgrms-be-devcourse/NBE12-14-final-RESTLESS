@@ -24,7 +24,7 @@ Drop 문서([../drop/](../drop/))처럼 policy, invariants, state-machines, tran
 
 ## 현재 결제 연결 범위 (2026-11-16)
 
-TicketPaymentResultHandler를 등록해 예약 ID 기준 공통 결제 준비·승인·대사 callback을 연결했다. 승인 성공 발급, 실패/불명확, 자동 만료, 보상 취소 확정까지 서버 흐름을 구현했다. 공통 주문 상세의 TICKET payable resolver도 구현했다. 정상 환불·결제창 UI·운영 알림은 후속이다. 아래 단계별 기록의 미구현/후속 표기는 당시 범위이며 현재 기준은 [Handler 문서](payment-handler.md#보상-취소공통-handler-등록-2026-11-16)를 따른다.
+TicketPaymentResultHandler를 등록해 예약 ID 기준 공통 결제 준비, 승인, 미완료 결제 재확인 작업의 callback을 연결했다. 승인 성공 발급, 실패/불명확, 자동 만료, 보상 취소 확정까지 서버 흐름을 구현했다. 공통 주문 상세의 TICKET payable resolver도 구현했다. 정상 환불, 결제창 UI, 운영 알림은 후속이다. 아래 단계별 기록의 미구현/후속 표기는 당시 범위이며 현재 기준은 [Handler 문서](payment-handler.md#보상-취소공통-handler-등록-2026-11-16)를 따른다.
 
 ## 매핑 테스트 구성
 
@@ -77,7 +77,7 @@ TicketPaymentService가 공통 트랜잭션 안에서 예약 ID 기준 PayableSn
 
 ## 본인 발급 티켓 조회
 
-GET /api/tickets(페이지 목록), GET /api/tickets/{ticketId}(상세)를 추가했다. 예약 사용자 기준으로 본인 티켓만 조회하며 발급 당시 가격·기존 티켓번호·현재 상태와 공연/회차/좌석 정보를 제공한다. 사용·취소 이력도 보존하고 현재 좌석 소유자가 바뀌어도 과거 티켓의 소유자는 바뀌지 않는다. 테스트는 사용자 요청으로 작성만 하고 실행하지 않았다. 상세는 [API 계약](../../contracts/api/ticketing.md#본인-발급-티켓-목록상세)을 따른다.
+GET /api/tickets(페이지 목록), GET /api/tickets/{ticketId}(상세)를 추가했다. 예약 사용자 기준으로 본인 티켓만 조회하며 발급 당시 가격·기존 티켓번호·현재 상태와 공연/회차/좌석 정보를 제공한다. 사용·취소 이력도 보존하고 현재 좌석 소유자가 바뀌어도 과거 티켓의 소유자는 바뀌지 않는다. 테스트는 사용자 요청으로 작성만 하고 실행하지 않았다. 상세는 [API 계약](../../contracts/api/ticketing.md#본인-발급-티켓-목록과-상세)을 따른다.
 
 ## 주문 상세 결제 대상 연결 (2026-11-16)
 

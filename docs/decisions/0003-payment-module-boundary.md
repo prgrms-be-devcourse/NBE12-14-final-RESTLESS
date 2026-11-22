@@ -1,6 +1,6 @@
 # ADR-0003. 공통 결제 모듈 경계: 결제 대상 식별과 결과 전달
 
-- 상태: Accepted
+- 상태: IMPLEMENTED
 - 날짜: 2026-11-12
 - 개정: 2026-11-12, Handler 상태 변경 메서드에 결제 시도 문맥과 환불 종류 전달 ([4절](#4-개정-시도-문맥과-환불-종류-2026-11-12))
 - 개정: 2026-11-14, 주문 상세가 `PaymentLookup`으로 최근 결제를 읽음 ([5절](#5-개정-주문-상세의-결제-읽기-2026-11-14))
@@ -19,7 +19,7 @@
 
 ### 1. 결제 대상은 `(payable_type, payable_id)`로 식별한다
 
-- `payments`에 `payable_type`(`DROP`, `TICKET`, `FAN_MEETING`)과 `payable_id`를 둔다. 결제 대상 테이블로 가는 물리 FK는 두지 않는다.
+- `payments`에 `payable_type`(`DROP`, `TICKET`, `FAN_MEETING`, `CREDIT_CHARGE`)과 `payable_id`를 둔다. 결제 대상 테이블로 가는 물리 FK는 두지 않는다.
 - 팬미팅은 `fan_meeting_orders`를 그대로 쓴다. 팬미팅 스키마와 문서는 바꾸지 않는다.
 - 토스 `orderId`로 쓸 `pg_order_id VARCHAR(64) UNIQUE`를 결제 시도마다 서버가 만든다.
 - `payment_key`는 NULL을 허용한다. 승인을 시작할 때(READY → PROCESSING) 채운다.
@@ -56,14 +56,14 @@ public interface PaymentResultHandler {
 3. 커밋한다.
 4. 커밋 후 `PaymentApprovedEvent`를 발행한다. 알림 같은 후속 작업에만 쓴다 (ADR-0001). **미구현 (2026-11-13)**: 아직 구독하는 후속 기능이 없어 이벤트 클래스와 발행 코드가 없다. 알림 기능을 붙일 때 추가한다.
 
-대사 스케줄러가 UNKNOWN, PROCESSING 건을 PG에 다시 조회해 확정할 때도 같은 Handler를 호출한다.
+미완료 결제 재확인 작업이 UNKNOWN, PROCESSING 건을 PG에 다시 조회해 확정할 때도 같은 Handler를 호출한다.
 
 ### 3. Handler 규칙
 
 | 규칙 | 이유 |
 |---|---|
 | 업무상 받을 수 없는 승인(기한 초과 등)은 `REJECT`를 반환한다. 결제 모듈이 보상 취소(COMPENSATING)를 진행한다 | 승인된 돈을 방치하지 않는다 |
-| 기술 오류는 예외로 던진다. 전체가 롤백되고 결제는 PROCESSING/UNKNOWN으로 남아 대사가 재시도한다. 단 `onApprovalStarting`의 예외는 승인 시작 트랜잭션이 롤백돼 결제가 READY로 남고 응답은 500이다 (PG를 호출하지 않음) | UNKNOWN을 실패로 확정하지 않는다 (INV-10) |
+| 기술 오류는 예외로 던진다. 전체가 롤백되고 결제는 PROCESSING/UNKNOWN으로 남아 미완료 결제 재확인 작업이 재시도한다. 단 `onApprovalStarting`의 예외는 승인 시작 트랜잭션이 롤백돼 결제가 READY로 남고 응답은 500이다 (PG를 호출하지 않음) | UNKNOWN을 실패로 확정하지 않는다 (INV-10) |
 | Handler 안에서 PG 호출이나 외부 I/O를 하지 않는다 | 트랜잭션과 잠금 시간을 짧게 유지한다 |
 | 잠금 순서: 결제 행을 먼저, 도메인 행을 나중에 잠근다 | 데드락 방지 (FAIL-DR-11) |
 | 결제 준비도 활성 결제 행을 먼저 잠근 뒤 `load`를 부른다 | 새 키 준비와 기존 시도 승인 시작 사이의 잠금 순환 방지 |
@@ -109,18 +109,18 @@ public interface PaymentResultHandler {
 |---|---|
 | A. 결제만 커밋한 뒤 AFTER_COMMIT 이벤트로 도메인이 확정 | 커밋과 리스너 실행 사이에 서버가 종료되면 결제는 APPROVED인데 주문은 미결제로 남는다. ADR-0001 1항 위반 |
 | B. 같은 트랜잭션 안의 동기 `@EventListener` | 원자성은 지켜지지만 수신자가 코드에 드러나지 않고 예외와 순서가 숨겨진다. 이벤트는 후속 작업용이라는 팀 규칙과 섞인다 |
-| D. 각 도메인이 PG 호출, 결과 기록, 대사를 직접 지휘 | 세 도메인이 PG 호출, UNKNOWN 처리, 재시도를 각자 구현한다. 사용자 요청 없이 도는 대사 스케줄러가 결국 도메인을 호출해야 하므로 C 구조가 다시 필요하다 |
+| D. 각 도메인이 PG 호출, 결과 기록, 미완료 결제 재확인을 직접 지휘 | 세 도메인이 PG 호출, UNKNOWN 처리, 재시도를 각자 구현한다. 사용자 요청 없이 도는 미완료 결제 재확인 작업이 결국 도메인을 호출해야 하므로 C 구조가 다시 필요하다 |
 | 팬미팅도 공통 `orders`를 생성 | 머지된 팬미팅 스키마, 상태 머신, PR #6 문서를 바꿔야 한다. 결제 쪽 스키마만 바꾸는 편이 변경 범위가 작다 |
 
 ## 알려진 한계
 
 - 물리 FK가 없어 잘못된 `payable_id`를 DB가 막지 못한다. 결제 생성 시 Handler `load`로 검증한다.
-- Handler가 느리거나 버그가 있으면 그 도메인의 결제 확정이 지연된다. 결제는 PROCESSING/UNKNOWN으로 남으므로 돈과 재고의 정합성은 유지되고, 대사가 재시도한다. 실패는 로그와 메트릭으로 남긴다.
+- Handler가 느리거나 버그가 있으면 그 도메인의 결제 확정이 지연된다. 결제는 PROCESSING/UNKNOWN으로 남으므로 돈과 재고의 정합성은 유지되고, 미완료 결제 재확인 작업이 재시도한다. 실패는 로그와 메트릭으로 남긴다.
 
 ## 영향
 
 - 새 마이그레이션: `payments`에 `payable_type`, `payable_id`, `pg_order_id`, `idempotency_key`, 실패 사유, `created_at`, `updated_at` 컬럼과 status CHECK를 추가한다. "대상당 진행 중인 시도 1건" 생성 컬럼 UNIQUE를 추가한다. `order_id`와 FK는 제거하고, `payment_key`는 NULL을 허용한다. `payment_refunds`에 중복 환불 방지 제약과 PG 취소 거래 키를 추가한다.
-- 팬미팅 `PaymentPort`(`startAttempt`, `resolve`)는 결제 모듈이 이 구조 위에서 제공한다. 팬미팅의 `PaymentResultHandler`는 위 인터페이스에 맞춘다. **미구현 (2026-11-13)**: 공통 결제에는 `PaymentService.prepare/confirm`만 있고 `resolve` 조회는 없다. READY 만료는 대사가 `onFailed(notStarted)`로 알린다. 팬미팅 연결 때 필요한 API를 팬미팅 담당과 정한다.
+- 팬미팅 `PaymentPort`(`startAttempt`, `resolve`)는 결제 모듈이 이 구조 위에서 제공한다. 팬미팅의 `PaymentResultHandler`는 위 인터페이스에 맞춘다. **미구현 (2026-11-13)**: 공통 결제에는 `PaymentService.prepare/confirm`만 있고 `resolve` 조회는 없다. READY 만료는 미완료 결제 재확인 작업이 `onFailed(notStarted)`로 알린다. 팬미팅 연결 때 필요한 API를 팬미팅 담당과 정한다. **갱신 (2026-11-20)**: 팬미팅은 `PaymentPort`를 두지 않고 `FanMeetingPaymentResultHandler`로 연결됐다. 결과를 따로 묻는 API는 없다 ([팬미팅 ports.md 2절](../domains/fanmeeting/ports.md#2-결제-모듈-연결-paymentresulthandler-adr-0003)).
 - 드롭 TX2·TX3·TX4·TX5의 도메인 쪽 단계는 Handler 구현 안에서 수행한다.
 
 ## 재검토 조건

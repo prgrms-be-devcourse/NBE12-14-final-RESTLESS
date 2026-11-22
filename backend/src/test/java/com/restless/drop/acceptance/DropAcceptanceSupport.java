@@ -177,18 +177,9 @@ abstract class DropAcceptanceSupport {
                 new Sku("SKU-" + UUID.randomUUID().toString().substring(0, 8), "M", 39000, stock));
     }
 
+    /** SKU 합계 = 버킷 합 (ADR-0005). 키: total, available, reserved, sold. */
     Map<String, Integer> inventory(Long variantId) {
-        return jdbc.queryForObject("""
-                SELECT total_quantity, available_quantity, reserved_quantity, sold_quantity
-                FROM drop_inventories WHERE variant_id = ?
-                """, (rs, i) -> {
-            Map<String, Integer> m = new LinkedHashMap<>();
-            m.put("total", rs.getInt(1));
-            m.put("available", rs.getInt(2));
-            m.put("reserved", rs.getInt(3));
-            m.put("sold", rs.getInt(4));
-            return m;
-        }, variantId);
+        return DropStock.totals(jdbc, variantId);
     }
 
     // ---- 재고 점유 (D2 API) ----

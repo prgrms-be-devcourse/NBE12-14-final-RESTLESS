@@ -2,11 +2,12 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/auction/application/`, `backend/src/main/java/com/restless/credit/application/`
 >
-> 마지막 확인: 2026-11-18 (목록·상세 조회 캐시 추가)
+> 마지막 확인: 2026-11-21 (#316 크레딧 충전 TX-AU-6 추가)
 
 ## 공통 규칙
 
 - **잠금 순서:** 경매 행 → 지갑 행(지갑 ID 오름차순). 모든 트랜잭션이 이 순서를 지켜 데드락을 막는다.
+  충전 승인(TX-AU-6)은 결제 행 → 충전 주문 행 → 지갑 행이고 경매 행을 잠그지 않는다. 두 순서 모두 지갑 행이 마지막이라 순환하지 않는다.
 - 트랜잭션 안에서 외부 호출(HTTP, SSE 전송)을 하지 않는다.
 - 실시간 전달은 커밋 후 이벤트(AFTER_COMMIT)로만 한다. 실패해도 확정된 상태를 되돌리지 않는다 ([ADR-0001](../../decisions/0001-event-handling.md)).
 - 현재 시각은 주입받은 `Clock`으로 읽는다. **시각으로 판단하는 트랜잭션은 경매 행 잠금을 얻은 뒤에 시각을 읽고**, 그 트랜잭션 안에서는 그 시각 하나를 쓴다. 잠금 전에 읽으면 잠금을 기다리는 사이 흐른 시간이 판단에 빠진다.
@@ -81,6 +82,8 @@
 
 **스케줄러 설정** (`application.yml` `restless.auction.scheduler`): `enabled`(기본 true), `fixed-delay-ms`(기본 1000), `batch-size`(한 번에 처리할 경매 수, 기본 100). 테스트에서는 `build.gradle`이 `enabled=false`로 끄고, 스케줄러 테스트만 다시 켠다. 경매 하나가 실패하면 로그와 `auction.scheduler.failure`(`action` = `open`, `close`) 메트릭을 남기고 다음 경매를 계속 처리한다 (`AuctionCloseFailureTest`).
 
+**실행 스레드:** 모든 `@Scheduled` 작업은 Spring의 공용 실행기를 같이 쓴다. 스레드가 1개면 결제 대사가 PG 응답을 기다리는 동안 경매 시작·종료가 실행되지 못하므로, `spring.task.scheduling.pool.size`를 4로 둔다 (#315, `AuctionSchedulerIsolationTest`).
+
 ## TX-AU-4. 경매 종료 (스케줄러)
 
 1초마다 `status IN ('SCHEDULED', 'OPEN') AND ends_at <= 지금`인 경매 ID를 찾고, **경매마다 별도 트랜잭션**으로:
@@ -106,6 +109,29 @@
 
 잠금을 얻은 뒤 읽은 시각으로 시작 시각을 확인하므로, 시작 스케줄러나 입찰과 경합해도 시작된 경매는 바뀌지 않는다. 잠금을 기다리는 사이 시작 시각이 지나면 `AUCTION_ALREADY_STARTED`다 (`SellerAuctionLockOrderTest`).
 
+## TX-AU-6. 크레딧 충전 (PG 결제, #316)
+
+충전 주문 생성과 지급은 다른 트랜잭션이다. 사이의 PG 호출은 공통 결제 모듈이 트랜잭션 밖에서 한다 ([payment.md](../../contracts/api/payment.md), [ADR-0003](../../decisions/0003-payment-module-boundary.md)).
+
+**충전 주문 생성** (`POST /api/me/credit-charges`)
+
+1. 같은 회원·같은 요청 키의 충전 주문이 있으면 금액을 비교해 돌려준다 (같으면 200, 다르면 `IDEMPOTENCY_KEY_CONFLICT`)
+2. 없으면 `READY`, `expires_at = 지금 + 30분`으로 저장한다
+3. 같은 키가 동시에 와 `UNIQUE(user_id, request_key)`에 막히면, 그 저장 트랜잭션이 롤백된 뒤 새로 조회해 1과 같이 돌려준다. 그래서 이 단계는 하나의 트랜잭션으로 감싸지 않는다
+
+**결제 결과 반영** (결제 모듈이 결제 행을 잠근 트랜잭션 안에서 결과 처리기 호출, `MANDATORY`)
+
+| 호출 | 동작 |
+|---|---|
+| 결제 준비 (`load`) | `READY`면 회원·금액·주문명(`크레딧 50,000`)·`expires_at`을 준다. `PAID`이거나 없으면 결제 대상이 아니다. 기한은 결제 모듈이 `expires_at`으로 판정한다 |
+| 승인 시작 | 충전 주문 행 `FOR UPDATE` 뒤 시각을 읽어 `READY`이고 기한 안이면 받는다 |
+| 승인 확인 | 충전 주문 행 `FOR UPDATE`. `READY`면 지갑 생성(없으면) → 지갑 행 `FOR UPDATE` → `balance += 금액` → 내역 `CHARGE`(`operation_key = CHARGE:<충전 주문 ID>`) → `PAID`. **기한이 지났어도 지급한다.** 같은 결제로 이미 `PAID`면 받기만 하고, 다른 결제로 `PAID`이거나 승인 금액이 다르면 거절해 결제 모듈이 보상 취소한다 |
+| 실패, 결과 불명확 | 아무것도 바꾸지 않는다. 불명확은 결제 모듈의 미완료 결제 재확인 작업이 나중에 승인·실패로 다시 알려 준다 |
+| 환불 요청 | 기본 거절 `REFUND_NOT_SUPPORTED` |
+| 환불 완료 | 보상 취소만 올 수 있다. 충전 주문·지갑을 바꾸지 않는다 |
+
+지급 중 DB 오류는 예외로 던진다. 지갑, 내역, 충전 주문, 결제 상태가 함께 롤백되고 결제는 처리 중·불명확으로 남아 재확인 작업이 다시 확정한다 (`CreditChargeFailureTest`).
+
 ## 실시간 전달 (트랜잭션 밖)
 
 ```text
@@ -121,7 +147,8 @@ AuctionChangedEvent (AFTER_COMMIT)
 구현은 `auction/api/AuctionStreams`다. 연결은 이 서버 메모리에만 있다.
 
 - **연결 순서:** 연결을 먼저 등록한 뒤 현재 상태를 조회해 보낸다. 조회와 등록 사이에 바뀐 내용은 다음 전송에 다시 가고, 클라이언트는 같은 `revision`을 무시한다.
-- **전송 스레드:** 경매 종료·결제 대사 스케줄러와 스레드를 나누지 않으면 0.2초 간격이 밀리므로 전용 스레드를 쓴다. 한 경매의 전송이 실패해도 다른 경매는 계속 보낸다.
+- **전송 내용:** 한 번의 전송에서 상태 JSON은 한 번만 만들고, 같은 문자열을 그 경매의 연결 전체에 보낸다. JSON을 만들지 못하면 그 경매의 이번 전송은 건너뛰고 `flush` 실패로 기록하며 연결은 유지한다. 연결 직후 첫 전송에서 실패하면 그 연결을 등록해 두지 않는다.
+- **전송 스레드:** 경매 종료 스케줄러, 미완료 결제 재확인 작업과 스레드를 나누지 않으면 0.2초 간격이 밀리므로 전용 스레드를 쓴다. 한 경매의 전송이 실패해도 다른 경매는 계속 보낸다.
 - **설정** (`application.yml` `restless.auction.stream`): `flush-interval-ms`(기본 200), `timeout-ms`(연결 최대 유지 시간, 기본 30분. 지나면 서버가 닫고 클라이언트가 재연결한다).
 - **메트릭:** `auction.stream.connections`(열린 연결 수), `auction.stream.failure`(`stage` = `send` 끊긴 연결로 전송 실패, `flush` 한 경매 조회·전송 실패, `loop` 전송 주기 자체 실패).
 
@@ -159,3 +186,5 @@ AuctionChangedEvent (AFTER_COMMIT)
 | 종료 스케줄러가 두 번 실행됨 | 두 번째 실행은 잠금 뒤 `CLOSED`를 보고 끝낸다. 결과 PK가 중복 저장을 막는다 |
 | 종료 직전 입찰과 종료가 경합 | 스케줄러가 종료 후보를 조회한 뒤 트랜잭션을 시작하기 전에 새 입찰이 들어와 `ends_at`을 늘릴 수 있다. 종료 트랜잭션은 잠금을 얻은 **뒤** `ends_at`을 다시 확인하므로, 연장됐으면 종료하지 않는다. 종료가 먼저 잠금을 얻어 커밋하면, 그 뒤 입찰은 잠금 안의 시각 확인에서 `AUCTION_CLOSED`로 거절된다 |
 | SSE 전송 실패 | 로그와 메트릭을 남긴다. 입찰과 낙찰은 그대로다 |
+| 충전 승인 뒤 지급 반영 중 서버 종료나 DB 오류 | 지급·충전 주문 변경이 롤백되고 결제는 처리 중·불명확으로 남는다. 재확인 작업이 PG를 다시 조회해 승인이면 한 번 지급한다 |
+| 충전 결제 결과를 모름 | 지급하지 않고 기다린다. 그동안 같은 충전 주문의 새 결제 준비는 `PAYMENT_UNDER_REVIEW` |

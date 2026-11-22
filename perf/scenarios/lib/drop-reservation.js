@@ -155,11 +155,17 @@ export function checkTarget() {
   if (status !== 'ON_SALE') fail(`hot drop ${DROP_ID} saleStatus is ${status}, run seed.sh --refresh`);
 }
 
+// 참여자 n의 SKU. 계정 순서대로 SKU를 돌아가며 고른다. 대기 진입과 재고 점유가 같은 값을 써야 한다.
+// 입장 허가는 진입한 SKU의 점유에만 쓰이기 때문이다.
+export function variantFor(n, target = HOT) {
+  return target.variantIds[n % target.variantIds.length];
+}
+
 // 계정 하나가 SKU 하나에 재고 점유를 한 번 요청한다. Idempotency-Key는 계정마다 하나다.
 // tags는 요청과 지표에 함께 붙는다 (예: 계단식의 stage, 창 번호 win).
 // 결과 이름, 성공이면 응답 본문({reservationId, orderId, amount, ...}), k6 응답을 돌려준다.
 export function reserve(user, n, tags = {}, target = HOT) {
-  const variantId = target.variantIds[n % target.variantIds.length];
+  const variantId = variantFor(n, target);
   const res = http.post(
     `${BASE_URL}/api/drops/${target.dropId}/reservations`,
     JSON.stringify({ variantId, recipient: `회원${user.id}`, phone: '010-0000-0000', address: '서울시 송파구 올림픽로 424' }),

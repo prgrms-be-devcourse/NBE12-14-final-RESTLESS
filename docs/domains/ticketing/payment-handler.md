@@ -2,7 +2,7 @@
 
 - 상태: 상태 전이는 DECIDED (2026-11-12, 담당자 합의).
 - 기준: ADR-0003의 동기 Handler 계약. 승인 시도 저장 및 내부 서비스의 대상 조회·승인 시작·성공 확정/발급·실패/불명확 처리를 구현했다. 결제 기한 자동 만료도 구현했다. TicketPaymentResultHandler 등록과 보상 취소 확정 처리까지 구현했다. 정상 환불·불명확 운영 알림은 후속이다.
-- paymentId를 모든 상태 변경 Handler에 전달하는 원칙은 DECIDED (2026-11-12). 공통 DTO·인터페이스는 ADR-0003 개정에 반영됐고 티켓팅 예약의 시도 저장·수락 도메인 메서드를 구현했다. TicketPaymentResultHandler가 TICKET으로 등록돼 공통 준비·승인·대사에서 호출된다. 결제 대상 매핑은 예약 ID 기준으로 확정했다 (2026-11-13, 사용자 합의).
+- paymentId를 모든 상태 변경 Handler에 전달하는 원칙은 DECIDED (2026-11-12). 공통 DTO, 인터페이스는 ADR-0003 개정에 반영됐고 티켓팅 예약의 시도 저장, 수락 도메인 메서드를 구현했다. TicketPaymentResultHandler가 TICKET으로 등록돼 공통 준비, 승인, 미완료 결제 재확인 작업에서 호출된다. 결제 대상 매핑은 예약 ID 기준으로 확정했다 (2026-11-13, 사용자 합의).
 
 ## 경계
 
@@ -70,10 +70,10 @@ current_payment_id는 NULL 허용 UNIQUE이며, DB CHECK는 ID/시각의 부분 
 payment_result_pending은 수락한 승인 결과 또는 필요한 보상 취소가 미확정임을 뜻한다. 예약 상태 PAYMENT_PENDING은 checkout 직후와 승인 진행 중 모두 쓰므로 이를 구분하는 별도 필드다. 성공 확정에서는 이 필드를 false로 바꾸고 시도 ID/시각을 보존한다. 내부 최종 실패 처리에서도 이 필드를 false로 바꾼다. 자동 만료는 이 필드로 미확정 시도를 보호한다. 보상 취소가 확인되면 같은 시도에 한해 false로 바꾼다. 정상 환불·운영 알림은 후속이다.
 승인 전 READY 만료 실패의 approvalStartedAt은 null일 수 있다. 정상 환불과 보상 취소를 구분하고 예매 확정 전 보상 취소에 confirmed_count 감소를 적용하지 않는다.
 
-## 공통 대사와 checkout의 관계
+## 미완료 결제 재확인 작업과 checkout의 관계
 
-공통 결제는 PaymentReconciler/PaymentReconciliationScheduler로 미완료 승인·취소를 재조회하고 같은 Handler로 결과를 반영한다. 기준과 주기는 [공통 대사 운영 계약](../../operations/failure-handling.md#공통-결제-대사-46)을 따른다.
-checkout은 payments 행을 생성하지 않으므로 공통 대사 후보가 아니다. 주문만 연결된 PAYMENT_PENDING 예약의 결제 기한 만료를 공통 대사가 대신 정리하지 않는다. 승인 미시도·최종 실패 예약은 티켓팅의 결제 기한 만료 작업이 정리한다. 공통 Handler가 등록돼 결제 시도·결과 callback도 연결됐다.
+공통 결제는 PaymentReconciler/PaymentReconciliationScheduler로 미완료 승인, 취소를 재조회하고 같은 Handler로 결과를 반영한다. 기준과 주기는 [미완료 결제 재확인 작업 운영 계약](../../operations/failure-handling.md#미완료-결제-재확인-작업-46)을 따른다.
+checkout은 payments 행을 생성하지 않으므로 미완료 결제 재확인 작업의 후보가 아니다. 주문만 연결된 PAYMENT_PENDING 예약의 결제 기한 만료를 미완료 결제 재확인 작업이 대신 정리하지 않는다. 승인 미시도, 최종 실패 예약은 티켓팅의 결제 기한 만료 작업이 정리한다. 공통 Handler가 등록돼 결제 시도, 결과 callback도 연결됐다.
 공통 UNKNOWN 최초 시각·나이 메트릭은 구현됐지만 티켓팅의 불명확 5분 운영 확인 등록·중복 없는 알림은 후속이며 좌석 보호 정책을 바꾸지 않는다.
 
 ## 단계별 구현: 승인 시도 기록 기반 (2026-11-13)
@@ -184,7 +184,7 @@ TicketPaymentResultHandler를 PayableType.TICKET의 Spring 빈으로 등록했�
 ### 보상 대기와 완료
 
 - onApproved가 업무상 REJECT하면 공통 결제가 취소 요청과 PG 호출을 조정한다. 티켓팅은 수락한 paymentId·시각과 payment_result_pending=true를 유지한다. 별도 예약 상태를 추가하거나 기한만으로 반환하지 않는다.
-- PG 취소 응답이 불명확하면 공통 CANCEL_UNKNOWN과 대사가 담당한다. 최종 취소 거절은 공통 APPROVED/환불 FAILED로 남고 공통 보상 거절 로그·메트릭이 운영 확인 대상이 된다. 두 경우 모두 취소 확정 callback이 없으므로 티켓팅 좌석 보호를 유지한다.
+- PG 취소 응답이 불명확하면 공통 CANCEL_UNKNOWN과 미완료 결제 재확인 작업이 담당한다. 최종 취소 거절은 공통 APPROVED/환불 FAILED로 남고 공통 보상 거절 로그, 메트릭이 운영 확인 대상이 된다. 두 경우 모두 취소 확정 callback이 없으므로 티켓팅 좌석 보호를 유지한다.
 - onRefunded의 RefundContext(paymentId, COMPENSATION)는 PG 취소가 확정된 문맥이다. 현재 시도 ID가 같고 결과 미확정인 PAYMENT_PENDING/RECONCILING에서만 반환한다. 기한 전후와 관계없이 예약·선점 RELEASED, 좌석 AVAILABLE/NULL, reserved 감소, 주문 CANCELLED를 함께 반영하고 결과 미확정을 false로 바꾼다. 최초 주문·기한·수락 문맥은 보존한다. 발급 전 보상이므로 confirmed 수량과 이미 발급한 티켓을 변경하지 않는다.
 - 구매 관리 → 예약 → 좌석 ID 오름차순 → 주문 잠금 순서를 유지한다. PG 호출은 공통 결제 모듈만 수행하며 DB 트랜잭션 밖에서 호출한다.
 - 같은 시도의 RELEASED/미확정=false 재통지는 무시한다. 과거 좌석에 새 소유자가 생겼어도 포인터나 수량을 다시 건드리지 않는다.
@@ -193,12 +193,12 @@ TicketPaymentResultHandler를 PayableType.TICKET의 Spring 빈으로 등록했�
 
 - 다른 시도, 이미 CONFIRMED인 예약, 지원하지 않는 CUSTOMER_REFUND 완료 통지, 좌석 소유권·수량·주문 불일치는 자원을 변경하지 않는다. 오류 로그에 예약·결제 ID와 사유를 남기고 ticketing.payment.compensation.anomalies{reason}을 기록한다. reason은 고정 값이며 ID를 태그로 사용하지 않는다. 이 메트릭은 이상 callback 관측 횟수다.
 - 이 불일치에서 예외로 공통 PG 취소 확정까지 계속 롤백하지 않는다. 공통 취소 기록은 완료되고 티켓팅의 미정리 상태는 운영 복구 대상으로 남는다. 특히 일부 좌석만 반환하거나 새 소유자의 좌석을 덮어쓰지 않는다.
-- 실제 DB/저장 오류는 예외를 전파한다. 결제·환불·예약·좌석·주문 변경이 전체 롤백되고, 공통 대사가 이미 취소된 PG 사실을 재조회해 새 트랜잭션에서 다시 반영한다.
+- 실제 DB/저장 오류는 예외를 전파한다. 결제, 환불, 예약, 좌석, 주문 변경이 전체 롤백되고, 미완료 결제 재확인 작업이 이미 취소된 PG 사실을 재조회해 새 트랜잭션에서 다시 반영한다.
 - 정상 환불 요청은 인터페이스 기본 REFUND_NOT_SUPPORTED, 정상 환불 거절 통지는 기본 no-op을 유지한다. 정상 환불/입장/불명확 운영 알림은 후속이다. 공통 주문 상세의 TICKET payable resolver는 이후 연결했으며 결제창 UI는 별도 범위다.
 
 ### 검증 범위
 
-기존 checkout fixture·성공/실패/만료 검증을 재사용한다. 추가 검증은 보상 취소 동시 재통지와 새 소유자 보호, 시도·종류·상태·자원 불일치, 공통 PaymentService의 준비·승인·실패·불명확 대사 연결, 취소 응답 유실·거절·DB 반영 롤백과 복구에 집중한다. Fake PG를 사용하며 실제 PG 부하나 운영 결제를 호출하지 않는다.
+기존 checkout fixture, 성공/실패/만료 검증을 재사용한다. 추가 검증은 보상 취소 동시 재통지와 새 소유자 보호, 시도, 종류, 상태, 자원 불일치, 공통 PaymentService의 준비, 승인, 실패, 불명확 결과의 재확인 연결, 취소 응답 유실, 거절, DB 반영 롤백과 복구에 집중한다. Fake PG를 사용하며 실제 PG 부하나 운영 결제를 호출하지 않는다.
 
 ## 주문 상세와 결제 대상 식별 (2026-11-16)
 

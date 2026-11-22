@@ -1,4 +1,4 @@
-// 폴링 비용 Q: 대기자 N명을 고정해 두고 상태 조회 비용과 수용 가능한 대기 인원을 잰다.
+// 대기열 폴링 측정: 대기자 N명을 고정해 두고 상태 조회 비용과 수용 가능한 대기 인원을 잰다.
 // 계획은 docs/testing/drop-performance-plan.md, 절차는 drop-performance-procedure.md 5절. 사용법은 perf/scenarios/README.md.
 //
 // 앱은 restless.drop.queue.required=true, 입장 작업은 끈다(RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED=false).
@@ -11,7 +11,7 @@ import http from 'k6/http';
 import { Counter } from 'k6/metrics';
 import {
   DROP_ID, MANAGEMENT_URL, loadUsers, summaryTrendStats, checkTarget, skipped, summarize, tracked, durationMs,
-  emptyThresholds, latencyLine, pct, ROW_OFFSET,
+  emptyThresholds, latencyLine, pct, ROW_OFFSET, variantFor,
 } from './lib/drop-reservation.js';
 import { enterQueue, pollQueue } from './lib/drop-flow.js';
 
@@ -36,7 +36,7 @@ const lost = new Counter('drop_queue_waiter_lost');
 const admitted = new Counter('drop_queue_unexpected_admission');
 
 const PHASES = ['fill', 'settle', 'warmup', 'measure'];
-const LOSS_REASONS = ['enter_failed', 'closed', 'expired', 'consumed', 'admitted'];
+const LOSS_REASONS = ['enter_failed', 'sold_out', 'closed', 'expired', 'consumed', 'unavailable', 'admitted'];
 const subMetrics = [
   'drop_eval_latency{api:enter}', 'drop_unexpected_error{api:enter}',
   ...PHASES.flatMap((p) => [`drop_eval_latency{api:poll,phase:${p}}`, `drop_unexpected_error{api:poll,phase:${p}}`,
@@ -92,16 +92,19 @@ export default function () {
   const end = scenarioStart + FILL_MS + AFTER_FILL_MS;
   tracked({}, () => {
     const user = users[n];
-    const entered = enterQueue(user, { phase: phaseAt(scenarioStart) });
+    // 대기자는 계정 순서대로 핫 SKU에 나뉜다. 입장 순번은 SKU마다 따로 센다.
+    const variantId = variantFor(n);
+    const entered = enterQueue(user, variantId, { phase: phaseAt(scenarioStart) });
     if (entered.status !== 'WAITING') {
       if (entered.status === 'ADMITTED') admitted.add(1);
-      lost.add(1, { reason: entered.status === 'ADMITTED' ? 'admitted' : 'enter_failed' });
+      const reason = { ADMITTED: 'admitted', SOLD_OUT: 'sold_out' }[entered.status] || 'enter_failed';
+      lost.add(1, { reason });
       return;
     }
     // 조회 오류와 타임아웃은 세고 계속 조회한다. 30초 넘게 끊기면 서버가 대기를 닫고 다음 조회가 404가 된다.
     while (Date.now() + POLL_S * 1000 <= end) {
       sleep(POLL_S);
-      const status = pollQueue(user, { phase: phaseAt(scenarioStart) });
+      const status = pollQueue(user, variantId, { phase: phaseAt(scenarioStart) });
       if (status === 'WAITING' || status === 'ERROR') continue;
       if (status === 'ADMITTED') admitted.add(1);
       lost.add(1, { reason: status.toLowerCase() });

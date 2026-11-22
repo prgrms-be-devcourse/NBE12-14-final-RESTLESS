@@ -41,4 +41,11 @@ management:
         drop.reservation.duration: true
         drop.inventory.hold.update: true
         drop.inventory.lock.held: true
+        drop.inventory.lock.completion: true
+        # drop.inventory.hold.path (path: picked, waited, sold_out) is a counter and needs no histogram (#330).
         payment.pg.approve: true
+
+# k6는 한 IP에서 호출하므로 앱 내부 요청 제한을 끈다.
+restless:
+  ratelimit:
+    enabled: false
