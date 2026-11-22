@@ -82,6 +82,8 @@
 
 **스케줄러 설정** (`application.yml` `restless.auction.scheduler`): `enabled`(기본 true), `fixed-delay-ms`(기본 1000), `batch-size`(한 번에 처리할 경매 수, 기본 100). 테스트에서는 `build.gradle`이 `enabled=false`로 끄고, 스케줄러 테스트만 다시 켠다. 경매 하나가 실패하면 로그와 `auction.scheduler.failure`(`action` = `open`, `close`) 메트릭을 남기고 다음 경매를 계속 처리한다 (`AuctionCloseFailureTest`).
 
+**실행 스레드:** 모든 `@Scheduled` 작업은 Spring의 공용 실행기를 같이 쓴다. 스레드가 1개면 결제 대사가 PG 응답을 기다리는 동안 경매 시작·종료가 실행되지 못하므로, `spring.task.scheduling.pool.size`를 4로 둔다 (#315, `AuctionSchedulerIsolationTest`).
+
 ## TX-AU-4. 경매 종료 (스케줄러)
 
 1초마다 `status IN ('SCHEDULED', 'OPEN') AND ends_at <= 지금`인 경매 ID를 찾고, **경매마다 별도 트랜잭션**으로:
