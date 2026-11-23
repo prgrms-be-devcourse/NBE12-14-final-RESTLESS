@@ -3,6 +3,8 @@ package com.restless.ticketing.application;
 import com.restless.ticketing.application.dto.TicketReservationInfo;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mockingDetails;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -23,6 +25,8 @@ import com.restless.concert.domain.VenueSection;
 import com.restless.member.domain.Member;
 import com.restless.ticketing.domain.TicketReservationStatus;
 import com.restless.ticketing.domain.TicketSeat;
+import com.restless.ticketing.infrastructure.TicketSeatRepository;
+import com.restless.ticketing.infrastructure.TicketPurchaseLimitRepository;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -34,6 +38,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -46,10 +51,14 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @DisplayName("좌석 선점 서비스 통합 테스트")
 @SpringBootTest(properties = {
@@ -74,6 +83,10 @@ class TicketReservationServiceTest {
     // 만료 시점은 DB fixture로 제어하고 실제 만료 서비스를 직접 호출한다.
     @MockitoBean
     private SeatHoldExpirationScheduler scheduler;
+    @MockitoSpyBean
+    private TicketSeatRepository seatRepository;
+    @MockitoSpyBean
+    private TicketPurchaseLimitRepository purchaseLimitRepository;
 
     private Fixture fixture;
 
@@ -191,6 +204,51 @@ class TicketReservationServiceTest {
     }
 
     @Test
+    @DisplayName("최초 구매 관리 행의 실제 중복 생성 충돌 후 같은 키 요청을 새 트랜잭션에서 재현한다")
+    void concurrentLimitCreationUniqueConflictRetriesSameRequest() throws Exception {
+        var observedEmpty = new CountDownLatch(2);
+        var firstCommitted = new CountDownLatch(1);
+        var saveCalls = new AtomicInteger();
+        var conflicts = new AtomicInteger();
+        doAnswer(invocation -> {
+            Object result = mockingDetails(invocation.getMock()).getMockCreationSettings().getDefaultAnswer().answer(invocation);
+            if (((java.util.Optional<?>) result).isEmpty() && observedEmpty.getCount() > 0) {
+                observedEmpty.countDown();
+                assertThat(observedEmpty.await(10, TimeUnit.SECONDS)).isTrue();
+            }
+            return result;
+        }).when(purchaseLimitRepository).findByUserIdAndPerformanceId(fixture.firstUserId(), fixture.performanceId());
+        doAnswer(invocation -> {
+            int call = saveCalls.incrementAndGet();
+            if (call == 1) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override public void afterCommit() { firstCommitted.countDown(); }
+                });
+            } else if (call == 2) {
+                assertThat(firstCommitted.await(15, TimeUnit.SECONDS)).isTrue();
+            }
+            try {
+                return mockingDetails(invocation.getMock()).getMockCreationSettings().getDefaultAnswer().answer(invocation);
+            } catch (org.springframework.dao.DataIntegrityViolationException failure) {
+                assertThat(failure.getMessage()).contains("uk_ticket_purchase_limits_user_performance");
+                conflicts.incrementAndGet();
+                throw failure;
+            }
+        }).when(purchaseLimitRepository).saveAndFlush(org.mockito.ArgumentMatchers.any());
+
+        List<Outcome> results = race(
+                () -> reserve(fixture.firstUserId(), "unique-race", List.of(seat(0), seat(1))),
+                () -> reserve(fixture.firstUserId(), "unique-race", List.of(seat(1), seat(0))));
+        assertThat(conflicts).hasValue(1);
+        assertThat(results).allSatisfy(result -> assertThat(result.error()).isNull());
+        assertThat(results.getFirst().info()).isEqualTo(results.getLast().info());
+        assertStoredReservation(results.getFirst().info(), 2);
+        assertThat(count("ticket_reservations")).isEqualTo(1);
+        assertThat(count("ticket_purchase_limits")).isEqualTo(1);
+        assertThat(count("seat_holds")).isEqualTo(2);
+    }
+
+    @Test
     @DisplayName("같은 키 재요청은 좌석 순서와 무관하게 최초 기한을 유지하고 다른 좌석·회차는 거절한다")
     void replayPreservesOriginalReservationAndRejectsDifferentContent() {
         TicketReservationInfo original = reserve(fixture.firstUserId(), "same", List.of(seat(1), seat(0)));
@@ -207,6 +265,204 @@ class TicketReservationServiceTest {
         assertStoredReservation(original, 2);
         assertThat(count("ticket_reservations")).isEqualTo(1);
         assertThat(count("seat_holds")).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("요청 해시가 없는 과거 예약도 선점 이력으로 같은 요청을 재현하고 다른 요청은 거절한다")
+    void legacyReplayReconstructsRequestFromHolds() {
+        var original = reserve(fixture.firstUserId(), "legacy", List.of(seat(1), seat(0)));
+        jdbc.update("UPDATE ticket_reservations SET hold_request_hash=NULL WHERE id=?", original.reservationId());
+
+        assertThat(reserve(fixture.firstUserId(), "legacy", List.of(seat(0), seat(1)))).isEqualTo(original);
+        assertError(() -> reserve(fixture.firstUserId(), "legacy", List.of(seat(0), seat(2))),
+                ErrorCode.IDEMPOTENCY_KEY_CONFLICT);
+        assertError(() -> service.reserve(fixture.firstUserId(), "legacy", fixture.otherPerformanceId(),
+                List.of(seat(0), seat(1))), ErrorCode.IDEMPOTENCY_KEY_CONFLICT);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ticket_reservations WHERE id=? AND hold_request_hash IS NULL",
+                Integer.class, original.reservationId())).isEqualTo(1);
+        assertStoredReservation(original, 2);
+        assertThat(count("ticket_reservations")).isEqualTo(1);
+        assertThat(count("seat_holds")).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("요청 해시가 일치해도 기존 선점 이력이 최초 좌석과 다르면 재현하지 않는다")
+    void replayRejectsHistoryInconsistentWithStoredHash() {
+        var original = reserve(fixture.firstUserId(), "history-mismatch", List.of(seat(0), seat(1)));
+        jdbc.update("""
+                INSERT INTO seat_holds (reservation_id, performance_id, performance_seat_id, price_amount, expires_at, status, created_at, released_at)
+                SELECT reservation_id, performance_id, performance_seat_id, price_amount, expires_at, 'RELEASED', created_at, UTC_TIMESTAMP(6)
+                FROM seat_holds WHERE reservation_id=? AND performance_seat_id=?
+                """, original.reservationId(), seat(0));
+        var seatsBefore = jdbc.queryForList("SELECT id,status,current_hold_id FROM performance_seats WHERE performance_id=? ORDER BY id", fixture.performanceId());
+        var holdsBefore = jdbc.queryForList("SELECT id,performance_seat_id,status,released_at FROM seat_holds WHERE reservation_id=? ORDER BY id", original.reservationId());
+        var limitBefore = jdbc.queryForMap("SELECT reserved_count,confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId());
+
+        assertThatThrownBy(() -> reserve(fixture.firstUserId(), "history-mismatch", List.of(seat(0), seat(1))))
+                .isInstanceOf(IllegalStateException.class).hasMessage("예약의 선점 이력과 최초 요청이 일치하지 않습니다.");
+        assertThat(jdbc.queryForList("SELECT id,status,current_hold_id FROM performance_seats WHERE performance_id=? ORDER BY id", fixture.performanceId())).isEqualTo(seatsBefore);
+        assertThat(jdbc.queryForList("SELECT id,performance_seat_id,status,released_at FROM seat_holds WHERE reservation_id=? ORDER BY id", original.reservationId())).isEqualTo(holdsBefore);
+        assertThat(jdbc.queryForMap("SELECT reserved_count,confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId())).isEqualTo(limitBefore);
+        assertThat(reservationStatus(original.reservationId())).isEqualTo("HELD");
+        assertThat(count("ticket_reservations")).isEqualTo(1);
+    }
+
+    @ParameterizedTest(name = "{displayName} [{0}]")
+    @ValueSource(strings = {"NULL_KEY", "BLANK_KEY", "LONG_KEY", "NULL_SEATS", "EMPTY_SEATS", "NULL_SEAT", "INVALID_SEAT", "DUPLICATE_SEAT"})
+    @DisplayName("잘못된 선점 키와 좌석 목록은 자원을 생성하기 전에 거절한다")
+    void invalidHoldInputDoesNotCreateResources(String input) {
+        String key = switch (input) {
+            case "NULL_KEY" -> null;
+            case "BLANK_KEY" -> " ";
+            case "LONG_KEY" -> "x".repeat(101);
+            default -> "invalid-input";
+        };
+        List<Long> seatIds = switch (input) {
+            case "NULL_SEATS" -> null;
+            case "EMPTY_SEATS" -> List.of();
+            case "NULL_SEAT" -> java.util.Arrays.asList(seat(0), null);
+            case "INVALID_SEAT" -> List.of(seat(0), 0L);
+            case "DUPLICATE_SEAT" -> List.of(seat(0), seat(0));
+            default -> List.of(seat(0));
+        };
+
+        assertError(() -> service.reserve(fixture.firstUserId(), key, fixture.performanceId(), seatIds), ErrorCode.INVALID_REQUEST);
+        assertThat(count("ticket_reservations")).isZero();
+        assertThat(count("seat_holds")).isZero();
+        assertThat(count("ticket_purchase_limits")).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=? AND status='AVAILABLE' AND current_hold_id IS NULL", Integer.class, fixture.performanceId())).isEqualTo(3);
+    }
+
+    @ParameterizedTest(name = "{displayName} [{0}]")
+    @ValueSource(strings = {"MISSING", "DUPLICATE"})
+    @DisplayName("과거 예약의 선점 이력이 없거나 중복되면 재현을 거절하고 기존 자원을 변경하지 않는다")
+    void legacyReplayRejectsUnreconstructableHistory(String history) {
+        var original = reserve(fixture.firstUserId(), "legacy-invalid", List.of(seat(0), seat(1)));
+        jdbc.update("UPDATE ticket_reservations SET hold_request_hash=NULL WHERE id=?", original.reservationId());
+        if (history.equals("MISSING")) {
+            jdbc.update("UPDATE performance_seats SET status='AVAILABLE', current_hold_id=NULL WHERE performance_id=?", fixture.performanceId());
+            jdbc.update("DELETE FROM seat_holds WHERE reservation_id=?", original.reservationId());
+        } else {
+            jdbc.update("""
+                    INSERT INTO seat_holds (reservation_id, performance_id, performance_seat_id, price_amount, expires_at, status, created_at, released_at)
+                    SELECT reservation_id, performance_id, performance_seat_id, price_amount, expires_at, 'RELEASED', created_at, UTC_TIMESTAMP(6)
+                    FROM seat_holds WHERE reservation_id=? AND performance_seat_id=?
+                    """, original.reservationId(), seat(0));
+        }
+        var seatsBefore = jdbc.queryForList("SELECT id,status,current_hold_id FROM performance_seats WHERE performance_id=? ORDER BY id", fixture.performanceId());
+        var holdsBefore = jdbc.queryForList("SELECT id,performance_seat_id,status,released_at FROM seat_holds WHERE reservation_id=? ORDER BY id", original.reservationId());
+        var limitBefore = jdbc.queryForMap("SELECT reserved_count,confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId());
+
+        assertThatThrownBy(() -> reserve(fixture.firstUserId(), "legacy-invalid", List.of(seat(0), seat(1))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("과거 예약의 최초 선점 요청을 재구성할 수 없습니다.");
+
+        assertThat(jdbc.queryForList("SELECT id,status,current_hold_id FROM performance_seats WHERE performance_id=? ORDER BY id", fixture.performanceId())).isEqualTo(seatsBefore);
+        assertThat(jdbc.queryForList("SELECT id,performance_seat_id,status,released_at FROM seat_holds WHERE reservation_id=? ORDER BY id", original.reservationId())).isEqualTo(holdsBefore);
+        assertThat(jdbc.queryForMap("SELECT reserved_count,confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId())).isEqualTo(limitBefore);
+        assertThat(reservationStatus(original.reservationId())).isEqualTo("HELD");
+        assertThat(count("ticket_reservations")).isEqualTo(1);
+    }
+
+    @ParameterizedTest(name = "{displayName} [{0}]")
+    @ValueSource(strings = {"CANCEL", "EXPIRE"})
+    @DisplayName("두 번째 선점 이력 불일치로 취소·만료가 실패하면 첫 좌석 반환도 롤백한다")
+    void releaseRollsBackWhenSecondHoldIsInconsistent(String operation) {
+        var reservation = reserve(fixture.firstUserId(), "release-mismatch", List.of(seat(0), seat(1)));
+        if (operation.equals("EXPIRE")) markExpired(reservation.reservationId());
+        jdbc.update("UPDATE seat_holds SET status='RELEASED', released_at=UTC_TIMESTAMP(6) WHERE reservation_id=? AND performance_seat_id=?",
+                reservation.reservationId(), seat(1));
+        var seatsBefore = jdbc.queryForList("SELECT id,status,current_hold_id FROM performance_seats WHERE performance_id=? ORDER BY id", fixture.performanceId());
+        var holdsBefore = jdbc.queryForList("SELECT id,status,released_at FROM seat_holds WHERE reservation_id=? ORDER BY id", reservation.reservationId());
+        var limitBefore = jdbc.queryForMap("SELECT reserved_count,confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId());
+
+        assertThatThrownBy(() -> {
+            if (operation.equals("CANCEL")) service.cancel(fixture.firstUserId(), reservation.reservationId());
+            else service.expireHold(reservation.reservationId());
+        }).isInstanceOf(IllegalStateException.class).hasMessage("반환 예약의 선점·좌석 관계가 일치하지 않습니다.");
+
+        assertThat(reservationStatus(reservation.reservationId())).isEqualTo("HELD");
+        assertThat(jdbc.queryForList("SELECT id,status,current_hold_id FROM performance_seats WHERE performance_id=? ORDER BY id", fixture.performanceId())).isEqualTo(seatsBefore);
+        assertThat(jdbc.queryForList("SELECT id,status,released_at FROM seat_holds WHERE reservation_id=? ORDER BY id", reservation.reservationId())).isEqualTo(holdsBefore);
+        assertThat(jdbc.queryForMap("SELECT reserved_count,confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId())).isEqualTo(limitBefore);
+    }
+
+    @ParameterizedTest(name = "{displayName} [{0}]")
+    @ValueSource(strings = {"NOT_OPEN", "CLOSED"})
+    @DisplayName("예매 시작 전과 마감 후에는 선점·구매 관리 행을 남기지 않는다")
+    void bookingOutsideWindowDoesNotReserve(String boundary) {
+        if (boundary.equals("NOT_OPEN")) {
+            jdbc.update("UPDATE performances SET booking_opens_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR), booking_closes_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 2 HOUR) WHERE id=?", fixture.performanceId());
+        } else {
+            jdbc.update("UPDATE performances SET booking_opens_at=DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 HOUR), booking_closes_at=UTC_TIMESTAMP(6) WHERE id=?", fixture.performanceId());
+        }
+        assertError(() -> reserve(fixture.firstUserId(), "booking-window", List.of(seat(0))),
+                boundary.equals("NOT_OPEN") ? ErrorCode.BOOKING_NOT_OPEN : ErrorCode.BOOKING_CLOSED);
+        assertThat(count("ticket_reservations")).isZero();
+        assertThat(count("seat_holds")).isZero();
+        assertThat(count("ticket_purchase_limits")).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=? AND status='AVAILABLE' AND current_hold_id IS NULL", Integer.class, fixture.performanceId())).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("좌석 잠금 실패가 반복되면 세 번의 트랜잭션을 롤백하고 재시도를 중단한다")
+    void exhaustedSeatLockRetriesLeaveNoPartialReservation() {
+        var calls = new AtomicInteger();
+        doAnswer(invocation -> {
+            calls.incrementAndGet();
+            throw new PessimisticLockingFailureException("injected lock conflict");
+        }).when(seatRepository).findLockedById(seat(1));
+
+        assertError(() -> reserve(fixture.firstUserId(), "lock-conflict", List.of(seat(0), seat(1))), ErrorCode.SEAT_LOCK_TIMEOUT);
+        assertThat(calls).hasValue(3);
+        assertThat(count("ticket_reservations")).isZero();
+        assertThat(count("seat_holds")).isZero();
+        assertThat(count("ticket_purchase_limits")).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=? AND status='AVAILABLE' AND current_hold_id IS NULL", Integer.class, fixture.performanceId())).isEqualTo(3);
+    }
+
+    @ParameterizedTest(name = "{displayName} [{0}]")
+    @ValueSource(strings = {"CANCEL", "EXPIRE"})
+    @DisplayName("취소·만료의 좌석 잠금 실패가 반복되면 재시도를 중단하고 예약을 보존한다")
+    void releaseLockRetriesExhaustedPreservesReservation(String operation) {
+        var reservation = reserve(fixture.firstUserId(), "release-lock", List.of(seat(0), seat(1)));
+        if (operation.equals("EXPIRE")) markExpired(reservation.reservationId());
+        var beforeSeats = jdbc.queryForList("SELECT id,status,current_hold_id FROM performance_seats WHERE performance_id=? ORDER BY id", fixture.performanceId());
+        var beforeHolds = jdbc.queryForList("SELECT id,status,released_at FROM seat_holds WHERE reservation_id=? ORDER BY id", reservation.reservationId());
+        var beforeLimit = jdbc.queryForMap("SELECT reserved_count,confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId());
+        var calls = new AtomicInteger();
+        doAnswer(invocation -> { calls.incrementAndGet(); throw new PessimisticLockingFailureException("injected lock conflict"); })
+                .when(seatRepository).findLockedById(seat(1));
+
+        assertError(() -> {
+            if (operation.equals("CANCEL")) service.cancel(fixture.firstUserId(), reservation.reservationId());
+            else service.expireHold(reservation.reservationId());
+        }, ErrorCode.SEAT_LOCK_TIMEOUT);
+        assertThat(calls).hasValue(3);
+        assertThat(reservationStatus(reservation.reservationId())).isEqualTo("HELD");
+        assertThat(jdbc.queryForList("SELECT id,status,current_hold_id FROM performance_seats WHERE performance_id=? ORDER BY id", fixture.performanceId())).isEqualTo(beforeSeats);
+        assertThat(jdbc.queryForList("SELECT id,status,released_at FROM seat_holds WHERE reservation_id=? ORDER BY id", reservation.reservationId())).isEqualTo(beforeHolds);
+        assertThat(jdbc.queryForMap("SELECT reserved_count,confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId())).isEqualTo(beforeLimit);
+    }
+
+    @Test
+    @DisplayName("일시적 좌석 잠금 실패는 전체 롤백 후 같은 요청으로 재시도해 하나만 선점한다")
+    void transientSeatLockFailureRetriesWithoutDuplicateReservation() {
+        var calls = new AtomicInteger();
+        doAnswer(invocation -> {
+            if (calls.incrementAndGet() == 1) throw new PessimisticLockingFailureException("injected lock conflict");
+            return mockingDetails(invocation.getMock()).getMockCreationSettings().getDefaultAnswer().answer(invocation);
+        }).when(seatRepository).findLockedById(seat(1));
+
+        var result = reserve(fixture.firstUserId(), "transient-lock", List.of(seat(1), seat(0)));
+        assertThat(calls).hasValue(2);
+        assertStoredReservation(result, 2);
+        assertThat(count("ticket_reservations")).isEqualTo(1);
+        assertThat(count("seat_holds")).isEqualTo(2);
+        assertThat(count("ticket_purchase_limits")).isEqualTo(1);
+        assertThat(reserve(fixture.firstUserId(), "transient-lock", List.of(seat(0), seat(1)))).isEqualTo(result);
+        assertThat(count("ticket_reservations")).isEqualTo(1);
+        assertThat(reservedCount(fixture.firstUserId())).isEqualTo(2);
     }
 
     @ParameterizedTest(name = "{displayName} [요청 좌석 수={0}]")
@@ -260,6 +516,28 @@ class TicketReservationServiceTest {
         assertThat(count("ticket_reservations")).isEqualTo(2);
         assertThat(reservedCount(fixture.firstUserId())).isZero();
         assertStoredReservation(next, 1);
+    }
+
+    @Test
+    @DisplayName("만료 정리 전 같은 키 재요청은 기존 예약을 반환하고 이후 새 좌석 소유자를 보존한다")
+    void replayDirectlyExpiresOriginalAndPreservesNewOwner() {
+        var old = reserve(fixture.firstUserId(), "expired-replay", List.of(seat(0), seat(1)));
+        markExpired(old.reservationId());
+        var expiredAt = jdbc.queryForObject("SELECT hold_expires_at FROM ticket_reservations WHERE id=?", LocalDateTime.class, old.reservationId()).toInstant(ZoneOffset.UTC);
+
+        var replay = reserve(fixture.firstUserId(), "expired-replay", List.of(seat(1), seat(0)));
+        assertThat(replay.reservationId()).isEqualTo(old.reservationId());
+        assertThat(replay.status()).isEqualTo(TicketReservationStatus.RELEASED);
+        assertThat(replay.holdExpiresAt()).isEqualTo(expiredAt);
+        assertThat(reservedCount(fixture.firstUserId())).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM seat_holds WHERE reservation_id=? AND status='RELEASED' AND released_at IS NOT NULL", Integer.class, old.reservationId())).isEqualTo(2);
+        assertThat(count("ticket_reservations")).isEqualTo(1);
+
+        var next = reserve(fixture.secondUserId(), "new-owner", List.of(seat(0)));
+        assertThat(reserve(fixture.firstUserId(), "expired-replay", List.of(seat(0), seat(1)))).isEqualTo(replay);
+        assertStoredReservation(next, 1);
+        assertThat(count("ticket_reservations")).isEqualTo(2);
+        assertThat(reservedCount(fixture.firstUserId())).isZero();
     }
 
     @Test
