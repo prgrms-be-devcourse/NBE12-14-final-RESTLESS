@@ -77,4 +77,12 @@ public class Ticket {
                                long priceAmount, String status, Instant now) {
         return new Ticket(reservationId, performanceId, performanceSeatId, priceAmount, status, now);
     }
+
+    public void cancelForRefund(Instant now) {
+        if (!"ISSUED".equals(status) || usedAt != null || cancelledAt != null) {
+            throw new IllegalStateException("사용하지 않은 발급 티켓만 환불 취소할 수 있습니다.");
+        }
+        status = "CANCELLED";
+        cancelledAt = Objects.requireNonNull(now);
+    }
 }

@@ -85,4 +85,12 @@ public class TicketSeat {
         status = TicketSeatStatus.AVAILABLE;
         currentHoldId = null;
     }
+
+    public void releaseSold(Long holdId) {
+        if (status != TicketSeatStatus.SOLD || !Objects.equals(currentHoldId, holdId)) {
+            throw new IllegalStateException("환불할 판매 좌석의 소유자가 일치하지 않습니다.");
+        }
+        status = TicketSeatStatus.AVAILABLE;
+        currentHoldId = null;
+    }
 }

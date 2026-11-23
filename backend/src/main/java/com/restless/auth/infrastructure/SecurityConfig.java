@@ -41,7 +41,7 @@ public class SecurityConfig implements WebMvcConfigurer {
             "/api/concerts", "/api/concerts/**",
             "/api/drops", "/api/drops/*",
             "/api/auctions", "/api/auctions/*", "/api/auctions/*/bids", "/api/auctions/*/result",
-            "/api/fan-meetings/*",
+            "/api/fan-meetings", "/api/fan-meetings/*",
             "/actuator/health", "/actuator/health/**",
             // perf 프로필에서만 노출된다. 관리 포트를 보안 그룹으로 막는다 (application-perf.yml)
             "/actuator/prometheus",

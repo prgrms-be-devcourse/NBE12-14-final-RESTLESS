@@ -1,6 +1,7 @@
 package com.restless.ticketing.application;
 
 import com.restless.ticketing.application.dto.TicketSeatInfo;
+import com.restless.ticketing.application.dto.TicketSeatState;
 import com.restless.concert.application.ConcertQueryService;
 import com.restless.concert.application.dto.PerformanceLayout;
 import com.restless.concert.application.dto.SeatPosition;
@@ -21,6 +22,12 @@ public class TicketSeatQueryService {
 
     private final TicketSeatRepository ticketSeatRepository;
     private final ConcertQueryService concertQueryService;
+
+    @Transactional(readOnly = true)
+    public List<TicketSeatState> getSeatStates(Long performanceId) {
+        concertQueryService.requirePerformance(performanceId);
+        return ticketSeatRepository.findStatesByPerformanceId(performanceId);
+    }
 
     @Transactional(readOnly = true)
     public List<TicketSeatInfo> getSeats(Long performanceId) {

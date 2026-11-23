@@ -179,6 +179,35 @@ public class TicketReservation {
         paymentResultPending = false;
     }
 
+    /** 환불 요청 마감 정각부터는 신규 요청을 받지 않는다. */
+    public boolean canRequestRefund(Long paymentId, Instant now, Instant performanceStartsAt) {
+        return (status == TicketReservationStatus.CONFIRMED || status == TicketReservationStatus.REFUND_RECONCILING) && !paymentResultPending
+                && currentPaymentId != null && currentPaymentId.equals(paymentId)
+                && now.isBefore(performanceStartsAt.minusSeconds(3600));
+    }
+
+    public void requestRefund(Long paymentId, Instant now, Instant performanceStartsAt) {
+        if (!canRequestRefund(paymentId, now, performanceStartsAt)) {
+            throw new IllegalStateException("확정된 결제의 환불 요청 기한이 아니거나 환불할 수 없는 예약입니다.");
+        }
+        status = TicketReservationStatus.REFUND_PENDING;
+    }
+
+    public boolean matchesCustomerRefund(Long paymentId) {
+        return currentPaymentId != null && currentPaymentId.equals(paymentId)
+                && (status == TicketReservationStatus.REFUND_PENDING || status == TicketReservationStatus.REFUND_RECONCILING);
+    }
+
+    public void rejectRefund(Long paymentId) {
+        if (!matchesCustomerRefund(paymentId)) throw new IllegalStateException("현재 환불 요청이 아닙니다.");
+        status = TicketReservationStatus.REFUND_RECONCILING;
+    }
+
+    public void completeRefund(Long paymentId) {
+        if (!matchesCustomerRefund(paymentId)) throw new IllegalStateException("현재 환불 요청이 아닙니다.");
+        status = TicketReservationStatus.CANCELLED;
+    }
+
     /** READY 만료는 수락한 미확정 승인 시도가 없을 때만 반영한다. */
     public boolean canApplyPaymentFailure(Long paymentId, Instant attemptStartedAt) {
         if (attemptStartedAt == null) {

@@ -5,6 +5,8 @@ public enum FanMeetingStatus {
 
     SCHEDULED,
 
+    CANCELLED,
+
     OPEN,
 
     CLOSED,

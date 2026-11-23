@@ -2,7 +2,7 @@
 
 > 담당: 송혜민
 >
-> 상태: IMPLEMENTED (환불 요청 `.../cancellations`는 미구현)
+> 상태: IMPLEMENTED (전용 환불 경로 `.../cancellations`는 미구현, 환불은 공통 결제 API 사용)
 >
 > 관련 코드: `backend/src/main/java/com/restless/concert/api/`, `backend/src/main/java/com/restless/ticketing/api/`
 >
@@ -17,7 +17,8 @@
 | GET | `/api/concerts` | 공연 목록 (페이지 조회) | 구현 |
 | GET | `/api/concerts/{concertId}` | 공연 상세 | 구현 |
 | GET | `/api/concerts/{concertId}/performances` | 공연 회차 목록 | 구현 |
-| GET | `/api/performances/{performanceId}/seats` | 회차별 좌석 상태 (3초 폴링) | 구현 |
+| GET | `/api/performances/{performanceId}/seats` | 회차별 좌석 배치·가격·상태 최초 조회 | 구현 |
+| GET | `/api/performances/{performanceId}/seats/status` | 회차별 판매 좌석 상태 갱신 | 구현 |
 | GET | `/api/performances/{performanceId}/booking-availability` | 본인 회차별 구매 한도 조회 | 구현 |
 | POST | `/api/ticket-reservations` | 좌석 선점 (`Idempotency-Key`) | 구현 |
 | GET | `/api/ticket-reservations/{reservationId}` | 예약 상세 | 구현 |
@@ -28,6 +29,8 @@
 | POST | `/api/ticket-reservations/{reservationId}/checkout` | 결제 시작 | 구현 |
 | POST | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 요청 | 미구현 |
 | GET | `/api/ticket-reservations/{reservationId}/cancellations` | 환불 상태 조회 | 미구현 |
+| POST | `/api/payments/{paymentId}/refunds` | 공통 결제 API를 통한 티켓 전액 환불 | 구현 |
+| GET | `/api/payments/{paymentId}` | 공통 결제와 최근 환불 상태 조회 | 구현 |
 
 ## 공연 목록 조회
 
@@ -138,6 +141,12 @@ Long으로 변환할 수 없는 performanceId는 `400 INVALID_REQUEST`로 응답
 
 좌석 JSON이 2KB 이상이고 클라이언트가 gzip을 허용하면 서버는 gzip으로 응답할 수 있다. 압축 해제 후 JSON 필드와 의미는 동일하다. 압축은 이 좌석 조회 API에만 적용하며 `HTTP_COMPRESSION_ENABLED=false`로 비활성화할 수 있다.
 
+### 좌석 상태 갱신
+
+`GET /api/performances/{performanceId}/seats/status`는 인증된 사용자에게 해당 회차 판매 좌석의 `seatId`, `status`만 좌석 ID 오름차순으로 반환한다. 상태는 `AVAILABLE`, `HELD`, `SOLD`이며 조회 시점의 DB 상태다. 회차가 없으면 404, 좌석이 없으면 빈 배열, 비로그인은 401이다. 좌석 소유자나 배치·가격은 반환하지 않는다.
+
+클라이언트는 최초 진입 시 기존 `/seats`로 배치·가격과 상태를 받고, 이후 3초 폴링에서 이 API의 `seatId`를 기준으로 상태만 갱신한다. 목록이 최초 목록과 달라지면 전체 좌석을 다시 조회한다. 최초 목록에 없는 좌석을 임의로 생성하거나 실패한 상태 조회를 성공으로 처리하지 않는다. `frontend-test` 좌석 화면도 이 순서로 조회한다.
+
 ## 활성 예약과 예약 상세 조회
 
 두 API 모두 로그인 필수이며 회원 ID는 `@LoginMember`로 인증 정보에서 추출한다.
@@ -246,7 +255,7 @@ Authorization: Bearer <accessToken>
 - 변경은 모두 같은 트랜잭션에서 커밋하거나 롤백하며 이력, 최초 기한, 요청 키는 보존한다.
 - 본인의 이미 RELEASED인 예약에 반복 요청하면 204로 응답하며 좌석, 수량을 다시 변경하지 않는다. 만료 처리와 경합해도 반환은 한 번만 반영한다.
 - 만료 시각이 지난 결제 전 HELD도 취소 가능하다. PAYMENT_PENDING/RECONCILING/CONFIRMED 및 환불 상태는 이 API로 반환하지 않는다.
-- HELD라도 주문 ID, 결제 진입 시각, 결제 기한이 있으면 취소하지 않는다. 결제, 환불 취소 흐름은 별도 구현 대상이다.
+- HELD라도 주문 ID, 결제 진입 시각, 결제 기한이 있으면 취소하지 않는다. 결제 완료 후 환불은 공통 결제 환불 API를 사용한다.
 
 | HTTP | 코드 | 조건 |
 |---|---|---|
@@ -281,7 +290,7 @@ Authorization: Bearer <accessToken>
 - checkoutStartedAt은 잠금 후 DB UTC 시각, paymentExpiresAt은 그 시각부터 별도 5분이다. 최초 선점 기한, 이력 기한, 좌석 소유권, 구매 수량은 유지한다.
 - 기존 orderId가 있으면 기한 경과나 후속 상태와 무관하게 기존 주문과 최초 시각, 기한을 반환한다. 새 주문, 기한 연장은 없다. 이 응답은 현재 승인 가능함을 보장하지 않는다.
 - 주문 생성과 예약 변경은 같은 READ_COMMITTED 트랜잭션에서 커밋/롤백한다. 교착, 잠금 대기 실패는 전체 롤백 후 최대 3회 시도한다.
-- 범용 Idempotency-Key 응답 재현은 후속이다. TicketPaymentResultHandler가 (TICKET, 예약 ID)를 공통 POST /api/payments 및 /api/payments/confirm에 연결한다. 승인 시작, 성공 발급, 실패/불명확, 보상 취소 확정 처리를 구현했다. PG 호출은 기존 공통 결제 모듈과 pg.provider 설정이 담당하며 checkout 자체가 PG를 호출하지 않는다. 정상 환불, 결제창 UI는 후속이다. 스케줄러는 결제 전 HELD와, 미확정 시도가 없는 PAYMENT_PENDING의 결제 기한 만료를 각각 처리한다. 진행, 불명확 시도는 기한만으로 반환하지 않는다. 자동 만료 뒤 checkout 재요청도 기존 주문, 최초 기한을 반환하며 재생성하지 않는다.
+- 범용 Idempotency-Key 응답 재현은 후속이다. TicketPaymentResultHandler가 (TICKET, 예약 ID)를 공통 결제 승인과 환불 API에 연결한다. 승인 결과, 보상 취소 및 손님 전액 환불 처리를 구현했다. PG 호출은 공통 결제 모듈과 pg.provider 설정이 담당하며 checkout 자체가 PG를 호출하지 않는다. 결제창 UI는 후속이다. 스케줄러는 결제 전 HELD와, 미확정 시도가 없는 PAYMENT_PENDING의 결제 기한 만료를 각각 처리한다. 진행, 불명확 시도는 기한만으로 반환하지 않는다. 자동 만료 뒤 checkout 재요청도 기존 주문, 최초 기한을 반환하며 재생성하지 않는다.
 
 | HTTP | 코드 | 조건 |
 |---|---|---|
@@ -361,6 +370,14 @@ Java 엔티티, Repository는 Performance/PerformanceRepository, DB 테이블은
 티켓팅은 공통 결제의 `payableType=TICKET`, `payableId=예약 ID`로 연결한다. 공통 주문 ID와 결제창의 pgOrderId는 별개다. 금액은 예약에 연결된 공통 주문에서 확인한다.
 티켓팅 결제 Handler(`TicketPaymentResultHandler`)가 등록돼 있어, 티켓 주문도 공통 결제 준비, 승인 API(`POST /api/payments`, `/confirm`)를 쓴다 (2026-11-16 코드 기준). checkout 응답과 기존 API 동작은 유지한다.
 
+## 티켓 전액 환불
+
+확정 예약의 환불은 공통 `POST /api/payments/{paymentId}/refunds`를 사용하며, 로그인한 본인의 결제만 요청할 수 있다. 결제 ID는 본인 주문 상세의 최근 결제 정보에서 확인할 수 있다. 요청 헤더 `Idempotency-Key`, 환불 사유와 응답 형식은 [공통 환불 API](payment.md#손님-전액-환불)를 따른다.
+
+예약 전체를 수수료 없이 전액 환불한다. 공연 시작 1시간 전 정각부터 신규 요청을 거절하며 사용한 티켓은 환불할 수 없다. 요청 수락 후 결과 확정 전에는 티켓과 좌석을 보존한다. 취소 완료 시에만 티켓을 취소하고 좌석과 구매 확정 수량을 반환한다. 최종 거절 뒤 마감 전 새 키로 재요청할 수 있다.
+
+공통 결제 조회 `GET /api/payments/{paymentId}`의 최근 환불 요약으로 진행·불명확·완료·거절 상태를 확인한다. 불명확한 결과는 공통 재확인 작업이 처리하며 좌석을 반환하지 않는다. 상세 상태와 잠금 순서는 [티켓팅 Handler 문서](../../domains/ticketing/payment-handler.md#정상-환불-요청-내부-준비-2026-11-22)를 따른다.
+
 
 ## 본인 발급 티켓 목록과 상세
 
@@ -369,7 +386,7 @@ Java 엔티티, Repository는 Performance/PerformanceRepository, DB 테이블은
 - `GET /api/tickets?page=0&size=20`: 본인 발급 티켓을 issuedAt 내림차순, 동률은 ticketId 내림차순으로 반환한다. page 기본 0, size 기본 20, 허용 1~100이다. 목록이 없거나 페이지 범위 밖이면 content는 빈 배열이며 totalElements/totalPages는 본인의 실제 전체 건수 기준이다.
 - `GET /api/tickets/{ticketId}`: URL의 ticketId는 내부 BIGINT PK다. 타인 티켓과 없는 티켓은 모두 `404 NOT_FOUND`로 처리한다. ticketNo는 사용자에게 보여주는 기존 UUID이며 조회 권한이나 입장 토큰을 뜻하지 않는다.
 - 비로그인은 두 API 모두 `401 UNAUTHORIZED`다. 음수 page, 범위 밖 size, page×size가 JPA offset 범위(Integer.MAX_VALUE)를 넘는 요청, 양수가 아닌 ticketId, 정수 변환이 불가능한 파라미터는 `400 INVALID_REQUEST`다.
-- 티켓 레코드가 존재하면 저장된 상태와 사용, 취소 시각을 그대로 반환한다. ISSUED만 필터링하거나 취소 이력을 숨기지 않는다. 사용/환불/입장 상태 전이를 새로 구현하거나 허용 상태 집합을 추가하지 않는다.
+- 티켓 레코드가 존재하면 저장된 상태와 사용, 취소 시각을 그대로 반환한다. ISSUED만 필터링하거나 취소 이력을 숨기지 않는다. 환불이 확정되면 CANCELLED와 취소 시각을 반환하며 입장 처리는 별도 범위다.
 - 소유권은 예약 사용자 기준이다. 과거 티켓의 좌석이 재판매돼 current_hold_id가 다른 예약을 가리켜도 본인의 과거 티켓은 조회할 수 있으며 새 구매자의 티켓은 볼 수 없다.
 - 가격은 tickets.price_amount의 발급 당시 금액이다. 공연명, 회차 시작 시각, 배치 표시명, 좌석 등급은 현재 카탈로그에서 읽으며 과거 시점의 별도 표시 스냅샷을 보장하지 않는다. 다른 도메인의 Repository를 직접 접근하지 않고 ConcertQueryService의 페이지 단위 일괄 조회를 사용한다.
 - 조회는 읽기 전용 REPEATABLE_READ로 수행한다. 예약, 좌석 잠금, 발급/사용/취소 처리, 주문, 결제 상태 변경, 기한 연장을 하지 않는다.

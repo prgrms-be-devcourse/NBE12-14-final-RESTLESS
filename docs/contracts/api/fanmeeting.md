@@ -6,13 +6,15 @@
 >
 > 관련 코드: `backend/src/main/java/com/restless/fanmeeting/api/`
 >
-> 마지막 확인: 2026-11-16 (엔드포인트와 상세 응답 필드를 컨트롤러·DTO와 대조)
+> 마지막 확인: 2026-11-17 (엔드포인트와 상세 응답 필드를 컨트롤러·DTO와 대조)
 
 - 출처: 담당자 P0 구현 명세 8장, 6.6절. 처리 흐름은 [domains/fanmeeting/transactions.md](../../domains/fanmeeting/transactions.md)
-- 팬미팅 목록 API는 없다.
 
 | Method | Endpoint | 설명 | 권한 | 구현 |
 |---|---|---|---|---|
+| GET | `/api/fan-meetings` | 최신 ID순 공개 목록, 페이지·단일 status 필터 | 공개 | 구현 |
+| PUT | `/api/organizer/fan-meetings/{eventId}` | 생성과 같은 전체 본문으로 오픈 전 수정 | 본인 ORGANIZER, ADMIN | 구현 |
+| POST | `/api/organizer/fan-meetings/{eventId}/cancel` | 오픈 전 멱등 취소 | 본인 ORGANIZER, ADMIN | 구현 |
 | POST | `/api/organizer/fan-meetings` | Event 생성. 만든 회원이 주최자 | ORGANIZER, ADMIN | 구현 |
 | GET | `/api/fan-meetings/{eventId}` | 상세. 게릴라 오픈이면 OPEN 전 `entryOpensAt` null. `entryClosesAt`은 OPEN 중에만 | 공개 | 구현 |
 | POST | `/api/fan-meetings/{eventId}/applications` | 응모·재응모 | 회원 | 구현 |
@@ -207,3 +209,26 @@
 - 팀 공통 `ErrorResponse` 형식([README.md](README.md))을 따른다.
 - 회원 ID는 요청 본문이 아니라 인증 정보에서 얻는다.
 - 다른 회원의 주문은 403이 아니라 404 `ORDER_NOT_FOUND`로 답한다.
+
+## 공개 목록
+
+GET /api/fan-meetings?status=SCHEDULED&page=0&size=20. 단일 status이며 생략하면 SCHEDULED·OPEN만 표시한다. 지난 행사는 status로 조회한다. CANCELLED는 필터를 지정해도 목록에서 제외하며 빈 목록을 반환한다.
+page >= 0, 1 <= size <= 100이며 기본 0·20이다. 잘못된 파라미터는 400 INVALID_REQUEST다. 정렬은 event_id DESC다.
+```json
+{"items":[{"eventId":1,"title":"팬미팅","status":"SCHEDULED","entryOpensAt":null,"entryClosesAt":null,"meetingAt":"2026-11-25T03:00:00Z","winnerLimit":300,"feeAmount":50000}],"page":0,"size":20,"totalElements":1,"totalPages":1}
+```
+목록과 상세는 시각 공개 판정을 공유한다. 게릴라 행사의 SCHEDULED·CANCELLED는 entryOpensAt=null, entryClosesAt은 OPEN에서만 공개한다.
+
+## 오픈 전 수정·취소
+
+PUT /api/organizer/fan-meetings/{eventId}는 생성 요청과 같은 모든 필드를 받는다.
+```json
+{"title":"변경된 팬미팅","entryOpensAt":"2026-11-20T03:00:00Z","firstNoticeScheduledAt":"2026-11-19T03:00:00Z","winnerLimit":300,"reserveLimit":100,"feeAmount":50000,"meetingAt":"2026-11-25T03:00:00Z","promotionClosesAt":null,"opensAtPublic":true}
+```
+성공은 200이며 상세 응답과 같은 필드(eventId, title, status, entryOpensAt, entryClosesAt, meetingAt, winnerLimit, reserveLimit, feeAmount)를 반환한다. organizer_id·status는 보존한다.
+
+POST /api/organizer/fan-meetings/{eventId}/cancel은 본문 없이 호출하고 성공은 빈 본문 200이다. 이미 CANCELLED인 경우도 같은 응답이다.
+최초 수정·취소는 SCHEDULED이고 기존 entry_opens_at보다 이전에만 가능하다. 정확히 같은 시각부터 거절한다.
+없는 행사는 404 FAN_MEETING_NOT_FOUND, 다른 주최자는 404 FAN_MEETING_NOT_FOUND, 상태·시각 위반은 409 FAN_MEETING_NOT_EDITABLE이다.
+일반 회원은 403 FORBIDDEN, 비로그인은 401 UNAUTHORIZED다. 새 설정의 도메인 검증은 400 INVALID_FAN_MEETING_SETTINGS이며 JSON·필수 필드는 400 INVALID_REQUEST다.
+취소 이유 코드 BEFORE_OPEN·실행 회원 ID는 로그에 남기고 컬럼은 추가하지 않는다. 취소 상세는 200 CANCELLED, 응모는 409 APPLICATION_WINDOW_CLOSED다.

@@ -105,6 +105,14 @@ public class FanMeetingEvent {
 
     /** 생성 규칙을 거친 행사만 만들어지게 이 메서드로만 만든다. now는 시각 검증에 쓴다. */
     public static FanMeetingEvent create(FanMeetingSettings settings, Long organizerId, Instant now) {
+        Schedule schedule = validate(settings, now);
+        return new FanMeetingEvent(settings, organizerId, schedule.entryClosesAt(), schedule.promotionClosesAt(), now);
+    }
+
+    private record Schedule(Instant entryClosesAt, Instant promotionClosesAt) {
+    }
+
+    private static Schedule validate(FanMeetingSettings settings, Instant now) {
         if (!settings.entryOpensAt().isAfter(now)) {
             throw invalid("응모 오픈 시각은 현재보다 뒤여야 합니다.");
         }
@@ -133,7 +141,39 @@ public class FanMeetingEvent {
         if (promotionClosesAt.isAfter(settings.meetingAt().minus(MIN_PROMOTION_CLOSE_BEFORE_MEETING))) {
             throw invalid("승격 마감은 팬미팅 3시간 전까지 정할 수 있습니다.");
         }
-        return new FanMeetingEvent(settings, organizerId, entryClosesAt, promotionClosesAt, now);
+        return new Schedule(entryClosesAt, promotionClosesAt);
+    }
+
+    public void requireEditable(Instant now) {
+        if (status != FanMeetingStatus.SCHEDULED || !now.isBefore(entryOpensAt)) {
+            throw new BusinessException(ErrorCode.FAN_MEETING_NOT_EDITABLE);
+        }
+    }
+
+    public boolean cancel(Instant now) {
+        if (status == FanMeetingStatus.CANCELLED) {
+            return false;
+        }
+        requireEditable(now);
+        status = FanMeetingStatus.CANCELLED;
+        updatedAt = now;
+        return true;
+    }
+
+    public void update(FanMeetingSettings settings, Instant now) {
+        requireEditable(now);
+        Schedule schedule = validate(settings, now);
+        title = settings.title();
+        entryOpensAt = settings.entryOpensAt();
+        entryClosesAt = schedule.entryClosesAt();
+        firstNoticeScheduledAt = settings.firstNoticeScheduledAt();
+        winnerLimit = settings.winnerLimit();
+        reserveLimit = settings.reserveLimit();
+        feeAmount = settings.feeAmount();
+        meetingAt = settings.meetingAt();
+        promotionClosesAt = schedule.promotionClosesAt();
+        opensAtPublic = settings.opensAtPublic();
+        updatedAt = now;
     }
 
     /** 응모·취소를 받을 수 있는지. OPEN이고 entry_opens_at <= now < entry_closes_at. 아니면 APPLICATION_WINDOW_CLOSED. */
@@ -203,6 +243,16 @@ public class FanMeetingEvent {
     /** 최초 당첨 주문의 결제 기한이 승격 마감을 넘지 않을 때만 추첨을 진행한다. */
     public boolean isDrawAllowed(Instant now) {
         return !now.plus(FanMeetingOrder.PAYMENT_WINDOW).isAfter(promotionClosesAt);
+    }
+
+    /** 오픈 전 취소도 게릴라 시각을 공개하지 않는다. */
+    public Instant publicEntryOpensAt() {
+        boolean beforeOpen = status == FanMeetingStatus.SCHEDULED || status == FanMeetingStatus.CANCELLED;
+        return opensAtPublic || !beforeOpen ? entryOpensAt : null;
+    }
+
+    public Instant publicEntryClosesAt() {
+        return status == FanMeetingStatus.OPEN ? entryClosesAt : null;
     }
 
     /** 빈자리 = 정원 − (확정 + 결제 대기). */

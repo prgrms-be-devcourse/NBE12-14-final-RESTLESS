@@ -4,7 +4,7 @@
 
 ### P0 포함
 
-행사 생성(주최자·관리자), 응모·취소·재응모, 응모 기간 자동 열기·마감, 결정적 추첨(당첨·예비), 당첨자 결제 기한(60분) 안 결제, 결제 포기, 결제 결과 보류, 기한 만료, 빈자리 예비 승격, 모집 완료, 관리자 summary.
+공개 목록, 오픈 전 수정·취소, 행사 생성(주최자·관리자), 응모·취소·재응모, 응모 기간 자동 열기·마감, 결정적 추첨(당첨·예비), 당첨자 결제 기한(60분) 안 결제, 결제 포기, 결제 결과 보류, 기한 만료, 빈자리 예비 승격, 모집 완료, 관리자 summary.
 
 ### 만들지 말 것 (P0 범위 밖)
 
@@ -14,8 +14,8 @@
 - 실제 Common Payment·PG 연동, 환불 명령, `payment_version`
 - 알림 발송(Push·이메일), 혜택 알림 구독, 기한 임박 알림
 - 잔여석 판매(`LEFTOVER`), `leftover_*` 컬럼, `payment_deadline_at` 컬럼
-- 랜덤 오픈 시각, 1차 알림, Schedule API, DRAFT 수정, 설정 잠금
-- 이벤트 취소·환불 정산, `EVENT_COMPLETED`, `MANUAL_REVIEW` 자동 전환
+- 랜덤 오픈 시각, 1차 알림, Schedule API, 설정 잠금
+- 오픈 후 이벤트 취소·환불 정산 (P1, 결제 모듈 일괄 환불 합의 뒤), `EVENT_COMPLETED`, `MANUAL_REVIEW` 자동 전환
 - 응모 B안(시각 판정), Lease 갱신, 추첨 지수 backoff
 - 보류 수동 처리 기록 테이블(로그로 대신), 관리자 화면
 - 회원 정지, 본인인증, 티켓 보유자 한정
@@ -58,6 +58,16 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 - `promotion_closes_at` 미입력이면 `meeting_at - 24시간`
 - `entry_closes_at + 2시간 <= promotion_closes_at <= meeting_at - 3시간`
 
+
+## 3.1. 공개 목록과 오픈 전 수정·취소
+
+- 공개 목록은 로그인 없이 조회한다. page는 0부터, size 기본 20·최대 100이며 단일 status 필터를 받는다. 경매 목록의 페이지 방식(items, page, size, totalElements, totalPages)을 따른다. event_id 내림차순이다. 기본은 SCHEDULED·OPEN만 표시한다. 지난 행사는 status 필터로 조회하며 CANCELLED는 필터를 지정해도 목록에서 제외한다. 취소 행사 상세는 조회할 수 있다.
+- 목록과 상세는 같은 도메인 메서드로 시각 공개를 판단한다. 게릴라 행사는 SCHEDULED·CANCELLED에서 entryOpensAt을 숨긴다. entryClosesAt은 OPEN에서만 공개한다.
+- 수정은 PUT /api/organizer/fan-meetings/{eventId}에 생성과 같은 전체 본문을 보낸다. 본인 주최자 또는 ADMIN만 가능하다. 다른 주최자는 404 FAN_MEETING_NOT_FOUND이다.
+- Event 배타 잠금 뒤 Clock 시각으로 기존 상태 SCHEDULED이며 기존 entry_opens_at보다 이전인지 확인한다. 위반은 409 FAN_MEETING_NOT_EDITABLE이다. 생성과 같은 검증을 적용해 새 설정을 저장하고 organizer_id·status는 보존한다. 검증 실패는 400 INVALID_FAN_MEETING_SETTINGS이며 DTO 형식 검증은 INVALID_REQUEST다.
+- 취소는 POST /api/organizer/fan-meetings/{eventId}/cancel이다. 같은 권한·잠금·시각 조건으로 CANCELLED 전환하고 200을 반환한다. 이미 CANCELLED면 권한 확인 뒤 시각과 무관하게 200이다. 취소 사유 코드 BEFORE_OPEN과 실행 회원 ID는 로그에만 남긴다. 요청 본문·추가 컬럼은 없다.
+- CANCELLED는 끝 상태다. 상세는 200이며 응모는 APPLICATION_WINDOW_CLOSED로 거절한다. Open Worker와 OPEN_MISSED 조회는 SCHEDULED만 처리하므로 취소 행사를 건드리지 않는다.
+
 ## 4. 정책 요약
 
 | 영역 | 정책 |
@@ -95,7 +105,7 @@ enum에는 v0.8의 전체 값을 선언해도 된다. 전이는 이 폴더에 �
 - `/api/admin/**`(summary)는 `role = ADMIN`만 호출한다.
 - 역할은 인증 모듈의 보안 설정이 경로 단위로 막는다. 권한이 없으면 403 `FORBIDDEN`, 로그인하지 않았으면 401 `UNAUTHORIZED`이고, 형식은 팀 공통 오류 응답 `{code, message, details, traceId, timestamp}`다([인증 규칙](../../contracts/api/auth.md#인증-규칙)).
 - 팬미팅 컨트롤러는 역할을 다시 검사하지 않는다. 로그인 회원 ID는 `@LoginMember Long userId`로 받는다.
-- 주최자는 자기 행사(`organizer_id`)만 다룬다. 남의 행사는 404로 답한다. 주최자용 조회·관리 API(P1)를 만들 때 서비스에서 확인한다. ADMIN은 모든 행사를 다룬다.
+- 주최자는 자기 행사(`organizer_id`)만 수정·취소한다. 다른 주최자의 행사 수정·취소는 404 `FAN_MEETING_NOT_FOUND`다. 주최자용 조회 API(P1)는 남의 행사를 404로 답하도록 서비스에서 확인한다. ADMIN은 모든 행사를 다룬다.
 
 ## 7. 설정값 (설정 파일)
 

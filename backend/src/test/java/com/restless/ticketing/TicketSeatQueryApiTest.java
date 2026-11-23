@@ -43,6 +43,7 @@ class TicketSeatQueryApiTest {
 
     private static final Instant NOW = Instant.parse("2026-11-12T01:00:00Z");
     private static final String PATH = "/api/performances/{performanceId}/seats";
+    private static final String STATE_PATH = "/api/performances/{performanceId}/seats/status";
 
     @Autowired
     private MockMvc mockMvc;
@@ -75,6 +76,46 @@ class TicketSeatQueryApiTest {
         entityManager.persist(concert);
         concertId = concert.getId();
         performanceId = persistPerformance(layoutId);
+    }
+
+    @Test
+    @DisplayName("좌석 상태 조회는 회차의 판매 좌석만 반환하고 선점 후 최신 상태를 반영한다")
+    void returnsCurrentSeatStatesWithoutLayout() throws Exception {
+        Long physicalId = persistPhysicalSeat("1");
+        includeInLayout(layoutId, physicalId, "A", "10.25");
+        TicketSeat seat = persistTicketSeat(performanceId, layoutId, physicalId, "VIP", 100000);
+        Long otherPerformanceId = persistPerformance(layoutId);
+        persistTicketSeat(otherPerformanceId, layoutId, physicalId, "VIP", 100000);
+        entityManager.flush();
+        entityManager.clear();
+        mockMvc.perform(get(STATE_PATH, performanceId).with(jwt()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].seatId").value(seat.getId()))
+                .andExpect(jsonPath("$[0].status").value("AVAILABLE"))
+                .andExpect(jsonPath("$[0].venueSeatId").doesNotExist())
+                .andExpect(jsonPath("$[0].price").doesNotExist());
+        TicketReservation reservation = TicketReservation.createHeld(userId, performanceId, "state-query",
+                new byte[32], NOW.plusSeconds(300), NOW);
+        entityManager.persist(reservation);
+        SeatHold hold = SeatHold.createHeld(reservation.getId(), performanceId, seat.getId(),
+                seat.getPrice(), NOW.plusSeconds(300), NOW);
+        entityManager.persist(hold);
+        entityManager.flush();
+        entityManager.createNativeQuery("UPDATE performance_seats SET status = 'HELD', current_hold_id = :holdId WHERE id = :seatId")
+                .setParameter("holdId", hold.getId()).setParameter("seatId", seat.getId()).executeUpdate();
+        entityManager.clear();
+        mockMvc.perform(get(STATE_PATH, performanceId).with(jwt()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].seatId").value(seat.getId()))
+                .andExpect(jsonPath("$[0].status").value("HELD"));
+    }
+
+    @Test
+    @DisplayName("상태 조회는 인증과 회차 존재를 확인하고 빈 회차는 빈 배열을 반환한다")
+    void validatesSeatStateAccessAndPerformance() throws Exception {
+        mockMvc.perform(get(STATE_PATH, performanceId)).andExpect(status().isUnauthorized());
+        mockMvc.perform(get(STATE_PATH, -1).with(jwt())).andExpect(status().isNotFound());
+        mockMvc.perform(get(STATE_PATH, performanceId).with(jwt()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
     }
 
     @Test

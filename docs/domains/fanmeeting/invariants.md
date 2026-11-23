@@ -21,6 +21,7 @@
 | INV-FM-15 | 모집 완료 시 `PAYMENT_PENDING`, `PAYMENT_REVIEW`, `WAITING` 0건 |
 | INV-FM-16 | 승격 Order 중 `issued_at + 60분 > promotion_closes_at`인 것 0건, 야간에 발급된 것 0건 |
 | INV-FM-17 | `DECLINED` Selection의 Order는 `attempt_requested_at`이 NULL |
+| INV-FM-18 | CANCELLED 행사에는 Application·DrawRun·Selection·Order 0건 |
 
 AGENTS.md의 핵심 불변식 중 이 도메인에 해당하는 것:
 
