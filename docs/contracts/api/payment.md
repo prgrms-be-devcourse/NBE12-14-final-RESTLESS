@@ -6,7 +6,7 @@
 >
 > 관련 코드: `backend/src/main/java/com/restless/order/`, `backend/src/main/java/com/restless/payment/`
 >
-> 마지막 확인: 2026-11-21 (#314 최근 결제 조회 추가. `common.md`에서 분리. 이전 이력: #44, #45~#47, #73, #101, #109)
+> 마지막 확인: 2026-11-23 (#341 최근 결제 조회 추가. `common.md`에서 분리. 이전 이력: #44, #45~#47, #73, #101, #109)
 
 오류 응답 형식은 [README 공통 규칙 3](README.md#공통-규칙)을 따른다. 결제를 쓰는 도메인: [드롭](drop.md), [티켓팅](ticketing.md), [팬미팅](fanmeeting.md).
 
@@ -30,7 +30,7 @@
 
 ### 최근 결제 시도 조회
 
-`GET /api/payments/latest?payableType=FAN_MEETING&payableId=10`은 본인의 해당 대상에 대한 가장 최근 시도를 `{ "paymentId": 12, "status": "UNKNOWN" }`로 반환한다. `payableType`은 `DROP`, `TICKET`, `FAN_MEETING`이고 `payableId`는 양수이며 둘 다 필수다. 잘못된 값은 400이다.
+`GET /api/payments/latest?payableType=FAN_MEETING&payableId=10`은 본인의 해당 대상에 대한 가장 최근 시도를 `{ "paymentId": 12, "status": "UNKNOWN" }`로 반환한다. `payableType`은 `DROP`, `TICKET`, `FAN_MEETING`, `CREDIT_CHARGE` 중 하나이고 `payableId`는 양수다. 두 값 모두 필수이며 잘못된 값은 400이다.
 
 - 이력이 없거나 타인 소유 대상이면 동일하게 본문 없는 204다. 대상의 존재 여부를 노출하지 않는다.
 - 조회는 결제를 생성하거나 PG를 호출하지 않는다. 반환된 ID로 `GET /api/payments/{paymentId}`를 조회해 결과 확인을 이어 간다.

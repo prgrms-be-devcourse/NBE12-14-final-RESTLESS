@@ -417,7 +417,7 @@ class PaymentFlowTest {
                     .andExpect(jsonPath("$.paymentId").value(entry.getValue()))
                     .andExpect(jsonPath("$.status").value("READY"));
         }
-        assertThat(payments.count()).isEqualTo(3);
+        assertThat(payments.count()).isEqualTo(expected.size());
     }
 
     @Test
@@ -438,6 +438,9 @@ class PaymentFlowTest {
         mvc.perform(get("/api/payments/latest").header("Authorization", auth)
                         .param("payableType", "INVALID").param("payableId", "123"))
                 .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/payments/latest").header("Authorization", auth)
+                        .param("payableType", "DROP").param("payableId", "123"))
+                .andExpect(status().isNoContent());
     }
 
     @Test
