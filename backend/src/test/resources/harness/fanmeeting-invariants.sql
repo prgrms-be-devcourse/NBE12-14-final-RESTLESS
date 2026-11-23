@@ -97,3 +97,11 @@ SELECT COUNT(*) FROM fan_meeting_orders o
 SELECT COUNT(*) FROM fan_meeting_orders o
   JOIN fan_meeting_selections s ON s.selection_id = o.selection_id
  WHERE /* event-scope:o */ TRUE AND s.status = 'DECLINED' AND o.attempt_requested_at IS NOT NULL;
+
+-- name: INV-FM-18 취소 행사에 하위 데이터 없음
+SELECT COUNT(*) FROM fan_meeting_events e
+WHERE /* event-scope:e */ TRUE AND e.status = 'CANCELLED' AND (
+    EXISTS (SELECT 1 FROM fan_meeting_applications a WHERE a.event_id = e.event_id)
+ OR EXISTS (SELECT 1 FROM fan_meeting_draw_runs d WHERE d.event_id = e.event_id)
+ OR EXISTS (SELECT 1 FROM fan_meeting_selections s WHERE s.event_id = e.event_id)
+ OR EXISTS (SELECT 1 FROM fan_meeting_orders o WHERE o.event_id = e.event_id));

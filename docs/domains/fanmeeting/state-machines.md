@@ -5,6 +5,7 @@ Event, Application, Selection, Order 상태를 따로 저장하고, Selection–
 ## 1. Event
 
 ```text
+SCHEDULED → CANCELLED (오픈 전 취소, 끝 상태)
 SCHEDULED → OPEN → CLOSED → DRAWING → PAYMENT_IN_PROGRESS → RECRUITMENT_COMPLETED
 DRAWING → RECRUITMENT_COMPLETED   (추첨 후보 0명)
 ```

@@ -2,7 +2,7 @@
 
 > 상태: 각 도메인 문서의 머리말을 따른다. 문서 머리말 양식과 상태 용어는 [contracts/README.md](../README.md)에 있다.
 >
-> 마지막 확인: 2026-11-16 (엔드포인트 색인을 컨트롤러와 `SecurityConfig`에서 다시 만듦)
+> 마지막 확인: 2026-11-17 (엔드포인트 색인을 컨트롤러와 `SecurityConfig`에서 다시 만듦)
 
 - 경로: `/api/...` ([ADR-0002](../../decisions/0002-common-conventions.md))
 - 인증: JWT Bearer. 토큰, Refresh 쿠키, 공개 경로, 역할 규칙은 [인증·회원 API](auth.md#인증-규칙)에 있다.
@@ -61,7 +61,7 @@ API를 찾을 때 쓰는 색인이다. 요청·응답·오류는 문서 열의 �
 
 - 권한: `공개` 로그인 없이 호출, `로그인` 토큰 필요, 역할 이름은 그 역할만 (`SecurityConfig` 기준)
 - `*` 경매 목록·상세·결과는 지금 공개 경로에 있지만, 경매 정책은 로그인 필요다. 공개 경로에서 빼는 작업이 남아 있다 ([auction.md](auction.md)).
-- 구현: 2026-11-16 컨트롤러 기준. `미구현`은 문서에만 있는 계획이다.
+- 구현: 2026-11-17 컨트롤러 기준. `미구현`은 문서에만 있는 계획이다.
 
 | 도메인 | Method | Endpoint | 권한 | 구현 | 문서 |
 |---|---|---|---|---|---|
@@ -107,6 +107,9 @@ API를 찾을 때 쓰는 색인이다. 요청·응답·오류는 문서 열의 �
 | 팬미팅 | POST | `/api/fan-meetings/{eventId}/orders/{orderId}/confirm` | 로그인 | 구현 | [fanmeeting.md](fanmeeting.md) |
 | 팬미팅 | POST | `/api/fan-meetings/{eventId}/orders/{orderId}/decline` | 로그인 | 구현 | [fanmeeting.md](fanmeeting.md) |
 | 팬미팅 | GET | `/api/fan-meetings/{eventId}/result/me` | 로그인 | 구현 | [fanmeeting.md](fanmeeting.md) |
+| 팬미팅 | GET | `/api/fan-meetings` | 공개 | 구현 | [fanmeeting.md](fanmeeting.md) |
+| 팬미팅 | PUT | `/api/organizer/fan-meetings/{eventId}` | 본인 ORGANIZER, ADMIN | 구현 | [fanmeeting.md](fanmeeting.md) |
+| 팬미팅 | POST | `/api/organizer/fan-meetings/{eventId}/cancel` | 본인 ORGANIZER, ADMIN | 구현 | [fanmeeting.md](fanmeeting.md) |
 | 팬미팅 | POST | `/api/organizer/fan-meetings` | ORGANIZER, ADMIN | 구현 | [fanmeeting.md](fanmeeting.md) |
 | 경매 | GET | `/api/auctions` | 공개* | 구현 | [auction.md](auction.md) |
 | 경매 | POST | `/api/auctions` | ORGANIZER, ADMIN | 구현 | [auction.md](auction.md) |
