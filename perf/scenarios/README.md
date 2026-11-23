@@ -383,3 +383,7 @@ CSV는 Hikari 활성·대기·타임아웃, Tomcat busy thread·현재 연결, �
 앱 호스트는 `perf-`로 시작하고 `PERF_ALLOWED_APP_HOSTS`에 있어야 하며 `prod`를 포함하면 안 됩니다. 실행 전에 관리 endpoint의 `/actuator/prometheus`가 200인지 확인합니다. 비밀번호와 토큰은 로그나 요약에 남기지 않습니다.
 
 측정 기간이 끝나면 필요에 따라 `perf/ec2/perf-ec2.sh verify base`를 한 번 실행해 불변식을 확인합니다. 부하로 데이터가 바뀌었으므로 seed baseline 일부는 달라질 수 있습니다. 종료된 경매는 revision에서 OPEN 전환 +1, 입찰당 +1, 종료 전환 +1을 반영해 수락 수를 `revision - 2`로 구합니다. 열린 입찰 경매는 `revision - 1`을 씁니다.
+
+### 좌석 최초 조회 단계 계측 (perf 프로필)
+
+`ticketing_seat_query_stage_seconds_{count,sum,max}`는 `stage`가 `performance`(회차 리포지토리), `layout_seats`(배치 리포지토리), `sale_seats`(판매 좌석 리포지토리), `combine`(배치 맵 구성·정렬·DTO 결합)인 호출 시간을 기록한다. `outcome`은 `success` 또는 `error`다. 리포지토리 호출 시간에는 DB 실행 외 커넥션 획득 대기·결과 매핑이 포함될 수 있으며 순수 SQL 시간이 아니다. 커넥션 획득은 기존 풀 전체 지표 `hikaricp_connections_acquire_seconds_{count,sum,max}`, `hikaricp_connections_pending`으로 본다. 획득 지표와 단계 시간은 겹칠 수 있고 풀 전체 값은 좌석 조회만의 값이 아니다. 트랜잭션 시작 시 획득하는 대기는 리포지토리 타이머 시작 전에 발생할 수도 있다. 단계 타이머의 max는 Micrometer의 시간 창 최대값이며 누적 최대가 아니다. perf 이외의 프로필에서는 단계 타이머가 생성되지 않는다.

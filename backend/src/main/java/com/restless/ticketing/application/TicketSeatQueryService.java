@@ -1,5 +1,6 @@
 package com.restless.ticketing.application;
 
+import com.restless.common.observability.SeatQueryMetrics;
 import com.restless.ticketing.application.dto.TicketSeatInfo;
 import com.restless.ticketing.application.dto.TicketSeatState;
 import com.restless.concert.application.ConcertQueryService;
@@ -22,6 +23,7 @@ public class TicketSeatQueryService {
 
     private final TicketSeatRepository ticketSeatRepository;
     private final ConcertQueryService concertQueryService;
+    private final SeatQueryMetrics seatQueryMetrics;
 
     @Transactional(readOnly = true)
     public List<TicketSeatState> getSeatStates(Long performanceId) {
@@ -32,10 +34,16 @@ public class TicketSeatQueryService {
     @Transactional(readOnly = true)
     public List<TicketSeatInfo> getSeats(Long performanceId) {
         PerformanceLayout layout = concertQueryService.getPerformanceLayout(performanceId);
+        List<TicketSeat> seats = seatQueryMetrics.measure("sale_seats",
+                () -> ticketSeatRepository.findAllByPerformanceId(performanceId));
+        return seatQueryMetrics.measure("combine", () -> combineSeats(layout, seats));
+    }
+
+    private List<TicketSeatInfo> combineSeats(PerformanceLayout layout, List<TicketSeat> seats) {
         Map<Long, SeatPosition> positions = layout.seats().stream()
                 .collect(Collectors.toMap(SeatPosition::venueSeatId, Function.identity()));
 
-        return ticketSeatRepository.findAllByPerformanceId(performanceId).stream()
+        return seats.stream()
                 .sorted(Comparator.comparing(TicketSeat::getId))
                 .map(seat -> {
                     SeatPosition position = positions.get(seat.getVenueSeatId());
