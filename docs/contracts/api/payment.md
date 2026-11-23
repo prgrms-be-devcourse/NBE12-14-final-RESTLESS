@@ -106,7 +106,7 @@
 { "payableType": "DROP", "payableId": 123 }
 ```
 
-`payableType`은 `DROP`, `TICKET`, `FAN_MEETING`, `payableId`는 양수다.
+`payableType`은 `DROP`, `TICKET`, `FAN_MEETING`, `CREDIT_CHARGE`(크레딧 충전 주문, [auction.md](auction.md) "크레딧 충전"), `payableId`는 양수다.
 각 도메인의 Handler가 등록되어 있어야 한다(Handler 구현은 도메인 담당 범위).
 금액, 상품명, 기한은 Handler가 읽은 서버 값이며 클라이언트 금액을 받지 않는다.
 0원 대상은 PG로 결제하지 않는다. 409 `PAYMENT_NOT_PAYABLE`, `details.reason = "FREE_ORDER"`. 무료 주문은 도메인이 결제 없이 확정한다.

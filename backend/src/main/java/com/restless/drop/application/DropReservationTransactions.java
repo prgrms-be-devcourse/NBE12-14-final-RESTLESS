@@ -12,8 +12,11 @@ import com.restless.order.domain.OrderType;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -66,18 +69,6 @@ public class DropReservationTransactions {
                     .filter(entry -> entry.getVariantId().equals(variant.getId()) && entry.validAdmission(clock.instant()))
                     .orElseThrow(() -> new BusinessException(ErrorCode.DROP_ADMISSION_REQUIRED));
         }
-        // Keep the most contended inventory lock at the end of validation (EXP-01).
-        long updateStarted = System.nanoTime();
-        int held = inventories.holdOne(variant.getId());
-        long lockAcquired = System.nanoTime();
-        // Includes the wait for the SKU row lock. A sold-out UPDATE changes no row and keeps no lock.
-        meters.timer("drop.inventory.hold.update", "result", held == 0 ? "sold_out" : "held")
-                .record(lockAcquired - updateStarted, TimeUnit.NANOSECONDS);
-        if (held == 0) throw new BusinessException(ErrorCode.DROP_SOLD_OUT);
-        recordInventoryLockHeld(lockAcquired);
-        // The UPDATE may have waited across closesAt; reject and roll back its decrement in that case.
-        now = clock.instant();
-        requireOnSale(drop, now);
         if (admission != null && !admission.validAdmission(now)) {
             throw new BusinessException(ErrorCode.DROP_ADMISSION_REQUIRED);
         }
@@ -87,29 +78,104 @@ public class DropReservationTransactions {
                 new CreateOrderCommand.ShippingAddress(request.recipient(), request.phone(), request.address())));
         var reservation = reservations.saveAndFlush(DropReservation.reserved(dropId, variant.getId(), userId,
                 orderId, key, now.plus(settings.ttl()), now));
-        if (admission != null) {
-            now = clock.instant();
-            if (!admission.validAdmission(now)) throw new BusinessException(ErrorCode.DROP_ADMISSION_REQUIRED);
-            admission.consume(now);
-        }
+        if (admission != null) admission.consume(now);
         slot.occupy(reservation.getId(), now);
-        return new Result(created(reservation), false);
+        // Built here because it reads the order amount, which would be one more round trip inside the lock.
+        var response = created(reservation);
+        // #322: every other write reaches the database before the most contended rows are locked, so a bucket
+        // lock covers only the hold UPDATE and the commit. A rejection below rolls all of them back.
+        slots.flush();
+        long lockAcquired = holdOneUnit(variant.getId(), reservation.getId());
+        recordInventoryLockHeld(lockAcquired);
+        // The hold may have waited across closesAt or the admission deadline (INV-14, INV-06).
+        // These checks read only the clock, so they add no database round trip inside the lock.
+        var afterLock = clock.instant();
+        requireOnSale(drop, afterLock);
+        if (admission != null && !afterLock.isBefore(admission.getAdmittedUntil())) {
+            throw new BusinessException(ErrorCode.DROP_ADMISSION_REQUIRED);
+        }
+        return new Result(response, false);
     }
 
     /**
-     * Times the SKU row lock from the hold UPDATE returning to the transaction ending (commit or rollback).
-     * Measured in the application, so it adds the UPDATE reply and the commit round trip to the time the
-     * database holds the lock. Tags are bounded: committed, rolled_back, unknown.
+     * TX1 steps 5 to 9-1 of ADR-0005 / design #327 r3. Returns the time the held bucket's lock was acquired.
+     * <ul>
+     * <li>6: pick an unlocked stock bucket with {@code FOR UPDATE SKIP LOCKED}, from a random start, never waiting.
+     * <li>7: one UPDATE takes the unit from that bucket and records it on the reservation. Already locked: must hit.
+     * <li>8: if every stock bucket is locked, read committed stock without locks. None visible: sold out.
+     * <li>9: wait on the first bucket that showed stock. 9-1: if it emptied meanwhile, its lock stays until commit;
+     *     pick again, skipping buckets already waited on. At most one wait per bucket, so at most K waits.
+     * </ul>
+     * No deadlock: the only wait is step 9, on a bucket whose committed stock this transaction saw, and the only
+     * other bucket locks it holds are emptied buckets left by 9-1, which stay 0 while held.
+     */
+    private long holdOneUnit(Long variantId, Long reservationId) {
+        int buckets = inventories.bucketCount(variantId);
+        int from = ThreadLocalRandom.current().nextInt(buckets);
+        Set<Integer> waited = new HashSet<>();
+        long started = System.nanoTime();
+        while (true) {
+            var picked = inventories.pickFrom(variantId, from);
+            if (picked.isEmpty() && from > 0) picked = inventories.pickBefore(variantId, from);
+            if (picked.isPresent()) {
+                if (inventories.holdInBucket(reservationId, variantId, picked.get().intValue()) < 1) {
+                    throw new IllegalStateException("Locked drop inventory bucket had no stock");
+                }
+                return recordHold(started, waited.isEmpty() ? "picked" : "waited");
+            }
+            Integer target = inventories.stockedBuckets(variantId, from).stream().map(Number::intValue)
+                    .filter(bucket -> !waited.contains(bucket)).findFirst().orElse(null);
+            if (target == null) {
+                meters.timer("drop.inventory.hold.update", "result", "sold_out")
+                        .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
+                meters.counter("drop.inventory.hold.path", "path", "sold_out").increment();
+                throw new BusinessException(ErrorCode.DROP_SOLD_OUT);
+            }
+            waited.add(target);
+            if (waited.size() > buckets) throw new IllegalStateException("Drop inventory hold waited more than K times");
+            // Found-rows count is 2 here; 1 is possible with useAffectedRows. Either way at least 1 means held.
+            if (inventories.holdInBucket(reservationId, variantId, target) >= 1) return recordHold(started, "waited");
+        }
+    }
+
+    /** {@code hold.update} spans step 6 start to the successful hold, including any step 9 wait. */
+    private long recordHold(long started, String path) {
+        long lockAcquired = System.nanoTime();
+        meters.timer("drop.inventory.hold.update", "result", "held")
+                .record(lockAcquired - started, TimeUnit.NANOSECONDS);
+        meters.counter("drop.inventory.hold.path", "path", path).increment();
+        return lockAcquired;
+    }
+
+    /**
+     * Times the held bucket's lock from its acquisition (the step 6 pick reply, or the step 9 UPDATE reply) to the
+     * transaction ending (commit or rollback). It includes the step 7 UPDATE round trip. Measured in the
+     * application, so it adds the replies and the commit round trip to the time the database holds the lock. Tags are bounded: committed, rolled_back, unknown.
+     * #325: {@code drop.inventory.lock.completion} times only the last part, from the transaction manager
+     * starting to complete (any flush, then the JDBC commit or rollback) to its end. The rest of
+     * {@code lock.held} is the work between the lock and that point.
      */
     private void recordInventoryLockHeld(long lockAcquired) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) return;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            private long completionStarted;
+
+            @Override
+            public void beforeCompletion() {
+                completionStarted = System.nanoTime();
+            }
+
             @Override
             public void afterCompletion(int status) {
+                long ended = System.nanoTime();
                 var outcome = status == STATUS_COMMITTED ? "committed"
                         : status == STATUS_ROLLED_BACK ? "rolled_back" : "unknown";
                 meters.timer("drop.inventory.lock.held", "outcome", outcome)
-                        .record(System.nanoTime() - lockAcquired, TimeUnit.NANOSECONDS);
+                        .record(ended - lockAcquired, TimeUnit.NANOSECONDS);
+                if (completionStarted != 0) {
+                    meters.timer("drop.inventory.lock.completion", "outcome", outcome)
+                            .record(ended - completionStarted, TimeUnit.NANOSECONDS);
+                }
             }
         });
     }

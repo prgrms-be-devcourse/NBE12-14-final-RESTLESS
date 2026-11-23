@@ -83,3 +83,6 @@ echo "SELECT id, email, role FROM users WHERE id < 1000 ORDER BY id;" | run_mysq
 echo
 echo "드롭"
 echo "SELECT id, status, title FROM drops ORDER BY id;" | run_mysql
+echo
+echo "경매"
+echo "SELECT auction_id, status, seller_user_id, title FROM auctions ORDER BY auction_id;" | run_mysql

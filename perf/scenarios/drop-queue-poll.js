@@ -1,4 +1,4 @@
-// 폴링 비용 Q: 대기자 N명을 고정해 두고 상태 조회 비용과 수용 가능한 대기 인원을 잰다.
+// 대기열 폴링 측정: 대기자 N명을 고정해 두고 상태 조회 비용과 수용 가능한 대기 인원을 잰다.
 // 계획은 docs/testing/drop-performance-plan.md, 절차는 drop-performance-procedure.md 5절. 사용법은 perf/scenarios/README.md.
 //
 // 앱은 restless.drop.queue.required=true, 입장 작업은 끈다(RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED=false).

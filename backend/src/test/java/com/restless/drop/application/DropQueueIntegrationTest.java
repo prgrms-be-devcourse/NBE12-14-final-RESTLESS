@@ -4,6 +4,7 @@ import com.restless.TestcontainersConfiguration;
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
 import com.restless.drop.application.dto.CreateDropRequest;
+import com.restless.drop.acceptance.DropStock;
 import com.restless.drop.application.dto.CreateDropReservationRequest;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Timestamp;
@@ -76,11 +77,11 @@ class DropQueueIntegrationTest {
     void inv06SoldOutClosesAdmissionAndReplayNeedsNoAdmission() {
         queue.enter(drop, user, variant);
         job.runOnce();
-        jdbc.update("UPDATE drop_inventories SET available_quantity=0, sold_quantity=3 WHERE variant_id=?", variant);
+        DropStock.setAvailable(jdbc, variant, 0);
         assertCode(() -> service.create(drop, user, "sold-out", request()), ErrorCode.DROP_SOLD_OUT);
         job.runOnce();
         assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.UNAVAILABLE);
-        jdbc.update("UPDATE drop_inventories SET available_quantity=3, sold_quantity=0 WHERE variant_id=?", variant);
+        DropStock.setAvailable(jdbc, variant, 3);
         assertCode(() -> service.create(drop, user, "closed-grant", request()), ErrorCode.DROP_ADMISSION_REQUIRED);
         queue.enter(drop, user, variant);
         job.runOnce();
@@ -181,10 +182,10 @@ class DropQueueIntegrationTest {
                 INSERT INTO drop_queue_entries (drop_id,user_id,variant_id,status,entered_at,last_seen_at)
                 SELECT ?,id,?,'WAITING',?,? FROM users WHERE nickname='batch'
                 """, drop, variant, Timestamp.from(opens), Timestamp.from(opens));
-        jdbc.update("UPDATE drop_inventories SET available_quantity=0,sold_quantity=3 WHERE variant_id=?", variant);
+        DropStock.setAvailable(jdbc, variant, 0);
         assertThat(batches.runBatch(variant)).isEqualTo(DropQueueAdmissionTransactions.Result.MORE);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_entries WHERE variant_id=? AND status='UNAVAILABLE'", Integer.class, variant)).isEqualTo(100);
-        jdbc.update("UPDATE drop_inventories SET available_quantity=3,sold_quantity=0 WHERE variant_id=?", variant);
+        DropStock.setAvailable(jdbc, variant, 3);
         batches.runBatch(variant);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_entries WHERE variant_id=? AND status='UNAVAILABLE'", Integer.class, variant)).isEqualTo(100);
         var closedUser = jdbc.queryForObject("SELECT user_id FROM drop_queue_entries WHERE variant_id=? AND status='UNAVAILABLE' ORDER BY id LIMIT 1", Long.class, variant);
@@ -196,7 +197,7 @@ class DropQueueIntegrationTest {
     @Test
     void closureWaitsForConcurrentQueueReadInsteadOfLeavingLiveGrantBehind() throws Exception {
         queue.enter(drop, user, variant);
-        jdbc.update("UPDATE drop_inventories SET available_quantity=0,sold_quantity=3 WHERE variant_id=?", variant);
+        DropStock.setAvailable(jdbc, variant, 0);
         try (var connection = dataSource.getConnection(); var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
             connection.setAutoCommit(false);
             try (var statement = connection.prepareStatement("SELECT id FROM drop_queue_entries WHERE drop_id=? AND user_id=? FOR UPDATE")) {
@@ -227,7 +228,7 @@ class DropQueueIntegrationTest {
     }
 
     private void assertCoveredWaitingCloses(Instant later) {
-        jdbc.update("UPDATE drop_inventories SET available_quantity=1,sold_quantity=2 WHERE variant_id=?", variant);
+        DropStock.setAvailable(jdbc, variant, 1);
         queue.enter(drop, user, variant);
         job.runOnce();
         jdbc.update("""

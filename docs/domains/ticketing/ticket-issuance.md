@@ -106,7 +106,7 @@ UUID 번호 자체의 충돌은 발급 대상 중복과 구분하여 새 번호�
 
 ## 공통 결제 callback 연결 (2026-11-16)
 
-TicketPaymentResultHandler가 onApproved를 내부 발급 서비스로 전달한다. 거절된 승인은 공통 결제가 보상 취소하며, 티켓팅은 onRefunded(COMPENSATION)에서 미확정 자원만 정리한다. 이미 CONFIRMED인 예약에 보상 취소가 오면 티켓·confirmed 수량을 변경하지 않고 운영 확인 대상으로 기록한다. 정상 환불·입장 기능은 후속이다. 이전 단계의 Handler·보상 연결 후속 표기는 당시 범위다.
+TicketPaymentResultHandler가 onApproved를 내부 발급 서비스로 전달한다. 거절된 승인은 공통 결제가 보상 취소하며, 티켓팅은 onRefunded(COMPENSATION)에서 미확정 자원만 정리한다. 이미 CONFIRMED인 예약에 보상 취소가 오면 티켓·confirmed 수량을 변경하지 않고 운영 확인 대상으로 기록한다. 정상 환불은 이후 연결했으며 입장 기능은 후속이다. 이전 단계의 Handler·보상 연결 후속 표기는 당시 범위다.
 
 
 ## 본인 발급 티켓 조회 (2026-11-16)

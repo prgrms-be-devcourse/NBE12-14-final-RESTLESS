@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/auction/domain/`, `backend/src/main/java/com/restless/credit/domain/`, `backend/src/main/java/com/restless/auction/application/AuctionQueryService.java`
 >
-> 마지막 확인: 2026-11-15 (#131 결과·내 입찰 조회까지)
+> 마지막 확인: 2026-11-21 (#316 충전 주문 상태와 내역 `CHARGE` 추가)
 
 ## 1. 경매 (`auctions.status`)
 
@@ -66,10 +66,21 @@ HELD → CAPTURED       (해당 입찰이 낙찰됨, 보유액에서 차감)
 
 | 값 | 사건 | `balance_delta` | `reserved_delta` | `credit_hold_id` |
 |---|---|---|---|---|
-| `GRANT` | 지급 | + 금액 | 0 | NULL |
+| `GRANT` | 테스트용 지급 | + 금액 | 0 | NULL |
+| `CHARGE` | PG 충전 승인 (`operation_key = CHARGE:<충전 주문 ID>`) | + 금액 | 0 | NULL |
 | `HOLD` | 입찰 수락 | 0 | + 금액 | 확보 ID |
 | `RELEASE` | 추월 | 0 | − 금액 | 확보 ID |
 | `CAPTURE` | 낙찰 | − 금액 | − 금액 | 확보 ID |
+
+### 5.1 충전 주문 (`credit_charges.status`, #316)
+
+```text
+READY → PAID   (결제 승인 확인, 지급)
+```
+
+- 실패·결과 불명확·기한 경과는 상태를 바꾸지 않는다. 기한 안이면 같은 충전 주문으로 새 결제를 할 수 있다.
+- `EXPIRED` 상태는 두지 않는다. 기한은 `expires_at`으로 판정한다.
+- `PAID`는 끝 상태다. `PAID`면 `paid_payment_id`, `paid_at`이 있고 `CHARGE` 내역이 정확히 1건이다 (DB CHECK, INV-AU-16).
 
 ## 6. 상태 조합
 

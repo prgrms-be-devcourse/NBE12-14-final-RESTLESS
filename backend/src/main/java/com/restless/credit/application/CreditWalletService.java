@@ -59,6 +59,19 @@ public class CreditWalletService {
     }
 
     /**
+     * 승인된 충전의 크레딧을 지급한다 (#316). 결제 결과 트랜잭션 안에서만 실행한다(L-02와 같은 이유로 MANDATORY).
+     * 지갑이 없으면 만든다. 내역의 operation_key {@code CHARGE:<충전 주문 ID>}가 UNIQUE라 같은 충전은 한 번만 지급된다.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void charge(Long userId, Long creditChargeId, long amount, Instant now) {
+        wallets.insertIfAbsent(userId, LocalDateTime.ofInstant(now, ZoneOffset.UTC));
+        CreditWallet wallet = wallets.findByUserIdForUpdate(userId).orElseThrow();
+        wallet.grant(amount, now);
+        transactions.save(CreditTransaction.record(wallet, null, CreditTransactionType.CHARGE,
+                amount, 0, "CHARGE:" + creditChargeId, now));
+    }
+
+    /**
      * 여러 회원의 지갑을 지갑 ID 오름차순으로 잠근다. 지갑이 없는 회원은 건너뛴다.
      * 입찰은 새 입찰자와 이전 최고 입찰자의 지갑을 이 메서드로 먼저 잠근다 (데드락 방지).
      */

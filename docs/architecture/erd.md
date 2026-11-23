@@ -21,7 +21,7 @@
 | 주문·결제 | 공통 | `orders`, `order_items`, `order_shipping_snapshots`, `payments`, `payment_refunds` |
 | 공연, 공연장 | 송혜민 | `venues`, `venue_sections`, `venue_seats`, `venue_layouts`, `layout_seats`, `concerts`, `performances` |
 | 티켓팅 | 송혜민 | `performance_seats`, `seat_holds`, `ticket_reservations`, `tickets`, `ticket_purchase_limits` |
-| 한정판 드롭 | 이태호 | `drops`, `drop_variants`, `drop_inventories`, `drop_reservations`, `drop_purchase_slots`, `drop_queue_entries` |
+| 한정판 드롭 | 이태호 | `drops`, `drop_variants`, `drop_inventories`, `drop_inventory_buckets`, `drop_reservations`, `drop_purchase_slots`, `drop_queue_entries` |
 | 팬미팅 추첨 | 홍승연 | `fan_meeting_events`, `fan_meeting_draw_runs`, `fan_meeting_applications`, `fan_meeting_selections`, `fan_meeting_orders` |
 | 경매 | 천종원 | `auctions`, `auction_bids`, `auction_results`, `auction_images` |
 | 크레딧 | 천종원 (`com.restless.credit` 패키지로 분리, 지금은 경매만 사용) | `credit_wallets`, `credit_holds`, `credit_transactions` |
@@ -78,6 +78,7 @@ erDiagram
 ### 드롭
 
 - 입장 신청은 `drop_queue_entries` 행이다 (V20261113_1800, [data-model.md](../domains/drop/data-model.md)). 그림에는 아직 없다.
+- 드롭 재고 버킷은 `drop_inventory_buckets` 행이다 (V20261122_1400, [ADR-0005](../decisions/0005-drop-inventory-buckets.md)). 그림에는 아직 없다. `drop_inventories`의 수량 컬럼은 폐기 예정이다.
 - `drops.concert_id`는 현재 필수(NOT NULL FK)로 구현돼 있다. NULL 허용 여부는 팀 확인 대상으로 남아 있다.
 - 결제는 주문을 FK로 가리키지 않는다. `payments.payable_type`/`payable_id`로 결제 대상(드롭은 재고 점유 ID)을 가리킨다 ([ADR-0003](../decisions/0003-payment-module-boundary.md)).
 

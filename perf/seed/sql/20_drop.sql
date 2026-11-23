@@ -42,8 +42,9 @@ FROM _perf_seq s
 WHERE s.n < @hot_variants;
 
 -- 총재고를 SKU에 나누고 나머지는 앞 SKU부터 1개씩 더한다. 합계가 @hot_stock과 같아야 한다 (verify.sql).
-INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity)
-SELECT v.id, q.qty, q.qty, 0, 0
+-- 재고 버킷 수는 등록 API와 같이 min(@bucket_count, SKU 재고)다. 버킷 행은 파일 끝에서 한 번에 만든다.
+INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity, bucket_count)
+SELECT v.id, q.qty, q.qty, 0, 0, GREATEST(LEAST(@bucket_count, q.qty), 1)
 FROM drop_variants v
 JOIN (SELECT s.n + 1 AS variant_id,
              FLOOR(@hot_stock / @hot_variants) + (s.n < MOD(@hot_stock, @hot_variants)) AS qty
@@ -120,12 +121,14 @@ FROM (SELECT s.n,
       WHERE s.n < @bg_reservations) p;
 
 -- 판매가 끝난 SKU: 점유 중 0, 판매 = CONFIRMED 수, 나머지는 반환되어 available. 점유가 없는 SKU는 재고 0.
-INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity)
+-- 버킷은 1개다. 배경 점유의 bucket_no는 기본값 0이라 판매 수량이 모두 버킷 0에 있어야 한다.
+INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity, bucket_count)
 SELECT v.id,
        COALESCE(a.total, 0),
        COALESCE(a.total - a.sold, 0),
        0,
-       COALESCE(a.sold, 0)
+       COALESCE(a.sold, 0),
+       1
 FROM drop_variants v
 LEFT JOIN (SELECT variant_id, COUNT(*) AS total, SUM(status = 'CONFIRMED') AS sold
            FROM drop_reservations
@@ -166,14 +169,27 @@ SELECT @warm_variant_first + s.n, @warm_drop_id, CONCAT('WARM-', s.n + 1),
 FROM _perf_seq s
 WHERE s.n < @hot_variants AND @warm_stock > 0;
 
-INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity)
-SELECT v.id, q.qty, q.qty, 0, 0
+INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity, bucket_count)
+SELECT v.id, q.qty, q.qty, 0, 0, GREATEST(LEAST(@bucket_count, q.qty), 1)
 FROM drop_variants v
 JOIN (SELECT @warm_variant_first + s.n AS variant_id,
              FLOOR(@warm_stock / @hot_variants) + (s.n < MOD(@warm_stock, @hot_variants)) AS qty
       FROM _perf_seq s
       WHERE s.n < @hot_variants) q ON q.variant_id = v.id
 WHERE v.drop_id = @warm_drop_id AND @warm_stock > 0;
+
+-- 재고 버킷 (ADR-0005). 백필 마이그레이션과 같은 규칙이다: available을 bucket_count개로 나누고 나머지는 앞 버킷부터,
+-- 점유와 판매는 버킷 0에 둔다. 판매 중 SKU는 available = total이라 등록 API의 분배와 같다.
+INSERT INTO drop_inventory_buckets
+    (variant_id, bucket_no, total_quantity, available_quantity, reserved_quantity, sold_quantity)
+SELECT i.variant_id, s.n,
+       FLOOR(i.available_quantity / i.bucket_count) + (s.n < MOD(i.available_quantity, i.bucket_count))
+           + IF(s.n = 0, i.reserved_quantity + i.sold_quantity, 0),
+       FLOOR(i.available_quantity / i.bucket_count) + (s.n < MOD(i.available_quantity, i.bucket_count)),
+       IF(s.n = 0, i.reserved_quantity, 0),
+       IF(s.n = 0, i.sold_quantity, 0)
+FROM drop_inventories i
+JOIN _perf_seq s ON s.n < i.bucket_count;
 
 -- SKU마다 입장 허가 게이트가 하나 있어야 한다. 없으면 앱이 오류 로그와 함께 만든다. 모든 SKU 행을 만든 뒤 마지막에 둔다.
 INSERT INTO drop_queue_gates (variant_id) SELECT id FROM drop_variants;

@@ -94,8 +94,7 @@ class DropCatalogAcceptanceTest extends DropAcceptanceSupport {
         assertThat(detail.<List<Object>>read("$.variants[*].soldOut")).containsExactly(false, false);
 
         // 판매 완료로 L 재고를 소진한 상태를 만든다 (보존식 유지: available -> sold).
-        jdbc.update("UPDATE drop_inventories SET available_quantity = 0, sold_quantity = total_quantity WHERE variant_id = ?",
-                drop.variantIds().get(1));
+        DropStock.setAvailable(jdbc, drop.variantIds().get(1), 0);
         jdbc.update("""
                 INSERT INTO orders (user_id, order_type, status, total_amount, created_at, updated_at)
                 VALUES (?, 'DROP', 'PAID', 31000, NOW(6), NOW(6))""", admin);

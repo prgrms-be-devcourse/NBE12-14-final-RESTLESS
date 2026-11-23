@@ -149,8 +149,7 @@ class MyOrdersAcceptanceTest extends DropAcceptanceSupport {
     /** 결제하지 않아 기한이 지난 상태 (재고 보존식 유지: reserved -> available). */
     private void expire(Hold hold, DropFixture drop) {
         jdbc.update("UPDATE drop_reservations SET status = 'EXPIRED' WHERE id = ?", hold.reservationId());
-        jdbc.update("UPDATE drop_inventories SET reserved_quantity = reserved_quantity - 1, available_quantity = available_quantity + 1 WHERE variant_id = ?",
-                drop.variantIds().get(0));
+        DropStock.release(jdbc, hold.reservationId());
         jdbc.update("UPDATE orders SET status = 'CANCELLED' WHERE id = ?", hold.orderId());
     }
 

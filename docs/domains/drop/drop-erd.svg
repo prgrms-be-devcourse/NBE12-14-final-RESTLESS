@@ -1,0 +1,379 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2500" height="1940" viewBox="0 0 2500 1940">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#1B2540"/></marker></defs>
+<rect width="2500" height="1940" fill="#FFFFFF"/>
+<text x="1250.0" y="92" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="76" font-weight="bold" fill="#14213D" text-anchor="middle" >DROP COMMERCE</text>
+<text x="1250.0" y="150" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="34" font-weight="normal" fill="#1B2540" text-anchor="middle" >Entity Relationship Diagram (V20261122_1401 기준)</text>
+<rect x="43" y="204" width="700" height="464" rx="12" fill="#000" opacity="0.06"/>
+<rect x="40" y="200" width="700" height="464" rx="12" fill="#FFFFFF" stroke="#C9CFDB" stroke-width="2"/>
+<path d="M40 264 V212 Q40 200 52 200 H728 Q740 200 740 212 V264 Z" fill="#2B6CB0"/>
+<text x="68" y="243" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="30" font-weight="bold" fill="#FFFFFF" text-anchor="start" >DROPS</text>
+<rect x="41" y="264" width="698" height="40" fill="#E8EBF2"/>
+<text x="68" y="291" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >FIELD</text>
+<text x="350" y="291" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >TYPE</text>
+<text x="470" y="291" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >KEY</text>
+<text x="68" y="332" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >id</text>
+<text x="350" y="332" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="470" y="311" width="48" height="30" rx="7" fill="#DCEFFB" stroke="#9CCBEA" stroke-width="1.5"/>
+<text x="494.0" y="332" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#1F5F8B" text-anchor="middle" >PK</text>
+<line x1="41" y1="344" x2="739" y2="344" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="372" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >concert_id</text>
+<text x="350" y="372" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="470" y="351" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="494.0" y="372" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="528" y="371" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ concerts</text>
+<line x1="41" y1="384" x2="739" y2="384" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="412" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >title</text>
+<text x="350" y="412" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >varchar</text>
+<line x1="41" y1="424" x2="739" y2="424" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="452" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >description</text>
+<text x="350" y="452" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >text</text>
+<line x1="41" y1="464" x2="739" y2="464" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="492" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >image_url</text>
+<text x="350" y="492" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >varchar</text>
+<line x1="41" y1="504" x2="739" y2="504" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="532" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >opens_at</text>
+<text x="350" y="532" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >datetime</text>
+<line x1="41" y1="544" x2="739" y2="544" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="572" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >closes_at</text>
+<text x="350" y="572" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >datetime</text>
+<line x1="41" y1="584" x2="739" y2="584" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="612" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >status</text>
+<text x="350" y="612" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >varchar</text>
+<line x1="41" y1="624" x2="739" y2="624" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="652" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >created_at</text>
+<text x="350" y="652" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >datetime</text>
+<rect x="903" y="204" width="700" height="344" rx="12" fill="#000" opacity="0.06"/>
+<rect x="900" y="200" width="700" height="344" rx="12" fill="#FFFFFF" stroke="#C9CFDB" stroke-width="2"/>
+<path d="M900 264 V212 Q900 200 912 200 H1588 Q1600 200 1600 212 V264 Z" fill="#16999A"/>
+<text x="928" y="243" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="30" font-weight="bold" fill="#FFFFFF" text-anchor="start" >DROP_VARIANTS</text>
+<rect x="901" y="264" width="698" height="40" fill="#E8EBF2"/>
+<text x="928" y="291" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >FIELD</text>
+<text x="1210" y="291" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >TYPE</text>
+<text x="1330" y="291" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >KEY</text>
+<text x="928" y="332" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >id</text>
+<text x="1210" y="332" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="1330" y="311" width="48" height="30" rx="7" fill="#DCEFFB" stroke="#9CCBEA" stroke-width="1.5"/>
+<text x="1354.0" y="332" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#1F5F8B" text-anchor="middle" >PK</text>
+<line x1="901" y1="344" x2="1599" y2="344" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="372" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >drop_id</text>
+<text x="1210" y="372" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="1330" y="351" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="1354.0" y="372" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="1388" y="371" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ drops</text>
+<line x1="901" y1="384" x2="1599" y2="384" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="412" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >sku_code</text>
+<text x="1210" y="412" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >varchar</text>
+<line x1="901" y1="424" x2="1599" y2="424" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="452" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >option_name</text>
+<text x="1210" y="452" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >varchar</text>
+<line x1="901" y1="464" x2="1599" y2="464" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="492" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >price_amount</text>
+<text x="1210" y="492" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<line x1="901" y1="504" x2="1599" y2="504" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="532" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >is_active</text>
+<text x="1210" y="532" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >boolean</text>
+<rect x="1763" y="204" width="700" height="384" rx="12" fill="#000" opacity="0.06"/>
+<rect x="1760" y="200" width="700" height="384" rx="12" fill="#FFFFFF" stroke="#C9CFDB" stroke-width="2"/>
+<path d="M1760 264 V212 Q1760 200 1772 200 H2448 Q2460 200 2460 212 V264 Z" fill="#3B7D3B"/>
+<text x="1788" y="243" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="30" font-weight="bold" fill="#FFFFFF" text-anchor="start" >DROP_INVENTORIES</text>
+<rect x="1761" y="264" width="698" height="40" fill="#E8EBF2"/>
+<text x="1788" y="291" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >FIELD</text>
+<text x="2070" y="291" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >TYPE</text>
+<text x="2190" y="291" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >KEY</text>
+<text x="1788" y="332" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >variant_id</text>
+<text x="2070" y="332" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="2190" y="311" width="48" height="30" rx="7" fill="#DCEFFB" stroke="#9CCBEA" stroke-width="1.5"/>
+<text x="2214.0" y="332" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#1F5F8B" text-anchor="middle" >PK</text>
+<rect x="2246" y="311" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="2270.0" y="332" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="2304" y="331" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ drop_variants</text>
+<line x1="1761" y1="344" x2="2459" y2="344" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="1788" y="372" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >total_quantity</text>
+<text x="2070" y="372" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >int</text>
+<line x1="1761" y1="384" x2="2459" y2="384" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="1788" y="412" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >bucket_count</text>
+<text x="2070" y="412" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >tinyint</text>
+<line x1="1761" y1="424" x2="2459" y2="424" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="1788" y="452" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#8A8F99" text-anchor="start" text-decoration="line-through">available_quantity</text>
+<text x="2070" y="452" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#8A8F99" text-anchor="start" >int</text>
+<rect x="2190" y="431" width="106" height="30" rx="7" fill="#EEEEEE" stroke="#C8C8C8" stroke-width="1.5"/>
+<text x="2243.0" y="452" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="16" font-weight="bold" fill="#666666" text-anchor="middle" >폐기 예정</text>
+<line x1="1761" y1="464" x2="2459" y2="464" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="1788" y="492" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#8A8F99" text-anchor="start" text-decoration="line-through">reserved_quantity</text>
+<text x="2070" y="492" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#8A8F99" text-anchor="start" >int</text>
+<rect x="2190" y="471" width="106" height="30" rx="7" fill="#EEEEEE" stroke="#C8C8C8" stroke-width="1.5"/>
+<text x="2243.0" y="492" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="16" font-weight="bold" fill="#666666" text-anchor="middle" >폐기 예정</text>
+<line x1="1761" y1="504" x2="2459" y2="504" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="1788" y="532" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#8A8F99" text-anchor="start" text-decoration="line-through">sold_quantity</text>
+<text x="2070" y="532" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#8A8F99" text-anchor="start" >int</text>
+<rect x="2190" y="511" width="106" height="30" rx="7" fill="#EEEEEE" stroke="#C8C8C8" stroke-width="1.5"/>
+<text x="2243.0" y="532" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="16" font-weight="bold" fill="#666666" text-anchor="middle" >폐기 예정</text>
+<line x1="1761" y1="544" x2="2459" y2="544" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="1788" y="572" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#8A8F99" text-anchor="start" text-decoration="line-through">version</text>
+<text x="2070" y="572" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#8A8F99" text-anchor="start" >bigint</text>
+<rect x="2190" y="551" width="106" height="30" rx="7" fill="#EEEEEE" stroke="#C8C8C8" stroke-width="1.5"/>
+<text x="2243.0" y="572" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="16" font-weight="bold" fill="#666666" text-anchor="middle" >폐기 예정</text>
+<rect x="1763" y="758" width="700" height="384" rx="12" fill="#000" opacity="0.06"/>
+<rect x="1760" y="754" width="700" height="384" rx="12" fill="#FFFFFF" stroke="#C9CFDB" stroke-width="2"/>
+<path d="M1760 818 V766 Q1760 754 1772 754 H2448 Q2460 754 2460 766 V818 Z" fill="#5E8C2F"/>
+<text x="1788" y="797" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="30" font-weight="bold" fill="#FFFFFF" text-anchor="start" >DROP_INVENTORY_BUCKETS</text>
+<rect x="1761" y="818" width="698" height="40" fill="#E8EBF2"/>
+<text x="1788" y="845" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >FIELD</text>
+<text x="2070" y="845" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >TYPE</text>
+<text x="2190" y="845" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >KEY</text>
+<text x="1788" y="886" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >variant_id</text>
+<text x="2070" y="886" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="2190" y="865" width="48" height="30" rx="7" fill="#DCEFFB" stroke="#9CCBEA" stroke-width="1.5"/>
+<text x="2214.0" y="886" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#1F5F8B" text-anchor="middle" >PK</text>
+<rect x="2246" y="865" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="2270.0" y="886" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="2304" y="885" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ drop_inventories</text>
+<line x1="1761" y1="898" x2="2459" y2="898" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="1788" y="926" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >bucket_no</text>
+<text x="2070" y="926" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >tinyint</text>
+<rect x="2190" y="905" width="48" height="30" rx="7" fill="#DCEFFB" stroke="#9CCBEA" stroke-width="1.5"/>
+<text x="2214.0" y="926" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#1F5F8B" text-anchor="middle" >PK</text>
+<line x1="1761" y1="938" x2="2459" y2="938" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="1788" y="966" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >total_quantity</text>
+<text x="2070" y="966" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >int</text>
+<line x1="1761" y1="978" x2="2459" y2="978" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="1788" y="1006" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >available_quantity</text>
+<text x="2070" y="1006" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >int</text>
+<line x1="1761" y1="1018" x2="2459" y2="1018" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="1788" y="1046" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >reserved_quantity</text>
+<text x="2070" y="1046" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >int</text>
+<line x1="1761" y1="1058" x2="2459" y2="1058" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="1788" y="1086" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >sold_quantity</text>
+<text x="2070" y="1086" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >int</text>
+<line x1="1761" y1="1098" x2="2459" y2="1098" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="1788" y="1126" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >version</text>
+<text x="2070" y="1126" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="903" y="758" width="700" height="584" rx="12" fill="#000" opacity="0.06"/>
+<rect x="900" y="754" width="700" height="584" rx="12" fill="#FFFFFF" stroke="#C9CFDB" stroke-width="2"/>
+<path d="M900 818 V766 Q900 754 912 754 H1588 Q1600 754 1600 766 V818 Z" fill="#4C4BA0"/>
+<text x="928" y="797" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="30" font-weight="bold" fill="#FFFFFF" text-anchor="start" >DROP_RESERVATIONS</text>
+<rect x="901" y="818" width="698" height="40" fill="#E8EBF2"/>
+<text x="928" y="845" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >FIELD</text>
+<text x="1210" y="845" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >TYPE</text>
+<text x="1330" y="845" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >KEY</text>
+<text x="928" y="886" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >id</text>
+<text x="1210" y="886" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="1330" y="865" width="48" height="30" rx="7" fill="#DCEFFB" stroke="#9CCBEA" stroke-width="1.5"/>
+<text x="1354.0" y="886" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#1F5F8B" text-anchor="middle" >PK</text>
+<line x1="901" y1="898" x2="1599" y2="898" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="926" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >drop_id</text>
+<text x="1210" y="926" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="1330" y="905" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="1354.0" y="926" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="1388" y="925" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ drops</text>
+<line x1="901" y1="938" x2="1599" y2="938" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="966" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >variant_id</text>
+<text x="1210" y="966" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="1330" y="945" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="1354.0" y="966" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="1388" y="965" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ drop_variants</text>
+<line x1="901" y1="978" x2="1599" y2="978" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="1006" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >bucket_no</text>
+<text x="1210" y="1006" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >tinyint</text>
+<rect x="1330" y="985" width="62" height="30" rx="7" fill="#FFF1DC" stroke="#F0C98A" stroke-width="1.5"/>
+<text x="1361.0" y="1006" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="16" font-weight="bold" fill="#8A5A12" text-anchor="middle" >논리</text>
+<text x="1402" y="1005" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ 버킷</text>
+<line x1="901" y1="1018" x2="1599" y2="1018" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="1046" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >user_id</text>
+<text x="1210" y="1046" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="1330" y="1025" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="1354.0" y="1046" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="1388" y="1045" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ users</text>
+<line x1="901" y1="1058" x2="1599" y2="1058" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="1086" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >order_id</text>
+<text x="1210" y="1086" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="1330" y="1065" width="48" height="30" rx="7" fill="#E2F4E4" stroke="#A9D8AF" stroke-width="1.5"/>
+<text x="1354.0" y="1086" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#2E7D3A" text-anchor="middle" >UK</text>
+<rect x="1386" y="1065" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="1410.0" y="1086" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="1444" y="1085" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ orders</text>
+<line x1="901" y1="1098" x2="1599" y2="1098" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="1126" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >request_key</text>
+<text x="1210" y="1126" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >varchar</text>
+<line x1="901" y1="1138" x2="1599" y2="1138" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="1166" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >status</text>
+<text x="1210" y="1166" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >varchar</text>
+<line x1="901" y1="1178" x2="1599" y2="1178" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="1206" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >expires_at</text>
+<text x="1210" y="1206" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >datetime</text>
+<line x1="901" y1="1218" x2="1599" y2="1218" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="1246" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >current_payment_id</text>
+<text x="1210" y="1246" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint?</text>
+<rect x="1330" y="1225" width="62" height="30" rx="7" fill="#FFF1DC" stroke="#F0C98A" stroke-width="1.5"/>
+<text x="1361.0" y="1246" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="16" font-weight="bold" fill="#8A5A12" text-anchor="middle" >논리</text>
+<text x="1402" y="1245" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ payments</text>
+<line x1="901" y1="1258" x2="1599" y2="1258" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="1286" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >created_at</text>
+<text x="1210" y="1286" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >datetime</text>
+<line x1="901" y1="1298" x2="1599" y2="1298" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="928" y="1326" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >updated_at</text>
+<text x="1210" y="1326" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >datetime</text>
+<rect x="43" y="758" width="700" height="544" rx="12" fill="#000" opacity="0.06"/>
+<rect x="40" y="754" width="700" height="544" rx="12" fill="#FFFFFF" stroke="#C9CFDB" stroke-width="2"/>
+<path d="M40 818 V766 Q40 754 52 754 H728 Q740 754 740 766 V818 Z" fill="#B5476B"/>
+<text x="68" y="797" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="30" font-weight="bold" fill="#FFFFFF" text-anchor="start" >DROP_QUEUE_ENTRIES</text>
+<rect x="41" y="818" width="698" height="40" fill="#E8EBF2"/>
+<text x="68" y="845" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >FIELD</text>
+<text x="350" y="845" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >TYPE</text>
+<text x="470" y="845" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >KEY</text>
+<text x="68" y="886" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >id</text>
+<text x="350" y="886" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="470" y="865" width="48" height="30" rx="7" fill="#DCEFFB" stroke="#9CCBEA" stroke-width="1.5"/>
+<text x="494.0" y="886" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#1F5F8B" text-anchor="middle" >PK</text>
+<line x1="41" y1="898" x2="739" y2="898" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="926" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >drop_id</text>
+<text x="350" y="926" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="470" y="905" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="494.0" y="926" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="528" y="925" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ drops</text>
+<line x1="41" y1="938" x2="739" y2="938" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="966" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >variant_id</text>
+<text x="350" y="966" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="470" y="945" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="494.0" y="966" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="528" y="965" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ drop_variants</text>
+<line x1="41" y1="978" x2="739" y2="978" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="1006" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >user_id</text>
+<text x="350" y="1006" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="470" y="985" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="494.0" y="1006" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="528" y="1005" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ users</text>
+<line x1="41" y1="1018" x2="739" y2="1018" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="1046" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >status</text>
+<text x="350" y="1046" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >varchar</text>
+<line x1="41" y1="1058" x2="739" y2="1058" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="1086" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >entered_at</text>
+<text x="350" y="1086" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >datetime</text>
+<line x1="41" y1="1098" x2="739" y2="1098" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="1126" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >last_seen_at</text>
+<text x="350" y="1126" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >datetime</text>
+<line x1="41" y1="1138" x2="739" y2="1138" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="1166" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >admitted_at</text>
+<text x="350" y="1166" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >datetime?</text>
+<line x1="41" y1="1178" x2="739" y2="1178" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="1206" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >admitted_until</text>
+<text x="350" y="1206" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >datetime?</text>
+<line x1="41" y1="1218" x2="739" y2="1218" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="1246" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >consumed_at</text>
+<text x="350" y="1246" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >datetime?</text>
+<line x1="41" y1="1258" x2="739" y2="1258" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="1286" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >active_user_id</text>
+<text x="350" y="1286" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint?</text>
+<rect x="43" y="1432" width="700" height="264" rx="12" fill="#000" opacity="0.06"/>
+<rect x="40" y="1428" width="700" height="264" rx="12" fill="#FFFFFF" stroke="#C9CFDB" stroke-width="2"/>
+<path d="M40 1492 V1440 Q40 1428 52 1428 H728 Q740 1428 740 1440 V1492 Z" fill="#C4861A"/>
+<text x="68" y="1471" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="30" font-weight="bold" fill="#FFFFFF" text-anchor="start" >DROP_PURCHASE_SLOTS</text>
+<rect x="41" y="1492" width="698" height="40" fill="#E8EBF2"/>
+<text x="68" y="1519" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >FIELD</text>
+<text x="350" y="1519" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >TYPE</text>
+<text x="470" y="1519" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >KEY</text>
+<text x="68" y="1560" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >drop_id</text>
+<text x="350" y="1560" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="470" y="1539" width="48" height="30" rx="7" fill="#DCEFFB" stroke="#9CCBEA" stroke-width="1.5"/>
+<text x="494.0" y="1560" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#1F5F8B" text-anchor="middle" >PK</text>
+<rect x="526" y="1539" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="550.0" y="1560" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="584" y="1559" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ drops</text>
+<line x1="41" y1="1572" x2="739" y2="1572" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="1600" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >user_id</text>
+<text x="350" y="1600" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="470" y="1579" width="48" height="30" rx="7" fill="#DCEFFB" stroke="#9CCBEA" stroke-width="1.5"/>
+<text x="494.0" y="1600" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#1F5F8B" text-anchor="middle" >PK</text>
+<rect x="526" y="1579" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="550.0" y="1600" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="584" y="1599" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ users</text>
+<line x1="41" y1="1612" x2="739" y2="1612" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="1640" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >active_reservation_id</text>
+<text x="350" y="1640" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint?</text>
+<rect x="470" y="1619" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="494.0" y="1640" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="528" y="1639" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ drop_reservations</text>
+<line x1="41" y1="1652" x2="739" y2="1652" stroke="#E3E6EC" stroke-width="1.5"/>
+<text x="68" y="1680" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >updated_at</text>
+<text x="350" y="1680" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >datetime</text>
+<rect x="903" y="1432" width="700" height="144" rx="12" fill="#000" opacity="0.06"/>
+<rect x="900" y="1428" width="700" height="144" rx="12" fill="#FFFFFF" stroke="#C9CFDB" stroke-width="2"/>
+<path d="M900 1492 V1440 Q900 1428 912 1428 H1588 Q1600 1428 1600 1440 V1492 Z" fill="#6B7280"/>
+<text x="928" y="1471" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="30" font-weight="bold" fill="#FFFFFF" text-anchor="start" >DROP_QUEUE_GATES</text>
+<rect x="901" y="1492" width="698" height="40" fill="#E8EBF2"/>
+<text x="928" y="1519" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >FIELD</text>
+<text x="1210" y="1519" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >TYPE</text>
+<text x="1330" y="1519" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="18" font-weight="bold" fill="#2A3550" text-anchor="start" >KEY</text>
+<text x="928" y="1560" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#1B2540" text-anchor="start" >variant_id</text>
+<text x="1210" y="1560" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="21" font-weight="normal" fill="#3C465E" text-anchor="start" >bigint</text>
+<rect x="1330" y="1539" width="48" height="30" rx="7" fill="#DCEFFB" stroke="#9CCBEA" stroke-width="1.5"/>
+<text x="1354.0" y="1560" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#1F5F8B" text-anchor="middle" >PK</text>
+<rect x="1386" y="1539" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="1410.0" y="1560" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="1444" y="1559" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="14" font-weight="normal" fill="#5B6478" text-anchor="start" >→ drop_variants</text>
+<path d="M740 364.0 L896 364.0" fill="none" stroke="#1B2540" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="785.5" y="344.0" width="69" height="40" rx="12" fill="#EEF1F6" stroke="#1B2540" stroke-width="2.5"/>
+<text x="820.0" y="373.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >has</text>
+<text x="756" y="400.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >1</text>
+<text x="880" y="400.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >N</text>
+<path d="M1600 324.0 L1756 324.0" fill="none" stroke="#1B2540" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="1638.0" y="304.0" width="84" height="40" rx="12" fill="#EEF1F6" stroke="#1B2540" stroke-width="2.5"/>
+<text x="1680.0" y="333.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >owns</text>
+<text x="1616" y="360.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >1</text>
+<text x="1740" y="360.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >1</text>
+<path d="M2110 584 L2110 750" fill="none" stroke="#1B2540" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="2015.5" y="649.0" width="189" height="40" rx="12" fill="#EEF1F6" stroke="#1B2540" stroke-width="2.5"/>
+<text x="2110" y="678.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >splits into</text>
+<text x="2132" y="614" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >1</text>
+<text x="2150" y="742" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >1..16</text>
+<path d="M1440 544 L1440 750" fill="none" stroke="#1B2540" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="1338.0" y="629.0" width="204" height="40" rx="12" fill="#EEF1F6" stroke="#1B2540" stroke-width="2.5"/>
+<text x="1440" y="658.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >reserved for</text>
+<text x="1462" y="574" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >1</text>
+<text x="1474" y="742" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >0..N</text>
+<path d="M1600 998.0 L1756 998.0" fill="none" stroke="#1B2540" stroke-width="3" stroke-dasharray="10 8" marker-end="url(#arrow)"/>
+<rect x="1615.5" y="978.0" width="129" height="40" rx="12" fill="#EEF1F6" stroke="#1B2540" stroke-width="2.5"/>
+<text x="1680.0" y="1007.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >held in</text>
+<text x="1634" y="1038.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >0..N</text>
+<text x="1740" y="1034.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >1</text>
+<path d="M1040 544 L1040 719.0 L420 719.0 L420 750" fill="none" stroke="#1B2540" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="560.5" y="699.0" width="159" height="40" rx="12" fill="#EEF1F6" stroke="#1B2540" stroke-width="2.5"/>
+<text x="640" y="728.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >waits for</text>
+<text x="1062" y="574" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >1</text>
+<text x="456" y="742" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >0..N</text>
+<path d="M740 1632.0 L820.0 1632.0 L820.0 878.0 L896 878.0" fill="none" stroke="#1B2540" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="763.0" y="1355.0" width="114" height="40" rx="12" fill="#EEF1F6" stroke="#1B2540" stroke-width="2.5"/>
+<text x="820.0" y="1384.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >active</text>
+<text x="770" y="1668.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >0..1</text>
+<text x="880" y="914.0" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="24" font-weight="bold" fill="#1B2540" text-anchor="middle" >1</text>
+<rect x="1760" y="1428" width="700" height="420" rx="12" fill="#F8F9FC" stroke="#B9C0CE" stroke-width="2" stroke-dasharray="10 7"/>
+<text x="1788" y="1468" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="21" font-weight="bold" fill="#1B2540" text-anchor="start" >재고 (ADR-0005)</text>
+<text x="1788" y="1498" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="17" font-weight="normal" fill="#1B2540" text-anchor="start" >SKU 재고 = 버킷 합</text>
+<text x="1788" y="1523" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="17" font-weight="normal" fill="#1B2540" text-anchor="start" >버킷마다 total = available + reserved + sold, 모두 0 이상</text>
+<text x="1788" y="1548" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="17" font-weight="normal" fill="#1B2540" text-anchor="start" >bucket_count는 1~16. 생성 때 min(K, 총재고)</text>
+<text x="1788" y="1573" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="17" font-weight="normal" fill="#1B2540" text-anchor="start" >drop_reservations.bucket_no = 점유한 버킷</text>
+<text x="1788" y="1598" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="17" font-weight="normal" fill="#1B2540" text-anchor="start" >  물리 FK 없음 (교착 방지). 하네스 SQL로 검사</text>
+<text x="1788" y="1623" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="17" font-weight="normal" fill="#1B2540" text-anchor="start" >drop_inventories의 수량 컬럼은 멈춰 있고 읽지 않는다</text>
+<text x="1788" y="1656" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="21" font-weight="bold" fill="#1B2540" text-anchor="start" >그 밖의 제약</text>
+<text x="1788" y="1686" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="17" font-weight="normal" fill="#1B2540" text-anchor="start" >drops: opens_at &lt; closes_at</text>
+<text x="1788" y="1711" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="17" font-weight="normal" fill="#1B2540" text-anchor="start" >UNIQUE drop_variants (drop_id, sku_code)</text>
+<text x="1788" y="1736" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="17" font-weight="normal" fill="#1B2540" text-anchor="start" >UNIQUE drop_reservations (drop_id, user_id, request_key)</text>
+<text x="1788" y="1761" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="17" font-weight="normal" fill="#1B2540" text-anchor="start" >UNIQUE drop_queue_entries (drop_id, active_user_id)</text>
+<text x="1788" y="1786" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="17" font-weight="normal" fill="#1B2540" text-anchor="start" >active_user_id = WAITING, ADMITTED일 때의 user_id (생성 컬럼)</text>
+<text x="1788" y="1811" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="17" font-weight="normal" fill="#1B2540" text-anchor="start" >타입 끝의 ?는 NULL 허용. →는 참조 대상 테이블</text>
+<rect x="40" y="1859" width="48" height="30" rx="7" fill="#DCEFFB" stroke="#9CCBEA" stroke-width="1.5"/>
+<text x="64.0" y="1880" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#1F5F8B" text-anchor="middle" >PK</text>
+<text x="102" y="1880" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="22" font-weight="normal" fill="#1B2540" text-anchor="start" >Primary key</text>
+<rect x="269" y="1859" width="48" height="30" rx="7" fill="#EEE5FA" stroke="#C9B3EC" stroke-width="1.5"/>
+<text x="293.0" y="1880" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#5B3A96" text-anchor="middle" >FK</text>
+<text x="331" y="1880" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="22" font-weight="normal" fill="#1B2540" text-anchor="start" >Foreign key</text>
+<rect x="498" y="1859" width="48" height="30" rx="7" fill="#E2F4E4" stroke="#A9D8AF" stroke-width="1.5"/>
+<text x="522.0" y="1880" font-family="'JetBrains Mono', 'D2Coding', Menlo, Consolas, monospace" font-size="16" font-weight="bold" fill="#2E7D3A" text-anchor="middle" >UK</text>
+<text x="560" y="1880" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="22" font-weight="normal" fill="#1B2540" text-anchor="start" >Unique key</text>
+<rect x="714" y="1859" width="62" height="30" rx="7" fill="#FFF1DC" stroke="#F0C98A" stroke-width="1.5"/>
+<text x="745.0" y="1880" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="16" font-weight="bold" fill="#8A5A12" text-anchor="middle" >논리</text>
+<text x="790" y="1880" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="22" font-weight="normal" fill="#1B2540" text-anchor="start" >물리 FK 없는 참조</text>
+<rect x="1045" y="1859" width="106" height="30" rx="7" fill="#EEEEEE" stroke="#C8C8C8" stroke-width="1.5"/>
+<text x="1098.0" y="1880" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="16" font-weight="bold" fill="#666666" text-anchor="middle" >폐기 예정</text>
+<text x="1165" y="1880" font-family="'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="22" font-weight="normal" fill="#1B2540" text-anchor="start" >폐기 예정, 후속 축소 migration에서 삭제</text>
+</svg>

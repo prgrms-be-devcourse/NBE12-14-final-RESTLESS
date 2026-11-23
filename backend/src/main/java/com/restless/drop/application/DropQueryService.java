@@ -8,7 +8,7 @@ import com.restless.drop.domain.DropStatus;
 import com.restless.drop.infrastructure.*;
 import java.time.Clock;
 import java.util.List;
-import java.util.function.Function;
+import java.util.Map;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -47,12 +47,14 @@ public class DropQueryService {
         var drop = drops.findById(dropId).filter(d -> d.getStatus().isPublished())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         var skus = variants.findAllByDropIdOrderByIdAsc(dropId);
-        var stock = inventories.findAllById(skus.stream().map(v -> v.getId()).toList()).stream()
-                .collect(Collectors.toMap(i -> i.getVariantId(), Function.identity()));
+        // soldOut = the SKU's bucket sum is 0 (ADR-0005), read for all SKUs in one GROUP BY.
+        var ids = skus.stream().map(v -> v.getId()).toList();
+        Map<Long, Long> available = ids.isEmpty() ? Map.of() : inventories.availableByVariant(ids).stream()
+                .collect(Collectors.toMap(row -> ((Number) row[0]).longValue(), row -> ((Number) row[1]).longValue()));
         var result = skus.stream().map(v -> {
-            var inventory = stock.get(v.getId());
-            if (inventory == null) throw new IllegalStateException("Drop inventory is missing");
-            return new Variant(v.getId(), v.getSkuCode(), v.getOptionName(), v.getPriceAmount(), inventory.isSoldOut());
+            var stock = available.get(v.getId());
+            if (stock == null) throw new IllegalStateException("Drop inventory is missing");
+            return new Variant(v.getId(), v.getSkuCode(), v.getOptionName(), v.getPriceAmount(), stock == 0);
         }).toList();
         return new Detail(drop.getId(), drop.getTitle(), drop.getDescription(), drop.getImageUrl(),
                 drop.getOpensAt(), drop.getClosesAt(), drop.saleStatus(clock.instant()), result);

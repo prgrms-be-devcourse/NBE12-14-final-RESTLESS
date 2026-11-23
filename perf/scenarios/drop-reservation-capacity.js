@@ -1,5 +1,5 @@
-// 보조 측정 B: 성공 점유 경로의 용량. MODE=ramp는 연속 증가 탐색(B1), MODE=hold는 고정 도착률 유지(B2)다.
-// 계획은 docs/testing/drop-performance-plan.md, 절차는 drop-performance-procedure.md 4절. 사용법은 perf/scenarios/README.md.
+// 용량 측정: 성공 점유 경로의 지속 처리 용량 C. MODE=ramp는 연속 증가로 후보 찾기, MODE=hold는 고정 도착률 유지로 C 확인이다.
+// 계획은 docs/testing/drop-performance-plan.md, 절차는 drop-performance-procedure.md 3절. 사용법은 perf/scenarios/README.md.
 //
 // 대기열 없이 POST /api/drops/{id}/reservations만 친다. 앱은 restless.drop.queue.required=false,
 // 점유 TTL은 실행 시간보다 길게(RESTLESS_DROP_RESERVATION_TTL=PT30M) 띄운다. 시드는 --scale capacity다.

@@ -39,7 +39,7 @@ bash backend/scripts/seed/seed.sh --yes    # 묻지 않고 실행
 | 1 | `common/` | 공통 | 위 계정과 최초 크레딧 |
 | 2 | `ticketing/` | 송혜민 | [README](ticketing/README.md) |
 | 3 | `drop/` | 이태호 | 판매 중, 판매 예정, 판매 종료 드롭 1~3번. [seed.sql](drop/seed.sql) |
-| 4 | `auction/` | 경매 담당 | 아직 없음 |
+| 4 | `auction/` | 천종원 | 진행 중 3, 시작 예정 2, 유찰 1로 경매 1~6번. 입찰·낙찰은 넣지 않는다. [seed.sql](auction/seed.sql) |
 | 5 | `fanmeeting/` | 팬미팅 담당 | 아직 없음 |
 
 ## 도메인 시드 규칙

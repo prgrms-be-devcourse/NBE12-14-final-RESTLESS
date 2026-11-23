@@ -1,5 +1,6 @@
 package com.restless.drop.application;
 
+import com.restless.drop.acceptance.DropStock;
 import com.restless.TestcontainersConfiguration;
 import com.restless.common.error.BusinessException;
 import com.restless.drop.application.dto.CreateDropRequest;
@@ -137,9 +138,8 @@ class DropApprovalRollbackRecoveryIntegrationTest {
         return jdbc.queryForObject("SELECT active_reservation_id FROM drop_purchase_slots WHERE drop_id = ? AND user_id = ?", Long.class, drop, user);
     }
     private void stock(int available, int reserved, int sold) {
-        assertThat(jdbc.queryForMap("SELECT total_quantity, available_quantity, reserved_quantity, sold_quantity FROM drop_inventories WHERE variant_id = ?", variant))
-                .containsEntry("total_quantity", 1).containsEntry("available_quantity", available)
-                .containsEntry("reserved_quantity", reserved).containsEntry("sold_quantity", sold);
+        assertThat(DropStock.totals(jdbc, variant)).containsEntry("total", 1).containsEntry("available", available)
+                .containsEntry("reserved", reserved).containsEntry("sold", sold);
     }
 
     @TestConfiguration(proxyBeanMethods = false)

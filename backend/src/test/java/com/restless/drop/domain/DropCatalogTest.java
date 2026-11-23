@@ -74,15 +74,28 @@ class DropCatalogTest {
     }
 
     @Test
-    void inv01AndInv02InitialInventoryConservesQuantity() {
-        var inventory = DropInventory.initial(10L, 100);
+    void inv01AndInv02InitialInventorySplitsTotalIntoBuckets() {
+        var inventory = DropInventory.initial(10L, 100, 4);
         assertThat(inventory.getVariantId()).isEqualTo(10L);
-        assertThat(inventory.getTotalQuantity()).isEqualTo(inventory.getAvailableQuantity()
-                + inventory.getReservedQuantity() + inventory.getSoldQuantity());
-        assertThat(inventory.getAvailableQuantity()).isEqualTo(100);
-        assertThat(inventory.getReservedQuantity()).isZero();
-        assertThat(inventory.getSoldQuantity()).isZero();
-        assertThat(inventory.isSoldOut()).isFalse();
-        assertThatIllegalArgumentException().isThrownBy(() -> DropInventory.initial(10L, 0));
+        assertThat(inventory.getTotalQuantity()).isEqualTo(100);
+        assertThat(buckets(inventory)).containsExactly(25, 25, 25, 25);
+        assertThatIllegalArgumentException().isThrownBy(() -> DropInventory.initial(10L, 0, 4));
+        assertThatIllegalArgumentException().isThrownBy(() -> DropInventory.initial(10L, 1, 0));
+        assertThatIllegalArgumentException().isThrownBy(() -> DropInventory.initial(10L, 1, 17));
+    }
+
+    @Test
+    void bucketCountIsCappedByTotalAndRemainderGoesToFrontBuckets() {
+        assertThat(buckets(DropInventory.initial(1L, 10, 4))).containsExactly(3, 3, 2, 2);
+        assertThat(buckets(DropInventory.initial(1L, 3, 4))).containsExactly(1, 1, 1);
+        assertThat(buckets(DropInventory.initial(1L, 1, 4))).containsExactly(1);
+        assertThat(buckets(DropInventory.initial(1L, 1000, 16))).hasSize(16).allMatch(q -> q == 62 || q == 63)
+                .satisfies(q -> assertThat(q.stream().mapToInt(Integer::intValue).sum()).isEqualTo(1000));
+        assertThat(buckets(DropInventory.initial(1L, 7, 1))).containsExactly(7);
+    }
+
+    private static java.util.List<Integer> buckets(DropInventory inventory) {
+        return java.util.stream.IntStream.range(0, inventory.getBucketCount())
+                .map(inventory::bucketQuantity).boxed().toList();
     }
 }
