@@ -82,6 +82,13 @@ public class ConcertQueryService {
     }
 
     @Transactional(readOnly = true)
+    public void requirePerformance(Long performanceId) {
+        if (!performanceRepository.existsById(performanceId)) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다.");
+        }
+    }
+
+    @Transactional(readOnly = true)
     public PerformanceLayout getPerformanceLayout(Long performanceId) {
         Performance performance = performanceRepository.findById(performanceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다."));

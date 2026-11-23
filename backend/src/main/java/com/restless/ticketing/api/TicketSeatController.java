@@ -1,6 +1,7 @@
 package com.restless.ticketing.api;
 
 import com.restless.ticketing.application.dto.TicketSeatInfo;
+import com.restless.ticketing.application.dto.TicketSeatState;
 import com.restless.ticketing.application.TicketSeatQueryService;
 import com.restless.ticketing.application.TicketReservationQueryService;
 import com.restless.ticketing.application.dto.TicketBookingAvailability;
@@ -29,5 +30,10 @@ public class TicketSeatController {
     @GetMapping("/{performanceId}/seats")
     public List<TicketSeatInfo> getSeats(@PathVariable("performanceId") Long performanceId) {
         return ticketSeatQueryService.getSeats(performanceId);
+    }
+
+    @GetMapping("/{performanceId}/seats/status")
+    public List<TicketSeatState> getSeatStates(@PathVariable("performanceId") Long performanceId) {
+        return ticketSeatQueryService.getSeatStates(performanceId);
     }
 }
