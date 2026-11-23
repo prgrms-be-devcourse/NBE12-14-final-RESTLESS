@@ -3,6 +3,7 @@ package com.restless.auction.api;
 import com.restless.auction.api.dto.BidRequest;
 import com.restless.auction.application.BidService;
 import com.restless.auction.application.BidService.BidResult;
+import com.restless.auction.application.BidPrecheckService;
 import com.restless.auth.LoginMember;
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
@@ -26,6 +27,7 @@ public class AuctionBidController {
     static final int MAX_KEY_LENGTH = 100;
 
     private final BidService bidService;
+    private final BidPrecheckService bidPrecheckService;
 
     @PostMapping("/api/auctions/{auctionId}/bids")
     @ResponseStatus(HttpStatus.CREATED)
@@ -35,6 +37,7 @@ public class AuctionBidController {
         if (requestKey.isBlank() || requestKey.length() > MAX_KEY_LENGTH) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "Idempotency-Key는 1~100자여야 합니다.");
         }
+        bidPrecheckService.check(userId, auctionId, request.amount(), requestKey);
         return bidService.place(userId, auctionId, request.amount(), requestKey);
     }
 }

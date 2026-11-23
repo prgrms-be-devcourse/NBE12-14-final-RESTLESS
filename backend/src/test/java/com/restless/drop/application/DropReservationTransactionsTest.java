@@ -9,6 +9,7 @@ import com.restless.order.application.OrderService;
 import com.restless.order.application.OrderView;
 import com.restless.order.domain.OrderStatus;
 import com.restless.order.domain.OrderType;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -17,11 +18,12 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class DropReservationTransactionsTest {
     @Test
-    void inv14InventoryLockWaitCrossingSaleCloseRejectsBeforeOrderCreation() {
+    void inv14InventoryLockWaitCrossingSaleCloseRejectsAfterOtherWritesAreFlushed() {
         var drops = mock(DropRepository.class);
         var variants = mock(DropVariantRepository.class);
         var slots = mock(DropPurchaseSlotRepository.class);
@@ -43,27 +45,30 @@ class DropReservationTransactionsTest {
         when(slot.getActiveReservationId()).thenReturn(null);
         when(slots.lockById(new DropPurchaseSlot.Id(1L, 2L))).thenReturn(slot);
         when(clock.instant()).thenReturn(opens);
-        when(inventories.holdOne(3L)).thenAnswer(call -> {
+        when(inventories.bucketCount(3L)).thenReturn(1);
+        when(inventories.pickFrom(3L, 0)).thenReturn(Optional.of(0));
+        when(inventories.holdInBucket(any(), eq(3L), eq(0))).thenAnswer(call -> {
             // The inventory UPDATE returns only after the competing transaction releases its lock.
             when(clock.instant()).thenReturn(closes);
-            return 1;
+            return 2;
         });
         when(orders.create(any())).thenReturn(7L);
         when(orders.find(7L)).thenReturn(Optional.of(new OrderView(7L, 2L, OrderType.DROP, OrderStatus.PENDING_PAYMENT, 0)));
         when(reservations.saveAndFlush(any(DropReservation.class))).thenAnswer(call -> call.getArgument(0));
         var service = new DropReservationTransactions(drops, variants, slots, inventories, reservations,
-                orders, clock, new DropReservationSettings(Duration.ofMinutes(5), false), mock(DropQueueEntryRepository.class));
+                orders, clock, new DropReservationSettings(Duration.ofMinutes(5), false), mock(DropQueueEntryRepository.class), new SimpleMeterRegistry());
 
         assertThatThrownBy(() -> service.create(1L, 2L, "key",
                 new CreateDropReservationRequest(3L, "회원", "010", "서울")))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DROP_NOT_ON_SALE));
-        verifyNoInteractions(orders);
-        verify(reservations, never()).saveAndFlush(any());
+        // #322: the SKU lock is taken last; the transaction rollback undoes the earlier writes
+        // (DropReservationIntegrationTest checks that against MySQL).
+        assertInventoryLockedLast(orders, reservations, slots, inventories);
     }
 
     @Test
-    void inv06InventoryLockWaitCrossingAdmissionExpiryRejectsBeforeOrderCreation() {
+    void inv06InventoryLockWaitCrossingAdmissionExpiryRejectsAfterOtherWritesAreFlushed() {
         var drops = mock(DropRepository.class);
         var variants = mock(DropVariantRepository.class);
         var slots = mock(DropPurchaseSlotRepository.class);
@@ -85,27 +90,40 @@ class DropReservationTransactionsTest {
         when(slot.getActiveReservationId()).thenReturn(null);
         when(slots.lockById(new DropPurchaseSlot.Id(1L, 2L))).thenReturn(slot);
         when(clock.instant()).thenReturn(opens);
-        when(inventories.holdOne(3L)).thenAnswer(call -> {
+        when(inventories.bucketCount(3L)).thenReturn(1);
+        when(inventories.pickFrom(3L, 0)).thenReturn(Optional.of(0));
+        when(inventories.holdInBucket(any(), eq(3L), eq(0))).thenAnswer(call -> {
             // The inventory UPDATE returns only after the competing transaction releases its lock.
             when(clock.instant()).thenReturn(opens.plusSeconds(300));
-            return 1;
+            return 2;
         });
         when(orders.create(any())).thenReturn(7L);
         when(orders.find(7L)).thenReturn(Optional.of(new OrderView(7L, 2L, OrderType.DROP, OrderStatus.PENDING_PAYMENT, 0)));
         when(reservations.saveAndFlush(any(DropReservation.class))).thenAnswer(call -> call.getArgument(0));
         var queue = mock(DropQueueEntryRepository.class);
-        var admission = DropQueueEntry.waiting(1L, 2L, opens);
+        var admission = DropQueueEntry.waiting(1L, 2L, 3L, opens);
         admission.admit(opens, Duration.ofMinutes(5));
         when(queue.lockLatest(1L, 2L)).thenReturn(Optional.of(admission));
         var service = new DropReservationTransactions(drops, variants, slots, inventories, reservations,
-                orders, clock, new DropReservationSettings(Duration.ofMinutes(5), true), queue);
+                orders, clock, new DropReservationSettings(Duration.ofMinutes(5), true), queue, new SimpleMeterRegistry());
 
         assertThatThrownBy(() -> service.create(1L, 2L, "key",
                 new CreateDropReservationRequest(3L, "회원", "010", "서울")))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DROP_ADMISSION_REQUIRED));
-        assertThat(admission.getStatus()).isEqualTo(DropQueueStatus.ADMITTED);
-        verifyNoInteractions(orders);
-        verify(reservations, never()).saveAndFlush(any());
+        assertInventoryLockedLast(orders, reservations, slots, inventories);
+    }
+
+    private static void assertInventoryLockedLast(OrderService orders, DropReservationRepository reservations,
+            DropPurchaseSlotRepository slots, DropInventoryRepository inventories) {
+        var order = inOrder(orders, reservations, slots, inventories);
+        order.verify(orders).create(any());
+        order.verify(reservations).saveAndFlush(any(DropReservation.class));
+        order.verify(orders).find(7L);
+        order.verify(slots).flush();
+        order.verify(inventories).bucketCount(3L);
+        order.verify(inventories).pickFrom(3L, 0);
+        order.verify(inventories).holdInBucket(any(), eq(3L), eq(0));
+        order.verifyNoMoreInteractions();
     }
 }

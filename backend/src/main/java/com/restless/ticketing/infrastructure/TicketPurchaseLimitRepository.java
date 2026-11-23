@@ -10,4 +10,6 @@ public interface TicketPurchaseLimitRepository extends JpaRepository<TicketPurch
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<TicketPurchaseLimit> findByUserIdAndPerformanceId(Long userId, Long performanceId);
+
+    Optional<TicketPurchaseLimit> findFirstByUserIdAndPerformanceId(Long userId, Long performanceId);
 }

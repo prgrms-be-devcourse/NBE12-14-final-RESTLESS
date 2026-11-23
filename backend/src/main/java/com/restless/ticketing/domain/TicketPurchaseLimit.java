@@ -65,4 +65,11 @@ public class TicketPurchaseLimit {
         }
         reservedCount -= quantity;
     }
+
+    public void refund(int quantity) {
+        if (quantity <= 0 || confirmedCount < quantity) {
+            throw new IllegalStateException("환불할 확정 수량이 일치하지 않습니다.");
+        }
+        confirmedCount -= quantity;
+    }
 }

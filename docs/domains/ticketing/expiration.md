@@ -1,7 +1,7 @@
 # 예약 만료와 좌석 반환
 
 - 상태: DECIDED (2026-11-12, 담당자 합의).
-- 구현 상태: 결제 전 HELD 예약의 전체 좌석 반환과 요청 시 만료 정리, 5초 주기 만료 스케줄러를 구현했다. 내부 결제 실패 callback에서 기한이 지난 PAYMENT_PENDING/RECONCILING의 전체 반환을 추가했다. 승인 미시도·최종 실패 예약의 결제 기한 자동 만료도 구현했다. TicketPaymentResultHandler와 보상 취소도 연결했다. 정상 환불·운영 알림은 후속이다.
+- 구현 상태: 결제 전 HELD 예약의 전체 좌석 반환과 요청 시 만료 정리, 5초 주기 만료 스케줄러를 구현했다. 결제 실패 callback에서 기한이 지난 PAYMENT_PENDING/RECONCILING의 전체 반환과 승인 미시도·최종 실패 예약의 결제 기한 자동 만료도 구현했다. TicketPaymentResultHandler의 보상 취소와 정상 환불을 연결했다. 운영 알림은 후속이다.
 
 ## 1. 판단 기준
 

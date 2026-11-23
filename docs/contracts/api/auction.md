@@ -6,7 +6,7 @@
 >
 > 관련 코드: `backend/src/main/java/com/restless/auction/api/`, `backend/src/main/java/com/restless/credit/api/`, `backend/src/main/java/com/restless/common/error/ErrorCode.java`
 >
-> 마지막 확인: 2026-11-16 (엔드포인트와 공개 경로를 컨트롤러·`SecurityConfig`와 대조)
+> 마지막 확인: 2026-11-21 (#316 크레딧 충전 API 추가)
 
 오류 응답 형식은 [README 공통 규칙 3](README.md#공통-규칙)을 따른다.
 
@@ -35,6 +35,7 @@
 | GET | `/api/me/bids?status=&page=&size=` | 내가 참여한 경매별 마지막 입찰, 입찰 상태(`HIGHEST`, `OUTBID`, `WON`), 경매 상태 | 구현 |
 | GET | `/api/me/wallet` | 보유, 묶인, 사용 가능 크레딧 | 구현 |
 | POST | `/api/me/wallet/grants` | 테스트용 10,000 지급. 운영(prod)에서는 없음 | 구현 |
+| POST | `/api/me/credit-charges` | 크레딧 충전 주문 생성. 결제는 공통 결제 API로 한다. `Idempotency-Key` 헤더 필수 | 구현 |
 
 종료된 경매(`CLOSED`)에서 낙찰되지 못한 입찰은 `OUTBID`다. 화면은 이를 "낙찰 실패"로 표시한다.
 
@@ -52,6 +53,59 @@ POST /api/me/wallet/grants
 ```
 
 - 운영(prod) 프로필에서는 API를 등록하지 않으므로 404 `NOT_FOUND`.
+
+### 크레딧 충전
+
+PG 결제로 크레딧을 충전한다 (1원 = 1크레딧, 환불 불가). 정책은 [policy.md](../../domains/auction/policy.md) 7.1절.
+
+```http
+POST /api/me/credit-charges
+Idempotency-Key: 6f1c...
+Content-Type: application/json
+
+{ "amount": 50000 }
+```
+
+- `amount`: 필수 정수, 1,000 이상 1,000,000 이하, 1,000 단위. 소수(`1000.5`)도 400이다. 고정 상품(10,000 / 50,000 / 100,000)은 프론트의 바로가기일 뿐이다.
+- `Idempotency-Key`: 필수, 공백만인 값을 제외한 1~64자. 범위는 회원별이다.
+- 응답: 새로 만들면 201, 같은 키·같은 금액 재요청이면 200 (그사이 결제됐으면 `status`가 `PAID`).
+
+```json
+{
+  "chargeId": 7,
+  "amount": 50000,
+  "status": "READY",
+  "expiresAt": "2026-11-21T08:30:00Z",
+  "payable": { "payableType": "CREDIT_CHARGE", "payableId": 7 }
+}
+```
+
+| 경우 | 응답 |
+|---|---|
+| 금액 누락, 정수 아님, 범위 밖, 1,000 단위 아님 | 400 `INVALID_REQUEST` (`details.field = "amount"`) |
+| `Idempotency-Key` 누락, 공백, 64자 초과 | 400 `INVALID_REQUEST` |
+| 같은 키, 다른 금액 | 409 `IDEMPOTENCY_KEY_CONFLICT` |
+| 토큰 없음 | 401 `UNAUTHORIZED` |
+
+결제는 응답의 `payable`을 그대로 공통 결제 API에 넘긴다 ([payment.md](payment.md)).
+
+```text
+POST /api/payments          { "payableType": "CREDIT_CHARGE", "payableId": 7 } + Idempotency-Key
+결제창 (dev·프론트는 Fake PG)
+POST /api/payments/confirm  { "paymentKey": "...", "orderId": "<pgOrderId>", "amount": 50000 }
+GET  /api/me/wallet         지급 확인
+```
+
+- 결제 준비 응답의 `orderName`은 `크레딧 50,000` 형식이고, `expiresAt`은 충전 주문의 결제 기한(생성 + 30분)이다.
+- 승인(200)이면 같은 트랜잭션에서 지갑에 지급된다. 결과 불명확(202)이면 지급하지 않고, 미완료 결제 재확인 작업이 승인을 확인하면 그때 지급한다.
+
+| 결제 API 응답 | 경우 |
+|---|---|
+| 409 `PAYMENT_WINDOW_EXPIRED` | 충전 주문 결제 기한(30분)이 지남. 새 충전 주문을 만든다 |
+| 409 `PAYMENT_NOT_PAYABLE` | 이미 충전된 주문이거나 없는 주문 |
+| 404 `PAYMENT_TARGET_NOT_FOUND` | 다른 회원의 충전 주문 |
+| 409 `PAYMENT_UNDER_REVIEW` | 같은 충전 주문의 앞 결제 결과를 아직 모름 |
+| 409 `PAYMENT_NOT_REFUNDABLE` (`details.reason = REFUND_NOT_SUPPORTED`) | 충전 결제의 손님 환불 요청 |
 
 ## 주최자 (ORGANIZER, ADMIN)
 
@@ -103,6 +157,8 @@ Content-Type: application/json
 
 정렬: `OPEN`은 곧 끝나는 순, `SCHEDULED`는 곧 시작하는 순, `CLOSED`와 전체는 최근 순.
 
+목록은 서버에서 최대 1초 캐시한다. 새 경매, 상태, 종료 시각이 최대 1초 늦게 보일 수 있다.
+
 ## 상세
 
 ```json
@@ -127,6 +183,7 @@ Content-Type: application/json
 
 - 입찰이 없으면 `highestBid`는 `null`이고 `minimumBidAmount`는 시작가다.
 - `serverTime`은 클라이언트 남은 시간 표시용이다. 입찰 가능 여부는 서버가 판단한다.
+- 상세는 서버에서 최대 1초 캐시한다. 입찰 수락, 시작, 종료, 수정, 삭제가 커밋되면 다음 조회부터 바로 반영한다. 경매 변경 이벤트가 없는 닉네임 변경은 최대 1초 늦게 보일 수 있다. `serverTime`은 캐시와 상관없이 응답 시각이다.
 
 ## 입찰
 
@@ -165,6 +222,8 @@ Content-Type: application/json
   "details": { "minimumBidAmount": 54000 }
 }
 ```
+
+몰림을 줄이려고 서버는 경매 상태 캐시로 금액 부족을 먼저 확인할 수 있다. 이때 `minimumBidAmount`는 최대 1초 전 값일 수 있다. 이 값으로 다시 입찰해도 서버가 최신 금액으로 다시 검증하므로, 더 높은 금액이 필요하면 다시 `BID_AMOUNT_TOO_LOW`를 받는다.
 
 ## 결과
 

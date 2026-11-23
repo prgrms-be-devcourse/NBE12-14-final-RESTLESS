@@ -7,6 +7,7 @@ import com.restless.auction.domain.AuctionStatus;
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
 import io.micrometer.core.instrument.MeterRegistry;
+import tools.jackson.databind.json.JsonMapper;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -50,20 +51,22 @@ public class AuctionStreams {
 
     private final AuctionQueryService queries;
     private final MeterRegistry meters;
+    private final JsonMapper json;
     private final long timeoutMs;
     private final Map<Long, Set<SseEmitter>> subscribers = new ConcurrentHashMap<>();
     private final Set<Long> changed = ConcurrentHashMap.newKeySet();
     private final ScheduledExecutorService flusher;
 
-    public AuctionStreams(AuctionQueryService queries, MeterRegistry meters,
+    public AuctionStreams(AuctionQueryService queries, MeterRegistry meters, JsonMapper json,
                           @Value("${restless.auction.stream.flush-interval-ms:200}") long flushIntervalMs,
                           @Value("${restless.auction.stream.timeout-ms:1800000}") long timeoutMs) {
         this.queries = queries;
         this.meters = meters;
+        this.json = json;
         this.timeoutMs = timeoutMs;
         meters.gauge("auction.stream.connections", subscribers,
                 map -> map.values().stream().mapToInt(Set::size).sum());
-        // 다른 스케줄러(경매 종료, 결제 대사)와 스레드를 나누지 않아야 0.2초 간격이 밀리지 않는다.
+        // 다른 스케줄러(경매 종료, 미완료 결제 재확인 작업)와 스레드를 나누지 않아야 0.2초 간격이 밀리지 않는다.
         this.flusher = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofPlatform().name("auction-stream-flush").daemon().factory());
         flusher.scheduleWithFixedDelay(this::flushSafely, flushIntervalMs, flushIntervalMs, TimeUnit.MILLISECONDS);
@@ -95,7 +98,12 @@ public class AuctionStreams {
             remove(auctionId, emitter);
             throw new BusinessException(ErrorCode.AUCTION_NOT_FOUND);
         }
-        send(auctionId, List.of(emitter), snapshot.get());
+        try {
+            send(auctionId, List.of(emitter), snapshot.get());
+        } catch (RuntimeException exception) {
+            remove(auctionId, emitter);
+            throw exception;
+        }
         return emitter;
     }
 
@@ -143,13 +151,14 @@ public class AuctionStreams {
 
     private void send(Long auctionId, List<SseEmitter> emitters, AuctionSnapshot snapshot) {
         boolean closed = snapshot.status() == AuctionStatus.CLOSED;
+        String jsonText = json.writeValueAsString(snapshot);
         for (SseEmitter emitter : emitters) {
             try {
                 // 빌더는 build()할 때 내용을 덧붙이므로 연결마다 새로 만든다.
                 emitter.send(SseEmitter.event()
                         .name(EVENT_NAME)
                         .id(String.valueOf(snapshot.revision()))
-                        .data(snapshot, MediaType.APPLICATION_JSON));
+                        .data(jsonText, MediaType.APPLICATION_JSON));
                 if (closed) {
                     emitter.complete();
                 }

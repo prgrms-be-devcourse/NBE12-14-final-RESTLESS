@@ -3,10 +3,12 @@
 #
 #   seed.sh --scale base --profile perf            # 빈 스키마에 시드, 토큰 CSV, 점검
 #   seed.sh --scale base --profile perf --refresh  # 스냅샷 복원 뒤: 핫 판매 기간, 토큰 만료 갱신
+#   AUCTION_CLOSE_IN_MINUTES=2 seed.sh --scale base --profile perf --refresh # AU-7/8 종료 시각
 #   seed.sh --scale base --profile perf --verify   # 점검만
 #
 # 필요한 환경변수: DB_HOST, DB_NAME, DB_USERNAME, DB_PASSWORD, JWT_SECRET, PERF_ALLOWED_DB_HOSTS
 # 선택: DB_PORT(3306), MYSQL(mysql 클라이언트 명령. 예: "docker exec -i -e MYSQL_PWD perf-mysql mysql")
+#       DROP_BUCKET_COUNT(scale.yml drop_bucket_count를 덮어쓴다. K=1 기준 실행용)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -82,10 +84,24 @@ fi
 scale_vars="$(python3 "$ROOT/lib/scale.py" "$ROOT/scale.yml" "$SCALE")" || die "cannot read scale.yml"
 eval "$scale_vars"
 participants=$(( SCALE_drop_hot_stock * SCALE_contention_ratio ))
+heavy_count=$(( SCALE_auction_heavy_users * SCALE_auction_heavy_auctions_per_user ))
+mass_accounts=$(( SCALE_auction_mass_close * SCALE_auction_mass_close_bids_per ))
+(( SCALE_auction_heavy_users >= 2 && SCALE_auction_mass_close_bids_per >= 2 && mass_accounts + SCALE_auction_heavy_users < SCALE_users )) || die "auction account ranges overlap"
+close_minutes=${AUCTION_CLOSE_IN_MINUTES:-0}
+[[ "$close_minutes" =~ ^[0-9]{1,5}$ ]] || die "AUCTION_CLOSE_IN_MINUTES must be a positive integer"
+if [[ -n "${AUCTION_CLOSE_IN_MINUTES:-}" ]] && (( 10#$close_minutes == 0 )); then die "AUCTION_CLOSE_IN_MINUTES must be positive"; fi
 per_drop=$(( (SCALE_drop_bg_reservations + SCALE_drop_bg_drops - 1) / SCALE_drop_bg_drops ))
 (( participants <= SCALE_users )) || die "hot participants $participants (stock x ratio) exceed users $SCALE_users"
 (( per_drop <= SCALE_users )) || die "reservations per background drop $per_drop exceed users"
 (( SCALE_drop_hot_queue_prefill <= SCALE_users )) || die "drop_hot_queue_prefill exceeds users"
+(( SCALE_drop_warm_stock >= 0 )) || die "drop_warm_stock must not be negative"
+drop_bucket_count="${DROP_BUCKET_COUNT:-$SCALE_drop_bucket_count}"
+[[ "$drop_bucket_count" =~ ^[0-9]{1,2}$ ]] && (( 10#$drop_bucket_count >= 1 && 10#$drop_bucket_count <= 16 )) \
+  || die "drop_bucket_count must be 1..16"
+drop_bucket_count=$(( 10#$drop_bucket_count ))
+# 워밍업 드롭 ID는 배경 드롭 뒤, SKU ID는 배경 SKU 뒤다 (sql/20_drop.sql의 ID 규칙).
+warm_drop_id=$(( SCALE_drop_bg_drops + 2 ))
+warm_variant_first=$(( SCALE_drop_hot_variants + SCALE_drop_bg_drops * SCALE_drop_bg_variants_per_drop + 1 ))
 (( SCALE_drop_bg_pct_confirmed + SCALE_drop_bg_pct_restored + SCALE_drop_bg_pct_released <= 100 )) \
   || die "drop_bg_pct_* sum exceeds 100"
 (( SCALE_organizers > 0 && SCALE_drop_hot_variants > 0 && SCALE_drop_bg_drops > 0 && SCALE_drop_bg_variants_per_drop > 0 )) \
@@ -93,7 +109,7 @@ per_drop=$(( (SCALE_drop_bg_reservations + SCALE_drop_bg_drops - 1) / SCALE_drop
 
 seq_size=$SCALE_users
 for n in $(( SCALE_users + 1 + SCALE_organizers )) "$SCALE_drop_bg_reservations" \
-         $(( SCALE_drop_bg_drops * SCALE_drop_bg_variants_per_drop )) "$SCALE_drop_hot_queue_prefill" $(( 1 + SCALE_auction_spread + SCALE_auction_bg )) $(( SCALE_auction_bg * SCALE_auction_bg_bids_per )); do
+         $(( SCALE_drop_bg_drops * SCALE_drop_bg_variants_per_drop )) "$SCALE_drop_hot_queue_prefill" $(( 1 + SCALE_auction_spread + SCALE_auction_bg )) $(( SCALE_auction_bg * SCALE_auction_bg_bids_per )) "$(( heavy_count * 2 ))" "$(( heavy_count + SCALE_auction_ending + SCALE_auction_mass_close ))" "$mass_accounts"; do
   (( n > seq_size )) && seq_size=$n
 done
 
@@ -104,13 +120,16 @@ SET @users = $SCALE_users, @organizers = $SCALE_organizers, @ratio = $SCALE_cont
 SET @token_ttl_hours = $SCALE_token_ttl_hours, @hot_window_hours = $SCALE_hot_window_hours;
 SET @hot_variants = $SCALE_drop_hot_variants, @hot_price = $SCALE_drop_hot_price;
 SET @hot_stock = $SCALE_drop_hot_stock, @hot_queue_prefill = $SCALE_drop_hot_queue_prefill;
-SET @bg_drops = $SCALE_drop_bg_drops, @bg_vpd = $SCALE_drop_bg_variants_per_drop;
+SET @warm_stock = $SCALE_drop_warm_stock, @warm_drop_id = $warm_drop_id, @warm_variant_first = $warm_variant_first;
+SET @bg_drops = $SCALE_drop_bg_drops, @bg_vpd = $SCALE_drop_bg_variants_per_drop, @bucket_count = $drop_bucket_count;
 SET @bg_reservations = $SCALE_drop_bg_reservations;
 SET @pct_confirmed = $SCALE_drop_bg_pct_confirmed, @pct_restored = $SCALE_drop_bg_pct_restored;
 SET @pct_released = $SCALE_drop_bg_pct_released;
 SET @auction_spread = $SCALE_auction_spread, @auction_bg = $SCALE_auction_bg, @auction_bg_bids_per = $SCALE_auction_bg_bids_per;
 SET @auction_bg_pct_unsold = $SCALE_auction_bg_pct_unsold, @auction_start_price = $SCALE_auction_start_price;
 SET @auction_min_increment = $SCALE_auction_min_increment, @credit_grant = $SCALE_credit_grant;
+SET @heavy_users = $SCALE_auction_heavy_users, @heavy_per_user = $SCALE_auction_heavy_auctions_per_user;
+SET @ending_count = $SCALE_auction_ending, @mass_count = $SCALE_auction_mass_close, @mass_bids = $SCALE_auction_mass_close_bids_per, @close_minutes = $((10#$close_minutes));
 SQL
 }
 
@@ -138,16 +157,28 @@ write_tokens() {
       'seeded_at', (SELECT v FROM perf_seed_meta WHERE k = 'seeded_at'),
       'contention_ratio', $SCALE_contention_ratio,
       'participants', 'users.csv rows 1..$participants',
-      'auction', JSON_OBJECT('hot_auction_id', 1, 'spread_first_id', 2, 'spread_last_id', 1 + $SCALE_auction_spread, 'start_price', $SCALE_auction_start_price, 'min_increment', $SCALE_auction_min_increment, 'credit_grant', $SCALE_credit_grant),
+      'ticketing', JSON_OBJECT('performance_id', (SELECT p.id FROM performances p JOIN venue_layouts l ON l.id=p.layout_id WHERE l.layout_code='PERF-TICKET' LIMIT 1), 'seat_count', (SELECT COUNT(*) FROM performance_seats s JOIN performances p ON p.id=s.performance_id JOIN venue_layouts l ON l.id=p.layout_id WHERE l.layout_code='PERF-TICKET')),
+      'auction', JSON_OBJECT('hot_auction_id', 1, 'spread_first_id', 2, 'spread_last_id', 1 + $SCALE_auction_spread, 'start_price', $SCALE_auction_start_price, 'min_increment', $SCALE_auction_min_increment, 'credit_grant', $SCALE_credit_grant, 'heavy_first_user_id', $((SCALE_users - SCALE_auction_heavy_users + 1)), 'heavy_last_user_id', $SCALE_users, 'ending_first_id', $((2 + SCALE_auction_spread + SCALE_auction_bg + heavy_count)), 'ending_last_id', $((1 + SCALE_auction_spread + SCALE_auction_bg + heavy_count + SCALE_auction_ending)), 'mass_first_id', $((2 + SCALE_auction_spread + SCALE_auction_bg + heavy_count + SCALE_auction_ending)), 'mass_last_id', $((1 + SCALE_auction_spread + SCALE_auction_bg + heavy_count + SCALE_auction_ending + SCALE_auction_mass_close)), 'mass_first_user_id', $((SCALE_users - SCALE_auction_heavy_users - mass_accounts + 1)), 'mass_last_user_id', $((SCALE_users - SCALE_auction_heavy_users)), 'mass_ends_at', (SELECT ends_at FROM auctions WHERE auction_id = $((2 + SCALE_auction_spread + SCALE_auction_bg + heavy_count + SCALE_auction_ending)))),
       'drop', JSON_OBJECT(
           'hot_drop_id', 1,
           'opens_at', (SELECT opens_at FROM drops WHERE id = 1),
           'closes_at', (SELECT closes_at FROM drops WHERE id = 1),
           'total_stock', $SCALE_drop_hot_stock,
           'variants', (SELECT JSON_ARRAYAGG(JSON_OBJECT('variant_id', v.id, 'sku', v.sku_code,
-                                                        'price', v.price_amount, 'total_quantity', i.total_quantity))
+                                                        'price', v.price_amount, 'total_quantity', i.total_quantity,
+                                                        'bucket_count', i.bucket_count))
                        FROM drop_variants v JOIN drop_inventories i ON i.variant_id = v.id
-                       WHERE v.drop_id = 1))))" > "$OUT/manifest.json"
+                       WHERE v.drop_id = 1),
+          'bucket_count', $drop_bucket_count,
+          'warmup', IF($SCALE_drop_warm_stock = 0, NULL, JSON_OBJECT(
+              'drop_id', $warm_drop_id,
+              'total_stock', $SCALE_drop_warm_stock,
+              'first_user_row', $participants,
+              'variants', (SELECT JSON_ARRAYAGG(JSON_OBJECT('variant_id', v.id, 'sku', v.sku_code,
+                                                            'price', v.price_amount, 'total_quantity', i.total_quantity,
+                                                            'bucket_count', i.bucket_count))
+                           FROM drop_variants v JOIN drop_inventories i ON i.variant_id = v.id
+                           WHERE v.drop_id = $warm_drop_id))))))" > "$OUT/manifest.json"
   echo "out: $OUT/users.csv, staff.csv, manifest.json"
 }
 
@@ -192,7 +223,7 @@ case "$MODE" in
   seed)
     [[ -n "${JWT_SECRET:-}" ]] || die "JWT_SECRET is required (same value as the perf app)"
     salt="$(python3 -c 'import secrets; print(secrets.token_hex(8))')"
-    echo "seed: scale=$SCALE users=$SCALE_users hot_stock=$SCALE_drop_hot_stock participants=$participants"
+    echo "seed: scale=$SCALE users=$SCALE_users hot_stock=$SCALE_drop_hot_stock participants=$participants drop_bucket_count=$drop_bucket_count"
     run_files "$salt" "$ROOT"/sql/[0-9][0-9]_*.sql
     write_tokens "$salt"
     verify

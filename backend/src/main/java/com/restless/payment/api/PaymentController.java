@@ -21,6 +21,7 @@ import java.time.Instant;
 @RequiredArgsConstructor
 public class PaymentController {
     private final PaymentService service;
+    private final PaymentLookup lookup;
 
     @PostMapping
     public ResponseEntity<PreparedResponse> prepare(
@@ -55,6 +56,17 @@ public class PaymentController {
                         || result.status() == PaymentStatus.UNKNOWN;
         return ResponseEntity.status(pending ? HttpStatus.ACCEPTED : HttpStatus.OK)
                 .body(new ConfirmedResponse(result.paymentId(), result.status()));
+    }
+
+    /** 본인의 최근 결제 시도. 이력이 없거나 타인 소유 대상이면 모두 204로 응답한다. */
+    @GetMapping("/latest")
+    public ResponseEntity<PaymentLookup.Latest> latest(
+            @LoginMember Long userId,
+            @RequestParam PayableType payableType,
+            @RequestParam @Positive Long payableId) {
+        return lookup.latest(payableType.name(), payableId, userId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
     @GetMapping("/{paymentId}")

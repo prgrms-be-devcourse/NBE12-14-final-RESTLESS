@@ -1,6 +1,6 @@
 # ADR-0002. 공통 규약: DB, ID, API 경로
 
-- 상태: Accepted
+- 상태: IMPLEMENTED
 - 날짜: 2026-11-10
 
 ## 결정

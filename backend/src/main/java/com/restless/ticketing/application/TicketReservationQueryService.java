@@ -8,6 +8,9 @@ import com.restless.ticketing.domain.TicketReservation;
 import com.restless.ticketing.domain.TicketReservationStatus;
 import com.restless.ticketing.infrastructure.SeatHoldRepository;
 import com.restless.ticketing.infrastructure.TicketReservationRepository;
+import com.restless.ticketing.infrastructure.TicketPurchaseLimitRepository;
+import com.restless.concert.application.ConcertQueryService;
+import com.restless.ticketing.application.dto.TicketBookingAvailability;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -32,6 +35,20 @@ public class TicketReservationQueryService {
     private final TicketReservationRepository ticketReservationRepository;
     private final SeatHoldRepository seatHoldRepository;
     private final JdbcTemplate jdbc;
+    private final TicketPurchaseLimitRepository purchaseLimits;
+    private final ConcertQueryService concerts;
+
+    public TicketBookingAvailability getAvailability(Long userId, Long performanceId) {
+        validateUser(userId);
+        if (performanceId == null || performanceId <= 0) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        int maximum = concerts.getBookingPerformance(performanceId).maxTicketsPerUser();
+        var limit = purchaseLimits.findFirstByUserIdAndPerformanceId(userId, performanceId);
+        int confirmed = limit.map(com.restless.ticketing.domain.TicketPurchaseLimit::getConfirmedCount).orElse(0);
+        int reserved = limit.map(com.restless.ticketing.domain.TicketPurchaseLimit::getReservedCount).orElse(0);
+        var active = getActive(userId).stream().filter(r -> r.performanceId().equals(performanceId)).findFirst().orElse(null);
+        return new TicketBookingAvailability(maximum, confirmed, reserved,
+                Math.max(0, maximum - confirmed - reserved), active);
+    }
 
     public TicketReservationDetail getDetail(Long userId, Long reservationId) {
         validateUser(userId);

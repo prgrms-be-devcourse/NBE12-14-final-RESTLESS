@@ -29,8 +29,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: ./gradlew build
       # Keeps expected/actual values and stack traces that the job log does not show.
+      # Uploaded on success too: an independent verifier counts tests from it instead of rebuilding.
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: backend-test-results
           path: |

@@ -9,3 +9,8 @@
 | 오류 응답 규칙 | [README 공통 규칙 3](README.md#공통-규칙) |
 | 공연 | [ticketing.md](ticketing.md) |
 | 주문, 결제 | [payment.md](payment.md) |
+| 요청 횟수 제한 (2026-11-20 추가분) | [README 요청 횟수 제한](README.md#요청-횟수-제한) |
+
+## 요청 횟수 제한
+
+[README 공통 규칙의 요청 횟수 제한](README.md#요청-횟수-제한)으로 옮겼다 (2026-11-20). 예전 링크를 위해 이 절 제목을 남긴다.

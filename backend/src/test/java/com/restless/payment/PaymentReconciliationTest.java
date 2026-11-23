@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
     "pg.provider=fake",
     "spring.docker.compose.enabled=false",
     "spring.main.allow-bean-definition-overriding=true",
-    // 수동 대사를 검증하므로 IntelliJ JUnit 직접 실행에서도 자동 실행을 끈다.
+    // 재확인 작업을 직접 실행해 검증하므로 IntelliJ JUnit 직접 실행에서도 자동 실행을 끈다.
     "restless.payment.reconcile.enabled=false"
 })
 @Import({TestcontainersConfiguration.class, PaymentReconciliationTest.Config.class})
@@ -447,6 +447,41 @@ class PaymentReconciliationTest {
     }
 
     @Test
+    void failedApplyDoesNotKeepPaymentAtHeadOfCandidates() {
+        var stuck = prepare(1);
+        change(stuck, x -> x.startProcessing("stuck", NOW.minusSeconds(10)));
+        var healthy = prepare(2);
+        change(healthy, x -> x.startProcessing("healthy", NOW.minusSeconds(5)));
+        for (var p : List.of(stuck, healthy)) pg.results.put(p.pgOrderId(), approved(p));
+        age(31);
+        var limited =
+                new PaymentReconciler(
+                        payments,
+                        transactions,
+                        pg,
+                        clock,
+                        new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+                        new PaymentReconciliationProperties(
+                                1,
+                                Duration.ofSeconds(30),
+                                Duration.ofSeconds(10),
+                                Duration.ofSeconds(30),
+                                Duration.ofMinutes(15)));
+        handler.throwApproved = true;
+        limited.runOnce();
+        assertThat(payment(stuck).getStatus()).isEqualTo(PaymentStatus.PROCESSING);
+        assertThat(payment(stuck).getUpdatedAt()).isEqualTo(clock.now);
+
+        handler.throwApproved = false;
+        age(62);
+        limited.runOnce();
+        assertThat(payment(healthy).getStatus()).isEqualTo(PaymentStatus.APPROVED);
+        assertThat(payment(stuck).getStatus()).isEqualTo(PaymentStatus.PROCESSING);
+        limited.runOnce();
+        assertThat(payment(stuck).getStatus()).isEqualTo(PaymentStatus.APPROVED);
+    }
+
+    @Test
     void batchLimitSelectsOldestFirst() {
         var recent = prepare(1);
         processing(recent);
@@ -571,6 +606,9 @@ class PaymentReconciliationTest {
         assertThat(failure("cancel_apply")).isEqualTo(before + 1);
         handler.throwRefunded = false;
         reconciler.runOnce();
+        assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.CANCEL_UNKNOWN);
+        age(41); // The failed apply recorded a check at 31s; retry after the 10s interval.
+        reconciler.runOnce();
         assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.CANCELLED);
         assertThat(
                         jdbc.queryForObject(
@@ -691,6 +729,7 @@ class PaymentReconciliationTest {
         final AtomicInteger queries = new AtomicInteger();
         volatile Runnable duringQuery = () -> {}, afterApproval = () -> {};
         volatile PgCancelCommand lastCancel;
+        volatile String queriedOrderId;
 
         ObservedPg(FakePgClient fake) {
             super(fake);
@@ -704,12 +743,14 @@ class PaymentReconciliationTest {
             duringQuery = () -> {};
             afterApproval = () -> {};
             lastCancel = null;
+            queriedOrderId = null;
         }
 
         @Override
         public PgQueryResult query(String id) {
             txSeen |= TransactionSynchronizationManager.isActualTransactionActive();
             queries.incrementAndGet();
+            queriedOrderId = id;
             duringQuery.run();
             return results.containsKey(id) ? results.get(id) : fake.query(id);
         }

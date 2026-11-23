@@ -6,7 +6,7 @@
 >
 > 관련 코드: `backend/src/main/java/com/restless/order/`, `backend/src/main/java/com/restless/payment/`
 >
-> 마지막 확인: 2026-11-16 (엔드포인트를 컨트롤러와 대조. `common.md`에서 분리. 이전 이력: #44, #45~#47, #73, #101, #109)
+> 마지막 확인: 2026-11-23 (#341 최근 결제 조회 추가. `common.md`에서 분리. 이전 이력: #44, #45~#47, #73, #101, #109)
 
 오류 응답 형식은 [README 공통 규칙 3](README.md#공통-규칙)을 따른다. 결제를 쓰는 도메인: [드롭](drop.md), [티켓팅](ticketing.md), [팬미팅](fanmeeting.md).
 
@@ -19,6 +19,7 @@
 | POST | `/api/payments` | 결제 준비. 새 시도 201, 같은 키 재요청 200 | 구현 |
 | POST | `/api/payments/confirm` | 토스 승인. 승인 200, 처리 중/불명확 202, 최종 거절 409 | 구현 |
 | GET | `/api/payments/{paymentId}` | 본인 결제 조회 200 | 구현 |
+| GET | `/api/payments/latest?payableType=FAN_MEETING&payableId=10` | 본인 대상의 최근 결제 시도 200, 이력 없음 204 | 구현 |
 | POST | `/api/payments/{paymentId}/refunds` | 손님 전액 환불. 완료 200, 처리 중/불명확 202, 거절/상태 충돌 409 | 구현 |
 
 기존 초안의 `/api/payments/orders/{orderId}`는 `/api/payments/{paymentId}`로 변경했다.
@@ -26,6 +27,14 @@
 결제 대상은 `(payableType, payableId)`로 식별하며 `orderId`는 승인 요청에서만 우리 `pgOrderId`를 뜻한다.
 모든 결제 API는 Bearer 로그인이 필요하다(토큰 없음/만료/위조는 401 `UNAUTHORIZED`).
 회원 ID는 토큰의 `@LoginMember`에서만 받고 본문에서 받지 않는다.
+
+### 최근 결제 시도 조회
+
+`GET /api/payments/latest?payableType=FAN_MEETING&payableId=10`은 본인의 해당 대상에 대한 가장 최근 시도를 `{ "paymentId": 12, "status": "UNKNOWN" }`로 반환한다. `payableType`은 `DROP`, `TICKET`, `FAN_MEETING`, `CREDIT_CHARGE` 중 하나이고 `payableId`는 양수다. 두 값 모두 필수이며 잘못된 값은 400이다.
+
+- 이력이 없거나 타인 소유 대상이면 동일하게 본문 없는 204다. 대상의 존재 여부를 노출하지 않는다.
+- 조회는 결제를 생성하거나 PG를 호출하지 않는다. 반환된 ID로 `GET /api/payments/{paymentId}`를 조회해 결과 확인을 이어 간다.
+- 팬미팅 자체 주문처럼 공통 주문 상세를 쓰지 않는 화면도 PG 복귀와 새로고침 뒤 결제 상태를 복원할 수 있다. 실패 후 재시도가 있으면 과거 FAILED 대신 가장 최근 시도를 준다.
 
 ### 내 주문 목록
 
@@ -97,7 +106,7 @@
 { "payableType": "DROP", "payableId": 123 }
 ```
 
-`payableType`은 `DROP`, `TICKET`, `FAN_MEETING`, `payableId`는 양수다.
+`payableType`은 `DROP`, `TICKET`, `FAN_MEETING`, `CREDIT_CHARGE`(크레딧 충전 주문, [auction.md](auction.md) "크레딧 충전"), `payableId`는 양수다.
 각 도메인의 Handler가 등록되어 있어야 한다(Handler 구현은 도메인 담당 범위).
 금액, 상품명, 기한은 Handler가 읽은 서버 값이며 클라이언트 금액을 받지 않는다.
 0원 대상은 PG로 결제하지 않는다. 409 `PAYMENT_NOT_PAYABLE`, `details.reason = "FREE_ORDER"`. 무료 주문은 도메인이 결제 없이 확정한다.
@@ -160,7 +169,7 @@ FAILED는 409 `PAYMENT_FAILED`, 취소 계열은 409 `PAYMENT_NOT_PAYABLE`이다
 취소 성공은 CANCELLED / 환불 COMPLETED, 불명확은 CANCEL_UNKNOWN / 환불 UNKNOWN,
 취소 확정 거절은 APPROVED / 환불 FAILED로 남아 운영 확인 대상이다.
 취소 결과 반영 기술 오류는 CANCEL_PENDING / 환불 REQUESTED를 유지하고 `refund: UNKNOWN`으로 응답한다.
-미완료 승인/취소는 [공통 결제 대사](../../operations/failure-handling.md#공통-결제-대사-46)가 PG 조회로 복구한다. 손님 환불도 같은 취소 확정 경로를 쓴다.
+미완료 승인/취소는 [미완료 결제 재확인 작업](../../operations/failure-handling.md#미완료-결제-재확인-작업-46)이 PG 조회로 복구한다. 손님 환불도 같은 취소 확정 경로를 쓴다.
 
 ### 결제 조회
 
@@ -213,7 +222,7 @@ FAILED는 409 `PAYMENT_FAILED`, 취소 계열은 409 `PAYMENT_NOT_PAYABLE`이다
 | HTTP | 응답/오류 | 의미 |
 |---|---|---|
 | 200 | `{ "refundId": 10, "status": "COMPLETED" }` | PG 전액 취소 확인, 결제 CANCELLED, `onRefunded(CUSTOMER_REFUND)` 커밋 |
-| 202 | `{ "refundId": 10, "status": "UNKNOWN" }` | PG 취소 결과 불명확, 결제 CANCEL_UNKNOWN. 대사가 조회/같은 키 취소 재시도로 확정 |
+| 202 | `{ "refundId": 10, "status": "UNKNOWN" }` | PG 취소 결과 불명확, 결제 CANCEL_UNKNOWN. 미완료 결제 재확인 작업이 조회/같은 키 취소 재시도로 확정 |
 | 202 | `{ "refundId": 10, "status": "REQUESTED" }` | 최초 취소 진행 중인 같은 키의 재요청, 또는 결과 반영 기술 오류로 CANCEL_PENDING/REQUESTED 유지 |
 | 409 | `PAYMENT_REFUND_REJECTED`, `details.code` | PG 취소 최종 거절, 환불 FAILED·결제 APPROVED, `onRefundRejected(CUSTOMER_REFUND)` 함께 커밋 |
 
@@ -230,15 +239,15 @@ Handler 업무 거절은 요청 트랜잭션 전체를 롤백하므로 결제 AP
 
 요청 트랜잭션 커밋 → 트랜잭션 밖 PG 취소 한 번 → 기존 공통 취소 결과 반영 트랜잭션 순서다.
 요청 트랜잭션은 결제 행을 잠근 뒤 Handler(도메인 행)를 호출하고 환불 행을 새로 만든다. 결과 반영 트랜잭션은 결제 행 → 환불 행 → 도메인 행 순서로 잠근다. PG 전액 취소가 확인되기 전에는 재고·좌석을 반환하지 않는다.
-결과 반영 Handler의 기술 예외는 결제·환불·도메인 변경을 함께 롤백하고 202로 반환한다. 대사가 같은 저장 키로 복구한다.
+결과 반영 Handler의 기술 예외는 결제, 환불, 도메인 변경을 함께 롤백하고 202로 반환한다. 미완료 결제 재확인 작업이 같은 저장 키로 복구한다.
 PG의 명시적 거절로 FAILED가 된 경우에는 새 키로 다시 요청할 수 있다. 완료된 환불은 다른 키로 중복 요청할 수 없다.
 
 관측: `payment.refund{result=requested|completed|rejected|unknown}`는 **커밋된 손님 환불 상태 전이**를 센다.
 신규 환불 건수는 `result=requested`, 완료 건수는 `result=completed`로 조회한다. 같은 키 재요청·중복 결과는 늘리지 않는다.
-`unknown`은 REQUESTED → UNKNOWN 최초 전이만 세며, 대사 완료/거절도 동일하게 집계한다. 롤백은 집계하지 않는다.
+`unknown`은 REQUESTED → UNKNOWN 최초 전이만 세며, 미완료 결제 재확인 작업의 완료/거절도 동일하게 집계한다. 롤백은 집계하지 않는다.
 API 응답 횟수(멱등 재요청 포함)는 `payment.refund.request{result=completed|rejected|unknown|not_refundable}`로 분리했다(REQUESTED 응답은 unknown 분류).
 프로세스 재시작·메트릭 전송 장애로 카운터가 유실될 수 있으므로 회계상 정본은 DB이며 상태별 카운터를 합산해 환불 총수로 쓰지 않는다.
-`payment.pg.cancel{kind=CUSTOMER_REFUND|COMPENSATION}` Timer는 손님 환불·보상 취소·대사의 실제 PG 취소 호출을 모두 측정한다.
+`payment.pg.cancel{kind=CUSTOMER_REFUND|COMPENSATION}` Timer는 손님 환불, 보상 취소, 미완료 결제 재확인 작업의 실제 PG 취소 호출을 모두 측정한다.
 
 ### 결제 오류
 

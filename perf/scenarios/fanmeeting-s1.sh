@@ -1,0 +1,409 @@
+#!/usr/bin/env bash
+# 팬미팅 S1 한 회: 행사 하나로 측정 흐름 전체를 명령 하나로 돈다. 사용법은 perf/scenarios/fanmeeting.md.
+#
+#   지표 기록 시작 → 행사 생성 → 응모 몰림(A, START_OFFSET=-2s면 B, GUERRILLA=true면 게릴라 오픈 G) → 점검 1
+#   → 마감 앞뒤 응모(C) → 추첨 확정 대기 → 점검 2(D) → 결과 조회 폭주 → 점검 3 → 지표 요약(단계별)
+#
+# 결과는 RUN_DIR 한 폴더에 모인다. 측정한 사람은 이 폴더를 통째로 넘기면 된다(토큰·비밀번호는 들어가지 않는다).
+# 약 15~20분 걸린다(OPEN_IN 3분 + 응모 기간 10분 + 추첨 + 조회).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="$(cd "$ROOT/../.." && pwd)"
+die() { echo "fanmeeting-s1: $*" >&2; exit 2; }
+say() { echo "[$(date -u +%H:%M:%S)] $*"; }
+# 단계 경계와 경계 스냅샷을 같은 정밀도로 비교하도록 밀리초까지 남긴다.
+now_iso() { python3 -c 'import datetime as d; print(d.datetime.now(d.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"))'; }
+
+# ---------------------------------------------------------------- 입력
+export BASE_URL="${BASE_URL:-http://perf-app:8080}"
+export MANAGEMENT_URL="${MANAGEMENT_URL:-http://perf-app:8081}"
+: "${PERF_ALLOWED_APP_HOSTS:?PERF_ALLOWED_APP_HOSTS is required (comma separated, e.g. perf-app)}"
+export PERF_ALLOWED_APP_HOSTS
+SEED_OUT="$(cd "${SEED_OUT:-$REPO/perf/seed/out}" 2>/dev/null && pwd)" || die "SEED_OUT not found (perf/seed/out)"
+export SEED_OUT
+[[ -f "$SEED_OUT/users.csv" && -f "$SEED_OUT/staff.csv" ]] || die "$SEED_OUT needs users.csv and staff.csv (from perf/seed/seed.sh)"
+
+PARTICIPANTS="${PARTICIPANTS:-1000}"
+PEAK_RATE="${PEAK_RATE:-1000}"
+RAMP="${RAMP:-5s}"
+HOLD="${HOLD:-}"                     # 비우면 참여자 수와 도착률로 계산
+START_OFFSET="${START_OFFSET:-2s}"   # A: 2s(Open Worker 뒤), B: -2s(오픈 직전부터)
+# G 게릴라 오픈: 오픈 시각을 숨긴 행사(OPENS_AT_PUBLIC=false). 참여자 전원이 오픈 PREOPEN 전부터 상세를
+# POLL_MIN~POLL_MAX 간격으로 새로고침하다가 OPEN이 보이면 응모한다. 이때 PEAK_RATE·RAMP·HOLD는 쓰지 않는다.
+GUERRILLA="${GUERRILLA:-false}"
+PREOPEN="${PREOPEN:-60s}"
+POLL_MIN="${POLL_MIN:-1s}"
+POLL_MAX="${POLL_MAX:-3s}"
+OPEN_WAIT="${OPEN_WAIT:-120s}"
+CLOSE_PARTICIPANTS="${CLOSE_PARTICIPANTS:-500}"   # C. 0이면 건너뜀
+CLOSE_RATE="${CLOSE_RATE:-}"            # 비우면 마감 3초 전부터 약 6초에 걸쳐 보내도록 자동
+RESULT="${RESULT:-true}"             # 결과 조회 폭주. false면 건너뜀
+RESULT_RATE="${RESULT_RATE:-$PEAK_RATE}"
+DRAW_TIMEOUT="${DRAW_TIMEOUT:-600}"  # 마감 뒤 추첨 확정을 기다리는 최대 초
+METRICS_INTERVAL="${METRICS_INTERVAL:-2}"
+K6="${K6:-docker}"                   # docker 또는 local(설치된 k6)
+K6_IMAGE="${K6_IMAGE:-grafana/k6:2.4.0}"
+# k6 웹 대시보드: 단계 실행 중 http://localhost:K6_DASHBOARD_PORT 에서 실시간으로 보고, 끝나면 <단계>-dashboard.html로 남긴다.
+# 이 노트북에서만 열린다(127.0.0.1). 단계마다 k6를 새로 띄우므로 단계가 바뀌면 페이지를 새로고침한다.
+K6_DASHBOARD="${K6_DASHBOARD:-true}"
+K6_DASHBOARD_PORT="${K6_DASHBOARD_PORT:-5665}"
+INVARIANTS_SQL="${INVARIANTS_SQL:-$REPO/backend/src/test/resources/harness/fanmeeting-invariants.sql}"
+RUN_DIR="${RUN_DIR:-$REPO/.ai-output/perf/s1-$(date -u +%m%d-%H%M)-p${PARTICIPANTS}-r${PEAK_RATE}}"
+[[ "$K6_DASHBOARD" == "true" || "$K6_DASHBOARD" == "false" ]] || die "K6_DASHBOARD must be true or false: $K6_DASHBOARD"
+[[ "$GUERRILLA" == "true" || "$GUERRILLA" == "false" ]] || die "GUERRILLA must be true or false: $GUERRILLA"
+for v in PREOPEN POLL_MIN POLL_MAX OPEN_WAIT; do
+  [[ "${!v}" =~ ^[0-9]+(ms|s|m)?$ ]] || die "$v must look like 60s, 1500ms or 2m: ${!v}"
+done
+for n in PARTICIPANTS PEAK_RATE CLOSE_PARTICIPANTS RESULT_RATE DRAW_TIMEOUT METRICS_INTERVAL K6_DASHBOARD_PORT; do
+  [[ "${!n}" =~ ^[0-9]+$ ]] || die "$n must be a whole number: ${!n}"
+done
+[[ $PARTICIPANTS -ge 1 && $PEAK_RATE -ge 1 && $RESULT_RATE -ge 1 ]] || die "PARTICIPANTS, PEAK_RATE, RESULT_RATE must be >= 1"
+[[ -e "$RUN_DIR" ]] && die "RUN_DIR already exists: $RUN_DIR"
+
+# 호스트 규칙은 각 스크립트가 다시 검사한다. 여기서는 docker에 넘길 호스트 이름과 주소만 정한다.
+host_of() { local h="${1#*://}"; h="${h%%/*}"; echo "${h%%:*}"; }
+HOSTS=("$(host_of "$BASE_URL")")
+[[ "$(host_of "$MANAGEMENT_URL")" != "${HOSTS[0]}" ]] && HOSTS+=("$(host_of "$MANAGEMENT_URL")")
+# K6_ADD_HOST: 컨테이너 안에서 perf- 이름이 가리킬 주소. 비우면 PERF_APP_ADDR, 그것도 없으면 이 머신의 /etc/hosts로 찾는다.
+if [[ "$K6" == "docker" ]]; then
+  K6_ADD_HOST="${K6_ADD_HOST:-${PERF_APP_ADDR:-}}"
+  if [[ -z "$K6_ADD_HOST" ]]; then
+    K6_ADD_HOST="$(python3 -c 'import socket,sys; print(socket.gethostbyname(sys.argv[1]))' "${HOSTS[0]}" 2>/dev/null)" \
+      || die "cannot resolve ${HOSTS[0]}. Add it to /etc/hosts or set PERF_APP_ADDR (IP)"
+  fi
+  command -v docker >/dev/null || die "docker not found (or set K6=local)"
+else
+  command -v k6 >/dev/null || die "k6 not found (or set K6=docker)"
+fi
+
+CURL=(curl -sS --max-time 10)
+if [[ -n "${PERF_APP_ADDR:-}" ]]; then
+  hp="${BASE_URL#*://}"; hp="${hp%%/*}"
+  CURL+=(--connect-to "${hp}:${PERF_APP_ADDR}:${hp##*:}")
+fi
+
+# 참여자 계정: A는 USER 행 앞에서 PARTICIPANTS개, C는 그 다음부터. 모자라면 C를 줄이거나 건너뛴다.
+available="$(awk -F',' 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "role") r = i; next } $r == "USER" { n++ } END { print n + 0 }' "$SEED_OUT/users.csv")"
+[[ $PARTICIPANTS -le $available ]] || die "users.csv has $available USER rows, PARTICIPANTS is $PARTICIPANTS"
+if [[ $((PARTICIPANTS + CLOSE_PARTICIPANTS)) -gt $available ]]; then
+  CLOSE_PARTICIPANTS=$((available - PARTICIPANTS))
+  say "C: only $CLOSE_PARTICIPANTS unused accounts left, C uses that many"
+fi
+
+# C는 마감을 가로질러야 한다: 마감 3초 전에 시작해 마감 3초 뒤쯤 계정이 바닥나게 도착률을 정한다.
+if [[ -z "$CLOSE_RATE" ]]; then CLOSE_RATE=$(( (CLOSE_PARTICIPANTS + 5) / 6 )); [[ $CLOSE_RATE -ge 1 ]] || CLOSE_RATE=1; fi
+[[ "$CLOSE_RATE" =~ ^[0-9]+$ && $CLOSE_RATE -ge 1 ]] || die "CLOSE_RATE must be a whole number >= 1"
+
+# 총 도착 수가 참여자보다 많도록 유지 시간을 정한다(램프 절반 + 유지 + 내려가는 5초의 절반).
+secs() { python3 -c 'import re,sys; m=re.fullmatch(r"(\d+)(ms|s|m)?", sys.argv[1]); print(int(m.group(1)) * {"ms": 0.001, "s": 1, "m": 60, None: 1}[m.group(2)])' "$1"; }
+if [[ -z "$HOLD" ]]; then
+  HOLD="$(python3 -c 'import math,sys; p,r,ramp=map(float,sys.argv[1:]); print(f"{max(5, math.ceil(p / r - ramp / 2 - 2.5) + 3)}s")' "$PARTICIPANTS" "$PEAK_RATE" "$(secs "$RAMP")")"
+fi
+RESULT_HOLD="${RESULT_HOLD:-$(python3 -c 'import math,sys; p,r=map(float,sys.argv[1:]); print(f"{max(10, math.ceil(p / r) + 10)}s")' "$PARTICIPANTS" "$RESULT_RATE")}"
+
+DB_CHECK=0
+if [[ -n "${DB_HOST:-}" ]]; then
+  [[ -f "$INVARIANTS_SQL" ]] || die "INVARIANTS_SQL not found: $INVARIANTS_SQL (pull latest dev, or give the path)"
+  DB_CHECK=1
+fi
+
+mkdir -p "$RUN_DIR"
+export EVENT_FILE="$RUN_DIR/event.env"
+TIMELINE="$RUN_DIR/timeline.tsv"
+printf 'phase\tstart\tend\texit\tstart_snapshot\tend_snapshot\n' > "$TIMELINE"
+exec > >(tee -a "$RUN_DIR/run.log") 2>&1
+
+cat > "$RUN_DIR/conditions.txt" <<EOF
+started_at=$(now_iso)
+base_url=$BASE_URL management_url=$MANAGEMENT_URL k6=$K6 ${K6_IMAGE}
+participants=$PARTICIPANTS peak_rate=$PEAK_RATE ramp=$RAMP hold=$HOLD start_offset=$START_OFFSET
+close_participants=$CLOSE_PARTICIPANTS close_rate=$CLOSE_RATE
+result=$RESULT result_rate=$RESULT_RATE result_hold=$RESULT_HOLD
+winner_limit=${WINNER_LIMIT:-300} reserve_limit=${RESERVE_LIMIT:-100} fee_amount=${FEE_AMOUNT:-50000} open_in=${OPEN_IN:-3m}
+guerrilla=$GUERRILLA$( [[ "$GUERRILLA" == "true" ]] && echo " preopen=$PREOPEN poll=$POLL_MIN~$POLL_MAX open_wait=$OPEN_WAIT (peak_rate, ramp, hold unused for apply)")
+db_check=$DB_CHECK metrics_interval=${METRICS_INTERVAL}s users_available=$available k6_dashboard=$K6_DASHBOARD
+EOF
+say "run dir $RUN_DIR"
+cat "$RUN_DIR/conditions.txt"
+
+# ---------------------------------------------------------------- 지표 기록 (끝까지 백그라운드)
+metrics_pid=""
+stop_metrics() {
+  if [[ -n "$metrics_pid" ]] && kill -0 "$metrics_pid" 2>/dev/null; then
+    kill -TERM "$metrics_pid" 2>/dev/null || true
+    wait "$metrics_pid" 2>/dev/null || true
+  fi
+  metrics_pid=""
+}
+trap 'stop_metrics' EXIT
+OUT_DIR="$RUN_DIR/metrics" INTERVAL="$METRICS_INTERVAL" "$ROOT/fanmeeting-metrics.sh" >> "$RUN_DIR/metrics.log" 2>&1 &
+metrics_pid=$!
+sleep 2
+kill -0 "$metrics_pid" 2>/dev/null || die "metrics recorder stopped: $(tail -3 "$RUN_DIR/metrics.log")"
+
+# ---------------------------------------------------------------- 단계 실행 도우미
+phase_start=""
+begin() { phase_start="$(now_iso)"; say "== $1"; }
+finish() {  # finish <phase> <exit> [start snapshot] [end snapshot]
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$phase_start" "$(now_iso)" "$2" "${3:--}" "${4:--}" >> "$TIMELINE"
+}
+
+run_k6() {  # run_k6 <phase> <script> [KEY=VALUE ...]
+  local phase="$1" script="$2"; shift 2
+  local envs=(BASE_URL="$BASE_URL" MANAGEMENT_URL="$MANAGEMENT_URL" PERF_ALLOWED_APP_HOSTS="$PERF_ALLOWED_APP_HOSTS"
+              SUMMARY_PATH="@OUT@/$phase.json" "$@")
+  if [[ "$K6_DASHBOARD" == "true" ]]; then
+    envs+=(K6_WEB_DASHBOARD=true K6_WEB_DASHBOARD_EXPORT="@OUT@/$phase-dashboard.html")
+    say "k6 dashboard: http://localhost:$K6_DASHBOARD_PORT (live while $phase runs), saved to $phase-dashboard.html"
+  fi
+  local code=0
+  if [[ "$K6" == "docker" ]]; then
+    local args=(run --rm -v "$REPO/perf:/perf:ro" -v "$SEED_OUT:/seed:ro" -v "$RUN_DIR:/out")
+    # 컨테이너 안에서는 모든 주소로 열고(0.0.0.0), 밖으로는 이 노트북(127.0.0.1)에만 연결한다.
+    [[ "$K6_DASHBOARD" == "true" ]] \
+      && args+=(-p "127.0.0.1:$K6_DASHBOARD_PORT:5665" -e K6_WEB_DASHBOARD_HOST=0.0.0.0 -e K6_WEB_DASHBOARD_PORT=5665)
+    for h in "${HOSTS[@]}"; do args+=(--add-host "$h:$K6_ADD_HOST"); done
+    args+=(-e SEED_OUT=/seed -e EVENT_FILE=/out/event.env)
+    for e in "${envs[@]}"; do args+=(-e "${e//@OUT@//out}"); done
+    docker "${args[@]}" "$K6_IMAGE" run -q "/perf/scenarios/$script" || code=$?
+  else
+    local kv=(SEED_OUT="$SEED_OUT" EVENT_FILE="$EVENT_FILE")
+    [[ "$K6_DASHBOARD" == "true" ]] && kv+=(K6_WEB_DASHBOARD_HOST=127.0.0.1 K6_WEB_DASHBOARD_PORT="$K6_DASHBOARD_PORT")
+    for e in "${envs[@]}"; do kv+=("${e//@OUT@/$RUN_DIR}"); done
+    env "${kv[@]}" k6 run -q "$ROOT/$script" || code=$?
+  fi
+  return $code
+}
+
+run_check() {  # run_check <phase> [SUMMARY_PATH]
+  if [[ $DB_CHECK -eq 0 ]]; then
+    say "check skipped (DB_HOST not set). Run fanmeeting-check.sh later with EVENT_FILE=$EVENT_FILE"
+    return 0
+  fi
+  local code=0
+  INVARIANTS_SQL="$INVARIANTS_SQL" SUMMARY_PATH="${2:-}" "$ROOT/fanmeeting-check.sh" > "$RUN_DIR/$1.txt" 2>&1 || code=$?
+  cat "$RUN_DIR/$1.txt"
+  return $code
+}
+
+# 단계 경계 스냅샷: 단계의 부하를 시작하기 전에 한 장, 부하가 끝난 뒤 한 장을 직접 저장한다(동기 호출).
+# 단계 요약은 이 두 파일(timeline.tsv의 start_snapshot, end_snapshot) 사이의 차이라서, 백그라운드 기록 간격 때문에
+# 단계 앞뒤 요청이 빠지거나 단계 밖 요청이 섞이지 않는다. 기록 루프와는 같은 잠금을 써서 겹치지 않는다.
+# 저장한 이름(epoch ms)을 출력한다. 실패하면 아무것도 출력하지 않고, 그 단계 요약은 INVALID가 된다.
+boundary_snap() {
+  local out
+  if out="$(OUT_DIR="$RUN_DIR/metrics" "$ROOT/fanmeeting-metrics.sh" snap 2>> "$RUN_DIR/metrics.log")"; then
+    echo "$out" >> "$RUN_DIR/metrics.log"
+    sed -n 's/^metrics: snapshot \([0-9][0-9]*\) .*/\1/p' <<< "$out"
+  else
+    say "boundary snapshot failed ($1). This phase's server metrics will be marked INVALID." >&2
+  fi
+}
+
+failures=()
+step() {  # step <phase> <command...>: 실패해도 흐름은 계속 가고 끝에 모아서 보여 준다
+  local phase="$1"; shift
+  begin "$phase"
+  local snap_from snap_until code=0
+  snap_from="$(boundary_snap "$phase start")"
+  "$@" || code=$?
+  snap_until="$(boundary_snap "$phase end")"
+  finish "$phase" "$code" "$snap_from" "$snap_until"
+  [[ $code -eq 0 ]] || { failures+=("$phase(exit $code)"); say "$phase exited $code"; }
+}
+
+# ---------------------------------------------------------------- 1. 행사 생성
+begin prepare
+# 게릴라 오픈이면 오픈 시각을 숨긴 행사를 만든다.
+[[ "$GUERRILLA" == "true" ]] && export OPENS_AT_PUBLIC=false
+"$ROOT/fanmeeting-prepare.sh" || { finish prepare $?; die "prepare failed"; }
+finish prepare 0
+# shellcheck disable=SC1090
+source "$EVENT_FILE"
+
+# ---------------------------------------------------------------- 2. 응모 몰림 (A, START_OFFSET<0이면 B, GUERRILLA=true면 G)
+# 시나리오를 k6에 명시한다. A·G는 전원 201이어야 하고, B는 오픈 전 거절이 정상이다(판정이 다르다).
+if [[ "$GUERRILLA" == "true" ]]; then
+  apply_scenario=G
+  apply_phase="apply-G"
+  say "k6 waits until $FM_ENTRY_OPENS_AT -$PREOPEN, then $PARTICIPANTS members refresh every $POLL_MIN~$POLL_MAX and apply when OPEN shows"
+  step "$apply_phase" run_k6 "$apply_phase" fanmeeting-apply.js SCENARIO=G MODE=open START_OFFSET="-$PREOPEN" \
+    PARTICIPANTS="$PARTICIPANTS" USER_OFFSET=0 POLL_MIN="$POLL_MIN" POLL_MAX="$POLL_MAX" OPEN_WAIT="$OPEN_WAIT"
+else
+  apply_scenario=A; [[ "$START_OFFSET" == -* ]] && apply_scenario=B
+  apply_phase="apply-$apply_scenario"
+  say "k6 waits until $FM_ENTRY_OPENS_AT ${START_OFFSET} (participants $PARTICIPANTS, ${PEAK_RATE}/s, ramp $RAMP, hold $HOLD)"
+  step "$apply_phase" run_k6 "$apply_phase" fanmeeting-apply.js SCENARIO="$apply_scenario" MODE=open START_OFFSET="$START_OFFSET" \
+    PARTICIPANTS="$PARTICIPANTS" USER_OFFSET=0 PEAK_RATE="$PEAK_RATE" RAMP="$RAMP" HOLD="$HOLD" \
+    ${PRE_VUS:+PRE_VUS=$PRE_VUS} ${MAX_VUS:+MAX_VUS=$MAX_VUS}
+fi
+step check-1-apply run_check check-1-apply "$RUN_DIR/$apply_phase.json"
+
+# 결과 조회에서 NOT_APPLIED가 나와야 하는 인원 = A(B) 참여자 중 응모가 안 된 사람.
+#   DB 점검이 있으면 DB의 APPLIED 수로 정한다(이 시점의 행사 응모는 A뿐이다).
+#   없으면 k6 201 수로 정하되, 연결 오류·5xx가 있으면 실제 응모 여부를 알 수 없어 판정하지 않는다(unknown).
+expected_not_applied() {
+  local db_applied=""
+  [[ -f "$RUN_DIR/check-1-apply.txt" ]] \
+    && db_applied="$(sed -n 's/.*(APPLIED \([0-9][0-9]*\),.*/\1/p' "$RUN_DIR/check-1-apply.txt" | head -1)"
+  if [[ -n "$db_applied" ]]; then
+    echo "$((PARTICIPANTS - db_applied)) db"
+    return
+  fi
+  python3 -c '
+import json, sys
+try:
+    o = json.load(open(sys.argv[1]))["outcomes"]
+except (OSError, ValueError, KeyError):
+    print("unknown no-apply-summary"); sys.exit()
+uncertain = o["fm_transport_error"] + o["fm_server_error"]
+print("unknown k6-responses-lost" if uncertain else str(int(sys.argv[2]) - o["fm_applied"]) + " k6")
+' "$RUN_DIR/$apply_phase.json" "$PARTICIPANTS"
+}
+read -r EXPECTED_NOT_APPLIED expected_source <<< "$(expected_not_applied)"
+echo "expected_not_applied=$EXPECTED_NOT_APPLIED source=$expected_source" >> "$RUN_DIR/conditions.txt"
+say "result check: expected NOT_APPLIED $EXPECTED_NOT_APPLIED (from $expected_source)"
+
+# ---------------------------------------------------------------- 3. 마감 앞뒤 (C)
+if [[ $CLOSE_PARTICIPANTS -gt 0 ]]; then
+  say "k6 waits until $FM_ENTRY_CLOSES_AT -3s (C: $CLOSE_PARTICIPANTS unused accounts, ${CLOSE_RATE}/s)"
+  step apply-C run_k6 apply-C fanmeeting-apply.js SCENARIO=C MODE=close START_OFFSET=-3s \
+    PARTICIPANTS="$CLOSE_PARTICIPANTS" USER_OFFSET="$PARTICIPANTS" PEAK_RATE="$CLOSE_RATE" RAMP=1s HOLD=8s
+else
+  say "C skipped (no unused accounts or CLOSE_PARTICIPANTS=0)"
+fi
+
+# ---------------------------------------------------------------- 4. 추첨 확정 대기 (D)
+wait_draw() {
+  local closes_ms deadline status=""
+  closes_ms="$(python3 -c 'import sys,datetime as d; print(int(d.datetime.fromisoformat(sys.argv[1].replace("Z","+00:00")).timestamp()*1000))' "$FM_ENTRY_CLOSES_AT")"
+  deadline=$(( closes_ms / 1000 + DRAW_TIMEOUT ))
+  while :; do
+    status="$("${CURL[@]}" "$BASE_URL/api/fan-meetings/$FM_EVENT_ID" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' 2>/dev/null || true)"
+    case "$status" in
+      PAYMENT_IN_PROGRESS|RECRUITMENT_COMPLETED) say "event $FM_EVENT_ID is $status"; return 0 ;;
+    esac
+    [[ $(date +%s) -ge $deadline ]] && { say "draw not finalized ${DRAW_TIMEOUT}s after close (status ${status:-?})"; return 1; }
+    sleep 5
+  done
+}
+step wait-draw wait_draw
+step check-2-draw run_check check-2-draw
+
+# ---------------------------------------------------------------- 5. 결과 조회 폭주
+if [[ "$RESULT" == "true" ]] && awk -F'\t' '$1 == "wait-draw" && $4 == "0" { ok = 1 } END { exit !ok }' "$TIMELINE"; then
+  step result run_k6 result fanmeeting-result.js PARTICIPANTS="$PARTICIPANTS" USER_OFFSET=0 \
+    EXPECTED_NOT_APPLIED="$EXPECTED_NOT_APPLIED" PEAK_RATE="$RESULT_RATE" RAMP=5s HOLD="$RESULT_HOLD"
+  step check-3-result run_check check-3-result
+else
+  say "result read storm skipped"
+fi
+
+# ---------------------------------------------------------------- 6. 지표 요약 (전체, 단계별)
+stop_metrics
+cat "$RUN_DIR/metrics.log"
+# 단계 요약은 경계 스냅샷 두 장을 직접 지정해 센다. 경계가 하나라도 없으면 단계 시각으로 자르되 INVALID로 표시한다.
+# 요약이 INVALID(경계 누락, 앱 재시작, 카운터 역행)면 실패로 모은다. 그 숫자를 처리량으로 읽지 않는다.
+while IFS=$'\t' read -r phase start end _ snap_from snap_until; do
+  [[ "$phase" == apply-* || "$phase" == result ]] || continue
+  mcode=0
+  if [[ "$snap_from" =~ ^[0-9]+$ && "$snap_until" =~ ^[0-9]+$ ]]; then
+    FROM_SNAPSHOT="$snap_from" UNTIL_SNAPSHOT="$snap_until" \
+      "$ROOT/fanmeeting-metrics.sh" summary "$RUN_DIR/metrics" > "$RUN_DIR/metrics-$phase.txt" 2>&1 || mcode=$?
+  else
+    FROM="$start" UNTIL="$end" BOUNDARY_MISSING="$phase boundary snapshot missing (start ${snap_from:--}, end ${snap_until:--})" \
+      "$ROOT/fanmeeting-metrics.sh" summary "$RUN_DIR/metrics" > "$RUN_DIR/metrics-$phase.txt" 2>&1 || mcode=$?
+  fi
+  mv -f "$RUN_DIR/metrics/summary.json" "$RUN_DIR/metrics-$phase.json" 2>/dev/null || true
+  [[ $mcode -eq 0 ]] || failures+=("metrics-$phase(invalid, exit $mcode)")
+done < <(tail -n +2 "$TIMELINE")
+mcode=0
+"$ROOT/fanmeeting-metrics.sh" summary "$RUN_DIR/metrics" > "$RUN_DIR/metrics-all.txt" 2>&1 || mcode=$?
+[[ $mcode -eq 0 ]] || failures+=("metrics-all(invalid, exit $mcode)")
+
+# ---------------------------------------------------------------- 7. 한 장 요약
+python3 - "$RUN_DIR" > "$RUN_DIR/summary.txt" <<'PY'
+import json, os, sys
+d = sys.argv[1]
+def load(name):
+    p = os.path.join(d, name)
+    return json.load(open(p, encoding='utf-8')) if os.path.exists(p) else None
+env = dict(l.strip().split('=', 1) for l in open(os.path.join(d, 'event.env')) if '=' in l)
+print(f"S1 event {env['FM_EVENT_ID']}  opens {env['FM_ENTRY_OPENS_AT']}  closes {env['FM_ENTRY_CLOSES_AT']}")
+print(open(os.path.join(d, 'conditions.txt')).read().strip())
+print('\nphases (UTC)')
+for line in list(open(os.path.join(d, 'timeline.tsv')))[1:]:
+    p, s, e, c, sf, su = (line.rstrip('\n').split('\t') + ['-', '-'])[:6]
+    print(f"  {p:16} {s} → {e}  exit {c}  snapshots {sf} → {su}")
+for name in ('apply-A', 'apply-B', 'apply-G', 'apply-C'):
+    s = load(f'{name}.json')
+    if not s:
+        continue
+    o, b = s['outcomes'], s['byTimeSinceReference']
+    print(f"\n{name}: applied {o['fm_applied']}, window_closed {o['fm_window_closed']}, busy {o['fm_busy']}, "
+          f"5xx {o['fm_server_error']}, transport {o['fm_transport_error']}, dropped {o['dropped_iterations']}, "
+          f"requests sent {s['requestsTotal']}/{s['conditions']['participants']}")
+    print('  applied by time  ' + '  '.join(f"{k[11:]} {v}" for k, v in b.items() if k.startswith('fm_applied_')))
+    print('  closed by time   ' + '  '.join(f"{k[17:]} {v}" for k, v in b.items() if k.startswith('fm_window_closed_')))
+    g = s.get('guerrilla')
+    if g:
+        lat = lambda t: '-' if not t else f"med {t.get('med', 0):.0f} p95 {t.get('p(95)', 0):.0f} max {t.get('max', 0):.0f} ms"
+        print(f"  guerrilla: opensAt hidden {s['conditions'].get('guerrilla')}, refresh {s['conditions'].get('pollMin')}~{s['conditions'].get('pollMax')}, "
+              f"detail requests {g['detailRequests']} (5xx {g['detailServerError']}, transport {g['detailTransportError']}, "
+              f"other {g['detailOtherError']}), never saw OPEN {g['neverSawOpen']}")
+        print(f"  detail latency {lat(g['detailLatency'])}; OPEN first seen after the open {lat(g['openSeenAfterMs'])}")
+    if s['failedThresholds']:
+        print('  thresholds FAILED: ' + ', '.join(s['failedThresholds']))
+r = load('result.json')
+if r:
+    f = r['firstPass']
+    print(f"\nresult: first pass winner {f['fm_result_first_winner']}, reserve {f['fm_result_first_reserve']}, "
+          f"not_selected {f['fm_result_first_not_selected']}, pending {f['fm_result_first_pending']}, "
+          f"not_applied {f['fm_result_first_not_applied']}, with_order {f['fm_result_first_with_order']}, "
+          f"valid {f['total']}/{r['conditions']['participants']} (complete {f['complete']}); "
+          f"order mismatch {r['outcomes']['fm_order_mismatch']}, not_found {r['outcomes']['fm_order_not_found']}, "
+          f"5xx {r['outcomes']['fm_server_error']}, transport {r['outcomes']['fm_transport_error']}, "
+          f"dropped {r['outcomes']['dropped_iterations']}")
+    print(f"  not applied check: {f['notAppliedVerdict']}")
+    print("  (A participants only. With C, DB WINNER/RESERVE/orders also count C applicants, so first pass is lower)")
+    if r['failedThresholds']:
+        print('  thresholds FAILED: ' + ', '.join(r['failedThresholds']))
+pct = lambda v: '-' if v is None else f'{v * 100:.0f}%'
+for name in ('apply-A', 'apply-B', 'apply-G', 'apply-C', 'result'):
+    m = load(f'metrics-{name}.json')
+    if not m:
+        continue
+    if not m.get('valid', False):
+        print(f"\nserver {name}  ⚠ INVALID: {'; '.join(m.get('problems') or ['unknown'])}. Not a throughput result.")
+        if not m.get('endpoints'):
+            continue
+    print(f"\nserver {name} (counted {m.get('from')} → {m.get('until')}, {m['snapshots']} snapshots, "
+          f"boundary {m.get('fromSnapshot') or '-'} → {m.get('untilSnapshot') or '-'})")
+    for e in m['endpoints']:
+        fmt = lambda v: '-' if v is None else f'{v:.1f}'
+        print(f"  {e['endpoint']}: {int(e['requests'])} req (all statuses, peak {fmt(e['peakRate'])}/s), "
+              f"success {e['successStatus']} {int(e['successRequests'])} (avg {fmt(e['successAvgRate'])}/s, "
+              f"peak {fmt(e['successPeakRate'])}/s), "
+              f"p95 {fmt(e['p95Ms'])}ms, p99 {fmt(e['p99Ms'])}ms, max {fmt(e['maxMs'])}ms")
+    res = m['resources']
+    print(f"  tomcat connections max {res.get('tomcatConnectionsMax')}/{res.get('tomcatMaxConnections')} "
+          f"(keep-alive {res.get('tomcatKeepAliveMax')}), busy threads max {res.get('tomcatBusyMax')}/{res.get('tomcatMaxThreads')}")
+    print(f"  hikari active max {res['hikariActiveMax']}/{res['hikariMax']}, pending max {res['hikariPendingMax']}, "
+          f"timeouts {res['hikariTimeouts']}; cpu process max {pct(res['processCpuMax'])}, system max {pct(res['systemCpuMax'])}")
+for name in ('check-1-apply', 'check-2-draw', 'check-3-result'):
+    p = os.path.join(d, f'{name}.txt')
+    if os.path.exists(p):
+        lines = [l.rstrip() for l in open(p) if l.strip()]
+        keep = [l for l in lines if any(k in l for k in ('FAILED', 'applications', 'k6 201', 'started→completed', 'selections', 'fanmeeting-check'))]
+        print(f"\n{name}\n  " + '\n  '.join(keep))
+PY
+echo
+cat "$RUN_DIR/summary.txt"
+echo
+if [[ ${#failures[@]} -gt 0 ]]; then
+  say "finished with problems: ${failures[*]}"
+  say "send this folder: $RUN_DIR"
+  exit 1
+fi
+say "finished. send this folder: $RUN_DIR"

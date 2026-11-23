@@ -106,7 +106,7 @@ UUID 번호 자체의 충돌은 발급 대상 중복과 구분하여 새 번호�
 
 ## 공통 결제 callback 연결 (2026-11-16)
 
-TicketPaymentResultHandler가 onApproved를 내부 발급 서비스로 전달한다. 거절된 승인은 공통 결제가 보상 취소하며, 티켓팅은 onRefunded(COMPENSATION)에서 미확정 자원만 정리한다. 이미 CONFIRMED인 예약에 보상 취소가 오면 티켓·confirmed 수량을 변경하지 않고 운영 확인 대상으로 기록한다. 정상 환불·입장 기능은 후속이다. 이전 단계의 Handler·보상 연결 후속 표기는 당시 범위다.
+TicketPaymentResultHandler가 onApproved를 내부 발급 서비스로 전달한다. 거절된 승인은 공통 결제가 보상 취소하며, 티켓팅은 onRefunded(COMPENSATION)에서 미확정 자원만 정리한다. 이미 CONFIRMED인 예약에 보상 취소가 오면 티켓·confirmed 수량을 변경하지 않고 운영 확인 대상으로 기록한다. 정상 환불은 이후 연결했으며 입장 기능은 후속이다. 이전 단계의 Handler·보상 연결 후속 표기는 당시 범위다.
 
 
 ## 본인 발급 티켓 조회 (2026-11-16)
@@ -115,6 +115,6 @@ TicketQueryService/TicketController가 GET /api/tickets와 GET /api/tickets/{tic
 
 목록은 발급 시각·ID 내림차순 페이지이며 상세와 같은 IssuedTicketInfo를 사용한다. 기존 UUID·발급 금액·상태·사용/취소 시각과 예약·주문·회차·공연·좌석 정보를 반환한다. 공연 정보는 ConcertQueryService에서 일괄 조회해 도메인 경계를 유지하며, 개별 티켓마다 조회하거나 상태를 수정하지 않는다. 가격은 티켓에 보존된 값이고 공연명·좌석 표시·등급은 현재 카탈로그 값이다.
 
-조회는 입장 권한·QR 생성·티켓 사용·환불을 수행하지 않는다. 상태값은 저장된 문자열을 그대로 반환하며 사용/취소 전이 정책은 별도다. 새 스키마·인덱스·공통 API 변경은 없다. API 응답과 오류 규칙은 [티켓팅 API](../../contracts/api/ticketing.md#본인-발급-티켓-목록상세)를 따른다.
+조회는 입장 권한·QR 생성·티켓 사용·환불을 수행하지 않는다. 상태값은 저장된 문자열을 그대로 반환하며 사용/취소 전이 정책은 별도다. 새 스키마·인덱스·공통 API 변경은 없다. API 응답과 오류 규칙은 [티켓팅 API](../../contracts/api/ticketing.md#본인-발급-티켓-목록과-상세)를 따른다.
 
 기존 매핑/발급 검증을 반복하지 않고 TicketQueryApiTest에 인증·본인 범위·정렬/페이지·표시 데이터·과거 이력·입력 검증을 추가했다. 테스트는 작성만 했으며 실행하지 않았다.

@@ -569,6 +569,16 @@ public class PaymentTransactions {
                 });
     }
 
+    /** Separate short transaction so a rolled-back apply still moves the payment behind the queue. */
+    void recordApprovalCheck(Long paymentId, PaymentStatus expected) {
+        tx.executeWithoutResult(
+                ignored -> {
+                    Payment payment = payments.findByIdForUpdate(paymentId).orElseThrow();
+                    if (payment.getStatus() == expected && approvalPending(payment))
+                        payment.recordReconciliationCheck(clock.instant());
+                });
+    }
+
     void recordCancelCheck(Long paymentId, PaymentStatus expected) {
         tx.executeWithoutResult(
                 ignored -> {

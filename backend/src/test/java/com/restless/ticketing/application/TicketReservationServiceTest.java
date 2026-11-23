@@ -262,6 +262,30 @@ class TicketReservationServiceTest {
         assertStoredReservation(next, 1);
     }
 
+    @Test
+    @DisplayName("회차별 구매 한도는 본인 확정·선점 수량과 활성 예약을 조회한다")
+    void bookingAvailabilityShowsOwnCountsAndActiveReservation() throws Exception {
+        String path = "/api/performances/{id}/booking-availability";
+        mockMvc.perform(get(path, fixture.performanceId())).andExpect(status().isUnauthorized());
+        mockMvc.perform(get(path, fixture.performanceId()).with(jwt().jwt(t -> t.subject(fixture.firstUserId().toString()))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.maximum").value(3))
+                .andExpect(jsonPath("$.remaining").value(3)).andExpect(jsonPath("$.activeReservation").doesNotExist());
+        jdbc.update("INSERT INTO ticket_purchase_limits (user_id, performance_id, reserved_count, confirmed_count) VALUES (?, ?, 0, 2)", fixture.firstUserId(), fixture.performanceId());
+        mockMvc.perform(get(path, fixture.performanceId()).with(jwt().jwt(t -> t.subject(fixture.firstUserId().toString()))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.confirmed").value(2))
+                .andExpect(jsonPath("$.remaining").value(1)).andExpect(jsonPath("$.activeReservation").doesNotExist());
+        TicketReservationInfo own = reserve(fixture.firstUserId(), "availability", List.of(seat(0)));
+        mockMvc.perform(get(path, fixture.performanceId()).with(jwt().jwt(t -> t.subject(fixture.firstUserId().toString()))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.confirmed").value(2))
+                .andExpect(jsonPath("$.reserved").value(1)).andExpect(jsonPath("$.remaining").value(0))
+                .andExpect(jsonPath("$.activeReservation.reservationId").value(own.reservationId()));
+        mockMvc.perform(get(path, fixture.performanceId()).with(jwt().jwt(t -> t.subject(fixture.secondUserId().toString()))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.remaining").value(3))
+                .andExpect(jsonPath("$.activeReservation").doesNotExist());
+        mockMvc.perform(get(path, Long.MAX_VALUE).with(jwt().jwt(t -> t.subject(fixture.firstUserId().toString()))))
+                .andExpect(status().isNotFound());
+    }
+
     @ParameterizedTest(name = "{displayName} [{0}]")
     @EnumSource(value = TicketReservationStatus.class, names = {"HELD", "PAYMENT_PENDING", "RECONCILING"})
     @DisplayName("기한 전 HELD와 결제 진행·결과 확인 중 예약은 최초 선점 기한만으로 반환하지 않는다")

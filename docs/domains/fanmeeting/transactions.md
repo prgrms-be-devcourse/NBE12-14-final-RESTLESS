@@ -188,7 +188,7 @@ COMMIT (결제 모듈)
 | | 그 외(현재 시도가 아니어서 거절한 승인의 환불) | 변화 없음, 로그 |
 
 - 처음 반영하는 승인은 결과(`PAID` 또는 `REFUND_PENDING`)와 함께 `approved_attempt_id`에 그 시도를 기록한다.
-- 결과 모름은 실패로 처리하지 않는다. 최종 결과는 결제 모듈의 대사 작업이 **같은 시도로** `onApproved` 또는 `onFailed`로 다시 알려 준다.
+- 결과 모름은 실패로 처리하지 않는다. 최종 결과는 결제 모듈의 미완료 결제 재확인 작업이 **같은 시도로** `onApproved` 또는 `onFailed`로 다시 알려 준다.
 - **만료(`EXPIRED`) 뒤 승인:** 결제 모듈은 실패로 닫힌 시도를 승인하지 않으므로 계약 위반이다. 거절해 보상 취소하고 주문·선발은 `EXPIRED`로 둔다(정원 초과 방지, 자리를 되돌리지 않는다). 로그 `FANMEETING_APPROVAL_NOT_CURRENT`.
 - 손님 환불(`onRefundRequesting`)은 P0 범위 밖이라 기본 구현(거절)을 쓴다.
 - 거절 사유: `FANMEETING_NOT_PAYABLE`, `FANMEETING_ORDER_NOT_FOUND`, `FANMEETING_STALE_ATTEMPT`, `FANMEETING_AMOUNT_MISMATCH`, `FANMEETING_LATE_APPROVAL`.

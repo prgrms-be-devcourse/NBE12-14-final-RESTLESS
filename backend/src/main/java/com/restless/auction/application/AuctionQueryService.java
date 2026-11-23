@@ -64,6 +64,20 @@ public class AuctionQueryService {
                 auction.getRevision(), clock.instant());
     }
 
+    /** 잠금 전 입찰 사전 확인용 최소 상태. API 응답에는 사용하지 않는다. */
+    @Transactional(readOnly = true)
+    public Optional<BidPrecheckState> bidPrecheckState(Long auctionId) {
+        Auction auction = auctions.findById(auctionId).orElse(null);
+        if (auction == null) {
+            return Optional.empty();
+        }
+        Bid highest = bids.findTopByAuctionIdOrderByBidSequenceDesc(auctionId).orElse(null);
+        return Optional.of(new BidPrecheckState(auction.getStatus(), auction.getSellerUserId(),
+                highest == null ? null : highest.getBidderUserId(),
+                auction.minimumBidAmount(highest == null ? null : highest.getBidAmount()),
+                auction.getStartsAt(), auction.getEndsAt()));
+    }
+
     /**
      * 종료 결과. 결과는 종료할 때 한 번 만들어지고 바뀌지 않는다.
      * 경매가 없으면 {@code AUCTION_NOT_FOUND}, 아직 종료되지 않았으면 {@code AUCTION_RESULT_NOT_FOUND}.
@@ -148,6 +162,15 @@ public class AuctionQueryService {
                                 long minimumIncrementAmount, HighestBid highestBid, long minimumBidAmount,
                                 Instant startsAt, Instant endsAt, int extensionDurationSeconds, long revision,
                                 Instant serverTime) {
+        public AuctionDetail withServerTime(Instant currentTime) {
+            return new AuctionDetail(auctionId, title, itemName, itemDescription, sellerNickname, status,
+                    startingPriceAmount, minimumIncrementAmount, highestBid, minimumBidAmount, startsAt, endsAt,
+                    extensionDurationSeconds, revision, currentTime);
+        }
+    }
+
+    public record BidPrecheckState(AuctionStatus status, Long sellerUserId, Long highestBidderUserId,
+                                   long minimumBidAmount, Instant startsAt, Instant endsAt) {
     }
 
     /** 실시간 스트림 메시지. revision이 SSE 이벤트 id가 된다. */

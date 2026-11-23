@@ -13,6 +13,13 @@ common:
   # 핫 드롭 판매 기간. 시드 또는 --refresh 시각부터 센다.
   hot_window_hours: 24
   # 주최자 계정 수. 공연마다 돌아가며 판매자가 된다.
+  auction_heavy_users: 100
+  auction_heavy_auctions_per_user: 50
+  auction_ending: 1
+  auction_mass_close: 1000
+  auction_mass_close_bids_per: 3
+  auction_spread: 100
+  auction_bg: 1000
   auction_bg_bids_per: 20
   auction_bg_pct_unsold: 10
   auction_start_price: 10000
@@ -21,8 +28,14 @@ common:
   organizers: 10
   drop_hot_variants: 3
   drop_hot_price: 59000
+  # 판매 중 SKU(핫, 워밍업)의 재고 버킷 수 K (ADR-0005). SKU마다 min(K, 재고). 1~16.
+  # 같은 날 K=1 기준 실행은 scale.yml을 고치지 않고 DROP_BUCKET_COUNT=1 seed.sh ...로 덮어쓴다.
+  drop_bucket_count: 4
   # 핫 드롭 대기열에 미리 넣을 WAITING 행 수. 0이면 대기열 등록 자체를 측정한다.
   drop_hot_queue_prefill: 0
+  # 워밍업 전용 드롭의 총재고. 0이면 만들지 않는다. 핫 드롭과 SKU 수·가격이 같고 판매 중이다.
+  # 측정 전에 같은 경로를 데우되 핫 드롭 재고와 참여 계정을 쓰지 않으려고 둔다 (perf/scenarios/drop-sale.js).
+  drop_warm_stock: 0
   drop_bg_variants_per_drop: 3
   # 종료된 드롭 점유의 상태 비율(%). 나머지는 EXPIRED. restored가 환불 비율이다.
   drop_bg_pct_confirmed: 80
@@ -31,6 +44,9 @@ common:
 
 # 로컬 확인용
 small:
+  auction_heavy_users: 10
+  auction_heavy_auctions_per_user: 20
+  auction_mass_close: 50
   auction_spread: 10
   auction_bg: 50
   users: 1000
@@ -38,17 +54,75 @@ small:
   drop_bg_drops: 5
   drop_bg_reservations: 1000
 
+# 로컬 확인용 판매 시나리오. small과 같고 워밍업 드롭이 있다.
+sale_local:
+  auction_heavy_users: 10
+  auction_heavy_auctions_per_user: 20
+  auction_mass_close: 50
+  auction_spread: 10
+  auction_bg: 50
+  users: 1000
+  drop_hot_stock: 50
+  drop_warm_stock: 200
+  drop_bg_drops: 5
+  drop_bg_reservations: 1000
+
 # 기본 실험 (EXP-01~04)
 base:
-  auction_spread: 100
-  auction_bg: 1000
   users: 100000
   drop_hot_stock: 1000
   drop_bg_drops: 100
   drop_bg_reservations: 100000
 
+# 용량 측정 (계단식, perf/scenarios/drop-reservation-step.js)
+# 재고가 1,000이면 높은 도착률에서 몇 초 만에 품절되어 품절 응답만 재게 된다. 성공 점유 경로의 처리량을 보려고
+# 재고를 계획 도착 수(기본 계단 약 19만)보다 크게 둔다. 계정은 테스트에서 한 번씩만 쓰므로 계정 수도 같이 늘린다.
+# 핫 SKU 3개, 배경 데이터 크기는 base와 같아서 행 경합과 테이블 크기 조건이 같다. 바뀌는 것은 재고 수량뿐이다.
+capacity:
+  users: 210000
+  drop_hot_stock: 210000
+  contention_ratio: 1
+  drop_bg_drops: 100
+  drop_bg_reservations: 100000
+
+# SKU 1개 집중 (drop-performance-procedure.md 4절 반증 대조). capacity와 같고 핫 SKU만 1개다.
+# 스케일 구역끼리는 상속하지 않으므로 capacity의 값을 그대로 적는다.
+capacity_single:
+  users: 210000
+  drop_hot_stock: 210000
+  contention_ratio: 1
+  drop_bg_drops: 100
+  drop_bg_reservations: 100000
+  drop_hot_variants: 1
+
+# 대표 판매 시나리오 H (perf/scenarios/drop-sale.js). base와 같고 워밍업 드롭이 있다.
+# 재고 1,000 x 경쟁률 10 = 참여자 10,000명. 워밍업은 CSV에서 참여자 뒤 행을 쓴다.
+sale:
+  users: 100000
+  drop_hot_stock: 1000
+  drop_warm_stock: 5000
+  drop_bg_drops: 100
+  drop_bg_reservations: 100000
+
+# H 축소 진단. 경쟁률 10:1은 그대로다. 재고 500 → 참여자 5,000명, 재고 200 → 참여자 2,000명.
+sale_small:
+  users: 100000
+  drop_hot_stock: 500
+  drop_warm_stock: 5000
+  drop_bg_drops: 100
+  drop_bg_reservations: 100000
+
+sale_mini:
+  users: 100000
+  drop_hot_stock: 200
+  drop_warm_stock: 5000
+  drop_bg_drops: 100
+  drop_bg_reservations: 100000
+
 # 확장 실험
 large:
+  auction_heavy_users: 1000
+  auction_mass_close: 10000
   auction_spread: 1000
   auction_bg: 10000
   users: 1000000

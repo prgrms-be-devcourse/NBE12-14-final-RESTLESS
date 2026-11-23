@@ -8,6 +8,7 @@ Codex는 레포 루트에서 실행하면 이 파일을 자동으로 읽지 않�
 - 계약: `docs/contracts/api/drop.md`. 요청·응답·오류 코드의 기준이고, 수용 테스트가 이 계약으로 판정한다.
 - 정책·불변식: `docs/domains/drop/` 의 `policy.md`, `invariants.md`, `state-machines.md`, `transactions.md`, `data-model.md`
 - 결제 연결: `docs/decisions/0003-payment-module-boundary.md`
+- 성능 개선: `docs/testing/drop-performance-plan.md`(목표, 진행 방식, 병목 기록), `docs/testing/drop-performance-procedure.md`(측정 실행 절차), `docs/testing/drop-performance-measurement.md`(집계와 판정). 도구는 `perf/`에 있다. 재고 점유 경로를 고치기 전에 읽는다.
 
 ## 용어
 
@@ -23,10 +24,14 @@ Codex는 레포 루트에서 실행하면 이 파일을 자동으로 읽지 않�
 - 시각은 주입된 `Clock`으로 얻는다. 테스트에서 고정 시계로 JWT를 발급하지 않는다 (시간이 지나면 401로 깨진다).
 - 테스트에서 저장 전 시각과 DB에서 읽은 시각을 비교할 때는 1마이크로초 오차를 둔다. MySQL은 나노초를 마이크로초로 반올림해 저장하고, Linux CI 시계는 나노초를 준다. 버림 비교는 macOS에서만 통과한다 (HD-19, #119).
 - 메트릭 태그에 ID처럼 끝없이 늘어나는 값을 넣지 않는다. 로그에 시크릿이나 `paymentKey`를 남기지 않는다.
+- TX1의 타이머 `drop.inventory.hold.update`, `drop.inventory.lock.held`, `drop.reservation.duration`은 성능 실험의 측정 기준이다. 이름, 태그 값, 재는 구간을 바꾸면 `docs/domains/drop/transactions.md`의 계측 표와 `backend/src/main/resources/application-perf.yml`의 히스토그램 설정을 같이 고친다.
+- 결과와 보고서는 레포에 올리지 않는다. 성능 측정 결과는 `.ai-output/perf/<날짜>-<실험>/`에 둔다.
 - 기본값이 있는 설정(예: `restless.drop.queue.required=true`)을 바꾸면, 그 기본값에 기대는 기존 테스트를 찾아 값을 명시한다.
-- 문서에 없는 정책은 멈추지 말고 문서에 가장 가까운 쪽으로 정한다. 정한 내용은 같은 PR에서 `policy.md`의 해당 절에 `PROPOSED`로 남긴다. 하네스 단계에서는 Codex가 보고서의 "대신 정한 것"에 적고 Claude가 옮긴다.
+- 문서에 없는 사항의 결정 범위는 `docs/testing/independent-verification.md`의 정책 결정 표를 따른다. 내부 구현 선택은 진행하고 기록한다. 공개 계약·핵심 불변식·사업 정책과 열린 질문은 사람의 결정 전 확정하지 않는다. `PROPOSED`는 승인이 아니다.
 
 ## 검증 (`backend/`에서)
+
+구현 검증·PR 승인 준비 전에 저장소 루트의 `tools/verification/skills/independent-verification/SKILL.md`를 읽고 따른다. Codex와 Claude 모두 commit·push·PR을 수행할 수 있다. 구현과 독립 검증의 분리는 유지한다.
 
 - 드롭 테스트: `./gradlew test --tests 'com.restless.drop.*'`
 - 모듈 경계: `./gradlew test --tests 'com.restless.architecture.*'`

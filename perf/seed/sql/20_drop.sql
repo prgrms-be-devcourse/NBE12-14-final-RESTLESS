@@ -3,8 +3,8 @@
 -- seed.sh가 FOREIGN_KEY_CHECKS=0으로 실행하고, verify.sql이 FK 고아 행을 따로 검사한다.
 --
 -- ID 규칙
---   drops:         핫 1, 배경 d(0..) → d + 2
---   drop_variants: 핫 1..@hot_variants, 배경 → @hot_variants + 1 + d * @bg_vpd + j
+--   drops:         핫 1, 배경 d(0..) → d + 2, 워밍업 → @bg_drops + 2 (@warm_stock > 0일 때만)
+--   drop_variants: 핫 1..@hot_variants, 배경 → @hot_variants + 1 + d * @bg_vpd + j, 워밍업은 배경 뒤 @hot_variants개
 --   drop_reservations: 배경 n(0..) → n + 1. 드롭 d = n DIV per_drop, 드롭 안 순번 k = n MOD per_drop
 
 SET @bg_per_drop = CEIL(@bg_reservations / @bg_drops);
@@ -42,8 +42,9 @@ FROM _perf_seq s
 WHERE s.n < @hot_variants;
 
 -- 총재고를 SKU에 나누고 나머지는 앞 SKU부터 1개씩 더한다. 합계가 @hot_stock과 같아야 한다 (verify.sql).
-INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity)
-SELECT v.id, q.qty, q.qty, 0, 0
+-- 재고 버킷 수는 등록 API와 같이 min(@bucket_count, SKU 재고)다. 버킷 행은 파일 끝에서 한 번에 만든다.
+INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity, bucket_count)
+SELECT v.id, q.qty, q.qty, 0, 0, GREATEST(LEAST(@bucket_count, q.qty), 1)
 FROM drop_variants v
 JOIN (SELECT s.n + 1 AS variant_id,
              FLOOR(@hot_stock / @hot_variants) + (s.n < MOD(@hot_stock, @hot_variants)) AS qty
@@ -52,8 +53,9 @@ JOIN (SELECT s.n + 1 AS variant_id,
 WHERE v.drop_id = 1;
 
 -- 기본 0. 대기 상태 조회처럼 대기열이 차 있는 상황을 볼 때만 scale.yml에서 켠다.
-INSERT INTO drop_queue_entries (drop_id, user_id, status, entered_at, last_seen_at)
-SELECT 1, s.n + 1, 'WAITING', @t0, @t0
+-- 대기열은 SKU별이다. 핫 드롭 SKU에 계정 순서대로 돌려 가며 나눈다.
+INSERT INTO drop_queue_entries (drop_id, user_id, variant_id, status, entered_at, last_seen_at)
+SELECT 1, s.n + 1, 1 + MOD(s.n, @hot_variants), 'WAITING', @t0, @t0
 FROM _perf_seq s
 WHERE s.n < @hot_queue_prefill;
 
@@ -119,12 +121,14 @@ FROM (SELECT s.n,
       WHERE s.n < @bg_reservations) p;
 
 -- 판매가 끝난 SKU: 점유 중 0, 판매 = CONFIRMED 수, 나머지는 반환되어 available. 점유가 없는 SKU는 재고 0.
-INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity)
+-- 버킷은 1개다. 배경 점유의 bucket_no는 기본값 0이라 판매 수량이 모두 버킷 0에 있어야 한다.
+INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity, bucket_count)
 SELECT v.id,
        COALESCE(a.total, 0),
        COALESCE(a.total - a.sold, 0),
        0,
-       COALESCE(a.sold, 0)
+       COALESCE(a.sold, 0),
+       1
 FROM drop_variants v
 LEFT JOIN (SELECT variant_id, COUNT(*) AS total, SUM(status = 'CONFIRMED') AS sold
            FROM drop_reservations
@@ -132,9 +136,9 @@ LEFT JOIN (SELECT variant_id, COUNT(*) AS total, SUM(status = 'CONFIRMED') AS so
 WHERE v.drop_id <> 1;
 
 -- 실제 구매 흐름처럼 점유마다 소비된 입장 1건과 비어 있는 구매 슬롯 1건을 남긴다.
-INSERT INTO drop_queue_entries (drop_id, user_id, status, entered_at, last_seen_at, admitted_at, admitted_until,
-                                consumed_at)
-SELECT r.drop_id, r.user_id, 'CONSUMED',
+INSERT INTO drop_queue_entries (drop_id, user_id, variant_id, status, entered_at, last_seen_at, admitted_at,
+                                admitted_until, consumed_at)
+SELECT r.drop_id, r.user_id, r.variant_id, 'CONSUMED',
        r.created_at - INTERVAL 2 MINUTE,
        r.created_at - INTERVAL 1 MINUTE,
        r.created_at - INTERVAL 1 MINUTE,
@@ -146,3 +150,46 @@ ORDER BY r.id;
 INSERT INTO drop_purchase_slots (drop_id, user_id, active_reservation_id, updated_at)
 SELECT r.drop_id, r.user_id, NULL, r.updated_at
 FROM drop_reservations r;
+
+-- ---------------------------------------------------------------- 워밍업 드롭
+-- 측정 전에 같은 경로를 데우는 판매 중 드롭. 배경 드롭의 재고·점유 INSERT가 이 드롭을 집지 않게 파일 끝에 둔다.
+-- 핫 드롭과 SKU 수·가격·공연이 같다. @warm_stock이 0이면 만들지 않는다.
+-- 핫 드롭 재고와 참여 계정을 쓰지 않으려고 따로 둔다. 판매 기간은 99_hot_window.sql이 핫 드롭과 같이 맞춘다.
+INSERT INTO drops (id, concert_id, title, description, image_url, opens_at, closes_at, status, created_at)
+SELECT @warm_drop_id, 1, CONCAT(a.name, ' <', a.tour, '> 워밍업 전용 응원봉'),
+       '부하 테스트 워밍업 전용. 측정 대상이 아니다.',
+       'https://cdn.fanq.com/drops/warmup.png',
+       @t0 - INTERVAL 1 MINUTE, @t0 + INTERVAL @hot_window_hours HOUR, 'OPEN', @t0 - INTERVAL 7 DAY
+FROM _perf_artists a
+WHERE a.i = 0 AND @warm_stock > 0;
+
+INSERT INTO drop_variants (id, drop_id, sku_code, option_name, price_amount, is_active)
+SELECT @warm_variant_first + s.n, @warm_drop_id, CONCAT('WARM-', s.n + 1),
+       COALESCE(ELT(s.n + 1, '블랙', '화이트', '실버 한정'), CONCAT('Ver.', s.n + 1)), @hot_price, TRUE
+FROM _perf_seq s
+WHERE s.n < @hot_variants AND @warm_stock > 0;
+
+INSERT INTO drop_inventories (variant_id, total_quantity, available_quantity, reserved_quantity, sold_quantity, bucket_count)
+SELECT v.id, q.qty, q.qty, 0, 0, GREATEST(LEAST(@bucket_count, q.qty), 1)
+FROM drop_variants v
+JOIN (SELECT @warm_variant_first + s.n AS variant_id,
+             FLOOR(@warm_stock / @hot_variants) + (s.n < MOD(@warm_stock, @hot_variants)) AS qty
+      FROM _perf_seq s
+      WHERE s.n < @hot_variants) q ON q.variant_id = v.id
+WHERE v.drop_id = @warm_drop_id AND @warm_stock > 0;
+
+-- 재고 버킷 (ADR-0005). 백필 마이그레이션과 같은 규칙이다: available을 bucket_count개로 나누고 나머지는 앞 버킷부터,
+-- 점유와 판매는 버킷 0에 둔다. 판매 중 SKU는 available = total이라 등록 API의 분배와 같다.
+INSERT INTO drop_inventory_buckets
+    (variant_id, bucket_no, total_quantity, available_quantity, reserved_quantity, sold_quantity)
+SELECT i.variant_id, s.n,
+       FLOOR(i.available_quantity / i.bucket_count) + (s.n < MOD(i.available_quantity, i.bucket_count))
+           + IF(s.n = 0, i.reserved_quantity + i.sold_quantity, 0),
+       FLOOR(i.available_quantity / i.bucket_count) + (s.n < MOD(i.available_quantity, i.bucket_count)),
+       IF(s.n = 0, i.reserved_quantity, 0),
+       IF(s.n = 0, i.sold_quantity, 0)
+FROM drop_inventories i
+JOIN _perf_seq s ON s.n < i.bucket_count;
+
+-- SKU마다 입장 허가 게이트가 하나 있어야 한다. 없으면 앱이 오류 로그와 함께 만든다. 모든 SKU 행을 만든 뒤 마지막에 둔다.
+INSERT INTO drop_queue_gates (variant_id) SELECT id FROM drop_variants;

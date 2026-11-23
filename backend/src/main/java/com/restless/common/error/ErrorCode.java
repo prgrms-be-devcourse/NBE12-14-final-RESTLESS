@@ -18,6 +18,7 @@ public enum ErrorCode {
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 요청 방식입니다."),
     UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "지원하지 않는 요청 형식입니다."),
     FILE_SIZE_EXCEEDED(HttpStatus.CONTENT_TOO_LARGE, "파일 크기가 너무 큽니다."),
+    TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요."),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했습니다."),
 
     // 인증, 회원
@@ -70,7 +71,7 @@ public enum ErrorCode {
 
     DROP_INVALID_STATE(HttpStatus.CONFLICT, "드롭 상태가 올바르지 않습니다."),
     DROP_NOT_ON_SALE(HttpStatus.CONFLICT, "드롭 판매 기간이 아닙니다."),
-    DROP_SOLD_OUT(HttpStatus.CONFLICT, "드롭 재고가 소진되었습니다."),
+    DROP_SOLD_OUT(HttpStatus.CONFLICT, "현재 구매 불가"),
     DROP_ACTIVE_PURCHASE_EXISTS(HttpStatus.CONFLICT, "진행 중인 드롭 구매가 있습니다."),
     DROP_ADMISSION_REQUIRED(HttpStatus.FORBIDDEN, "드롭 구매권이 필요합니다."),
 
