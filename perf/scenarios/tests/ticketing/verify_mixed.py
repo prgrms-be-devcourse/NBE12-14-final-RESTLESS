@@ -5,7 +5,7 @@ root=Path.cwd(); out=root/'.ai-output/ticketing-k6'; out.mkdir(parents=True,exis
 csv=out/'mixed-users.csv'; csv.write_text('user_id,access_token\n'+''.join(f'{n},token{n}\n' for n in range(1,5)))
 class Handler(http.server.BaseHTTPRequestHandler):
  def do_GET(self):
-  if urlsplit(self.path).path=='/actuator/prometheus': body=b'probe'
+  if urlsplit(self.path).path=='/actuator/prometheus': body=b'mock_metric 1\n'
   else:
    self.server.events.append(('get',time.monotonic(),self.headers.get('Authorization')))
    body=b'[{"seatId":1,"status":"AVAILABLE"},{"seatId":2,"status":"AVAILABLE"}]'
@@ -40,10 +40,11 @@ try:
    c=m['ticket_outcomes{outcome:unavailable}']['values']['count'] if 'ticket_outcomes{outcome:unavailable}' in m else None
   print(f'{mode} error={bad}: pass; holds={attempts}, polls={polls}, exit={r.returncode}')
  srv.events=[]; srv.holds=0; srv.mode='hot'; srv.bad=False
- env.update(DURATION='5s',HOLD_DELAY_SECONDS='1',POLL_ENTRY='simultaneous')
+ host=f'perf-test-{time.time_ns()}'
+ env.update(DURATION='5s',HOLD_DELAY_SECONDS='1',POLL_ENTRY='simultaneous',BASE_URL=f'http://{host}:8080',MANAGEMENT_URL=f'http://{host}:8080',PERF_ALLOWED_APP_HOSTS=host,K6_WEB_DASHBOARD='false')
  p=subprocess.run([str(root/'perf/scenarios/run-ticketing.sh'),'mixed','4'],env=env,capture_output=True,text=True,timeout=25)
  assert p.returncode==0, p.stderr[-500:]
- output_path=next(line.split('결과: ',1)[1] for line in p.stdout.splitlines() if line.startswith('결과: '))
+ output_path=next(line.split('요약 JSON: ',1)[1] for line in p.stdout.splitlines() if line.startswith('요약 JSON: '))
  metrics=json.loads(Path(output_path).read_text())['metrics']
  assert metrics['ticket_hold_completed']['values']['count']==1
  assert metrics['ticket_poll_requests']['values']['count']>=3

@@ -4,6 +4,8 @@
 
 좌석 조회는 `ticketing/spread.js`(분산 진입)와 `ticketing/simultaneous.js`(동시 진입)를 사용한다. 선점과 혼합을 포함한 모든 티켓팅 시나리오는 `run-ticketing.sh`로 실행한다. `users.csv`는 공통 시드가 만든 서로 다른 사용자 토큰을 사용하며, 파일은 Git에 올리지 않는다.
 
+조회·페이지·혼합 시나리오는 최초에 `/seats`로 배치와 가격을 포함한 목록을 조회하고, 이후 3초 폴링은 `/seats/status`로 좌석 ID와 상태만 조회한다. 이전 전체 좌석 반복 조회 결과와 직접 비교할 때는 요청 경로와 전송량 차이를 고려한다. `burst`는 최초 전체 목록 조회만 한 번 수행한다.
+
 ```bash
 export BASE_URL="http://<테스트-서버>:8080"
 export MANAGEMENT_URL="http://<테스트-서버>:8081"

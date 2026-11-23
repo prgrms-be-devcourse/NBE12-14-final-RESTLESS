@@ -155,7 +155,7 @@ function setup() {
     console.log(`burst scheduled=${new Date(burstAt).toISOString()} participants=${participants}`);
     return { seatCount: seats.length, burstAt };
   }
-  return { ids, seatCount: seats.length, users: activeUsers };
+  return { ids, seatCount: seats.length, seatIds: seats.map(s => s.seatId), users: activeUsers };
 }
 function run(data) {
   const activeUsers = mode === 'burst' ? users : data.users;
