@@ -27,6 +27,7 @@ import com.restless.ticketing.domain.TicketReservationStatus;
 import com.restless.ticketing.domain.TicketSeat;
 import com.restless.ticketing.infrastructure.TicketSeatRepository;
 import com.restless.ticketing.infrastructure.TicketPurchaseLimitRepository;
+import com.restless.ticketing.infrastructure.TicketReservationRepository;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -87,6 +88,8 @@ class TicketReservationServiceTest {
     private TicketSeatRepository seatRepository;
     @MockitoSpyBean
     private TicketPurchaseLimitRepository purchaseLimitRepository;
+    @MockitoSpyBean
+    private TicketReservationRepository reservationRepository;
 
     private Fixture fixture;
 
@@ -133,14 +136,14 @@ class TicketReservationServiceTest {
             return;
         }
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
-            jdbc.update("UPDATE performance_seats SET status = 'AVAILABLE', current_hold_id = NULL WHERE performance_id = ?",
-                    fixture.performanceId());
-            jdbc.update("DELETE FROM seat_holds WHERE performance_id = ?", fixture.performanceId());
+            jdbc.update("UPDATE performance_seats SET status = 'AVAILABLE', current_hold_id = NULL WHERE performance_id IN (?, ?)",
+                    fixture.performanceId(), fixture.otherPerformanceId());
+            jdbc.update("DELETE FROM seat_holds WHERE performance_id IN (?, ?)", fixture.performanceId(), fixture.otherPerformanceId());
             jdbc.update("DELETE FROM ticket_reservations WHERE performance_id IN (?, ?)",
                     fixture.performanceId(), fixture.otherPerformanceId());
             jdbc.update("DELETE FROM ticket_purchase_limits WHERE performance_id IN (?, ?)",
                     fixture.performanceId(), fixture.otherPerformanceId());
-            jdbc.update("DELETE FROM performance_seats WHERE performance_id = ?", fixture.performanceId());
+            jdbc.update("DELETE FROM performance_seats WHERE performance_id IN (?, ?)", fixture.performanceId(), fixture.otherPerformanceId());
             jdbc.update("DELETE FROM performances WHERE venue_id = ?", fixture.venueId());
             jdbc.update("DELETE FROM concerts WHERE venue_id = ?", fixture.venueId());
             jdbc.update("DELETE FROM layout_seats WHERE venue_id = ?", fixture.venueId());
@@ -204,6 +207,25 @@ class TicketReservationServiceTest {
     }
 
     @Test
+    @DisplayName("같은 사용자의 같은 키로 서로 다른 좌석을 동시에 요청하면 한 요청만 선점한다")
+    void concurrentSameKeyDifferentSeatsConflicts() throws Exception {
+        jdbc.update("INSERT INTO ticket_purchase_limits (user_id,performance_id,reserved_count,confirmed_count) VALUES (?,?,0,0)", fixture.firstUserId(), fixture.performanceId());
+        List<Outcome> results = race(
+                () -> reserve(fixture.firstUserId(), "conflicting-key", List.of(seat(0))),
+                () -> reserve(fixture.firstUserId(), "conflicting-key", List.of(seat(1))));
+
+        assertThat(results.stream().filter(result -> result.info() != null)).hasSize(1);
+        assertThat(results.stream().map(Outcome::error).filter(java.util.Objects::nonNull))
+                .containsExactly(ErrorCode.IDEMPOTENCY_KEY_CONFLICT);
+        var winner = results.stream().map(Outcome::info).filter(java.util.Objects::nonNull).findFirst().orElseThrow();
+        assertStoredReservation(winner, 1);
+        assertThat(count("ticket_reservations")).isEqualTo(1);
+        assertThat(count("seat_holds")).isEqualTo(1);
+        assertThat(count("ticket_purchase_limits")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=? AND status='AVAILABLE' AND current_hold_id IS NULL", Integer.class, fixture.performanceId())).isEqualTo(2);
+    }
+
+    @Test
     @DisplayName("최초 구매 관리 행의 실제 중복 생성 충돌 후 같은 키 요청을 새 트랜잭션에서 재현한다")
     void concurrentLimitCreationUniqueConflictRetriesSameRequest() throws Exception {
         var observedEmpty = new CountDownLatch(2);
@@ -246,6 +268,50 @@ class TicketReservationServiceTest {
         assertThat(count("ticket_reservations")).isEqualTo(1);
         assertThat(count("ticket_purchase_limits")).isEqualTo(1);
         assertThat(count("seat_holds")).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("서로 다른 회차의 같은 요청 키 UNIQUE 충돌은 재검증 후 충돌로 거절한다")
+    void concurrentDifferentPerformancesHitRequestKeyUniqueConstraint() throws Exception {
+        jdbc.update("""
+                INSERT INTO performance_seats (performance_id, layout_id, venue_seat_id, grade, price, status, current_hold_id)
+                SELECT ?,layout_id,venue_seat_id,grade,price,'AVAILABLE',NULL FROM performance_seats WHERE id=?
+                """, fixture.otherPerformanceId(), seat(0));
+        Long otherSeat = jdbc.queryForObject("SELECT id FROM performance_seats WHERE performance_id=?", Long.class, fixture.otherPerformanceId());
+        var bothAtInsert = new CountDownLatch(2);
+        var firstCommitted = new CountDownLatch(1);
+        var inserts = new AtomicInteger();
+        var conflicts = new AtomicInteger();
+        doAnswer(invocation -> {
+            int call = inserts.incrementAndGet();
+            bothAtInsert.countDown();
+            assertThat(bothAtInsert.await(10, TimeUnit.SECONDS)).isTrue();
+            if (call == 1) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override public void afterCommit() { firstCommitted.countDown(); }
+                });
+            } else if (call == 2) {
+                assertThat(firstCommitted.await(15, TimeUnit.SECONDS)).isTrue();
+            }
+            try {
+                return mockingDetails(invocation.getMock()).getMockCreationSettings().getDefaultAnswer().answer(invocation);
+            } catch (org.springframework.dao.DataIntegrityViolationException failure) {
+                assertThat(failure.getMessage()).contains("uk_ticket_reservations_user_request_key");
+                conflicts.incrementAndGet();
+                throw failure;
+            }
+        }).when(reservationRepository).saveAndFlush(org.mockito.ArgumentMatchers.any());
+
+        List<Outcome> results = race(
+                () -> reserve(fixture.firstUserId(), "cross-performance", List.of(seat(0))),
+                () -> service.reserve(fixture.firstUserId(), "cross-performance", fixture.otherPerformanceId(), List.of(otherSeat)));
+        assertThat(conflicts).hasValue(1);
+        assertThat(results.stream().filter(result -> result.info() != null)).hasSize(1);
+        assertThat(results.stream().map(Outcome::error).filter(java.util.Objects::nonNull)).containsExactly(ErrorCode.IDEMPOTENCY_KEY_CONFLICT);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ticket_reservations WHERE user_id=? AND request_key=?", Integer.class, fixture.firstUserId(), "cross-performance")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM seat_holds WHERE performance_id IN (?,?) AND status='HELD'", Integer.class, fixture.performanceId(), fixture.otherPerformanceId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT SUM(reserved_count) FROM ticket_purchase_limits WHERE user_id=? AND performance_id IN (?,?)", Integer.class, fixture.firstUserId(), fixture.performanceId(), fixture.otherPerformanceId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE id IN (?,?) AND status='HELD' AND current_hold_id IS NOT NULL", Integer.class, seat(0), otherSeat)).isEqualTo(1);
     }
 
     @Test
@@ -331,6 +397,76 @@ class TicketReservationServiceTest {
         assertThat(count("seat_holds")).isZero();
         assertThat(count("ticket_purchase_limits")).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=? AND status='AVAILABLE' AND current_hold_id IS NULL", Integer.class, fixture.performanceId())).isEqualTo(3);
+    }
+
+    @ParameterizedTest(name = "{displayName} [{0}]")
+    @ValueSource(strings = {"NULL_USER", "INVALID_USER", "NULL_PERFORMANCE", "INVALID_PERFORMANCE"})
+    @DisplayName("유효하지 않은 사용자·회차 ID는 선점 자원 생성 전에 거절한다")
+    void invalidUserOrPerformanceDoesNotCreateResources(String input) {
+        Long userId = input.equals("NULL_USER") ? null : input.equals("INVALID_USER") ? 0L : fixture.firstUserId();
+        Long performanceId = input.equals("NULL_PERFORMANCE") ? null : input.equals("INVALID_PERFORMANCE") ? 0L : fixture.performanceId();
+        assertError(() -> service.reserve(userId, "invalid-identity", performanceId, List.of(seat(0))),
+                input.endsWith("USER") ? ErrorCode.UNAUTHORIZED : ErrorCode.INVALID_REQUEST);
+        assertThat(count("ticket_reservations")).isZero();
+        assertThat(count("seat_holds")).isZero();
+        assertThat(count("ticket_purchase_limits")).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=? AND status='AVAILABLE' AND current_hold_id IS NULL", Integer.class, fixture.performanceId())).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("다른 회차 좌석을 포함한 신규 요청은 모든 좌석과 구매 수량을 보존한다")
+    void mixedPerformanceSeatsDoNotCreateReservation() {
+        jdbc.update("""
+                INSERT INTO performance_seats (performance_id, layout_id, venue_seat_id, grade, price, status, current_hold_id)
+                SELECT ?, layout_id, venue_seat_id, grade, price, 'AVAILABLE', NULL FROM performance_seats WHERE id=?
+                """, fixture.otherPerformanceId(), seat(0));
+        Long otherSeat = jdbc.queryForObject("SELECT id FROM performance_seats WHERE performance_id=?", Long.class, fixture.otherPerformanceId());
+        try {
+            assertError(() -> reserve(fixture.firstUserId(), "mixed-performance", List.of(seat(0), otherSeat)), ErrorCode.SEAT_UNAVAILABLE);
+            assertThat(count("ticket_reservations")).isZero();
+            assertThat(count("seat_holds")).isZero();
+            assertThat(count("ticket_purchase_limits")).isZero();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE id IN (?,?) AND status='AVAILABLE' AND current_hold_id IS NULL", Integer.class, seat(0), otherSeat)).isEqualTo(2);
+        } finally {
+            jdbc.update("DELETE FROM performance_seats WHERE id=?", otherSeat);
+        }
+    }
+
+    @Test
+    @DisplayName("판매 불가 좌석이 하나라도 포함되면 전체 선점과 구매 수량 생성을 거절한다")
+    void nonSellableSeatRejectsEntireReservation() {
+        jdbc.update("""
+                UPDATE layout_seats l JOIN performance_seats s
+                    ON s.layout_id=l.layout_id AND s.venue_seat_id=l.venue_seat_id
+                SET l.is_sellable=false WHERE s.id=?
+                """, seat(1));
+        assertError(() -> reserve(fixture.firstUserId(), "non-sellable", List.of(seat(0), seat(1))), ErrorCode.SEAT_UNAVAILABLE);
+        assertThat(count("ticket_reservations")).isZero();
+        assertThat(count("seat_holds")).isZero();
+        assertThat(count("ticket_purchase_limits")).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=? AND status='AVAILABLE' AND current_hold_id IS NULL", Integer.class, fixture.performanceId())).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("재시도 대상이 아닌 DB 외래 키 오류는 그대로 전파하고 예약과 수량을 롤백한다")
+    void nonRetryableIntegrityFailurePropagatesAndRollsBack() {
+        var calls = new AtomicInteger();
+        doAnswer(invocation -> {
+            calls.incrementAndGet();
+            Object result = mockingDetails(invocation.getMock()).getMockCreationSettings().getDefaultAnswer().answer(invocation);
+            assertThat(count("ticket_reservations")).isEqualTo(1);
+            jdbc.update("UPDATE performance_seats SET status='HELD',current_hold_id=? WHERE id=?", Long.MAX_VALUE, seat(1));
+            return result;
+        }).when(reservationRepository).saveAndFlush(org.mockito.ArgumentMatchers.any());
+
+        assertThatThrownBy(() -> reserve(fixture.firstUserId(), "non-retryable", List.of(seat(0), seat(1))))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class)
+                .hasStackTraceContaining("fk_performance_seats_current_hold");
+        assertThat(calls).hasValue(1);
+        assertThat(count("ticket_reservations")).isZero();
+        assertThat(count("seat_holds")).isZero();
+        assertThat(count("ticket_purchase_limits")).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=? AND status='AVAILABLE' AND current_hold_id IS NULL AND price=100000", Integer.class, fixture.performanceId())).isEqualTo(3);
     }
 
     @ParameterizedTest(name = "{displayName} [{0}]")
@@ -541,6 +677,44 @@ class TicketReservationServiceTest {
     }
 
     @Test
+    @DisplayName("만료된 본인 활성 예약은 새 키 선점 전에 전체 반환하고 한도를 다시 검사한다")
+    void newKeyExpiresOwnActiveReservationBeforeReserving() {
+        var old = reserve(fixture.firstUserId(), "expired-own", List.of(seat(0), seat(1)));
+        markExpired(old.reservationId());
+        var next = reserve(fixture.firstUserId(), "new-own", List.of(seat(1), seat(2)));
+
+        assertThat(next.reservationId()).isNotEqualTo(old.reservationId());
+        assertThat(reservationStatus(old.reservationId())).isEqualTo("RELEASED");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM seat_holds WHERE reservation_id=? AND status='RELEASED' AND released_at IS NOT NULL", Integer.class, old.reservationId())).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT status FROM performance_seats WHERE id=?", String.class, seat(0))).isEqualTo("AVAILABLE");
+        assertStoredReservation(next, 2);
+        assertThat(count("ticket_reservations")).isEqualTo(2);
+        assertThat(count("seat_holds")).isEqualTo(4);
+        assertThat(reservedCount(fixture.firstUserId())).isEqualTo(2);
+    }
+
+    @ParameterizedTest(name = "{displayName} [{0}]")
+    @ValueSource(strings = {"CANCEL", "EXPIRE"})
+    @DisplayName("선점 이력이 없는 예약은 취소·만료 시 수량과 예약 상태를 변경하지 않는다")
+    void releaseWithoutHoldHistoryDoesNotChangeReservation(String operation) {
+        var reservation = reserve(fixture.firstUserId(), "missing-release-history", List.of(seat(0), seat(1)));
+        if (operation.equals("EXPIRE")) markExpired(reservation.reservationId());
+        jdbc.update("UPDATE performance_seats SET status='AVAILABLE',current_hold_id=NULL WHERE id IN (?,?)", seat(0), seat(1));
+        jdbc.update("DELETE FROM seat_holds WHERE reservation_id=?", reservation.reservationId());
+        var beforeSeats = jdbc.queryForList("SELECT id,status,current_hold_id FROM performance_seats WHERE performance_id=? ORDER BY id", fixture.performanceId());
+        var beforeLimit = jdbc.queryForMap("SELECT reserved_count,confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId());
+
+        assertThatThrownBy(() -> {
+            if (operation.equals("CANCEL")) service.cancel(fixture.firstUserId(), reservation.reservationId());
+            else service.expireHold(reservation.reservationId());
+        }).isInstanceOf(IllegalStateException.class).hasMessage("반환할 선점 이력이 없습니다.");
+        assertThat(reservationStatus(reservation.reservationId())).isEqualTo("HELD");
+        assertThat(jdbc.queryForList("SELECT id,status,current_hold_id FROM performance_seats WHERE performance_id=? ORDER BY id", fixture.performanceId())).isEqualTo(beforeSeats);
+        assertThat(jdbc.queryForMap("SELECT reserved_count,confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId())).isEqualTo(beforeLimit);
+        assertThat(count("seat_holds")).isZero();
+    }
+
+    @Test
     @DisplayName("회차별 구매 한도는 본인 확정·선점 수량과 활성 예약을 조회한다")
     void bookingAvailabilityShowsOwnCountsAndActiveReservation() throws Exception {
         String path = "/api/performances/{id}/booking-availability";
@@ -634,6 +808,24 @@ class TicketReservationServiceTest {
         assertStoredReservation(original, 2);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM seat_holds WHERE reservation_id = ? AND released_at IS NOT NULL",
                 Integer.class, original.reservationId())).isZero();
+    }
+
+    @ParameterizedTest(name = "{displayName} [{0}]")
+    @ValueSource(strings = {"NULL_USER", "ZERO_USER", "NULL_RESERVATION", "ZERO_RESERVATION"})
+    @DisplayName("취소 요청의 사용자·예약 ID가 유효하지 않으면 기존 선점 자원을 보존한다")
+    void invalidCancellationIdsDoNotChangeReservation(String invalid) {
+        var original = reserve(fixture.firstUserId(), "cancel-invalid", List.of(seat(0), seat(1)));
+        Long userId = invalid.equals("NULL_USER") ? null : invalid.equals("ZERO_USER") ? 0L : fixture.firstUserId();
+        Long reservationId = invalid.equals("NULL_RESERVATION") ? null : invalid.equals("ZERO_RESERVATION") ? 0L : original.reservationId();
+        var beforeSeats = jdbc.queryForList("SELECT id,status,current_hold_id FROM performance_seats WHERE performance_id=? ORDER BY id", fixture.performanceId());
+        var beforeHolds = jdbc.queryForList("SELECT id,status,released_at FROM seat_holds WHERE reservation_id=? ORDER BY id", original.reservationId());
+        var beforeLimit = jdbc.queryForMap("SELECT reserved_count,confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId());
+
+        assertError(() -> service.cancel(userId, reservationId), invalid.endsWith("USER") ? ErrorCode.UNAUTHORIZED : ErrorCode.INVALID_REQUEST);
+        assertThat(reservationStatus(original.reservationId())).isEqualTo("HELD");
+        assertThat(jdbc.queryForList("SELECT id,status,current_hold_id FROM performance_seats WHERE performance_id=? ORDER BY id", fixture.performanceId())).isEqualTo(beforeSeats);
+        assertThat(jdbc.queryForList("SELECT id,status,released_at FROM seat_holds WHERE reservation_id=? ORDER BY id", original.reservationId())).isEqualTo(beforeHolds);
+        assertThat(jdbc.queryForMap("SELECT reserved_count,confirmed_count FROM ticket_purchase_limits WHERE user_id=? AND performance_id=?", fixture.firstUserId(), fixture.performanceId())).isEqualTo(beforeLimit);
     }
 
     @ParameterizedTest(name = "{displayName} [{0}]")
