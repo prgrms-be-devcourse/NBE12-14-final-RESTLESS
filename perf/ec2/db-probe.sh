@@ -53,7 +53,7 @@ case "$cmd" in
       echo "SELECT NOW(3), 0, 0, 'tick', '';"
       echo "SELECT NOW(3), ID, TIME, IFNULL(STATE,''), REPLACE(LEFT(IFNULL(INFO,''),160),'\n',' ') FROM information_schema.PROCESSLIST WHERE DB='$DB_NAME' AND COMMAND='Query' AND ID<>CONNECTION_ID();"
       echo "DO SLEEP(0.5);"
-    done | run > "$out"
+    done | run --unbuffered > "$out"
     echo "saved $out ($(wc -l < "$out") rows)" ;;
   *)
     sed -n '2,8p' "$0"; exit 1 ;;

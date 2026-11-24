@@ -135,7 +135,7 @@ k6 run perf/scenarios/drop-sale.js 2>&1 | tee .ai-output/perf/<날짜>-<측정>/
 
 - 시나리오는 호스트가 `perf-`로 시작하지 않으면 시작하지 않는다. ALB 이름도 `perf-`로 시작하게 `/etc/hosts`에 둔다.
 - `ulimit -n`을 올리지 않으면 부하 발생기 쪽 연결 오류가 서버 성능으로 오해된다.
-- 풀 크기와 대기열 설정은 서버마다 `curl http://perf-app:8081/actuator/prometheus`와 `perf-app2`의 값으로 따로 확인한다. k6의 시작 점검은 `MANAGEMENT_URL`의 서버 1만 본다.
+- 유효 설정은 서버마다 따로 확인한다. 각 서버에서 `docker exec restless-perf printenv RESTLESS_DROP_QUEUE_REQUIRED RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED RESTLESS_DROP_QUEUE_ADMIT_PER_RUN`을 실행한다. 풀 크기는 `curl http://perf-app:8081/actuator/prometheus`와 `perf-app2`의 `hikaricp_connections_max`로 본다. 측정 뒤에는 입장 카운터 `drop_queue_admitted_total`이 입장 허가 작업을 켠 서버에만 늘었는지 본다. k6의 시작 점검은 `MANAGEMENT_URL`의 서버 1만 보고 설정은 확인하지 않는다.
 - 서버 두 대의 앱 CPU, Tomcat busy, Hikari active와 pending을 서버별로 따로 본다. 요청 수가 고르게 나뉘었는지도 서버별 `http.server.requests` 합으로 확인한다.
 - 수집이 가끔 시간 초과로 빠질 수 있다. 빠진 횟수를 기록한다. 스파이크 한가운데에서 빠졌는지 본다.
 
@@ -150,7 +150,7 @@ RDS 콘솔의 CPU는 1분 값이고 Performance Insights와 performance_schema�
 
 ### 7-4. JFR 켜기와 꺼내기
 
-앱 CPU가 첫 병목일 때 무엇이 CPU를 쓰는지 보려고 켠다. 프로파일러 부담이 있으므로 JFR을 켠 회차의 처리량을 켜지 않은 회차와 바로 비교하지 않는다. 서버 한 대에만 켜서 다른 서버와 비교하는 방법도 있다.
+앱 CPU가 첫 병목일 때 무엇이 CPU를 쓰는지 보려고 켠다. 프로파일러 부담이 있으므로 JFR을 켠 회차의 처리량을 켜지 않은 회차와 바로 비교하지 않는다. 서버 두 대는 입장 허가 작업과 DB 프로브가 서버 1에만 있어 대칭이 아니다. 서버 한 대에만 켜서 다른 서버와 비교하려면 이 차이를 함께 적는다.
 
 1. 켤 서버에서 `perf-ec2.sh stop-app`으로 멈춘 뒤 컨테이너를 지우고 직접 띄운다. `perf-ec2.sh start`는 JVM 옵션을 받지 않는다. 이미지 기본 옵션을 덮어쓰므로 기본값도 같이 적는다.
 
@@ -164,7 +164,7 @@ curl -sf http://127.0.0.1:8081/actuator/health   # UP이 될 때까지 반복한
 
 2. 스택 깊이 기본값 64는 Tomcat과 앱 코드 같은 바깥 계층을 과소 집계한다. 위 명령은 256으로 올렸다.
 3. 측정 뒤 `docker stop -t 60 restless-perf`로 종료한다. 종료할 때 파일이 저장되므로 기본 10초로 끊지 않는다. 컨테이너를 지우기 전에 `docker cp restless-perf:/tmp/run.jfr ~/run-<날짜>.jfr`로 서버 홈에 꺼낸다. 저장소 폴더에는 두지 않는다. 노트북에는 서버 접속 방식대로 받아 결과 폴더에 둔다.
-4. 판매 1분 창의 실행 샘플만 모아 처음 만나는 JDK 밖 프레임 기준으로 묶는다. `jfr print --events jdk.ExecutionSample`과 `jdk.CPULoad`, `jdk.GarbageCollection`을 쓴다. self 몫만 믿는다. 깊이 제한이 있으면 엔드포인트별 CPU는 나눌 수 없다.
+4. 판매 1분 창의 실행 샘플만 모아 처음 만나는 JDK 밖 프레임 기준으로 묶는다. 노트북의 JDK 21에서 복사한 파일에 `jfr print --events jdk.ExecutionSample`과 `jdk.CPULoad`, `jdk.GarbageCollection`을 쓴다. self 몫만 믿는다. 깊이 제한이 있으면 엔드포인트별 CPU는 나눌 수 없다.
 5. 끝나면 서버를 `perf-ec2.sh start <태그>`로 되돌린다. JFR 파일은 커밋하지 않는다.
 
 ### 7-5. 측정 뒤 확인

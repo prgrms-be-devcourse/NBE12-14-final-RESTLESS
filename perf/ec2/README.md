@@ -62,7 +62,7 @@ perf/ec2/perf-ec2.sh finish
 
 ## DB 프로브
 
-[db-probe.sh](db-probe.sh)는 RDS 콘솔 값과 Performance Insights를 쓸 수 없을 때 DB가 무엇을 하는지 보는 읽기 전용 대체 수단이다. `perf-ec2.sh`와 같이 `perf.env`를 읽고, DB 이름이 `perf-`로 시작하지 않거나 prod가 들어 있거나 프로필이 perf가 아니면 멈춘다. 값은 출력하지 않는다. DB를 바꾸지 않는다.
+[db-probe.sh](db-probe.sh)는 RDS 콘솔 값과 Performance Insights를 쓸 수 없을 때 DB가 무엇을 하는지 보는 읽기 전용 대체 수단이다. `perf-ec2.sh`와 같이 `perf.env`를 읽고, DB 이름이 `perf-`로 시작하지 않거나 prod가 들어 있거나 프로필이 perf가 아니면 멈춘다. 비밀값은 출력하지 않는다. DB를 바꾸지 않는다.
 
 ```bash
 perf/ec2/db-probe.sh status ~/probe-before.txt   # 측정 전 전역 카운터
