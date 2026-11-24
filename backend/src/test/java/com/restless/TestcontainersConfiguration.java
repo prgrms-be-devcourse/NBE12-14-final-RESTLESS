@@ -22,7 +22,8 @@ public class TestcontainersConfiguration {
     private static final MySQLContainer SHARED = startShared();
 
     private static MySQLContainer startShared() {
-        MySQLContainer container = new MySQLContainer(IMAGE);
+        // 캐시된 컨텍스트마다 커넥션 풀을 하나씩 들고 있다. 기본값 151로는 캐시를 늘리면 접속이 모자란다.
+        MySQLContainer container = new MySQLContainer(IMAGE).withCommand("--max-connections=1000");
         // JVM이 끝나면 Testcontainers가 컨테이너를 지운다.
         container.start();
         return container;

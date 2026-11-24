@@ -52,6 +52,8 @@ tasks.named('test') {
     // 테스트 클래스를 JVM 여러 개에 나눠 돌린다. 포크마다 자기 MySQL 컨테이너를 띄우므로 데이터가 섞이지 않는다.
     // 코어의 절반만 쓴다. 나머지는 포크마다 하나씩 뜨는 MySQL 몫이다. CI 러너는 4코어라 2개가 된다.
     maxParallelForks = Math.max(1, Runtime.runtime.availableProcessors().intdiv(2))
+    // 캐시된 컨텍스트를 64개까지 들고 있으므로 기본 힙 512MB로는 모자란다. 2GB에서 49개로 전체가 통과했다.
+    maxHeapSize = '2g'
     // 경매 시작·종료 스케줄러는 테스트에서 끈다. 다른 테스트의 데이터 정리와 겹치지 않게 하기 위해서다.
     // 스케줄러를 검증하는 테스트만 @SpringBootTest(properties)로 다시 켠다.
     systemProperty 'restless.auction.scheduler.enabled', 'false'
@@ -63,8 +65,8 @@ tasks.named('test') {
     systemProperty 'restless.drop.expiry.enabled', 'false'
     // JDBC Timestamp fixtures and JPA TIMESTAMP_UTC must use the same time zone on every host.
     systemProperty 'user.timezone', 'UTC'
-    // Each cached Spring context keeps its own database in the shared MySQL container (TestcontainersConfiguration).
-    systemProperty 'spring.test.context.cache.maxSize', '4'
+    // Each cached Spring context keeps its own database and connection pool in the shared MySQL container (TestcontainersConfiguration).
+    systemProperty 'spring.test.context.cache.maxSize', '64'
     systemProperty 'restless.drop.queue.scheduler.enabled', 'false'
     // 팬미팅 응모 기간 Worker도 같은 이유로 끈다. 워커 테스트는 FanMeetingEntryWorker를 직접 부른다.
     systemProperty 'restless.fanmeeting.worker.enabled', 'false'
