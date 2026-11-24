@@ -59,13 +59,15 @@ restless:
           - { up-to-position: 200, after-ms: 2000 }
           - { up-to-position: 1000, after-ms: 3000 }
         fallback-ms: 5000
-      # 서버 한 대에서 진입, 상태 조회를 동시에 처리하는 수의 상한. 넘으면 바로 503 QUEUE_BUSY.
+      # 서버 한 대에서 진입, 상태 조회를 동시에 처리하는 수의 상한. 넘으면 바로 503 DROP_QUEUE_BUSY.
       # 근거: Hikari 풀 20, Tomcat 스레드 200. 진입은 트랜잭션 동안 커넥션을 쥐므로 풀의 40%,
       # 조회는 커넥션을 짧게 빌리므로 30. 합 38은 Tomcat 200 대비 작아 TX1, 결제 스레드를 남긴다.
       concurrency:
         entry-max: 8
         status-max: 30
-        retry-after-seconds: 1
+        # 진입 Retry-After x 진입 요청 횟수 제한(10초당 5회)이 제한 창 이상이어야 한다. 어기면 기동이 실패한다.
+        entry-retry-after-seconds: 3
+        status-retry-after-seconds: 1
       scheduler:
         enabled: true
         fixed-delay-ms: 1000

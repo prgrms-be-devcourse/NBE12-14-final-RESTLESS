@@ -38,7 +38,7 @@ import org.springframework.test.web.servlet.ResultActions;
         "restless.drop.queue.scheduler.enabled=false"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
-@DisplayName("대기열 pollAfterMs와 QUEUE_BUSY (#390)")
+@DisplayName("대기열 pollAfterMs와 DROP_QUEUE_BUSY (#390)")
 class DropQueueBusyIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;
@@ -109,11 +109,11 @@ class DropQueueBusyIntegrationTest {
     }
 
     @Test
-    @DisplayName("진입 허용치가 모두 차 있으면 즉시 503 QUEUE_BUSY와 Retry-After를 주고, 행을 만들지 않는다")
+    @DisplayName("진입 허용치가 모두 차 있으면 즉시 503 DROP_QUEUE_BUSY와 Retry-After를 주고, 행을 만들지 않는다")
     void entryAboveLimitIsRejected() throws Exception {
         exhaust(Kind.ENTRY);
-        enter().andExpect(status().isServiceUnavailable()).andExpect(header().string("Retry-After", "1"))
-                .andExpect(jsonPath("$.code").value("QUEUE_BUSY")).andExpect(jsonPath("$.traceId").exists());
+        enter().andExpect(status().isServiceUnavailable()).andExpect(header().string("Retry-After", "3"))
+                .andExpect(jsonPath("$.code").value("DROP_QUEUE_BUSY")).andExpect(jsonPath("$.traceId").exists());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_entries WHERE drop_id=?", Long.class, drop)).isZero();
 
         limiter.release(held.remove(0));
@@ -128,7 +128,7 @@ class DropQueueBusyIntegrationTest {
                 Timestamp.class, drop);
         exhaust(Kind.STATUS);
         me().andExpect(status().isServiceUnavailable()).andExpect(header().string("Retry-After", "1"))
-                .andExpect(jsonPath("$.code").value("QUEUE_BUSY"));
+                .andExpect(jsonPath("$.code").value("DROP_QUEUE_BUSY"));
         assertThat(jdbc.queryForObject("SELECT last_seen_at FROM drop_queue_entries WHERE drop_id=?",
                 Timestamp.class, drop)).isEqualTo(before);
         enter().andExpect(status().isOk());

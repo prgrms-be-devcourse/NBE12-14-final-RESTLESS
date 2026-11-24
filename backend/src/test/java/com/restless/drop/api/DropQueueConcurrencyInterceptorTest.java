@@ -7,6 +7,8 @@ import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
 import com.restless.drop.application.DropQueueConcurrencyLimiter;
 import com.restless.drop.application.DropQueueConcurrencyLimiter.Kind;
+import com.restless.common.ratelimit.RateLimitProperties;
+import java.time.Duration;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,8 +20,11 @@ import org.springframework.web.servlet.HandlerMapping;
 class DropQueueConcurrencyInterceptorTest {
     private static final String ENTRIES = "/api/drops/{dropId}/queue/entries";
     private static final String ME = "/api/drops/{dropId}/queue/me";
+    private static final RateLimitProperties.Rule RULE = new RateLimitProperties.Rule(5, Duration.ofSeconds(10));
+    private static final RateLimitProperties LIMITS = new RateLimitProperties(true, 100, Duration.ofMinutes(2),
+            RULE, RULE, RULE, RULE, new RateLimitProperties.Rule(5, Duration.ofSeconds(1)));
     private final DropQueueConcurrencyLimiter limiter =
-            new DropQueueConcurrencyLimiter(1, 1, 2, new SimpleMeterRegistry());
+            new DropQueueConcurrencyLimiter(1, 1, 3, 1, LIMITS, new SimpleMeterRegistry());
     private final DropQueueConcurrencyInterceptor interceptor = new DropQueueConcurrencyInterceptor(limiter);
 
     private static MockHttpServletRequest request(String method, String pattern) {
@@ -29,7 +34,7 @@ class DropQueueConcurrencyInterceptorTest {
     }
 
     @Test
-    @DisplayName("상한까지는 통과하고 넘으면 즉시 503 QUEUE_BUSY와 Retry-After를 준다")
+    @DisplayName("상한까지는 통과하고 넘으면 즉시 503 DROP_QUEUE_BUSY와 Retry-After를 준다")
     void rejectsImmediatelyAboveLimit() {
         var first = request("GET", ME);
         assertThat(interceptor.preHandle(first, new MockHttpServletResponse(), new Object())).isTrue();
@@ -37,10 +42,17 @@ class DropQueueConcurrencyInterceptorTest {
         var response = new MockHttpServletResponse();
         assertThatThrownBy(() -> interceptor.preHandle(request("GET", ME), response, new Object()))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
-                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.QUEUE_BUSY);
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DROP_QUEUE_BUSY);
                     assertThat(e.getErrorCode().getHttpStatus().value()).isEqualTo(503);
                 });
-        assertThat(response.getHeader("Retry-After")).isEqualTo("2");
+        assertThat(response.getHeader("Retry-After")).isEqualTo("1");
+
+        var entryFirst = request("POST", ENTRIES);
+        interceptor.preHandle(entryFirst, new MockHttpServletResponse(), new Object());
+        var entryResponse = new MockHttpServletResponse();
+        assertThatThrownBy(() -> interceptor.preHandle(request("POST", ENTRIES), entryResponse, new Object()))
+                .isInstanceOf(BusinessException.class);
+        assertThat(entryResponse.getHeader("Retry-After")).isEqualTo("3");
     }
 
     @Test

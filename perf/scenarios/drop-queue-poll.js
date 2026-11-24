@@ -40,6 +40,7 @@ const LOSS_REASONS = ['enter_failed', 'sold_out', 'closed', 'expired', 'consumed
 const subMetrics = [
   'drop_eval_latency{api:enter}', 'drop_unexpected_error{api:enter}',
   'drop_queue_busy{api:enter}', 'drop_queue_busy{api:poll,phase:measure}',
+  'drop_queue_busy_latency{api:enter}', 'drop_queue_busy_latency{api:poll}',
   ...PHASES.flatMap((p) => [`drop_eval_latency{api:poll,phase:${p}}`, `drop_unexpected_error{api:poll,phase:${p}}`,
     `drop_queue_poll{phase:${p}}`]),
   'drop_queue_poll{result:waiting,phase:measure}', 'drop_queue_poll{result:timeout,phase:measure}',
@@ -96,7 +97,7 @@ export default function () {
     // 대기자는 계정 순서대로 핫 SKU에 나뉜다. 입장 순번은 SKU마다 따로 센다.
     const variantId = variantFor(n);
     let entered = enterQueue(user, variantId, { phase: phaseAt(scenarioStart) });
-    // 503 QUEUE_BUSY는 오류가 아니라 Retry-After 뒤 다시 진입한다.
+    // 503 DROP_QUEUE_BUSY는 오류가 아니라 Retry-After 뒤 다시 진입한다.
     while (entered.status === 'BUSY') {
       const wait = nextWaitSeconds(entered, POLL_S);
       if (Date.now() + wait * 1000 > end) break;
@@ -148,8 +149,10 @@ export function handleSummary(data) {
     `  measure: polls ${measured} in ${MEASURE_MS / 1000}s = ${(measured / (MEASURE_MS / 1000)).toFixed(1)}/s`
       + ` (about ${(WAITERS / POLL_S).toFixed(0)}/s if the server sends no pollAfterMs), waiting replies ${m('drop_queue_poll{result:waiting,phase:measure}').count || 0},`
       + ` timeouts ${m('drop_queue_poll{result:timeout,phase:measure}').count || 0}`,
-    `  queue busy (503 QUEUE_BUSY, retried after Retry-After): enter ${m('drop_queue_busy{api:enter}').count || 0}, `
+    `  queue busy (503 DROP_QUEUE_BUSY, retried after Retry-After): enter ${m('drop_queue_busy{api:enter}').count || 0}, `
       + `poll in measure ${m('drop_queue_busy{api:poll,phase:measure}').count || 0}`,
+    latencyLine('busy enter (503 only)', m('drop_queue_busy_latency{api:enter}')),
+    latencyLine('busy poll (503 only)', m('drop_queue_busy_latency{api:poll}')),
   ];
   const out = summarize(data, {
     headline: `drop ${DROP_ID} queue polling, waiters ${WAITERS}, poll every ${POLL_S}s unless the server sends pollAfterMs`,

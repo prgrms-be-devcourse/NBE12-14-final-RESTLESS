@@ -71,6 +71,7 @@ const subMetrics = [
   `drop_queue_poll{result:waiting,${SALE}}`, `drop_queue_poll{result:closed,${SALE}}`, `drop_queue_poll{result:unavailable,${SALE}}`,
   `drop_queue_enter{result:sold_out,${SALE}}`,
   `drop_queue_busy{api:enter,${SALE}}`, `drop_queue_busy{api:poll,${SALE}}`,
+  `drop_queue_busy_latency{api:enter,${SALE}}`, `drop_queue_busy_latency{api:poll,${SALE}}`,
   `drop_first_response{${SALE}}`, `drop_queue_wait{${SALE}}`, `iteration_started{${SALE}}`, `iteration_finished{${SALE}}`,
   `drop_sold_out{${SALE}}`, 'drop_member_result{scenario:warmup}', 'drop_member_result{result:paid,scenario:warmup}',
 ];
@@ -160,8 +161,9 @@ function member(user, n, deadline, tag, target) {
     // 진입, 조회, 점유가 같은 SKU를 쓴다. 입장 허가는 진입한 SKU에만 통한다.
     const variantId = variantFor(n, target);
     let entered = enterQueue(user, variantId, tag(), target.dropId);
-    recordFirstResponse(entered.res);
-    // 서버가 503 QUEUE_BUSY로 일찍 거절하면 오류가 아니라 Retry-After 뒤 다시 진입한다.
+    // 503 거절은 첫 응답 지연에 넣지 않는다. 아래 busy 지연으로만 본다.
+    if (entered.status !== 'BUSY') recordFirstResponse(entered.res);
+    // 서버가 503 DROP_QUEUE_BUSY로 일찍 거절하면 오류가 아니라 Retry-After 뒤 다시 진입한다.
     while (entered.status === 'BUSY') {
       const wait = nextWaitSeconds(entered, POLL_S);
       if (Date.now() + wait * 1000 > deadline) return recordMember('unfinished', startedMs);
@@ -174,7 +176,7 @@ function member(user, n, deadline, tag, target) {
     let status = entered.status;
     const enteredMs = Date.now();
     // 조회 오류는 세고 계속 조회한다. 실제 화면도 다음 주기에 다시 묻는다.
-    // 서버가 pollAfterMs를 주면 그 간격을 따르고, 없으면 POLL_SECONDS를 쓴다. 503 QUEUE_BUSY는 Retry-After 뒤 다시 묻는다.
+    // 서버가 pollAfterMs를 주면 그 간격을 따르고, 없으면 POLL_SECONDS를 쓴다. 503 DROP_QUEUE_BUSY는 Retry-After 뒤 다시 묻는다.
     let last = entered;
     while (status === 'WAITING' || status === 'ERROR' || status === 'BUSY') {
       const wait = nextWaitSeconds(last, POLL_S);
@@ -214,8 +216,10 @@ export function handleSummary(data) {
       latencyLine('queue wait', m(`drop_queue_wait{${SALE}}`)),
       `  polls waiting ${m(`drop_queue_poll{result:waiting,${SALE}}`).count || 0}, closed ${m(`drop_queue_poll{result:closed,${SALE}}`).count || 0}, `
         + `unavailable ${m(`drop_queue_poll{result:unavailable,${SALE}}`).count || 0}; enter rejected sold out ${m(`drop_queue_enter{result:sold_out,${SALE}}`).count || 0}`,
-      `  queue busy (503 QUEUE_BUSY, retried after Retry-After): enter ${m(`drop_queue_busy{api:enter,${SALE}}`).count || 0}, `
+      `  queue busy (503 DROP_QUEUE_BUSY, retried after Retry-After): enter ${m(`drop_queue_busy{api:enter,${SALE}}`).count || 0}, `
         + `poll ${m(`drop_queue_busy{api:poll,${SALE}}`).count || 0}`,
+      latencyLine('busy enter (503 only)', m(`drop_queue_busy_latency{api:enter,${SALE}}`)),
+      latencyLine('busy poll (503 only)', m(`drop_queue_busy_latency{api:poll,${SALE}}`)),
     ] : []),
     latencyLine('arrival to paid', m(`drop_member_total{result:paid,${SALE}}`)),
     latencyLine('arrival to sold out', m(`drop_member_total{result:sold_out,${SALE}}`)),

@@ -242,7 +242,7 @@ on은 회원마다 SKU 하나를 계정 순서대로 돌아가며 정하고 진�
 - on의 `sold_out`에는 점유 품절과 진입 거절(그 SKU의 `available = 0`, 409 `DROP_SOLD_OUT`)이 함께 들어간다. `unavailable`은 대기 중 재고가 0이 되어 조회가 `UNAVAILABLE`을 받은 회원이다. 최종 매진은 아니다.
 - `first response`는 도착 뒤 첫 API의 평가 지연이다. `queue wait`는 진입 응답부터 입장을 확인한 시각까지다. `arrival to paid`는 도착부터 결제 승인까지다.
 - 대기 중 회원은 조회 응답의 `pollAfterMs`만큼 쉬고 다시 조회한다. 값이 없으면 `POLL_SECONDS`를 쓴다 (2026-11-24 서버 제안 간격, #390).
-- 503 `QUEUE_BUSY`는 서버가 동시 처리 상한을 넘겨 일찍 거절한 응답이다. 오류로 세지 않고 `Retry-After`에 최대 50% 지터를 더해 쉰 뒤 다시 보낸다. 요약의 `queue busy` 줄과 `drop_queue_busy` 카운터(태그 `api`는 enter, poll)에서 건수를 본다. `unexpected` 비율에는 들어가지 않는다.
+- 503 `DROP_QUEUE_BUSY`는 서버가 동시 처리 상한을 넘겨 일찍 거절한 응답이다. 오류로 세지 않고 `Retry-After`에 최대 50% 지터를 더해 쉰 뒤 다시 보낸다. 요약의 `queue busy` 줄과 `drop_queue_busy` 카운터(태그 `api`는 enter, poll)에서 건수를, `drop_queue_busy_latency`에서 503 응답의 지연을 본다. 빠른 거절이 enter와 poll의 평가 지연이나 `first response`에 섞이지 않고 `unexpected` 비율에도 들어가지 않는다. 포화 구간의 p95는 busy 건수와 함께 읽는다.
 - on에서 생성기가 참여자만큼 VU를 만들지 못하면 `dropped_iterations`가 생긴다. 그 실행은 원래 조건을 만들지 못한 것이다.
 
 ### drop-reservation-capacity.js (용량 측정)
@@ -282,7 +282,7 @@ on은 회원마다 SKU 하나를 계정 순서대로 돌아가며 정하고 진�
 | `POLL_SECONDS` | 2 | 서버 응답에 `pollAfterMs`가 없을 때 쓰는 조회 간격. 있으면 그 값을 따른다 |
 
 - 조회 응답의 `pollAfterMs`를 따르므로 새 서버에서는 초당 조회 수가 `WAITERS / POLL_SECONDS`보다 적다. 이전 서버와 비교할 때는 이 점을 조건에 적는다.
-- 503 `QUEUE_BUSY`는 오류가 아니라 `Retry-After` 뒤 재시도로 세고 요약의 `queue busy` 줄에 나온다.
+- 503 `DROP_QUEUE_BUSY`는 오류가 아니라 `Retry-After` 뒤 재시도로 세고 요약의 `queue busy` 줄과 busy 지연 줄에 나온다. 평가 지연에는 섞이지 않는다.
 - 요약의 `fixed-N experiment held`는 모든 대기자가 측정 끝까지 WAITING이었다는 뜻이다. 한 명이라도 잃으면 `FAILED`다.
 - 입장 작업이 켜져 있어 ADMITTED가 보이면 `drop_queue_unexpected_admission` 임계값이 실행을 멈춘다.
 - 끝난 직후 서버의 `drop_queue_waiting` 값을 로그에 남긴다. 목표 인원과 같아야 한다.

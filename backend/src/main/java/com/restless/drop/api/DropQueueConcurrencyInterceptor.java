@@ -12,7 +12,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.HandlerMapping;
 
 /**
- * 대기열 진입과 상태 조회에만 동시 처리 상한을 건다. 넘으면 바로 503 QUEUE_BUSY와 Retry-After를 준다.
+ * 대기열 진입과 상태 조회에만 동시 처리 상한을 건다. 넘으면 바로 503 DROP_QUEUE_BUSY와 Retry-After를 준다.
  * 허용치는 요청이 끝나면 정상 응답, 예외, 취소 어느 경우든 afterCompletion에서 돌려준다.
  */
 @Component
@@ -31,8 +31,8 @@ public class DropQueueConcurrencyInterceptor implements HandlerInterceptor {
         Kind kind = select(request.getMethod(), pattern.toString());
         if (kind == null) return true;
         if (!limiter.tryAcquire(kind)) {
-            response.setHeader(HttpHeaders.RETRY_AFTER, Integer.toString(limiter.retryAfterSeconds()));
-            throw new BusinessException(ErrorCode.QUEUE_BUSY);
+            response.setHeader(HttpHeaders.RETRY_AFTER, Integer.toString(limiter.retryAfterSeconds(kind)));
+            throw new BusinessException(ErrorCode.DROP_QUEUE_BUSY);
         }
         request.setAttribute(ACQUIRED, kind);
         return true;

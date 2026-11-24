@@ -14,9 +14,11 @@ const PAY_TIMEOUT_MS = durationMs(PAY_TIMEOUT);
 const queueEnter = new Counter('drop_queue_enter');
 const queuePoll = new Counter('drop_queue_poll');
 const payment = new Counter('drop_payment');
-// 서버가 대기열 동시 처리 상한을 넘겨 503 QUEUE_BUSY로 거절한 요청 수. 오류가 아니라 Retry-After 뒤 재시도로 센다.
+// 서버가 대기열 동시 처리 상한을 넘겨 503 DROP_QUEUE_BUSY로 거절한 요청 수. 오류가 아니라 Retry-After 뒤 재시도로 센다.
 // 태그 api는 enter, poll.
 const queueBusy = new Counter('drop_queue_busy');
+// 503 응답의 지연. 빠른 거절이 enter와 poll의 평가 지연에 섞여 포화 때 p95가 좋아 보이지 않게 따로 둔다.
+const queueBusyLatency = new Trend('drop_queue_busy_latency', true);
 // 회원 한 명의 최종 결과: paid, payment_pending, payment_failed, sold_out, unavailable, queue_closed,
 // admission_expired, unfinished(관측 종료까지 대기), error.
 const memberResult = new Counter('drop_member_result');
@@ -31,9 +33,9 @@ function json(res) {
   try { return res.json() || {}; } catch (e) { return {}; }
 }
 
-// 503 QUEUE_BUSY는 서버가 일부러 일찍 거절한 정상 응답이다. Retry-After(초)를 밀리초로 돌려준다 (기본 1초).
+// 503 DROP_QUEUE_BUSY는 서버가 일부러 일찍 거절한 정상 응답이다. Retry-After(초)를 밀리초로 돌려준다 (기본 1초).
 function busyRetryMs(res, body) {
-  if (res.status !== 503 || body.code !== 'QUEUE_BUSY') return null;
+  if (res.status !== 503 || body.code !== 'DROP_QUEUE_BUSY') return null;
   const seconds = Number(res.headers['Retry-After']);
   return seconds > 0 ? seconds * 1000 : 1000;
 }
@@ -47,7 +49,7 @@ export function nextWaitSeconds(result, fallbackS) {
 }
 
 // POST /queue/entries {variantId}. 진입한 SKU의 재고 점유에만 입장 허가가 쓰인다.
-// status: WAITING, ADMITTED, SOLD_OUT(그 SKU의 available = 0), NOT_ON_SALE, BUSY(503 QUEUE_BUSY), ERROR.
+// status: WAITING, ADMITTED, SOLD_OUT(그 SKU의 available = 0), NOT_ON_SALE, BUSY(503 DROP_QUEUE_BUSY), ERROR.
 export function enterQueue(user, variantId, tags = {}, dropId = DROP_ID) {
   const res = http.post(`${BASE_URL}/api/drops/${dropId}/queue/entries`, JSON.stringify({ variantId }), {
     headers: authHeaders(user),
@@ -64,20 +66,25 @@ export function enterQueue(user, variantId, tags = {}, dropId = DROP_ID) {
   const mismatch = (res.status === 201 || res.status === 200) && body.variantId !== variantId;
   // 한 번만 진입하므로 201 WAITING과 현재 구매 불가(409 DROP_SOLD_OUT)만 정상이다.
   // 200(기존 대기)은 계정 재사용을 뜻한다. 응답 SKU가 요청과 다르면 서버나 스크립트가 틀렸다.
-  const kind = observe(res, mismatch || (res.status !== 201 && status !== 'SOLD_OUT' && status !== 'BUSY'), { api: 'enter', ...tags });
+  // BUSY는 평가 지연과 예상 밖 오류율에 넣지 않는다. 별도 카운터와 지연으로만 본다.
+  const kind = status === 'BUSY' ? 'busy'
+    : observe(res, mismatch || (res.status !== 201 && status !== 'SOLD_OUT'), { api: 'enter', ...tags });
   let result = `existing_${status.toLowerCase()}`;
-  if (kind !== 'response') result = kind;
+  if (kind === 'busy') result = 'busy';
+  else if (kind !== 'response') result = kind;
   else if (mismatch) result = 'variant_mismatch';
   else if (res.status === 201) result = 'entered';
   else if (status === 'SOLD_OUT') result = 'sold_out';
-  else if (status === 'BUSY') result = 'busy';
   else if (status === 'ERROR' || status === 'NOT_ON_SALE') result = `http_${res.status}`;
   queueEnter.add(1, { result, ...tags });
-  if (kind === 'response' && status === 'BUSY') queueBusy.add(1, { api: 'enter', ...tags });
+  if (status === 'BUSY') {
+    queueBusy.add(1, { api: 'enter', ...tags });
+    queueBusyLatency.add(res.timings.duration, { api: 'enter', ...tags });
+  }
   return { status, position: body.position, pollAfterMs: body.pollAfterMs, retryAfterMs, res };
 }
 
-// GET /queue/me. status: WAITING, ADMITTED, EXPIRED, CONSUMED, UNAVAILABLE, CLOSED(404), BUSY(503 QUEUE_BUSY), ERROR.
+// GET /queue/me. status: WAITING, ADMITTED, EXPIRED, CONSUMED, UNAVAILABLE, CLOSED(404), BUSY(503 DROP_QUEUE_BUSY), ERROR.
 // pollAfterMs는 서버가 WAITING 응답에 싣는 다음 조회 간격이다.
 // UNAVAILABLE은 그 SKU가 현재 구매 불가가 되어 대기나 미사용 입장 허가가 끝났다는 뜻이다.
 export function pollQueue(user, variantId, tags = {}, dropId = DROP_ID) {
@@ -98,13 +105,16 @@ export function pollQueue(user, variantId, tags = {}, dropId = DROP_ID) {
   } else if (res.status === 404) status = 'CLOSED';
   else if (retryAfterMs) status = 'BUSY';
   // 404는 이탈·판매 종료로 닫힌 대기다. 정상 응답이지만 결과로 따로 센다.
-  const kind = observe(res, status === 'ERROR' || mismatch, { api: 'poll', ...tags });
+  const kind = status === 'BUSY' ? 'busy' : observe(res, status === 'ERROR' || mismatch, { api: 'poll', ...tags });
   let result = status.toLowerCase();
-  if (kind !== 'response') result = kind;
+  if (kind !== 'response' && kind !== 'busy') result = kind;
   else if (status === 'ERROR') result = `http_${res.status}`;
   else if (mismatch) result = 'variant_mismatch';
   queuePoll.add(1, { result, ...tags });
-  if (kind === 'response' && status === 'BUSY') queueBusy.add(1, { api: 'poll', ...tags });
+  if (status === 'BUSY') {
+    queueBusy.add(1, { api: 'poll', ...tags });
+    queueBusyLatency.add(res.timings.duration, { api: 'poll', ...tags });
+  }
   return { status, pollAfterMs, retryAfterMs };
 }
 
