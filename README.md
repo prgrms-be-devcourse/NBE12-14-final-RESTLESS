@@ -225,31 +225,9 @@ cd backend && ./gradlew build
 
 ## 👥 팀원
 
-<table>
-<tr>
-<td align="center" width="25%">
-<a href="https://github.com/anton061311"><img src="https://github.com/anton061311.png" width="100" alt="이태호"><br><b>이태호</b></a><br>
-<sub>@anton061311</sub><br><br>
-🛍️ <b>한정판 드롭</b><br>
-<sub>주문, 결제, 배포와 CI/CD</sub>
-</td>
-<td align="center" width="25%">
-<a href="https://github.com/songfox00"><img src="https://github.com/songfox00.png" width="100" alt="송혜민"><br><b>송혜민</b></a><br>
-<sub>@songfox00</sub><br><br>
-🎫 <b>티켓팅</b><br>
-<sub>공연, 공연장</sub>
-</td>
-<td align="center" width="25%">
-<a href="https://github.com/vvipia"><img src="https://github.com/vvipia.png" width="100" alt="천종원"><br><b>천종원</b></a><br>
-<sub>@vvipia</sub><br><br>
-🔨 <b>경매</b><br>
-<sub>크레딧</sub>
-</td>
-<td align="center" width="25%">
-<a href="https://github.com/GibGui"><img src="https://github.com/GibGui.png" width="100" alt="홍승연"><br><b>홍승연</b></a><br>
-<sub>@GibGui</sub><br><br>
-💌 <b>팬미팅 추첨</b><br>
-<sub>인증, 회원</sub>
-</td>
-</tr>
-</table>
+| 이름 | 핵심 도메인 | 공통 모듈, 그 밖의 역할 | 주요 작업 |
+|---|---|---|---|
+| **이태호**<br>[@anton061311](https://github.com/anton061311) | 🛍️ 한정판 드롭 | 주문, 결제, 배포, CI/CD | 재고 예약과 입장 제어 대기열<br>재고 행 분할로 잠금 경합 완화<br>토스페이먼츠 연동과 미완료 결제 재확인 작업<br>EC2 배포와 CI 시간 단축 |
+| **송혜민**<br>[@songfox00](https://github.com/songfox00) | 🎫 티켓팅 | 공연, 공연장 | 좌석 선점, 만료, 취소<br>결제 승인, 예매 확정, 티켓 발급<br>결제 실패와 불명확 처리, 보상 취소, 전액 환불<br>좌석 상태 조회 분리와 응답 압축 등 조회 성능 개선 |
+| **천종원**<br>[@vvipia](https://github.com/vvipia) | 🔨 경매 | 크레딧 | 경매 등록, 입찰, 크레딧 확보, 스케줄러 종료<br>SSE 실시간 경매 상태 스트림<br>PG 결제로 크레딧 충전<br>1초 1만 건 입찰 부하 테스트, 경매 조회 캐시 |
+| **홍승연**<br>[@GibGui](https://github.com/GibGui) | 💌 팬미팅 추첨 | 인증, 회원 | JWT 인증과 회원 프로필, 탈퇴, 주최자 역할<br>응모, 추첨, 당첨 주문 생성<br>결제 결과 반영, 예비 승격, 모집 완료<br>API 오류 응답 형식 통일, 응모 몰림 부하 측정 |
