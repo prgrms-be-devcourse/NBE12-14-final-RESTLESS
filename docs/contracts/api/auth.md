@@ -94,3 +94,9 @@ class FanMeetingWithdrawalGuard implements WithdrawalGuard {
 - **주최자**: `/api/organizer/**`는 `role = ORGANIZER` 또는 `ADMIN`만. 아니면 403 `FORBIDDEN`. 주최자 기능은 이 경로 아래로 만든다. 보안 설정은 역할만 보므로, 본인 것인지(예: 자기 행사)는 각 도메인 서비스가 확인한다. ORGANIZER도 DB에서 지정한다.
 - **로그인 회원 ID**: 컨트롤러 파라미터에 `@LoginMember Long userId`를 쓴다. 요청 본문으로 회원 ID를 받지 않는다.
 - **현재 시각**: `Instant.now()` 대신 `Clock`을 주입받아 `clock.instant()`로 읽는다(`common/config/ClockConfig`). 테스트에서 시각을 바꿀 수 있다.
+
+## 주최자·관리자 권한 관계 정책 (DECIDED, 2026-11-24)
+
+ADMIN은 주최자 기능을 수행할 수 있다. 티켓팅 MVP에서 ORGANIZER는 본인 공연·회차, ADMIN은 모든 공연·회차를 관리하되 동일한 공개 후 수정·삭제 제한과 사업 규칙을 준수한다. 현재 일부 서비스가 ADMIN도 본인 공연으로 제한하므로 후속 구현에서 변경해야 한다.
+
+공개 후에는 제목·소개만 수정할 수 있다. 관리자 예외 수정·삭제(거래 없는 공개 공연 삭제 포함), 운영 정지·재개와 관련 이력 조회·요청 검토는 DEFERRED로 MVP에서 제외한다. 다른 도메인의 기존 권한 정책은 이번 티켓팅 범위 축소로 변경하지 않는다. 정본은 [티켓팅 주최자 정책](../../domains/ticketing/organizer-policy.md)이다.
