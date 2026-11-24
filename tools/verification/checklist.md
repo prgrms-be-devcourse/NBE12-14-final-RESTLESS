@@ -68,7 +68,7 @@ FAIL 뒤 수정을 같은 검증자 계열에게 변경분만 다시 보게 할 
 
 경로와 별개로 diff 내용이 아래와 같으면 높음이다.
 - 에이전트 지침 파일이 바뀜. `AGENTS.md`, `CLAUDE.md`, `SKILL.md`.
-- 운영 코드나 SQL에서 잠금, 트랜잭션, 쓰기 쿼리 줄이 새로 생기거나 지워지거나 바뀜. 예: `Transactional`, `FOR UPDATE`, `SKIP LOCKED`, `@Lock`, `@Modifying`, `@Version`, `synchronized`, `getLock`, `RLock`, 설정의 `ddl-auto`, `open-in-view`, `lock-timeout`, `setIfAbsent`, `UPDATE ... SET`, `INSERT INTO`, `DELETE FROM`. 주석 줄은 세지 않는다. 정확한 목록은 merge-gate.py의 `LOCK_LINE`이다.
+- 운영 코드나 SQL에서 잠금, 트랜잭션, 쓰기 쿼리 줄이 새로 생기거나 지워지거나 바뀜. 예: `Transactional`, `FOR UPDATE`, `SKIP LOCKED`, `@Lock`, `@Modifying`, `@Version`, `synchronized`, `getLock`, `RLock`, 설정의 `ddl-auto`, `validate-on-migrate`, `open-in-view`, `lock-timeout`, `setIfAbsent`, `UPDATE ... SET`, `INSERT INTO`, `DELETE FROM`. 주석 줄은 세지 않는다. 정확한 목록은 merge-gate.py의 `LOCK_LINE`이다.
 - 테스트 코드에서 단언, 검증, 대기, 타임아웃 줄이 지워지거나 바뀜(`ASSERT_REMOVED`), `@Test` 삭제, 테스트 파일 삭제, `@Disabled`나 건너뛰기 추가.
 - diff를 읽지 못했거나, 바이너리처럼 내용을 못 읽는 파일이 있거나, 변경 파일 목록이 비어 있음, 파일 목록에는 있는데 diff에 없음.
 - 경로 규칙은 이름을 바꾸기 전 경로에도 건다. 높음 경로에서 옮겨 나오는 변경도 높음이다.

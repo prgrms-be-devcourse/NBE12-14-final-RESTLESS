@@ -243,7 +243,7 @@ class RiskTest(unittest.TestCase):
 
     def test_config_keys_that_change_transaction_or_schema_behavior_are_high(self):
         f = "backend/src/main/resources/application.yml"
-        for line in ["    open-in-view: true", "    hibernate.ddl-auto: update", "lock-timeout: 0"]:
+        for line in ["    validate-on-migrate: false", "    open-in-view: true", "    hibernate.ddl-auto: update", "lock-timeout: 0"]:
             self.assertEqual(tier([f], diff(f, [line]))[0], gate.HIGH, line)
 
     def test_file_missing_from_diff_is_high(self):

@@ -63,7 +63,7 @@ HIGH_PATHS = [
 # 운영 코드에 새로 생긴 줄. 잠금과 트랜잭션 경계, 쓰기 쿼리.
 LOCK_LINE = re.compile(r"Transactional|TransactionTemplate|Propagation\.|Isolation\.|FOR\s+UPDATE|SKIP\s+LOCKED"
                        r"|@Lock\b|PESSIMISTIC_|LockModeType|\bsynchronized\b|ReentrantLock|advisory_lock|GET_LOCK"
-                       r"|@Version\b|@Modifying|ddl-auto|flyway\.|lock[-_]timeout|open-in-view|maximum-pool-size|connection-timeout|getLock\(|\.lock\(|tryLock|\bRLock\b|setIfAbsent|opsFor\w+|RedisTemplate"
+                       r"|@Version\b|@Modifying|ddl-auto|flyway|out-of-order|validate-on-migrate|baseline-on-migrate|clean-disabled|isolation|minimum-idle|max-lifetime|lock[-_]timeout|open-in-view|maximum-pool-size|connection-timeout|getLock\(|\.lock\(|tryLock|\bRLock\b|setIfAbsent|opsFor\w+|RedisTemplate"
                        r"|\bUPDATE\s+\w+\s+SET\b|\bINSERT\s+INTO\b|\bDELETE\s+FROM\b", re.I)
 # 테스트에서 사라지거나 바뀐 줄이 이런 줄이면 단언을 약하게 만들 수 있다.
 ASSERT_REMOVED = re.compile(r"\bassert\w*|\.(?:is|has|contains|matches|does|all|none|any|satisf|extracting|usingRecursive|as)\w*\("
@@ -416,6 +416,8 @@ def main():
     tools = [c for c in pr["statusCheckRollup"] if c.get("name") == "tools"]
     if tools and not all(c.get("conclusion") == "SUCCESS" for c in tools):
         blocks.append("tools CI(분류기와 테스트 선택 자체 시험)가 성공하지 않음")
+    elif not tools and any(f.startswith(("tools/verification/", "tools/ci/")) for f in files):
+        blocks.append("검증 도구를 바꿨는데 tools CI 결과가 없음. CI를 다시 돌릴 것")
 
     for n in notes:
         print(f"참고: {n}")
