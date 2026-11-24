@@ -62,16 +62,18 @@ FAIL 뒤 수정을 같은 검증자 계열에게 변경분만 다시 보게 할 
 | 채점 테스트 | `backend/src/test/java/com/restless/drop/acceptance/*`, `backend/src/test/java/com/restless/architecture/*`, `backend/src/test/resources/harness/*`, `tools/harness/*` |
 | 불변식 핵심 코드 | 2절의 변이 시험 필수 경로 |
 | 불변식, 트랜잭션, 상태 전이 문서 | `docs/domains/*/invariants.md`, `transactions.md`, `state-machines.md`, `idempotency.md`, `seat-ownership.md`, `docs/operations/failure-handling.md` |
+| 검증 절차 문서 | `docs/testing/independent-verification.md`, `docs/testing/strategy.md` |
 | 검증과 CI 도구 자체 | `tools/verification/*`, `tools/ci/*`, `.github/*` |
 | 빌드 설정 | `backend/build.gradle`, `backend/settings.gradle`, `backend/gradle/*`, `backend/gradlew`, `frontend/package.json` |
 
 경로와 별개로 diff 내용이 아래와 같으면 높음이다.
 - 에이전트 지침 파일이 바뀜. `AGENTS.md`, `CLAUDE.md`, `SKILL.md`.
-- 운영 코드나 SQL에 `@Transactional`, `TransactionTemplate`, `FOR UPDATE`, `SKIP LOCKED`, `@Lock`, `@Modifying`, `@Version`, `synchronized`가 새로 생김. 주석 줄은 세지 않는다.
-- 테스트 파일에서 단언이나 `@Test` 줄이 지워지거나 바뀜, 테스트 파일 삭제, `@Disabled`나 건너뛰기 추가.
-- diff를 읽지 못했거나 변경 파일 목록이 비어 있음.
+- 운영 코드나 SQL에서 잠금, 트랜잭션, 쓰기 쿼리 줄이 새로 생기거나 지워지거나 바뀜. 예: `Transactional`, `FOR UPDATE`, `SKIP LOCKED`, `@Lock`, `@Modifying`, `@Version`, `synchronized`, `getLock`, `RLock`, `setIfAbsent`, `UPDATE ... SET`, `INSERT INTO`, `DELETE FROM`. 주석 줄은 세지 않는다. 정확한 목록은 merge-gate.py의 `LOCK_LINE`이다.
+- 테스트 코드에서 단언, 검증, 대기, 타임아웃 줄이 지워지거나 바뀜(`ASSERT_REMOVED`), `@Test` 삭제, 테스트 파일 삭제, `@Disabled`나 건너뛰기 추가.
+- diff를 읽지 못했거나, 바이너리처럼 내용을 못 읽는 파일이 있거나, 변경 파일 목록이 비어 있음, 파일 목록에는 있는데 diff에 없음.
+- 경로 규칙은 이름을 바꾸기 전 경로에도 건다. 높음 경로에서 옮겨 나오는 변경도 높음이다.
 
-위 어느 것도 아니면 낮음 조건을 본다. 낮음은 모든 파일이 문서이거나 모두 테스트 파일이고 높음 근거가 없을 때다. 문서는 `docs/` 아래와 저장소 루트의 `.md`뿐이다. `perf/`와 `tools/` 아래 `.md`는 문서가 아니다. 나머지는 중간이다.
+위 어느 것도 아니면 낮음 조건을 본다. 낮음은 모든 파일이 문서이거나 테스트 코드(`.java`, `.kt`, `.js`, `.ts`)이고 높음 근거가 없을 때다. 문서와 테스트가 섞여도 낮음이다. `src/test/resources`의 설정 파일은 테스트 코드가 아니라 중간이다. 문서는 `docs/` 아래와 저장소 루트의 `.md`뿐이다. `perf/`와 `tools/` 아래 `.md`는 문서가 아니다. 나머지는 중간이다.
 
 gate는 참고로 변경 종류도 출력한다. 코드, 정책 문서, 코드 설명 문서(`docs/operations/**`, `docs/architecture/**`), 서식 문서다. 요구를 정하는 것은 위험도다.
 
@@ -79,7 +81,7 @@ gate는 참고로 변경 종류도 출력한다. 코드, 정책 문서, 코드 �
 
 작은 후속 커밋. 높음 PR에서 독립 PASS를 받은 뒤 쌓인 커밋은 아래를 모두 만족하면 다시 독립 검증하지 않는다. 합쳐서 30줄 이하이고, 그 변경만 분류해도 높음이 아니고, compare 결과의 patch를 모두 읽을 수 있어야 한다. 하나라도 어긋나면 4절이나 새 검증을 따른다.
 
-위험도와 상관없이 정책 문서(`docs/domains/**`, `docs/contracts/**`, `docs/decisions/**`, `docs/product/**`, `docs/testing/**`) 변경은 사람 확인이 필요하다는 안내가 나온다. 결제 핵심 경로를 바꾼 높음 PR은 review.md에 변이 결과가 없으면 막힌다. 판정 기록은 review.md의 마지막 비어 있지 않은 줄만 읽는다. 모든 위험도에서 backend CI가 실패하면 막힌다.
+정책 문서(`docs/domains/**`, `docs/contracts/**`, `docs/decisions/**`, `docs/product/**`, `docs/testing/**`) 변경은 높음이 아니어도 사람 확인이 필요하다는 안내가 나온다. 이전과 달리 gate가 강제하지 않는 안내이고, 높음에 드는 정책 문서만 독립 PASS를 요구한다. 이 완화는 2026-11-24 사용자 결정이다. 결제 핵심 경로를 바꾼 높음 PR은 review.md에 변이 결과가 없으면 막힌다. 판정 기록은 review.md의 마지막 비어 있지 않은 줄만 읽는다. 모든 위험도에서 backend CI가 실패하면 막힌다.
 
 SHA가 다르면 재검증하거나, 두 트리의 차이를 확인해 빠진 파일을 review.md에 적는다. 2026-11-20에 #274는 프로덕션 코드가 같았지만 검증받은 테스트 4개가 빠진 채 머지됐다.
 

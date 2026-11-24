@@ -47,6 +47,7 @@ MUTATION_REQUIRED = ["backend/src/main/java/com/restless/payment/application/Pay
 HIGH, MID, LOW = "높음", "중간", "낮음"
 RANK = {LOW: 0, MID: 1, HIGH: 2}
 HIGH_PATHS = [
+    ("검증 절차 문서", ["docs/testing/independent-verification.md", "docs/testing/strategy.md"]),
     ("Flyway 마이그레이션", ["backend/src/main/resources/db/migration/*"]),
     ("공개 API 계약", ["docs/contracts/*"]),
     ("채점 테스트", ["backend/src/test/java/com/restless/drop/acceptance/*",
@@ -60,12 +61,14 @@ HIGH_PATHS = [
     ("빌드 설정", [p for p in BUILD_CONFIG if not p.startswith(".github/")]),
 ]
 # 운영 코드에 새로 생긴 줄. 잠금과 트랜잭션 경계, 쓰기 쿼리.
-LOCK_ADDED = re.compile(r"@Transactional|TransactionTemplate|Propagation\.|Isolation\.|FOR\s+UPDATE|SKIP\s+LOCKED"
-                        r"|@Lock\b|PESSIMISTIC_|LockModeType|\bsynchronized\b|ReentrantLock|advisory_lock|GET_LOCK"
-                        r"|@Version\b|@Modifying", re.I)
+LOCK_LINE = re.compile(r"Transactional|TransactionTemplate|Propagation\.|Isolation\.|FOR\s+UPDATE|SKIP\s+LOCKED"
+                       r"|@Lock\b|PESSIMISTIC_|LockModeType|\bsynchronized\b|ReentrantLock|advisory_lock|GET_LOCK"
+                       r"|@Version\b|@Modifying|getLock\(|\.lock\(|tryLock|\bRLock\b|setIfAbsent|opsFor\w+|RedisTemplate"
+                       r"|\bUPDATE\s+\w+\s+SET\b|\bINSERT\s+INTO\b|\bDELETE\s+FROM\b", re.I)
 # 테스트에서 사라지거나 바뀐 줄이 이런 줄이면 단언을 약하게 만들 수 있다.
-ASSERT_REMOVED = re.compile(r"\bassert\w*\s*\(|\bassertThat\b|\.(?:is|has|contains|matches)\w*\(|\bverify\w*\(|\bexpect\w*\("
-                            r"|\bfail\(|@Test\b|@ParameterizedTest|@RepeatedTest|@Nested\b|\$\.|\.andExpect")
+ASSERT_REMOVED = re.compile(r"\bassert\w*|\.(?:is|has|contains|matches|does|all|none|any|satisf|extracting|usingRecursive|as)\w*\("
+                            r"|\bverify\w*\(|\bexpect\w*|\bfail\(|@Test\b|@ParameterizedTest|@RepeatedTest|@Nested\b|\$\.|\.andExpect"
+                            r"|await\w*\(|\bLatch|invokeAll|Timeout|\.join\(|\.get\(", re.I)
 SKIP_ADDED = re.compile(r"@Disabled|@Ignore\b|\bassume\w*\(|\.skip\(")
 FOLLOWUP_MAX_LINES = 30
 RISK_LABEL = {"risk:high": HIGH, "risk:medium": MID}
@@ -101,30 +104,58 @@ def ci_test_scope(check):
 
 
 def is_test_path(path):
-    return "/src/test/" in path or path.endswith(("Test.java", ".test.js", ".spec.js"))
+    """테스트 코드 파일. src/test 아래 설정이나 리소스(yml, sql)는 테스트 코드가 아니라 중간이다."""
+    return path.endswith((".java", ".kt", ".js", ".ts")) and ("/src/test/" in path or path.endswith(("Test.java", ".test.js", ".spec.js")))
+
+
+def unquote(path):
+    """git은 비 ASCII나 특수 문자 경로를 따옴표와 8진수 이스케이프로 낸다."""
+    path = path.strip()
+    if len(path) >= 2 and path[0] == '"' and path[-1] == '"':
+        try:
+            return path[1:-1].encode("latin1").decode("unicode_escape").encode("latin1").decode("utf-8")
+        except (UnicodeError, ValueError):
+            return path[1:-1]
+    return path
 
 
 def parse_diff(text):
-    """gh pr diff 출력을 {경로: {added, removed, status}}로. status는 added, removed, modified."""
-    out, cur = {}, None
-    for line in text.splitlines():
-        if line.startswith("diff --git "):
-            cur = None
-            m = re.match(r"diff --git a/(.+) b/(.+)$", line)
-            if m:
-                cur = out.setdefault(m.group(2), {"added": [], "removed": [], "status": "modified", "old": m.group(1)})
-        elif cur is None:
+    """gh pr diff 출력을 {경로: {added, removed, status, old}}로. status는 added, removed, modified.
+    경로는 diff --git 줄이 아니라 --- 와 +++ 와 rename 줄에서 읽는다. 첫 @@ 뒤의 --- 로 시작하는 줄은 내용이다.
+    내용이 없는 변경(이름만 바꿈, 바이너리)도 항목으로 남는다."""
+    out = {}
+    for block in re.split(r"^(?=diff --git )", text, flags=re.M):
+        if not block.startswith("diff --git "):
             continue
-        elif line.startswith("new file mode"):
-            cur["status"] = "added"
-        elif line.startswith("deleted file mode"):
-            cur["status"] = "removed"
-        elif line.startswith("+++ ") or line.startswith("--- "):
-            continue
-        elif line.startswith("+"):
-            cur["added"].append(line[1:])
-        elif line.startswith("-"):
-            cur["removed"].append(line[1:])
+        e = {"added": [], "removed": [], "status": "modified", "old": None, "new": None}
+        in_body = False
+        for line in block.splitlines()[1:]:
+            if in_body:
+                if line.startswith("+"):
+                    e["added"].append(line[1:])
+                elif line.startswith("-"):
+                    e["removed"].append(line[1:])
+            elif line.startswith("@@"):
+                in_body = True
+            elif line.startswith("new file mode"):
+                e["status"] = "added"
+            elif line.startswith("deleted file mode"):
+                e["status"] = "removed"
+            elif line.startswith("rename from "):
+                e["old"] = unquote(line[12:])
+            elif line.startswith("rename to "):
+                e["new"] = unquote(line[10:])
+            elif line.startswith("--- ") and line[4:].strip() != "/dev/null":
+                e["old"] = unquote(line[4:])[2:]
+            elif line.startswith("+++ ") and line[4:].strip() != "/dev/null":
+                e["new"] = unquote(line[4:])[2:]
+            elif line.startswith("Binary files"):
+                e["binary"] = True
+        key = e["new"] or e["old"]
+        if key:
+            out[key] = e
+        else:
+            out[f"?{len(out)}"] = {**e, "unreadable": True}
     return out
 
 
@@ -153,25 +184,33 @@ def assess_risk(files, patches, labels=(), body=""):
     """(위험도, 근거 목록). patches가 None이면 diff를 읽지 못한 것이라 높음이다.
     사람은 라벨 risk:high, risk:medium이나 본문 `위험도: 높음`으로 올릴 수만 있고 내릴 수는 없다."""
     reasons = []
-    if patches is None:
-        reasons.append("diff를 읽지 못함. 애매하면 높음")
-        tier = HIGH
+    if not files or patches is None:
+        reasons.append("변경 파일 목록이 비어 있거나 diff를 읽지 못함. 애매하면 높음")
     else:
-        tier = LOW
-        for f in files:
+        # 경로 규칙은 파일 목록, diff, 이름을 바꾸기 전 경로의 합집합에 건다.
+        paths = list(dict.fromkeys(list(files) + [k for k in patches if not k.startswith("?")]
+                                   + [p["old"] for p in patches.values() if p.get("old")]))
+        for f in paths:
             for why, pats in HIGH_PATHS:
                 if match(f, pats):
                     reasons.append(f"{why}: {f}")
             if os.path.basename(f) in AGENT_FILES:
                 reasons.append(f"에이전트 지침: {f}")
+        for f in files:
+            if f not in patches:
+                reasons.append(f"diff에서 찾지 못한 파일: {f}")
         for f, p in patches.items():
-            if p.get("unreadable"):
+            if p.get("unreadable") or p.get("binary") and is_test_path(f):
                 reasons.append(f"diff를 읽지 못함: {f}")
-            if f.startswith("backend/src/main/") or f.endswith(".sql"):
-                hit = next((l.strip() for l in p["added"]
-                            if LOCK_ADDED.search(l) and not l.strip().startswith(("//", "*", "/*", "--", "#"))), None)
-                if hit and "db/migration" not in f:
-                    reasons.append(f"잠금, 트랜잭션, 쓰기 쿼리가 새로 생김: {f}: {hit[:80]}")
+            prod = f.startswith("backend/src/main/") or f.endswith(".sql")
+            if prod and "db/migration" not in f:
+                # 지워지거나 바뀐 줄도 본다. 잠금을 빼는 변경도 같은 위험이다.
+                for kind_, lines in (("새로 생김", p["added"]), ("지워지거나 바뀜", p["removed"])):
+                    hit = next((l.strip() for l in lines
+                                if LOCK_LINE.search(l) and not l.strip().startswith(("//", "*", "/*", "--", "#"))), None)
+                    if hit:
+                        reasons.append(f"잠금, 트랜잭션, 쓰기 쿼리가 {kind_}: {f}: {hit[:80]}")
+                        break
             if is_test_path(f):
                 if p["status"] == "removed":
                     reasons.append(f"테스트 파일 삭제: {f}")
@@ -181,21 +220,17 @@ def assess_risk(files, patches, labels=(), body=""):
                 skip = next((l.strip() for l in p["added"] if SKIP_ADDED.search(l)), None)
                 if skip:
                     reasons.append(f"테스트를 건너뛰는 줄이 생김: {f}: {skip[:80]}")
-        if reasons:
-            tier = HIGH
-        elif all(is_doc(f) for f in files) and files:
-            tier = LOW
-            reasons.append("문서만 변경")
-        elif files and all(is_test_path(f) for f in files):
-            tier = LOW
-            reasons.append("테스트 추가만, 기존 단언 삭제나 변경 없음")
-        else:
-            tier = MID
-            other = [f for f in files if not is_doc(f) and not is_test_path(f) and not f.endswith(".md")] \
-                or [f for f in files if not is_doc(f) and not is_test_path(f)]
-            reasons.append(f"운영 코드, 설정, perf 스크립트: {', '.join(other[:3])}{' 외' if len(other) > 3 else ''}")
-    if not files:
-        tier, reasons = HIGH, ["변경 파일 목록이 비어 있음. 애매하면 높음"]
+    if reasons:
+        tier = HIGH
+    elif all(is_doc(f) or is_test_path(f) for f in files):
+        tier = LOW
+        reasons.append("문서와 테스트 추가만, 기존 단언 삭제나 변경 없음" if any(is_test_path(f) for f in files)
+                       else "문서만 변경")
+    else:
+        tier = MID
+        other = [f for f in files if not is_doc(f) and not is_test_path(f)]
+        other = [f for f in other if not f.endswith(".md")] or other
+        reasons.append(f"운영 코드, 설정, perf 스크립트: {', '.join(other[:3])}{' 외' if len(other) > 3 else ''}")
     # 사람이 올리는 것만 반영한다.
     asked = [RISK_LABEL[l] for l in labels if l in RISK_LABEL] + RISK_BODY.findall(body or "")
     for a in asked:
@@ -266,7 +301,8 @@ def compare_delta(sha, head):
     if r.returncode != 0:
         return None
     try:
-        return parse_compare(json.loads(r.stdout)["files"])
+        files = json.loads(r.stdout)["files"]
+        return None if len(files) >= 300 else parse_compare(files)
     except (ValueError, KeyError):
         return None
 

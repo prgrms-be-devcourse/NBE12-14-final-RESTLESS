@@ -178,6 +178,59 @@ class RiskTest(unittest.TestCase):
         self.assertEqual(d["x/B.java"]["status"], "added")
         self.assertEqual(d["x/C.java"]["status"], "removed")
 
+    def test_removing_a_lock_or_transaction_is_high(self):
+        f = f"{MAIN_J}/drop/application/Foo.java"
+        for gone in ["    @Transactional", "select 1 for update", "@org.springframework.transaction.annotation.Transactional",
+                     "RLock l = redisson.getLock(k);", "redis.opsForValue().setIfAbsent(k, v)",
+                     'jdbc.update("UPDATE drop_stock SET qty = qty - 1")']:
+            self.assertEqual(tier([f], diff(f, [], [gone]))[0], gate.HIGH, gone)
+
+    def test_chained_assertions_and_awaits_count_as_assertions(self):
+        f = f"{TEST_J}/drop/application/FooTest.java"
+        for gone in [".doesNotContain(x);", ".allSatisfy(a -> {});", "latch.await(5, SECONDS);", "pool.invokeAll(tasks);"]:
+            self.assertEqual(tier([f], diff(f, ["x"], [gone]))[0], gate.HIGH, gone)
+
+    def test_test_resources_are_not_test_additions(self):
+        f = "backend/src/test/resources/application-test.yml"
+        self.assertEqual(tier([f], diff(f, ["lock-timeout: 0"], ["lock-timeout: 3000"]))[0], gate.MID)
+
+    def test_docs_and_tests_together_stay_low(self):
+        d, t = "docs/testing/drop-performance-plan.md", f"{TEST_J}/drop/application/FooTest.java"
+        self.assertEqual(tier([d, t], {**diff(d, ["x"]), **diff(t, ["x"])})[0], gate.LOW)
+
+    def test_verification_docs_are_high(self):
+        f = "docs/testing/independent-verification.md"
+        self.assertEqual(tier([f], diff(f, ["x"]))[0], gate.HIGH)
+
+    def test_quoted_path_is_read_and_still_checked(self):
+        text = ('diff --git "a/backend/src/test/java/com/restless/drop/application/\\355\\225\\234Test.java" '
+                '"b/backend/src/test/java/com/restless/drop/application/\\355\\225\\234Test.java"\n'
+                '--- "a/backend/src/test/java/com/restless/drop/application/\\355\\225\\234Test.java"\n'
+                '+++ "b/backend/src/test/java/com/restless/drop/application/\\355\\225\\234Test.java"\n'
+                '@@ -1 +1 @@\n-assertThat(a).isEqualTo(3);\n+assertThat(a).isNotNull();\n')
+        d = gate.parse_diff(text)
+        self.assertEqual(list(d), ["backend/src/test/java/com/restless/drop/application/한Test.java"])
+        f = list(d)
+        self.assertEqual(tier(f, d)[0], gate.HIGH)
+
+    def test_rename_out_of_a_high_path_is_high(self):
+        text = ("diff --git a/backend/src/test/java/com/restless/drop/acceptance/A.java "
+                "b/backend/src/test/java/com/restless/drop/application/A.java\n"
+                "similarity index 100%\nrename from backend/src/test/java/com/restless/drop/acceptance/A.java\n"
+                "rename to backend/src/test/java/com/restless/drop/application/A.java\n")
+        d = gate.parse_diff(text)
+        new = "backend/src/test/java/com/restless/drop/application/A.java"
+        self.assertIn(new, d)
+        self.assertEqual(tier([new], d)[0], gate.HIGH)
+
+    def test_dashes_inside_a_hunk_are_content(self):
+        text = ("diff --git a/x.sql b/x.sql\n--- a/x.sql\n+++ b/x.sql\n@@ -1,2 +1 @@\n--- drop this\n-select 1 for update;\n+x\n")
+        d = gate.parse_diff(text)
+        self.assertEqual(d["x.sql"]["removed"], ["-- drop this", "select 1 for update;"])
+
+    def test_file_missing_from_diff_is_high(self):
+        self.assertEqual(tier(["docs/a.md", "docs/b.md"], diff("docs/a.md", ["x"]))[0], gate.HIGH)
+
     def test_parse_compare_marks_missing_patch(self):
         d = gate.parse_compare([{"filename": "a.java", "status": "modified", "patch": "@@\n-a\n+b", "changes": 2},
                                 {"filename": "b.bin", "status": "modified", "changes": 5}])
