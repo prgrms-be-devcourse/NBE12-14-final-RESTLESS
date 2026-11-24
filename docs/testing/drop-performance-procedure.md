@@ -172,7 +172,7 @@ curl -sf http://127.0.0.1:8081/actuator/health   # UP이 될 때까지 반복한
 
 ### 7-5. 측정 뒤 확인
 
-1. 수집을 멈추고 서버 1에서 `lockstats`와 DB 프로브 `status`를 후 값으로 남긴다. 그다음 서버마다 `curl -s http://perf-app:8081/actuator/prometheus -o .ai-output/perf/<날짜>-<측정>/after-run-server1.prom`을 받는다. 서버 2는 `perf-app2`와 `after-run-server2.prom`으로 같게 한다. DB 프로브의 `status` 전후 파일과 `sample` 파일도 노트북 결과 폴더로 받는다. JFR 파일은 서버 종료 뒤 같은 방식으로 받는다. 받는 방법은 7-4의 3번과 같다.
+1. 수집을 멈추고 서버 1에서 `lockstats`와 DB 프로브 `status`를 후 값으로 남긴다. 그다음 서버마다 `curl -s http://perf-app:8081/actuator/prometheus -o .ai-output/perf/<날짜>-<측정>/after-run-server1.prom`을 받는다. 서버 2는 `perf-app2`와 `after-run-server2.prom`으로 같게 한다. DB 프로브 파일(`status` 전후와 `sample`)은 서버 1의 `~/`에 있다. 노트북 결과 폴더로는 EC2 소유자가 `scp`로 받는다. JFR 파일은 서버 종료 뒤 같은 방법으로 받는다 (7-4의 3번).
 2. 진행 중 거래가 수렴했는지 보고 서버 1에서 `verify sale`을 돌린다. 출력을 결과 폴더에 저장한다. tail만 보지 않는다.
 3. 실패 항목을 이름으로 확인한다. 부하 뒤 정상인 실패는 hot drop untouched 한 건뿐이다. 그 밖의 실패는 정합성 위반으로 보고 그 회차를 채택하지 않는다.
 4. 정리는 이 순서로 한다. EC2 소유자가 한다. 먼저 팀원이 싱글 테스트에 쓰는 서버 1(fanq-server)을 대상 그룹에서 등록 해제한다. 다음 회차 전에 다시 등록한다. 멀티 측정이 모두 끝나면 ALB를 삭제하고 대상 그룹은 남긴다. 서버 2는 계속 쓸지 정하고, 안 쓰면 멈추고 EIP도 해제한다. 서버 1은 그대로 두되 팀원에게 넘기기 전에 `perf.env`에서 바꾼 값(대기열, 입장 허가 설정)을 [EC2 도구](../../perf/ec2/README.md) 순서 9대로 되돌린다. perf 전용 기간에는 `finish`를 하지 않는다 ([EC2 도구](../../perf/ec2/README.md)).

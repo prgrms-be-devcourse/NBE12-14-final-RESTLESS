@@ -72,6 +72,7 @@ perf/ec2/db-probe.sh status ~/probe-<날짜>-<측정>-after.txt    # 측정 후.
 
 - `status`는 커밋 수, redo fsync, 읽은 행 수, 잠금 대기 같은 누적 카운터다. RDS 인스턴스 전체 값이므로 다른 테스트가 없을 때만 해석한다.
 - `sample`은 연결 한 개로 `information_schema.PROCESSLIST`를 읽는다. 컬럼은 시각, 연결 ID, 경과 초, 상태, SQL 앞 160자다. poll마다 연결 ID 0인 `tick` 행이 한 줄 남아 poll 횟수를 센다. 몫은 실행 중인 SQL의 몫이고 CPU 시간 몫이 아니다.
+- `sample`이 0이 아닌 값으로 끝나면 표본이 중간에 끊긴 것이다. 출력 파일의 `tick` 행 수로 어디까지 모였는지 본다.
 - `PERF_ENV_FILE`로 env 파일 경로를, `MYSQL`로 mysql 명령을 바꿀 수 있다. `mysql`이 없으면 `mysql:8.4` 컨테이너를 쓴다.
 - 서버를 두 대 쓰는 측정에서는 서버 1에서만 돌린다. 앱 서버 CPU를 조금 쓴다 ([실행 절차 7절](../../docs/testing/drop-performance-procedure.md#7-alb-멀티-인스턴스-측정)).
 
