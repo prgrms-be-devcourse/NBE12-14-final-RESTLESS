@@ -248,7 +248,7 @@ class DropQueueIntegrationTest {
                 resume.countDown();
             }
             Long position = expected == DropQueueStatus.WAITING ? 1L : null;
-            assertThat(poll.get(10, TimeUnit.SECONDS)).isEqualTo(new DropQueueService.View(expected, variant, position, null));
+            assertThat(poll.get(10, TimeUnit.SECONDS)).isEqualTo(new DropQueueService.View(expected, variant, position, null, position == null ? null : 1000L));
         }
         assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(expected);
         assertThat(lastSeen()).isEqualTo(expectedLastSeen);

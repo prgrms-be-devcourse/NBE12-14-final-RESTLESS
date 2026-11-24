@@ -86,7 +86,10 @@ public enum ErrorCode {
     MEMBER_LOOKUP_FAILED(HttpStatus.SERVICE_UNAVAILABLE, "회원 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요."),
     ORDER_NOT_PAYABLE(HttpStatus.CONFLICT, "결제할 수 없는 주문입니다."),
     DECLINE_NOT_ALLOWED(HttpStatus.CONFLICT, "결제를 시작한 주문은 포기할 수 없어요."),
-    FAN_MEETING_NOT_EDITABLE(HttpStatus.CONFLICT, "오픈 전 행사만 수정하거나 취소할 수 있습니다.");
+    FAN_MEETING_NOT_EDITABLE(HttpStatus.CONFLICT, "오픈 전 행사만 수정하거나 취소할 수 있습니다."),
+
+    // 드롭 대기열 과부하 (#390)
+    QUEUE_BUSY(HttpStatus.SERVICE_UNAVAILABLE, "대기열 요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.");
 
     private final HttpStatus httpStatus;
     private final String message;

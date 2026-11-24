@@ -49,6 +49,23 @@ restless:
       # heartbeat-interval defaults to 10s (timeout / 4 for shorter timeouts).
       admission-ttl: 5m
       admit-per-run: 100
+      # 2026-11-24 사용자 위임 결정 (#390): 서버가 알려 주는 다음 조회 간격.
+      # 순번이 up-to-position 이하인 첫 구간의 after-ms, 없으면 fallback-ms. 어떤 값도 max-ms를 넘지 않는다.
+      # max-ms를 쓰지 않으면 min(10000, heartbeat-interval, heartbeat-timeout / 3)이다.
+      # 직접 쓰면 heartbeat-interval 이하이고 heartbeat-timeout 안에 3번 이상 들어와야 하며, 어기면 기동이 실패한다.
+      poll:
+        tiers:
+          - { up-to-position: 20, after-ms: 1000 }
+          - { up-to-position: 200, after-ms: 2000 }
+          - { up-to-position: 1000, after-ms: 3000 }
+        fallback-ms: 5000
+      # 서버 한 대에서 진입, 상태 조회를 동시에 처리하는 수의 상한. 넘으면 바로 503 QUEUE_BUSY.
+      # 근거: Hikari 풀 20, Tomcat 스레드 200. 진입은 트랜잭션 동안 커넥션을 쥐므로 풀의 40%,
+      # 조회는 커넥션을 짧게 빌리므로 30. 합 38은 Tomcat 200 대비 작아 TX1, 결제 스레드를 남긴다.
+      concurrency:
+        entry-max: 8
+        status-max: 30
+        retry-after-seconds: 1
       scheduler:
         enabled: true
         fixed-delay-ms: 1000

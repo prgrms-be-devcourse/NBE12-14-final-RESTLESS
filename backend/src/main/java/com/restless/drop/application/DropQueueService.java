@@ -24,9 +24,10 @@ public class DropQueueService {
     private final DropQueueSettings settings;
     private final DropQueueMetrics metrics;
     private final DropQueuePositions positions;
+    private final DropQueuePollPolicy pollPolicy;
     private final Clock clock;
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record View(DropQueueStatus status, Long variantId, Long position, Instant admittedUntil) { }
+    public record View(DropQueueStatus status, Long variantId, Long position, Instant admittedUntil, Long pollAfterMs) { }
     public record Entered(View body, boolean existing) { }
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Entered enter(Long dropId, Long userId, Long variantId) {
@@ -88,11 +89,12 @@ public class DropQueueService {
         if (status == DropQueueStatus.WAITING)
             return waitingView(entry, now, positions.snapshot(entry.getVariantId()));
         return new View(status, entry.getVariantId(), null,
-                status == DropQueueStatus.ADMITTED ? entry.getAdmittedUntil() : null);
+                status == DropQueueStatus.ADMITTED ? entry.getAdmittedUntil() : null, null);
     }
     private View waitingView(DropQueueEntry entry, Instant now, DropQueuePositions.Snapshot snapshot) {
         long position = positions.position(entry.getVariantId(), entry.getId(), now, snapshot);
-        return new View(entry.getStatus(), entry.getVariantId(), Math.max(1, position), null);
+        long shown = Math.max(1, position);
+        return new View(entry.getStatus(), entry.getVariantId(), shown, null, pollPolicy.afterMs(shown));
     }
     private boolean onSale(Drop drop, Instant now) {
         return drop.isOnSale(now);

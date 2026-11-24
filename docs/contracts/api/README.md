@@ -52,6 +52,7 @@
    | 업로드 크기 초과 | 413 | `FILE_SIZE_EXCEEDED` | |
    | 지원하지 않는 Content-Type | 415 | `UNSUPPORTED_MEDIA_TYPE` | |
    | 요청 횟수 한도 초과 ([한도](#요청-횟수-제한), `Retry-After` 초) | 429 | `TOO_MANY_REQUESTS` | |
+   | 드롭 대기열 동시 처리 상한 초과 ([drop.md](drop.md#대기열-동시-처리-상한), `Retry-After` 초) | 503 | `QUEUE_BUSY` | |
    | 그 밖의 예외 | 500 | `INTERNAL_ERROR` | (로그에 스택과 traceId) |
 
 4. 오류 코드는 `도메인_상황` 대문자 스네이크 케이스로 쓴다. 정상 거절(품절, 이미 받음)은 409 또는 422, 서버 오류는 5xx로 구분한다.
