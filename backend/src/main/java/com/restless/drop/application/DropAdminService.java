@@ -74,3 +74,5 @@ public class DropAdminService {
         return new Admin(drop.getId(), drop.getStatus());
     }
 }
+
+// CI 측정용 임시 변경. 머지하지 않는다 (#367).
