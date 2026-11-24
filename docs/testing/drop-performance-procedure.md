@@ -107,8 +107,8 @@ PG 장애 복구는 범위 밖이다. 중복과 동시 구매, 환불, 이중 �
 2. 서버 2에서 `perf-ec2.sh stop-app`을 먼저 한다. 컨테이너가 없으면 오류가 나도 된다. 앱이 떠 있으면 DB 초기화 중에 잠금을 기다리거나 새 시드에 쓰기를 한다. 서버 2는 5번까지 멈춰 둔다.
 3. 서버 1에서 2절 2번처럼 `stop-app`, `reset-db`, `start` (Flyway 실행), `stop-app`, `seed sale`을 한다. Flyway와 시드는 서버 1에서만 한다. 서버 2는 DB를 만들거나 시드하지 않는다.
 4. 서버 1에서 `serve-tokens`로 토큰 CSV를 노트북에 받는다. 받고 푸는 명령은 [EC2 도구](../../perf/ec2/README.md) 순서 4와 같다. 2절의 나머지 확인(이전 실행 원자료 저장, `~/.curlrc`의 `ipv4`)도 그대로 적용한다. 서버 2에는 시드와 토큰이 필요 없다.
-5. JFR을 켤 서버는 7-4의 1번대로 띄우므로 이 `start` 뒤에 그 방법으로 바꾼다. 서버 2의 `perf.env`에서 입장 허가 설정을 위 주의대로 정한다. 그다음 서버 1과 서버 2에서 같은 태그로 `start`를 한다. 서버 2의 `start`는 Flyway를 새로 적용하지 않고 이미 적용된 결과만 보여야 한다.
-6. 각 서버에서 `docker exec restless-perf env | grep RESTLESS_DROP_QUEUE_`로 유효 설정을 확인하고 고른 방법을 실행 기록에 적는다. 출력에 없는 키는 application.yml 기본값을 쓴다.
+5. 서버 2의 `perf.env`에서 입장 허가 설정을 위 주의대로 정한다. 그다음 서버 1과 서버 2에서 같은 태그로 `start`를 한다. 서버 2의 `start`는 Flyway를 새로 적용하지 않고 이미 적용된 결과만 보여야 한다. JFR을 켤 서버는 이 `start` 뒤에 7-4의 1번 방법으로 바꿔 띄운다.
+6. 각 서버에서 `docker exec restless-perf env | grep -E 'RESTLESS_DROP_|PAYMENT_RECONCILE_'`로 유효 설정을 확인하고 고른 방법을 실행 기록에 적는다. 출력에 없는 키는 application.yml 기본값을 쓴다.
 7. 이전 회차에서 서버 1을 대상 그룹에서 등록 해제했다면 사용자가 다시 등록한다. 그다음 대상 그룹에서 두 서버가 healthy인지 본다. 콘솔을 쓸 수 없으면 측정 뒤 서버별 요청 수가 고른지로 분배를 확인한다.
 8. 서버 1에서 `lockstats`와 DB 프로브 `status`를 측정 전 값으로 남긴다 (7-3절).
 9. 변경 전 예측을 결과 폴더에 한 줄 적는다. 그다음 7-2로 간다.
@@ -166,13 +166,13 @@ curl -sf http://127.0.0.1:8081/actuator/health   # UP이 될 때까지 반복한
 ```
 
 2. 스택 깊이 기본값 64는 Tomcat과 앱 코드 같은 바깥 계층을 과소 집계한다. 위 명령은 256으로 올렸다.
-3. 측정 뒤 7-5의 1번과 2번(`after-run` 파일, 후 값, 수렴 확인, `verify`)을 마친 다음 `docker stop -t 60 restless-perf`로 종료한다. 종료할 때 파일이 저장되므로 기본 10초로 끊지 않는다. 컨테이너를 지우기 전에 `docker cp restless-perf:/tmp/run.jfr ~/run-<날짜>.jfr`로 서버 홈에 꺼낸다. 저장소 폴더에는 두지 않는다. 노트북에는 서버 접속 방식대로 받아 결과 폴더에 둔다.
+3. 측정 뒤 7-5의 1번과 2번(`after-run` 파일, 후 값, 수렴 확인, `verify`)을 마친 다음 `docker stop -t 60 restless-perf`로 종료한다. 종료할 때 파일이 저장되므로 기본 10초로 끊지 않는다. 컨테이너를 지우기 전에 `docker cp restless-perf:/tmp/run.jfr ~/run-<날짜>.jfr`로 서버 홈에 꺼낸다. 저장소 폴더에는 두지 않는다. 노트북에는 EC2 소유자가 `scp`로 받아 결과 폴더에 둔다. 브라우저 터미널로는 내려받을 수 없다.
 4. 노트북의 JDK 21에서 복사한 파일을 본다. `jfr print --events jdk.CPULoad`와 `jdk.GarbageCollection`으로 CPU와 GC 정지를 보고, `jfr print --events jdk.ExecutionSample`로 판매 1분 창의 실행 샘플을 뽑는다. 샘플은 스택의 첫 JDK 밖 프레임 패키지로 직접 묶는다. 이 묶음 작업에는 정해 둔 스크립트가 없다. self 몫만 믿는다. 깊이 제한이 있으면 엔드포인트별 CPU는 나눌 수 없다.
 5. 끝나면 서버를 `perf-ec2.sh start <태그>`로 되돌린다. JFR 파일은 커밋하지 않는다.
 
 ### 7-5. 측정 뒤 확인
 
-1. 수집을 멈추고 서버마다 `curl -s http://perf-app:8081/actuator/prometheus -o .ai-output/perf/<날짜>-<측정>/after-run-server1.prom`을 받는다. 서버 2는 `perf-app2`와 `after-run-server2.prom`으로 같게 한다. DB 프로브의 `status` 전후 파일과 `sample` 파일도 노트북 결과 폴더로 받는다. JFR 파일은 서버 종료 뒤 같은 방식으로 받는다. 받는 방법은 서버 접속 방식을 따른다. 서버 1에서 `lockstats`와 DB 프로브 `status`를 후 값으로 남긴다.
+1. 수집을 멈추고 서버 1에서 `lockstats`와 DB 프로브 `status`를 후 값으로 남긴다. 그다음 서버마다 `curl -s http://perf-app:8081/actuator/prometheus -o .ai-output/perf/<날짜>-<측정>/after-run-server1.prom`을 받는다. 서버 2는 `perf-app2`와 `after-run-server2.prom`으로 같게 한다. DB 프로브의 `status` 전후 파일과 `sample` 파일도 노트북 결과 폴더로 받는다. JFR 파일은 서버 종료 뒤 같은 방식으로 받는다. 받는 방법은 7-4의 3번과 같다.
 2. 진행 중 거래가 수렴했는지 보고 서버 1에서 `verify sale`을 돌린다. 출력을 결과 폴더에 저장한다. tail만 보지 않는다.
 3. 실패 항목을 이름으로 확인한다. 부하 뒤 정상인 실패는 hot drop untouched 한 건뿐이다. 그 밖의 실패는 정합성 위반으로 보고 그 회차를 채택하지 않는다.
 4. 정리는 이 순서로 한다. 사용자가 한다. 먼저 팀원이 싱글 테스트에 쓰는 서버 1(fanq-server)을 대상 그룹에서 등록 해제한다. 다음 회차 전에 다시 등록한다. 멀티 측정이 모두 끝나면 ALB를 삭제하고 대상 그룹은 남긴다. 서버 2는 계속 쓸지 정하고, 안 쓰면 멈추고 EIP도 해제한다. 서버 1은 그대로 둔다. perf 전용 기간에는 `finish`를 하지 않는다 ([EC2 도구](../../perf/ec2/README.md)).
