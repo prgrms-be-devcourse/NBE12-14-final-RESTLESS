@@ -74,6 +74,17 @@ JUnit 5, Spring Boot Test, MySQL Testcontainers, Mockito, k6. 필요하면 Redis
 - 최신 `dev`를 합친 상태에서 `./gradlew build`를 돌린다. CI는 PR 브랜치가 아니라 "dev에 합친 결과"를 빌드한다. 각자 통과한 두 변경이 합쳐서 깨질 수 있다 (예: enum 끝의 `;`, 기본값이 바뀐 설정).
 - 다른 PR 위에 쌓은 PR은 앞 PR이 머지되면 dev를 다시 합치고 빌드한다.
 
+## 7-1. CI 테스트 범위
+
+- PR과 dev push는 영향받는 테스트만 돌릴 수 있다. 규칙은 `tools/ci/select-backend-tests.py`에 있다.
+- 도메인 하나만 바뀌면 그 도메인, 그 도메인을 쓰는 도메인, 그 도메인이 구현한 인터페이스를 가진 모듈의 테스트를 돌린다. ArchUnit과 기동 smoke test는 항상 돈다.
+- 공유 모듈(common, auth, member, order, payment, concert), migration, Spring 설정, 공용 테스트 fixture, Gradle과 CI 설정이 바뀌면 전체를 돈다. 분류할 수 없는 경로, 변경 목록 조회 실패도 전체다.
+- dev push는 마지막 커밋이 아니라 push 전체 범위(before..after)를 본다. main push는 항상 전체다.
+- 컴파일과 패키징은 범위와 상관없이 항상 한다. 문서만 바뀌면 백엔드 build를 건너뛴다.
+- dev 전체 테스트는 매일 03:00(KST) 정기 실행과 수동 실행으로 돈다. 전체 기준은 1195개다.
+- dev 이미지는 영향 범위 테스트만 통과해도 발행된다. 정기 전체 테스트에서만 잡히는 회귀는 이미지 발행 뒤에 발견될 수 있다.
+- 실행 범위는 CI 요약의 Backend test scope와 artifact의 `test-scope.txt`에 남는다. 다른 모듈에 영향이 있을 것 같으면 로컬에서 `./gradlew build`를 돌린다.
+
 ## 8. 원칙
 
 - PG 대량 부하 테스트에는 실제 토스 API가 아니라 Fake/Mock PG를 쓴다.
