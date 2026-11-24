@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/domain/`, `backend/src/main/java/com/restless/order/domain/`, `backend/src/main/java/com/restless/payment/domain/`
 >
-> 마지막 확인: 2026-11-22 (#330 `DropReservation`에 재고 버킷 번호가 생겼다. 상태와 전이는 바뀌지 않았다. 2026-11-20 #285 용어 정리, 2절은 #254에서 구현됐다. 2026-11-19 #253 SKU별 입장 제어 정책 반영. 나머지는 2026-11-14 #92 구현과 대조)
+> 마지막 확인: 2026-11-24 (#388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 `DropReservation`에 재고 버킷 번호가 생겼다. 상태와 전이는 바뀌지 않았다. 2026-11-20 #285 용어 정리, 2절은 #254에서 구현됐다. 2026-11-19 #253 SKU별 입장 제어 정책 반영. 나머지는 2026-11-14 #92 구현과 대조)
 
 Order, Payment, Reservation 상태는 따로 저장하고, 조합 간 정합성을 검증한다.
 
