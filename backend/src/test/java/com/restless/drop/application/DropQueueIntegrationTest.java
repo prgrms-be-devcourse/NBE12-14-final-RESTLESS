@@ -75,7 +75,7 @@ class DropQueueIntegrationTest {
         var venueName = UUID.randomUUID().toString();
         jdbc.update("INSERT INTO venues (name, address, timezone, status, created_at) VALUES (?, '서울', 'Asia/Seoul', 'ACTIVE', ?)", venueName, now);
         var venue = jdbc.queryForObject("SELECT id FROM venues WHERE name = ?", Long.class, venueName);
-        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at) VALUES (?, ?, ?, 'SCHEDULED', ?)",
+        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at, is_published) VALUES (?, ?, ?, 'SCHEDULED', ?, TRUE)",
                 venue, user, email, now);
         var concert = jdbc.queryForObject("SELECT id FROM concerts WHERE title = ?", Long.class, email);
         drop = admin.create(new CreateDropRequest(concert, "상품", "설명", "url", opens, opens.plusSeconds(3600),

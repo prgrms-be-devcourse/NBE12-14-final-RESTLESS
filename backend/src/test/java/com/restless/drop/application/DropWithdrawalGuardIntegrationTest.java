@@ -60,7 +60,7 @@ class DropWithdrawalGuardIntegrationTest {
         jdbc.update("INSERT INTO venues (name, address, timezone, status, created_at) VALUES (?, '서울', 'Asia/Seoul', 'ACTIVE', ?)",
                 name, Timestamp.from(now));
         Long venue = jdbc.queryForObject("SELECT id FROM venues WHERE name = ?", Long.class, name);
-        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at) VALUES (?, ?, ?, 'SCHEDULED', ?)",
+        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at, is_published) VALUES (?, ?, ?, 'SCHEDULED', ?, TRUE)",
                 venue, user, name, Timestamp.from(now));
         Long concert = jdbc.queryForObject("SELECT id FROM concerts WHERE title = ?", Long.class, name);
         Long drop = admin.create(new CreateDropRequest(concert, "상품", "설명", "url", now, now.plusSeconds(3600),

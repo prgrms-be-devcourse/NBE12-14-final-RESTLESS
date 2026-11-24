@@ -104,7 +104,7 @@ abstract class DropAcceptanceSupport {
         Timestamp now = Timestamp.from(Instant.now());
         jdbc.update("INSERT INTO venues (name, address, timezone, status, created_at) VALUES ('drop hall', 'seoul', 'Asia/Seoul', 'ACTIVE', ?)", now);
         Long venueId = jdbc.queryForObject("SELECT MAX(id) FROM venues", Long.class);
-        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at) VALUES (?, ?, 'drop concert', 'SCHEDULED', ?)",
+        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at, is_published) VALUES (?, ?, 'drop concert', 'SCHEDULED', ?, TRUE)",
                 venueId, admin, now);
         return jdbc.queryForObject("SELECT MAX(id) FROM concerts", Long.class);
     }

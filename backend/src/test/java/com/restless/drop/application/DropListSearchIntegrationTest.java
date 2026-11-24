@@ -38,7 +38,7 @@ class DropListSearchIntegrationTest {
         Long user = jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class, token + "@search.test");
         jdbc.update("INSERT INTO venues (name, address, timezone, status, created_at) VALUES (?, '서울', 'Asia/Seoul', 'ACTIVE', NOW())", token);
         Long venue = jdbc.queryForObject("SELECT id FROM venues WHERE name = ?", Long.class, token);
-        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at) VALUES (?, ?, ?, 'SCHEDULED', NOW())", venue, user, token);
+        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at, is_published) VALUES (?, ?, ?, 'SCHEDULED', NOW(), TRUE)", venue, user, token);
         concert = jdbc.queryForObject("SELECT id FROM concerts WHERE title = ?", Long.class, token);
     }
 
