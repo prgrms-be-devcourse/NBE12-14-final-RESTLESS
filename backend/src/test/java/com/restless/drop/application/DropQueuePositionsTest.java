@@ -24,7 +24,7 @@ class DropQueuePositionsTest {
         var snapshot = positions.snapshot(sku);
         assertThat(positions.position(sku, 4, clock.instant(), snapshot)).isOne();
         assertThat(positions.position(sku, 11, clock.instant(), snapshot)).isEqualTo(3);
-        assertThat(positions.position(sku, 9, clock.instant(), snapshot)).isEqualTo(2);
+        assertThat(positions.position(sku, 9, clock.instant(), snapshot)).isEqualTo(3);
         assertThat(positions.position(sku, 2, clock.instant(), snapshot)).isOne();
         when(entries.countWaitingTail(sku, 11, 15, cutoff)).thenReturn(2L);
         assertThat(positions.position(sku, 15, clock.instant(), snapshot)).isEqualTo(5);

@@ -43,8 +43,8 @@ class DropQueuePositions {
         }
         int index = Arrays.binarySearch(ids, id);
         // An earlier IDENTITY insert can commit after a higher id was captured.
-        // Use the number of captured ids below it, with position one for a live head.
-        return index >= 0 ? index + 1L : Math.max(1L, -1L - index);
+        // Count the captured ids below it plus the entry itself, like the former COUNT.
+        return index >= 0 ? index + 1L : -index;
     }
 
     @RequiredArgsConstructor
