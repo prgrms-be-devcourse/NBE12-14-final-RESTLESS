@@ -133,9 +133,10 @@ MANAGEMENT_URL=http://perf-app:8081 \
 PERF_ALLOWED_APP_HOSTS=perf-alb,perf-app \
 SEED_OUT="$PWD/perf/seed/out" QUEUE=on \
 SUMMARY_PATH=.ai-output/perf/<날짜>-<측정>/summary.json \
-k6 run perf/scenarios/drop-sale.js 2>&1 | tee .ai-output/perf/<날짜>-<측정>/k6.log
+k6 run --out json=.ai-output/perf/<날짜>-<측정>/sale.raw.json perf/scenarios/drop-sale.js 2>&1 | tee .ai-output/perf/<날짜>-<측정>/k6.log
 ```
 
+- `--out json`은 창별 지연과 매분 00 ~ 02초 제외 p95를 구하는 원자료다. 빼면 요약 파일만 남아 [측정 규약 1절](drop-performance-measurement.md#1-단위-분모-판정-구간)의 분석을 할 수 없다.
 - 시나리오는 호스트가 `perf-`로 시작하지 않으면 시작하지 않는다. ALB 이름도 `perf-`로 시작하게 `/etc/hosts`에 둔다.
 - `ulimit -n`을 올리지 않으면 부하 발생기 쪽 연결 오류가 서버 성능으로 오해된다.
 - 풀 크기는 두 서버(`perf-app`, `perf-app2`)의 `http://<호스트>:8081/actuator/prometheus`에서 `hikaricp_connections_max`로 본다. 측정 뒤에는 입장 카운터 `drop_queue_admitted_total`이 입장 허가 작업을 켠 서버에만 늘었는지 본다. 작업을 끈 서버에는 이 카운터가 아예 나타나지 않으며 정상이다. k6의 시작 점검은 `MANAGEMENT_URL`의 서버 1만 본다. 입장 허가 작업이 어느 서버에서 도는지는 k6가 확인하지 않는다.
