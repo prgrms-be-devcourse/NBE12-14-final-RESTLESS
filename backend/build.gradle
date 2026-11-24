@@ -49,6 +49,9 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // 테스트 클래스를 JVM 여러 개에 나눠 돌린다. 포크마다 자기 MySQL 컨테이너를 띄우므로 데이터가 섞이지 않는다.
+    // 코어의 절반만 쓴다. 나머지는 포크마다 하나씩 뜨는 MySQL 몫이다. CI 러너는 4코어라 2개가 된다.
+    maxParallelForks = Math.max(1, Runtime.runtime.availableProcessors().intdiv(2))
     // 경매 시작·종료 스케줄러는 테스트에서 끈다. 다른 테스트의 데이터 정리와 겹치지 않게 하기 위해서다.
     // 스케줄러를 검증하는 테스트만 @SpringBootTest(properties)로 다시 켠다.
     systemProperty 'restless.auction.scheduler.enabled', 'false'
