@@ -6,7 +6,7 @@ usage() {
 Usage: perf/scenarios/run-ticketing.sh SCENARIO USERS
 
 SCENARIO:
-  spread, simultaneous       좌석 조회 (3초 폴링)
+  spread, simultaneous       좌석 조회 1회 (분산/동시 진입)
   burst                      정해진 시각에 좌석 조회 1회
   page                       페이지 진입: 좌석·구매 가능 정보 조회
   hot, overlap               인기 좌석 또는 겹치는 좌석 선점 경쟁
@@ -16,8 +16,8 @@ SCENARIO:
 USERS는 전체 테스트 사용자 수다. 예: run-ticketing.sh spread 100
 필수 환경변수: BASE_URL, PERFORMANCE_ID, MANAGEMENT_URL, PERF_ALLOWED_APP_HOSTS
 인증: USERS_CSV 또는 SETUP=self (시드 계정 로그인)
-선택 환경변수: DURATION, MAX_DURATION, HOT_SEATS, HOLD_DELAY_SECONDS,
-              POLL_ENTRY (mixed만), BURST_DELAY_SECONDS, SEAT_ENCODING, MANAGEMENT_URL, K6_BIN
+선택 환경변수: MAX_DURATION, REFRESH_COUNT, REFRESH_INTERVAL_SECONDS, HOT_SEATS, HOLD_DELAY_SECONDS,
+              POLL_ENTRY (page/mixed), BURST_DELAY_SECONDS, SEAT_ENCODING, MANAGEMENT_URL, K6_BIN
 HELP
 }
 if [[ "${1:-}" == '-h' || "${1:-}" == '--help' ]]; then usage; exit 0; fi
@@ -44,14 +44,14 @@ export PARTICIPANTS="$users" VUS="$users"
 export HOT_SEATS="${HOT_SEATS:-1}" MAX_DURATION="${MAX_DURATION:-5m}"
 export HOLD_DELAY_SECONDS="${HOLD_DELAY_SECONDS:-3}" MIXED_HOLD=hot
 case "$scenario" in
-  spread|simultaneous) export MODE=poll POLL_ENTRY="$scenario" DURATION="${DURATION:-2m}" ;;
+  spread|simultaneous) export MODE=poll POLL_ENTRY="$scenario" ;;
   burst) export MODE=burst POLL_ENTRY=simultaneous ;;
-  page) export MODE=page POLL_ENTRY="${POLL_ENTRY:-spread}" DURATION="${DURATION:-2m}" ;;
-  hot|overlap|distributed|replay) export MODE="$scenario" POLL_ENTRY=spread DURATION="${DURATION:-2m}" ;;
+  page) export MODE=page POLL_ENTRY="${POLL_ENTRY:-spread}" ;;
+  hot|overlap|distributed|replay) export MODE="$scenario" POLL_ENTRY=spread ;;
   mixed|mixed-distributed)
     readers=$(( users * 4 / 5 )); holders=$(( users - readers ))
     (( readers > 0 && holders > 0 )) || { echo '혼합 시나리오는 최소 2명이 필요합니다.' >&2; exit 2; }
-    export MODE=mixed PARTICIPANTS="$readers" HOLD_PARTICIPANTS="$holders" POLL_ENTRY="${POLL_ENTRY:-spread}" DURATION="${DURATION:-30s}"
+    export MODE=mixed PARTICIPANTS="$readers" HOLD_PARTICIPANTS="$holders" POLL_ENTRY="${POLL_ENTRY:-spread}"
     [[ "$scenario" == mixed-distributed ]] && export MIXED_HOLD=distributed
     ;;
 esac

@@ -6,9 +6,8 @@ import com.restless.ticketing.application.dto.TicketSeatState;
 import com.restless.concert.application.ConcertQueryService;
 import com.restless.concert.application.dto.PerformanceLayout;
 import com.restless.concert.application.dto.SeatPosition;
-import com.restless.ticketing.domain.TicketSeat;
+import com.restless.ticketing.application.dto.TicketSeatSnapshot;
 import com.restless.ticketing.infrastructure.TicketSeatRepository;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -34,25 +33,24 @@ public class TicketSeatQueryService {
     @Transactional(readOnly = true)
     public List<TicketSeatInfo> getSeats(Long performanceId) {
         PerformanceLayout layout = concertQueryService.getPerformanceLayout(performanceId);
-        List<TicketSeat> seats = seatQueryMetrics.measure("sale_seats",
-                () -> ticketSeatRepository.findAllByPerformanceId(performanceId));
+        List<TicketSeatSnapshot> seats = seatQueryMetrics.measure("sale_seats",
+                () -> ticketSeatRepository.findSnapshotsByPerformanceId(performanceId));
         return seatQueryMetrics.measure("combine", () -> combineSeats(layout, seats));
     }
 
-    private List<TicketSeatInfo> combineSeats(PerformanceLayout layout, List<TicketSeat> seats) {
+    private List<TicketSeatInfo> combineSeats(PerformanceLayout layout, List<TicketSeatSnapshot> seats) {
         Map<Long, SeatPosition> positions = layout.seats().stream()
                 .collect(Collectors.toMap(SeatPosition::venueSeatId, Function.identity()));
 
         return seats.stream()
-                .sorted(Comparator.comparing(TicketSeat::getId))
                 .map(seat -> {
-                    SeatPosition position = positions.get(seat.getVenueSeatId());
-                    if (!layout.layoutId().equals(seat.getLayoutId()) || position == null) {
-                        throw new IllegalStateException("회차의 판매 좌석과 배치가 일치하지 않습니다: " + seat.getId());
+                    SeatPosition position = positions.get(seat.venueSeatId());
+                    if (!layout.layoutId().equals(seat.layoutId()) || position == null) {
+                        throw new IllegalStateException("회차의 판매 좌석과 배치가 일치하지 않습니다: " + seat.id());
                     }
-                    return new TicketSeatInfo(seat.getId(), seat.getVenueSeatId(), position.sectionLabel(),
+                    return new TicketSeatInfo(seat.id(), seat.venueSeatId(), position.sectionLabel(),
                             position.rowLabel(), position.seatNumber(), position.posX(), position.posY(),
-                            seat.getGrade(), seat.getPrice(), seat.getStatus());
+                            seat.grade(), seat.price(), seat.status());
                 })
                 .toList();
     }

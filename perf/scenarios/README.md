@@ -4,7 +4,7 @@
 
 좌석 조회는 `ticketing/spread.js`(분산 진입)와 `ticketing/simultaneous.js`(동시 진입)를 사용한다. 선점과 혼합을 포함한 모든 티켓팅 시나리오는 `run-ticketing.sh`로 실행한다. `users.csv`는 공통 시드가 만든 서로 다른 사용자 토큰을 사용하며, 파일은 Git에 올리지 않는다.
 
-조회·페이지·혼합 시나리오는 최초에 `/seats`로 배치와 가격을 포함한 목록을 조회하고, 이후 3초 폴링은 `/seats/status`로 좌석 ID와 상태만 조회한다. 이전 전체 좌석 반복 조회 결과와 직접 비교할 때는 요청 경로와 전송량 차이를 고려한다. `burst`는 최초 전체 목록 조회만 한 번 수행한다.
+조회·페이지·혼합 시나리오는 사용자당 최초 `/seats` 요청을 한 번 수행한다. 자동 폴링은 없다. `REFRESH_COUNT`를 지정하면 각 사용자가 수동 새로고침 버튼을 누르는 상황을 가정해 `/seats/status`를 지정 횟수만큼 조회한다. 목록이 일치하지 않으면 전체 좌석을 다시 조회한다. `burst`는 최초 전체 목록 조회만 한 번 수행한다.
 
 ```bash
 export BASE_URL="http://<테스트-서버>:8080"
@@ -18,9 +18,9 @@ perf/scenarios/run-ticketing.sh simultaneous 100
 perf/scenarios/run-ticketing.sh page 100
 ```
 
-숫자는 전체 사용자 수다. 조회의 기본 실행 시간은 2분이며, `DURATION=10s perf/scenarios/run-ticketing.sh spread 5`처럼 바꿀 수 있다. 실행기는 CSV 계정을 사용하며, 같은 서버 주소·회차에서 이미 배정한 사용자 ID를 `.ai-output/perf/ticketing-account-ledger.sqlite3`에 기록하고 건너뛴다. 과거 요약에 계정 정보가 있으면 해당 기록도 반영한다. 실패·중단된 실행의 배정도 유지한다. 직접 JS를 실행하거나 다른 컴퓨터에서 실행한 결과, 다른 주소로 접근한 같은 서버의 기록은 공유되지 않으므로 별도 조율이 필요하다. HTTP 사용 시 토큰은 암호화되지 않는다. 시작 전에 perf 프로필, 테스트 DB, 회차와 토큰 유효기간을 확인한다.
+숫자는 전체 사용자 수다. 각 사용자는 한 번 진입하며 `DURATION`은 적용되지 않는다. `MAX_DURATION`(기본 5분)은 완료 제한 시간이다. 예: `REFRESH_COUNT=2 REFRESH_INTERVAL_SECONDS=30 perf/scenarios/run-ticketing.sh page 100`은 사용자당 30초 간격으로 두 번의 수동 새로고침을 가정한다. 실제 사용자의 새로고침 빈도를 뜻하지 않는다. 기존 3초 폴링 결과와 요청 수 및 응답시간을 직접 비교하지 않는다. 실행기는 CSV 계정을 사용하며, 같은 서버 주소·회차에서 이미 배정한 사용자 ID를 `.ai-output/perf/ticketing-account-ledger.sqlite3`에 기록하고 건너뛴다. 과거 요약에 계정 정보가 있으면 해당 기록도 반영한다. 실패·중단된 실행의 배정도 유지한다. 직접 JS를 실행하거나 다른 컴퓨터에서 실행한 결과, 다른 주소로 접근한 같은 서버의 기록은 공유되지 않으므로 별도 조율이 필요하다. HTTP 사용 시 토큰은 암호화되지 않는다. 시작 전에 perf 프로필, 테스트 DB, 회차와 토큰 유효기간을 확인한다.
 
-`page`는 로그인 완료 사용자의 첫 진입에서 좌석과 구매 가능 정보를 병렬 조회하고 이후 좌석만 3초 간격으로 조회한다. 기본 진입은 3초 분산이며 `POLL_ENTRY=simultaneous`로 동시 진입을 지정한다. 포커스 복귀·선점 이후의 갱신은 포함하지 않는다. 구매 가능 정보 API가 배포된 이미지가 필요하다. `ticket_availability_requests`, `ticket_availability_errors`, `ticket_availability_duration`으로 해당 API를 따로 확인한다.
+`page`는 로그인 완료 사용자의 첫 진입에서 좌석과 구매 가능 정보를 병렬 조회하고 기본적으로 추가 조회 없이 종료한다. 기본 진입은 3초 분산이며 `POLL_ENTRY=simultaneous`로 동시 진입을 지정한다. 포커스 복귀·선점 이후의 갱신은 포함하지 않는다. 구매 가능 정보 API가 배포된 이미지가 필요하다. `ticket_availability_requests`, `ticket_availability_errors`, `ticket_availability_duration`으로 해당 API를 따로 확인한다.
 
 다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 요약 결과는 `.ai-output/perf/ticketing-<시나리오>/summary-<UTC 날짜시간>.json`, HTML 보고서는 같은 폴더의 `report-<UTC 날짜시간>.html`에 자동 저장된다. 예: `.ai-output/perf/ticketing-spread/summary-20261118T010203Z.json`. 실행 중에는 `http://localhost:5665`에서 대시보드를 볼 수 있다. 실행기가 기본으로 대시보드와 HTML 내보내기를 켜므로 별도 k6 환경변수를 지정하지 않아도 된다.
 

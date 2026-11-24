@@ -36,7 +36,10 @@ const seatEncoding = __ENV.SEAT_ENCODING || 'identity';
 if (!['identity', 'gzip'].includes(seatEncoding)) throw new Error('SEAT_ENCODING must be identity or gzip');
 if (!['csv', 'self'].includes(setupMode)) throw new Error('SETUP must be csv or self');
 if (setupMode === 'self' && totalUsers > 1000) throw new Error('self setup supports at most 1000 seeded users');
-const duration = __ENV.DURATION || '2m';
+const refreshCount = Number(__ENV.REFRESH_COUNT || 0);
+if (!Number.isSafeInteger(refreshCount) || refreshCount < 0 || refreshCount > 100) throw new Error('REFRESH_COUNT must be an integer from 0 to 100');
+const refreshInterval = positive('REFRESH_INTERVAL_SECONDS', 30);
+if (mode === 'burst' && refreshCount) throw new Error('burst does not support manual refresh');
 const burstDelay = positive('BURST_DELAY_SECONDS', 20);
 const entry = fixedEntry || __ENV.POLL_ENTRY || 'spread';
 if (!['spread', 'simultaneous'].includes(entry)) throw new Error('POLL_ENTRY must be spread or simultaneous');
@@ -55,8 +58,8 @@ if (setupMode === 'csv' && (users.length < totalUsers || users.some(u => !u.id |
   throw new Error('users.csv needs enough distinct user IDs and access tokens');
 const options = {
   setupTimeout: '10m',
-  scenarios: { ticketing: mode === 'burst' ? { executor: 'per-vu-iterations', vus, iterations: 1, maxDuration: __ENV.MAX_DURATION || '5m' } : mode === 'poll' || mode === 'page' || mode === 'mixed'
-    ? { executor: 'constant-vus', vus: mode === 'mixed' ? totalUsers : vus, duration }
+  scenarios: { ticketing: ['burst', 'poll', 'page', 'mixed'].includes(mode)
+    ? { executor: 'per-vu-iterations', vus: mode === 'mixed' ? totalUsers : vus, iterations: 1, maxDuration: __ENV.MAX_DURATION || '5m' }
     : { executor: 'shared-iterations', vus, iterations: participants, maxDuration: __ENV.MAX_DURATION || '5m' } },
   thresholds: {
     ticket_unexpected: ['rate==0'],
@@ -82,11 +85,12 @@ const options = {
       'ticket_hold_duration{outcome:unavailable}': [],
       'ticket_hold_duration{outcome:lock_timeout}': [],
     } : {}),
-    ...(mode === 'mixed' ? { ticket_poll_requests: ['count>0'], ticket_poll_errors: ['rate==0'], ticket_hold_errors: ['rate==0'] } : {}),
+    ...(mode === 'mixed' ? { ticket_poll_requests: [`count>=${participants}`], ticket_poll_errors: ['rate==0'], ticket_hold_errors: ['rate==0'] } : {}),
+    ...(['poll', 'page'].includes(mode) ? { ticket_poll_requests: [`count>=${participants}`], ticket_poll_errors: ['rate==0'] } : {}),
+    ...(refreshCount && ['poll', 'page', 'mixed'].includes(mode) ? { ticket_refresh_requests: [`count==${participants * refreshCount}`] } : {}),
     ...(mode === 'burst' ? { ticket_poll_requests: [`count==${participants}`], ticket_poll_errors: ['rate==0'] } : {}),
     'ticket_poll_duration{outcome:ok}': [],
     'ticket_poll_duration{phase:entry}': [],
-    'ticket_poll_duration{phase:poll}': [],
   },
   summaryTrendStats: ['count', 'avg', 'med', 'p(95)', 'p(99)', 'max'],
 };
@@ -96,6 +100,7 @@ const unexpected = new Rate('ticket_unexpected');
 const pollErrors = new Rate('ticket_poll_errors');
 const holdErrors = new Rate('ticket_hold_errors');
 const pollRequests = new Counter('ticket_poll_requests');
+const refreshRequests = new Counter('ticket_refresh_requests');
 const holdAttempts = new Counter('ticket_hold_attempts');
 const holdCompleted = new Counter('ticket_hold_completed');
 const replayCompleted = new Counter('ticket_replay_completed');
@@ -150,6 +155,7 @@ function setup() {
   if (mode !== 'poll' && mode !== 'page' && mode !== 'burst') { holdAttempts.add(0); holdCompleted.add(0); }
   if (mode === 'replay') replayCompleted.add(0);
   if (mode === 'mixed') pollRequests.add(0);
+  if (refreshCount && ['poll', 'page', 'mixed'].includes(mode)) refreshRequests.add(0);
   if (mode === 'burst') {
     const burstAt = Date.now() + burstDelay * 1000;
     console.log(`burst scheduled=${new Date(burstAt).toISOString()} participants=${participants}`);
@@ -161,15 +167,17 @@ function run(data) {
   const activeUsers = mode === 'burst' ? users : data.users;
   const pollUser = mode === 'poll' || mode === 'page' || mode === 'burst' || (mode === 'mixed' && exec.vu.idInTest <= participants);
   if (pollUser) {
-    return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, burstStartDelay });
+    return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, burstStartDelay, refreshCount, refreshInterval, refreshRequests });
   }
   return runHold(data, { base, performanceId, users: activeUsers, mode, participants, holdDelay, mixedHold, hotSeats, runId, headers, holdAttempts, holdCompleted, replayCompleted, holdErrors, count, holdLatency });
 }
 function handleSummary(data) {
-  const report = { ...data, conditions: { mode, entry: mode === 'poll' || mode === 'page' || mode === 'mixed' ? entry : null,
+  const { setup_data: setupData, ...safeData } = data;
+  const safeSetup = setupData ? { ...setupData, ...(Array.isArray(setupData.users) ? { users: setupData.users.map(user => ({ id: user.id })) } : {}) } : setupData;
+  const report = { ...safeData, setup_data: safeSetup, conditions: { mode, entry: mode === 'poll' || mode === 'page' || mode === 'mixed' ? entry : null,
     mixedHold: mode === 'mixed' ? mixedHold : null, performanceId, participants, holdParticipants,
-    vus: mode === 'mixed' ? totalUsers : vus, duration: mode === 'poll' || mode === 'page' || mode === 'mixed' ? duration : null,
-    maxDuration: mode !== 'poll' && mode !== 'page' && mode !== 'mixed' ? (__ENV.MAX_DURATION || '5m') : null,
+    vus: mode === 'mixed' ? totalUsers : vus, refreshCount, refreshIntervalSeconds: refreshCount ? refreshInterval : null,
+    maxDuration: __ENV.MAX_DURATION || '5m',
     hotSeats, holdDelaySeconds: mode === 'mixed' ? holdDelay : null, burstDelaySeconds: mode === 'burst' ? burstDelay : null, seatEncoding, runId, baseUrl: base, rowOffset } };
   const out = { stdout: JSON.stringify(report, null, 2) };
   if (__ENV.SUMMARY_PATH) out[__ENV.SUMMARY_PATH] = JSON.stringify(report, null, 2);

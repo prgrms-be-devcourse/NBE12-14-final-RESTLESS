@@ -1,28 +1,24 @@
 package com.restless.concert.application;
 
 import com.restless.common.error.BusinessException;
-import com.restless.common.observability.SeatQueryMetrics;
-import com.restless.concert.application.dto.BookingPerformance;
-import com.restless.concert.application.dto.ConcertDetail;
-import com.restless.concert.application.dto.ConcertPage;
-import com.restless.concert.application.dto.PerformanceInfo;
-import com.restless.concert.application.dto.PerformanceLayout;
-import com.restless.concert.application.dto.SeatPosition;
-import com.restless.concert.application.dto.TicketSeatDescription;
 import com.restless.common.error.ErrorCode;
+import com.restless.common.observability.SeatQueryMetrics;
+import com.restless.concert.application.dto.*;
 import com.restless.concert.domain.Concert;
+import com.restless.concert.domain.LayoutSeat;
 import com.restless.concert.domain.Performance;
-import com.restless.concert.infrastructure.LayoutSeatRepository;
 import com.restless.concert.infrastructure.ConcertRepository;
+import com.restless.concert.infrastructure.LayoutSeatRepository;
 import com.restless.concert.infrastructure.PerformanceRepository;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -95,10 +91,7 @@ public class ConcertQueryService {
         Performance performance = seatQueryMetrics.measure("performance", () -> performanceRepository.findById(performanceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다.")));
         List<SeatPosition> seats = seatQueryMetrics.measure("layout_seats",
-                () -> layoutSeatRepository.findAllById_LayoutId(performance.getLayoutId())).stream()
-                .map(seat -> new SeatPosition(seat.getId().getVenueSeatId(), seat.getSectionLabel(),
-                        seat.getRowLabel(), seat.getSeatNumber(), seat.getPosX(), seat.getPosY()))
-                .toList();
+                () -> layoutSeatRepository.findPositionsByLayoutId(performance.getLayoutId()));
         return new PerformanceLayout(performance.getLayoutId(), seats);
     }
 
@@ -108,7 +101,7 @@ public class ConcertQueryService {
         Performance performance = performanceRepository.findById(performanceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다."));
         Set<Long> sellableSeatIds = layoutSeatRepository.findAllById_LayoutId(performance.getLayoutId()).stream()
-                .filter(seat -> seat.isSellable())
+                .filter(LayoutSeat::isSellable)
                 .map(seat -> seat.getId().getVenueSeatId())
                 .collect(Collectors.toUnmodifiableSet());
         return new BookingPerformance(performance.getLayoutId(), performance.getBookingOpensAt(),
