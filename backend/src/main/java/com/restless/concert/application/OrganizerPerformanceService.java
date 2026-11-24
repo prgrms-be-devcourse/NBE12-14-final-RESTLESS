@@ -71,7 +71,8 @@ public class OrganizerPerformanceService {
                 .map(seat -> new SeatSetupLayout.Seat(seat.getId().getVenueSeatId(), seat.getSectionLabel())).toList();
     }
 
-    @Transactional
+    /** 잠금 이후 기존 회차를 최신 커밋 기준으로 읽도록 READ_COMMITTED를 사용한다. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public PerformanceInfo create(Long actorId, Long concertId, Instant startsAt,
                                   Instant bookingOpensAt, Instant bookingClosesAt, Integer maxTicketsPerUser) {
         if (actorId == null || actorId <= 0) throw new BusinessException(ErrorCode.UNAUTHORIZED);

@@ -456,6 +456,40 @@ class OrganizerConcertApiTest {
     }
 
     @Test
+    @DisplayName("같은 시작 시각의 단건 회차 등록이 동시에 요청돼도 하나만 생성된다")
+    void concurrentSingleCreationsCannotOverlap() throws Exception {
+        Long layoutId = layoutFor(venueId);
+        addSellableSeat(layoutId);
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        org.springframework.test.context.transaction.TestTransaction.flagForCommit();
+        org.springframework.test.context.transaction.TestTransaction.end();
+        String body = performanceBody("2027-03-01T00:00:00Z", "2027-02-20T00:00:00Z", "2027-02-25T00:00:00Z", 2);
+        var ready = new java.util.concurrent.CountDownLatch(2);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            java.util.concurrent.Callable<Integer> create = () -> { ready.countDown(); start.await();
+                return mockMvc.perform(post("/api/organizer/concerts/{id}/performances", concertId).with(actor(ownerId, "ORGANIZER"))
+                        .contentType("application/json").content(body)).andReturn().getResponse().getStatus(); };
+            var first = executor.submit(create);
+            var second = executor.submit(create);
+            assertThat(ready.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            assertThat(java.util.List.of(first.get(20, java.util.concurrent.TimeUnit.SECONDS), second.get(20, java.util.concurrent.TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(201, 400);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id=?", Integer.class, concertId)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats s JOIN performances p ON p.id=s.performance_id WHERE p.concert_id=?", Integer.class, concertId)).isEqualTo(1);
+        } finally {
+            start.countDown(); executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            jdbc.update("DELETE s FROM performance_seats s JOIN performances p ON p.id=s.performance_id WHERE p.concert_id=?", concertId);
+            jdbc.update("DELETE FROM performances WHERE concert_id=?", concertId);
+            jdbc.update("DELETE FROM concert_section_prices WHERE concert_id=?", concertId);
+            jdbc.update("DELETE FROM concerts WHERE id=?", concertId);
+        }
+    }
+
+    @Test
     @DisplayName("한 회차라도 예매 시작이 지났거나 좌석 가격이 불일치하면 전체 공개되지 않는다")
     void rejectsIncompletePublication() throws Exception {
         Long layoutId = layoutFor(venueId);
