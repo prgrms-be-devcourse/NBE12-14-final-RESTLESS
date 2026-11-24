@@ -69,7 +69,7 @@ class DropQueueLimitOrderIntegrationTest {
         jdbc.update("INSERT INTO venues (name, address, timezone, status, created_at) VALUES (?, '서울', 'Asia/Seoul', 'ACTIVE', ?)",
                 unique, timestamp);
         Long venue = jdbc.queryForObject("SELECT id FROM venues WHERE name=?", Long.class, unique);
-        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at) VALUES (?, ?, ?, 'SCHEDULED', ?)",
+        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at, is_published) VALUES (?, ?, ?, 'SCHEDULED', ?, TRUE)",
                 venue, user, unique, timestamp);
         Long concert = jdbc.queryForObject("SELECT id FROM concerts WHERE title=?", Long.class, unique);
         drop = admin.create(new CreateDropRequest(concert, "상품", "설명", "url", now, now.plusSeconds(3600),
