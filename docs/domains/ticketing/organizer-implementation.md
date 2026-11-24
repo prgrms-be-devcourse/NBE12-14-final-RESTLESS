@@ -59,3 +59,5 @@ Focused 테스트 통과: `./gradlew test --tests 'com.restless.concert.Organize
 추가 회귀 검증: `./gradlew test --tests 'com.restless.concert.OrganizerConcertApiTest'` 15건 통과. `./gradlew test --tests 'com.restless.ticketing.application.TicketReservationServiceTest.concurrentUsersCannotOwnTheSameSeat' --tests 'com.restless.ticketing.application.TicketReservationServiceTest.replayPreservesOriginalReservationAndRejectsDifferentContent' --tests 'com.restless.ticketing.application.TicketReservationServiceTest.concurrentSameKeyRequestsReturnOneReservation'` 3건 통과. 전체 빌드와 mutation gate는 실행하지 않았다.
 
 단건 회차 등록은 READ_COMMITTED로 실행한다. 기본 REPEATABLE READ에서는 공연 행 잠금 전에 회원 조회로 읽기 스냅샷이 고정돼, 동시에 커밋된 같은 시각 회차를 겹침 검사에서 보지 못하고 두 회차가 모두 생성됐다(`concurrentSingleCreationsCannotOverlap` 수정 전 실패 [201, 201]).
+
+V20261125_1000은 `concerts.is_published` 기본값을 TRUE로 바꾼다. 주최자 API 생성은 엔티티가 FALSE를 명시하므로 계속 초안이다. 공개 여부를 지정하지 않은 직접 INSERT는 공개로 저장된다(`directlyInsertedConcertDefaultsToPublished`). 기존 V20261124_1100은 수정하지 않았다.

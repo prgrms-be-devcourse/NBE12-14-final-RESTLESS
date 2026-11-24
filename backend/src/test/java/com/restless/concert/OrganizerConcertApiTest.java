@@ -83,6 +83,15 @@ class OrganizerConcertApiTest {
     }
 
     @Test
+    @DisplayName("공개 여부를 지정하지 않은 공연 행은 기본 공개다")
+    void directlyInsertedConcertDefaultsToPublished() {
+        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at) VALUES (?, ?, 'direct', 'SCHEDULED', UTC_TIMESTAMP(6))",
+                venueId, ownerId);
+        assertThat(jdbc.queryForObject("SELECT is_published FROM concerts WHERE venue_id=? AND title='direct'", Boolean.class, venueId)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT published_at IS NULL FROM concerts WHERE venue_id=? AND title='direct'", Boolean.class, venueId)).isTrue();
+    }
+
+    @Test
     @DisplayName("주최자의 공연 등록은 로그인한 회원을 소유자로 저장하고 공개 조회에 노출한다")
     void createsConcertOwnedByAuthenticatedOrganizer() throws Exception {
         Long selectedLayout = layoutFor(venueId);

@@ -110,7 +110,7 @@
 ### 저장 모델
 
 - `concerts.status`는 기존 공연 진행 상태로 유지한다. 공개 여부와 같은 필드로 쓰지 않는다.
-- `concerts`에 `is_published BOOLEAN NOT NULL DEFAULT FALSE`, `published_at DATETIME(6) NULL`을 추가하는 방안을 사용한다. 공개 판정은 `is_published`로 한다. 기존 공연은 이관 시 `is_published = TRUE`, 실제 공개 시각을 알 수 없으므로 `published_at = NULL`로 보존한다. 신규 공연은 FALSE/NULL로 생성하고 공개 성공 시 TRUE/서버 시각을 함께 저장한다. 생성 시각을 실제 공개 시각으로 추정하지 않는다. 기존 진행 상태와 회차 상태는 변경하지 않는다.
+- `concerts`에 `is_published BOOLEAN NOT NULL`, `published_at DATETIME(6) NULL`을 추가하는 방안을 사용한다. DB 기본값은 공개(TRUE)다(2026-11-25 결정, V20261125_1000). 공개 여부를 지정하지 않은 직접 INSERT(타 도메인 fixture 등)는 공개로 저장되고, 주최자 API는 엔티티가 FALSE를 명시해 초안으로 만든다. 비공개 기본값으로의 전환은 후속 결정이다. 공개 판정은 `is_published`로 한다. 기존 공연은 이관 시 `is_published = TRUE`, 실제 공개 시각을 알 수 없으므로 `published_at = NULL`로 보존한다. 신규 공연은 FALSE/NULL로 생성하고 공개 성공 시 TRUE/서버 시각을 함께 저장한다. 생성 시각을 실제 공개 시각으로 추정하지 않는다. 기존 진행 상태와 회차 상태는 변경하지 않는다.
 - `concerts`에 초안의 공통 `layout_id`를 저장하고 `concert_section_prices(concert_id, section_label, grade, price)` 테이블로 구역별 공통 가격을 저장하는 방안을 제안한다. `concert_section_prices`는 `(concert_id, section_label)` 유일, 양수 가격 CHECK, 공연 FK를 둔다. 구역 표시는 선택 배치의 판매 가능 구역과 정확히 일치해야 한다.
 - 신규·정합성이 확인된 공연은 모든 회차의 `layout_id`가 공연의 배치와 같아야 한다. 기존 불일치 공연은 개별 확인 전 공통 설정으로 자동 변환하지 않는다. 가격 테이블의 관계와 CHECK만으로 공연-회차의 배치 일치를 강제하기 어려우므로 회차 생성 서비스에서 잠금·검증하고, 데이터 모델 계약을 필요하면 복합 FK로 보강한다.
 - `performance_seats`는 계속 회차별 판매 재고와 소유권의 기준이다. 회차 등록 트랜잭션이 공통 배치·가격으로 좌석을 생성하고, 기존 `seat_holds.price_amount`·`tickets.price_amount`의 스냅샷은 수정하지 않는다. 신규 판매 좌석은 `price > 0`이어야 한다. 기존 0원 좌석은 기존 공개 공연에서 보존한다.
