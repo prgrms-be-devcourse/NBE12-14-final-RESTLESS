@@ -88,14 +88,27 @@ PG 장애 복구는 범위 밖이다. 중복과 동시 구매, 환불, 이중 �
 
 ### 7-1. 준비 순서
 
-1. 두 서버가 같은 이미지 태그를 쓰는지 확인한다. 태그가 다르면 달라진 변경을 기록에 적는다. ALB 대상 그룹의 헬스 체크는 관리 포트 8081의 `/actuator/health`다.
-2. 두 서버의 `perf.env`가 같은 `perf-` DB와 같은 풀, Tomcat, 대기열, 가짜 PG 값을 쓰는지 `perf-ec2.sh check`로 본다. 전후 비교 중에는 서버를 늘리는 것 말고 바꾸지 않는다.
-3. 서버 1에서 2절 2번처럼 `stop-app`, `reset-db`, `start` (Flyway 실행), `stop-app`, `seed sale`을 한다. Flyway와 시드는 서버 한 대에서만 한다. 서버 2는 DB를 건드리지 않는다.
+먼저 필요한 것:
+
+- 서버 2에도 `~/restless` 저장소(같은 커밋), `/opt/restless/perf.env`, docker가 있어야 한다. `perf-ec2.sh start`가 서버 2에서도 자동 배포를 멈추고 `restless` 컨테이너를 지운다.
+- 보안 그룹은 노트북에서 서버 2의 8081을 열고, ALB에서 두 서버의 8080과 8081(헬스 체크)을 연다.
+- 서버 두 대는 같은 이미지 태그를 쓴다. 다르면 달라진 변경을 기록에 적는다.
+- 두 서버의 `perf.env`는 같은 `perf-` DB와 같은 풀, Tomcat, 대기열, 가짜 PG 값을 가진다. 아래 입장 허가 설정만 예외다.
+
+주의할 점:
+
+- 입장 허가 작업, 순번 스냅샷, 만료 작업은 앱 인스턴스마다 돈다. 서버 둘이 같은 `admit-per-run`을 쓰면 초당 입장 수가 약 2배가 되어 서버 수 말고도 변인이 바뀐다. 한 가지를 골라 실행 기록에 적는다. 서버마다 `RESTLESS_DROP_QUEUE_ADMIT_PER_RUN`을 절반으로 두거나, 서버 2의 `RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED`를 false로 둔다.
+- `perf-ec2.sh check`는 대기열이 false가 아니면 경고를 낸다. 대기열 켬 측정이면 정상이다.
+
+순서:
+
+1. 노트북 `/etc/hosts`에 서버 1, 서버 2, ALB를 모두 `perf-`로 시작하는 이름으로 둔다 (예: `perf-app`, `perf-app2`, `perf-alb`). ALB 주소는 바뀔 수 있으니 측정하는 날 `dig +short <ALB DNS>`로 다시 보고 사용자가 고친다. 서버 2 주소도 재시작하면 바뀔 수 있다. ALB 리스너 포트도 확인한다. 아래 k6 예시는 80이다.
+2. 서버 2에서 `perf-ec2.sh stop-app`을 먼저 한다. 앱이 떠 있으면 DB 초기화 중에 잠금을 기다리거나 새 시드에 쓰기를 한다. 서버 2는 5번까지 멈춰 둔다.
+3. 서버 1에서 2절 2번처럼 `stop-app`, `reset-db`, `start` (Flyway 실행), `stop-app`, `seed sale`을 한다. Flyway와 시드는 서버 1에서만 한다. 서버 2는 DB를 만들거나 시드하지 않는다.
 4. 서버 1에서 `serve-tokens`로 토큰 CSV를 노트북에 받는다. 서버 2에는 시드와 토큰이 필요 없다.
 5. 서버 1과 서버 2에서 같은 태그로 `start`를 한다. 서버 2의 `start`는 Flyway를 새로 적용하지 않고 이미 적용된 결과만 보여야 한다.
 6. 대상 그룹에서 두 서버가 healthy인지 본다. 콘솔을 쓸 수 없으면 측정 뒤 서버별 요청 수가 고른지로 분배를 확인한다.
-7. 노트북 `/etc/hosts`에 서버 1, 서버 2, ALB를 모두 `perf-`로 시작하는 이름으로 둔다 (예: `perf-app`, `perf-app2`, `perf-alb`). ALB 주소는 바뀔 수 있으니 측정하는 날 `dig +short <ALB DNS>`로 다시 보고 사용자가 고친다. 서버 2 주소도 재시작하면 바뀔 수 있다.
-8. 서버 1에서 `lockstats`와 DB 프로브 `status`를 측정 전 값으로 남긴다 (7-3절).
+7. 서버 1에서 `lockstats`와 DB 프로브 `status`를 측정 전 값으로 남긴다 (7-3절).
 
 ### 7-2. 서버별 지표 수집과 k6
 
@@ -120,6 +133,7 @@ k6 run perf/scenarios/drop-sale.js 2>&1 | tee .ai-output/perf/<날짜>-<측정>/
 
 - 시나리오는 호스트가 `perf-`로 시작하지 않으면 시작하지 않는다. ALB 이름도 `perf-`로 시작하게 `/etc/hosts`에 둔다.
 - `ulimit -n`을 올리지 않으면 부하 발생기 쪽 연결 오류가 서버 성능으로 오해된다.
+- 풀 크기와 대기열 설정은 서버마다 `curl http://perf-app:8081/actuator/prometheus`와 `perf-app2`의 값으로 따로 확인한다. k6의 시작 점검은 `MANAGEMENT_URL`의 서버 1만 본다.
 - 서버 두 대의 앱 CPU, Tomcat busy, Hikari active와 pending을 서버별로 따로 본다. 요청 수가 고르게 나뉘었는지도 서버별 `http.server.requests` 합으로 확인한다.
 - 수집이 가끔 시간 초과로 빠질 수 있다. 빠진 횟수를 기록한다. 스파이크 한가운데에서 빠졌는지 본다.
 
@@ -128,7 +142,7 @@ k6 run perf/scenarios/drop-sale.js 2>&1 | tee .ai-output/perf/<날짜>-<측정>/
 RDS 콘솔의 CPU는 1분 값이고 Performance Insights와 performance_schema를 못 쓸 때가 있다. 그때는 [db-probe.sh](../../perf/ec2/db-probe.sh)로 대신한다. 읽기 전용이고 사용법은 [EC2 도구](../../perf/ec2/README.md#db-프로브)에 있다.
 
 - `status`: 측정 전과 후에 한 번씩 전역 카운터를 저장하고 차이를 본다. 커밋 수, redo fsync, 읽은 행 수, 잠금 대기를 얻는다. 이 값은 RDS 인스턴스 전체이므로 다른 테스트가 없는지 확인한다.
-- `sample`: 측정 중 0.5초마다 실행 중인 SQL을 표본으로 모은다. 표본 수는 `<초> x 2`회다. 스파이크 전에 시작해 스파이크 뒤까지 돌린다. 표본 몫은 CPU 시간이 아니라 실행 중인 SQL의 몫이다.
+- `sample`: 측정 중 약 0.5초마다 실행 중인 SQL을 표본으로 모은다. 간격에 질의 시간이 더해져 실제 수집은 `<초>`보다 조금 길다. 표본 수는 대략 `<초> x 2`회다. 스파이크 전에 시작해 스파이크 뒤까지 돌린다. 표본 몫은 CPU 시간이 아니라 실행 중인 SQL의 몫이다.
 - 표본 수집이 요약 시점에 끝나지 않았으면 그 사실을 적는다.
 - 표본을 SQL 종류별로 묶을 때는 문장 앞부분으로 나눈다. 순번 COUNT, COMMIT, 행 잠금 SELECT, heartbeat UPDATE 같은 몫을 본다.
 
@@ -136,9 +150,18 @@ RDS 콘솔의 CPU는 1분 값이고 Performance Insights와 performance_schema�
 
 앱 CPU가 첫 병목일 때 무엇이 CPU를 쓰는지 보려고 켠다. 프로파일러 부담이 있으므로 JFR을 켠 회차의 처리량을 켜지 않은 회차와 바로 비교하지 않는다. 서버 한 대에만 켜서 다른 서버와 비교하는 방법도 있다.
 
-1. 켤 서버에서 `restless-perf`를 지우고 같은 이미지, 같은 env-file로 `docker run`을 한다. `perf-ec2.sh start`는 JVM 옵션을 받지 않으므로 이 서버에서만 직접 띄운다. 옵션은 `-e JAVA_TOOL_OPTIONS=...`로 넘긴다. 이 값은 이미지 기본값(`MaxRAMPercentage`, `ExitOnOutOfMemoryError`)을 덮어쓰므로 기본값도 같이 적는다.
-2. 옵션은 `-XX:StartFlightRecording=settings=profile,filename=/tmp/run.jfr,dumponexit=true`다. 스택 깊이를 늘리려면 `-XX:FlightRecorderOptions:stackdepth=256`을 더한다. 기본 64는 Tomcat과 앱 코드 같은 바깥 계층을 과소 집계한다.
-3. 측정 뒤 컨테이너를 `docker stop` 한다. 정상 종료 때 파일이 저장된다. `docker cp restless-perf:/tmp/run.jfr .`으로 꺼내 결과 폴더에 둔다. 컨테이너를 지우기 전에 꺼낸다.
+1. 켤 서버에서 `perf-ec2.sh stop-app`으로 멈춘 뒤 컨테이너를 지우고 직접 띄운다. `perf-ec2.sh start`는 JVM 옵션을 받지 않는다. 이미지 기본 옵션을 덮어쓰므로 기본값도 같이 적는다.
+
+```bash
+docker rm -f restless-perf
+docker run -d --name restless-perf --env-file /opt/restless/perf.env -p 8080:8080 -p 8081:8081 \
+  -e JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError -XX:FlightRecorderOptions:stackdepth=256 -XX:StartFlightRecording=settings=profile,filename=/tmp/run.jfr,dumponexit=true" \
+  ghcr.io/prgrms-be-devcourse/nbe12-14-final-restless-backend:<태그>
+curl -sf http://127.0.0.1:8081/actuator/health   # UP이 될 때까지 반복한다
+```
+
+2. 스택 깊이 기본값 64는 Tomcat과 앱 코드 같은 바깥 계층을 과소 집계한다. 위 명령은 256으로 올렸다.
+3. 측정 뒤 `docker stop -t 60 restless-perf`로 종료한다. 종료할 때 파일이 저장되므로 기본 10초로 끊지 않는다. 컨테이너를 지우기 전에 `docker cp restless-perf:/tmp/run.jfr .`으로 꺼내 결과 폴더에 둔다.
 4. 판매 1분 창의 실행 샘플만 모아 처음 만나는 JDK 밖 프레임 기준으로 묶는다. `jfr print --events jdk.ExecutionSample`과 `jdk.CPULoad`, `jdk.GarbageCollection`을 쓴다. self 몫만 믿는다. 깊이 제한이 있으면 엔드포인트별 CPU는 나눌 수 없다.
 5. 끝나면 서버를 `perf-ec2.sh start <태그>`로 되돌린다. JFR 파일은 커밋하지 않는다.
 
@@ -147,7 +170,9 @@ RDS 콘솔의 CPU는 1분 값이고 Performance Insights와 performance_schema�
 1. 수집을 멈추고 `lockstats`와 DB 프로브 `status`를 후 값으로 남긴다.
 2. 진행 중 거래가 수렴했는지 보고 서버 1에서 `verify sale`을 돌린다. 출력을 결과 폴더에 저장한다. tail만 보지 않는다.
 3. 실패 항목을 이름으로 확인한다. 부하 뒤 정상인 실패는 hot drop untouched 한 건뿐이다. 그 밖의 실패는 정합성 위반으로 보고 그 회차를 채택하지 않는다.
-4. 측정이 끝날 때마다 ALB 대상 그룹에서 팀원이 직접 쓰는 서버를 등록 해제한다. 팀원이 그 서버로 싱글 테스트를 하기 때문이다. 이 일은 사용자가 한다.
+4. 정리는 이 순서로 한다. 사용자가 한다. 먼저 팀원이 싱글 테스트에 쓰는 서버를 대상 그룹에서 등록 해제한다. 멀티 측정이 모두 끝나면 ALB를 삭제하고 대상 그룹은 남긴다. perf 전용 기간에는 `finish`를 하지 않는다 ([EC2 도구](../../perf/ec2/README.md)).
 5. 하루 작업이 끝나면 6절대로 EC2, RDS, ALB 사용 계획을 확인한다.
 
-회차 사이의 흔들림이 크다. 같은 조건의 두 회차가 20% 넘게 다르면 [측정 규약 5절](drop-performance-measurement.md#5-반복-횟수)대로 전후 각 3회로 확인한다. 서버가 크게 움직인 지표로 판정하고 처리량 하나로 판정하지 않는다.
+회차 사이의 흔들림이 크다. 반복 횟수와 판정은 [측정 규약 5절](drop-performance-measurement.md#5-반복-횟수)을 따른다. 처리량 하나로 판정하지 않고 크게 움직인 서버 지표를 함께 본다.
+
+서버 두 대 구성은 측정을 위한 것이다. 다중 EC2 도입 여부는 [열린 결정 사항](../product/open-questions.md#3-비교-실험-뒤-결정)이 정하며 이 절이 정하지 않는다.

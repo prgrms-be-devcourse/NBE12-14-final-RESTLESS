@@ -3,7 +3,7 @@
 # performance_schema가 꺼져 있고 Performance Insights 권한이 없을 때 쓰는 대체 수단이다.
 #
 #   db-probe.sh status <파일>        전역 카운터 스냅샷 (측정 전후로 한 번씩, 차이를 본다)
-#   db-probe.sh sample <초> <파일>   0.5초마다 실행 중인 SQL 표본 (연결 1개)
+#   db-probe.sh sample <초> <파일>   약 0.5초마다 실행 중인 SQL 표본 (연결 1개)
 #
 # perf-ec2.sh와 같은 안전장치: perf.env의 DB 이름이 perf-로 시작해야 하고 prod가 들어 있으면 멈춘다.
 set -euo pipefail
@@ -46,7 +46,7 @@ case "$cmd" in
     echo "saved $out"; cat "$out" ;;
   sample)
     secs="${2:?seconds is required}"; out="${3:?output file is required}"
-    [[ "$secs" =~ ^[0-9]+$ && "$secs" -gt 0 ]] || die "seconds must be a positive integer"
+    [[ "$secs" =~ ^[1-9][0-9]*$ ]] || die "seconds must be a positive integer"
     load_env
     n=$(( secs * 2 ))
     for _ in $(seq "$n"); do
@@ -55,5 +55,5 @@ case "$cmd" in
     done | run > "$out"
     echo "saved $out ($(wc -l < "$out") rows)" ;;
   *)
-    sed -n '2,10p' "$0"; exit 1 ;;
+    sed -n '2,8p' "$0"; exit 1 ;;
 esac
