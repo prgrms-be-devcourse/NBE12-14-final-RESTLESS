@@ -232,6 +232,7 @@ on은 회원마다 SKU 하나를 계정 순서대로 돌아가며 정하고 진�
 | `OBSERVE` | 300s | 신규 유입이 끝난 뒤 관측 시간. 이 시각까지 입장하지 못한 회원은 `unfinished`다 |
 | `POLL_SECONDS` | 2 | 서버 응답에 `pollAfterMs`가 없을 때 쓰는 조회 간격. 있으면 그 값을 따른다 |
 | `PAY` | 1 | 0이면 점유까지만 한다 |
+| `RETRY`, `RETRY_MAX` | 켬, 60s | 0이면 재시도를 끈다. `RETRY_MAX`는 회원별 재시도 상한 시간이고 입장 허가 유효시간(기본 5분)보다 짧게 둔다. 관측 종료 시각도 넘지 않는다 |
 | `WARMUP` | 시드에 워밍업 드롭이 있으면 켬 | 0이면 워밍업을 끈다 |
 | `WARM_RATE`, `WARM`, `WARM_GAP` | 30, 60s, 10s | 워밍업 도착률과 시간, 워밍업이 끝난 뒤 판매 시작까지 기다리는 시간. 계정은 참여자 뒤 행을 쓴다 |
 | `WINDOW_SECONDS` | 10 | 창 길이 |
@@ -243,6 +244,10 @@ on은 회원마다 SKU 하나를 계정 순서대로 돌아가며 정하고 진�
 - `first response`는 도착 뒤 첫 API의 평가 지연이다. `queue wait`는 진입 응답부터 입장을 확인한 시각까지다. `arrival to paid`는 도착부터 결제 승인까지다.
 - 대기 중 회원은 조회 응답의 `pollAfterMs`만큼 쉬고 다시 조회한다. 값이 없으면 `POLL_SECONDS`를 쓴다 (2026-11-24 서버 제안 간격, #390).
 - 503 `DROP_QUEUE_BUSY`는 서버가 동시 처리 상한을 넘겨 일찍 거절한 응답이다. 오류로 세지 않고 `Retry-After`에 최대 50% 지터를 더해 쉰 뒤 다시 보낸다. 요약의 `queue busy` 줄과 `drop_queue_busy` 카운터(태그 `api`는 enter, poll)에서 건수를, `drop_queue_busy_latency`에서 503 응답의 지연을 본다. 빠른 거절이 enter와 poll의 평가 지연이나 `first response`에 섞이지 않고 `unexpected` 비율에도 들어가지 않는다. 포화 구간의 p95는 busy 건수와 함께 읽는다.
+- 재시도: 실제 앱처럼 점유, 결제 준비, 결제 승인이 시간 초과, 연결 오류, 5xx(503 `DROP_QUEUE_BUSY` 포함)를 받으면 같은 `Idempotency-Key`와 같은 본문으로 다시 보낸다. 점유 키는 회원과 드롭마다 하나로 고정이고 서버는 같은 `reservationId`와 `orderId`를 200으로 돌려준다 (INV-07). 4xx 업무 오류(품절, 입장 허가 없음 등)는 다시 보내지 않는다. 간격은 `Retry-After`가 있으면 그 값, 없으면 200ms부터 2배씩 늘려 2s까지이며 둘 다 최대 50% 지터를 더한다.
+- 결제 승인은 서버가 READY가 아닌 시도에는 PG를 다시 부르지 않으므로 같은 키로 다시 보내도 안전하다. 승인 202(처리 중, 불명확)는 다시 승인하지 않고 `payment_pending`으로 끝낸다. 승인 요청이 응답 없이 끝나고 재시도로도 확인하지 못한 경우도 결과 불명이라 실패가 아니라 `payment_pending`으로 센다.
+- 재시도 지표: 요약의 `retry` 줄에 api별(reserve, prepare, confirm) 재시도 요청 수, 재시도로 회복된 회원 수, 재시도 뒤에도 실패한 회원 수, 재시도 끝에 4xx 업무 응답(품절 등)을 받은 회원 수가 나온다 (`drop_retry_attempts`, `drop_retry_recovered`, `drop_retry_exhausted`, `drop_retry_answered`). 재시도가 받은 200은 `drop_reservation_replayed`가 아니라 `drop_reservation_created`로 센다. 첫 시도의 지연만 `eval` 줄과 `first response`에 들어간다. 재시도 응답은 `drop_retry_eval_latency`, 첫 시도 시작부터 최종 성공까지는 `drop_time_to_final`(태그 `retried`가 true, false)로 따로 본다. 대기열 진입과 조회의 503은 위 `queue busy` 규칙을 그대로 따른다.
+- 다른 드롭 시나리오(spike, step, capacity, queue-poll)는 재시도를 하지 않는다.
 - on에서 생성기가 참여자만큼 VU를 만들지 못하면 `dropped_iterations`가 생긴다. 그 실행은 원래 조건을 만들지 못한 것이다.
 
 ### drop-reservation-capacity.js (용량 측정)

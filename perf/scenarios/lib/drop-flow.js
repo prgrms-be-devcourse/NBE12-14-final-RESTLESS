@@ -3,7 +3,7 @@
 import http from 'k6/http';
 import { Counter, Trend } from 'k6/metrics';
 import {
-  BASE_URL, DROP_ID, HTTP_TIMEOUT, authHeaders, durationMs, observe, transportKind,
+  BASE_URL, DROP_ID, HTTP_TIMEOUT, authHeaders, durationMs, observe, transportKind, retrying, isRetryable,
 } from './drop-reservation.js';
 
 // 결제 승인은 가짜 PG 지연(기본 300ms)을 포함하므로 재고·대기열보다 길게 둔다.
@@ -118,35 +118,48 @@ export function pollQueue(user, variantId, tags = {}, dropId = DROP_ID) {
   return { status, pollAfterMs, retryAfterMs };
 }
 
-// 결제 준비와 승인. result: paid, payment_pending(202), payment_failed, error.
-export function pay(user, reservation, tags = {}, dropId = DROP_ID) {
-  const prepared = http.post(`${BASE_URL}/api/payments`,
+// 결제 준비와 승인. result: paid, payment_pending(202 또는 승인 응답 없음), payment_failed, error.
+// deadlineMs를 주면 준비와 승인의 시간 초과, 연결 오류, 5xx를 같은 키와 같은 본문으로 다시 보낸다.
+// 준비는 Idempotency-Key로 같은 시도를 돌려주고, 승인은 READY가 아니면 PG를 다시 부르지 않는다 (docs/contracts/api/payment.md).
+// 승인 202(처리 중, 불명확)는 다시 승인하지 않고 payment_pending으로 끝낸다.
+// 승인 요청이 응답 없이 끝나도 결과 불명이라 실패로 세지 않고 payment_pending으로 센다. 첫 시도만 평가 지연에 넣는다.
+export function pay(user, reservation, tags = {}, dropId = DROP_ID, deadlineMs = null) {
+  // 첫 시도만 평가 지연과 예상 밖 오류율에 넣는다. 재시도는 retrying이 따로 센다.
+  const run = (api, send, isExpected) => {
+    const once = (attempt) => {
+      const res = send();
+      if (attempt === 0) observe(res, !isExpected(res), { api, ...tags }, PAY_TIMEOUT_MS);
+      return { res, ok: !isRetryable(res), retryable: isRetryable(res) };
+    };
+    return deadlineMs === null ? once(0) : retrying(api, tags, deadlineMs, once);
+  };
+  const prepared = run('prepare', () => http.post(`${BASE_URL}/api/payments`,
     JSON.stringify({ payableType: 'DROP', payableId: reservation.reservationId }), {
       headers: authHeaders(user, { 'Idempotency-Key': `perf-pay-${dropId}-${user.id}` }),
       tags: { name: 'POST /api/payments', ...tags },
       timeout: PAY_TIMEOUT,
-    });
+    }), (r) => r.status === 201 || r.status === 200).res;
   const prepareOk = prepared.status === 201 || prepared.status === 200;
-  observe(prepared, !prepareOk, { api: 'prepare', ...tags }, PAY_TIMEOUT_MS);
   if (!prepareOk) {
     payment.add(1, { result: transportKind(prepared) !== 'response' ? `prepare_${transportKind(prepared)}` : `prepare_http_${prepared.status}`, ...tags });
     return 'error';
   }
   const body = json(prepared);
-  const confirmed = http.post(`${BASE_URL}/api/payments/confirm`,
-    JSON.stringify({ paymentKey: `perf-key-${dropId}-${user.id}`, orderId: body.pgOrderId, amount: body.amount }), {
-      headers: authHeaders(user),
-      tags: { name: 'POST /api/payments/confirm', ...tags },
-      timeout: PAY_TIMEOUT,
-    });
+  const confirmBody = JSON.stringify({ paymentKey: `perf-key-${dropId}-${user.id}`, orderId: body.pgOrderId, amount: body.amount });
+  const confirmed = run('confirm', () => http.post(`${BASE_URL}/api/payments/confirm`, confirmBody, {
+    headers: authHeaders(user),
+    tags: { name: 'POST /api/payments/confirm', ...tags },
+    timeout: PAY_TIMEOUT,
+  }), (r) => r.status === 200 && json(r).status === 'APPROVED').res;
   const status = confirmed.status === 200 || confirmed.status === 202 ? json(confirmed).status : null;
+  const kind = transportKind(confirmed);
   let result = 'error';
   if (status === 'APPROVED') result = 'paid';
   else if (confirmed.status === 202) result = 'payment_pending';
   else if (status === 'FAILED') result = 'payment_failed';
+  else if (kind !== 'response') result = 'payment_pending';
   // 정상 가짜 PG에서는 승인만 정상이다. 대기·실패는 장애 주입이 켜졌거나 서버 문제다.
-  observe(confirmed, result !== 'paid', { api: 'confirm', ...tags }, PAY_TIMEOUT_MS);
-  payment.add(1, { result: transportKind(confirmed) !== 'response' ? `confirm_${transportKind(confirmed)}` : result === 'error' ? `confirm_http_${confirmed.status}` : result, ...tags });
+  payment.add(1, { result: kind !== 'response' ? `confirm_${kind}` : result === 'error' ? `confirm_http_${confirmed.status}` : result, ...tags });
   return result;
 }
 

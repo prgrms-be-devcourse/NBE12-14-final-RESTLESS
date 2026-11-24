@@ -2,7 +2,7 @@
 // 시나리오마다 다른 것은 부하 모델(options.scenarios)과 추가 태그뿐이다. 사용법은 perf/scenarios/README.md.
 // 집계 규칙은 docs/testing/drop-performance-measurement.md를 따른다.
 import http from 'k6/http';
-import { check, fail } from 'k6';
+import { check, fail, sleep } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { SharedArray } from 'k6/data';
 
@@ -161,42 +161,100 @@ export function variantFor(n, target = HOT) {
   return target.variantIds[n % target.variantIds.length];
 }
 
-// 계정 하나가 SKU 하나에 재고 점유를 한 번 요청한다. Idempotency-Key는 계정마다 하나다.
-// tags는 요청과 지표에 함께 붙는다 (예: 계단식의 stage, 창 번호 win).
-// 결과 이름, 성공이면 응답 본문({reservationId, orderId, amount, ...}), k6 응답을 돌려준다.
-export function reserve(user, n, tags = {}, target = HOT) {
-  const variantId = variantFor(n, target);
-  const res = http.post(
-    `${BASE_URL}/api/drops/${target.dropId}/reservations`,
-    JSON.stringify({ variantId, recipient: `회원${user.id}`, phone: '010-0000-0000', address: '서울시 송파구 올림픽로 424' }),
-    {
-      headers: authHeaders(user, { 'Idempotency-Key': `perf-${target.dropId}-${user.id}` }),
-      tags: { name: 'POST /api/drops/{id}/reservations', ...tags },
-      timeout: HTTP_TIMEOUT,
-    },
-  );
+// 재시도. 실제 앱처럼 시간 초과, 연결 오류, 5xx는 같은 Idempotency-Key로 다시 보낸다. 4xx 업무 오류는 보내지 않는다.
+// RETRY=0이면 끈다. 회원별 상한 RETRY_MAX는 입장 허가 유효시간(기본 5분)보다 짧게 두고, 관측 종료 시각도 넘지 않는다.
+export const RETRY = __ENV.RETRY !== '0';
+export const RETRY_MAX = __ENV.RETRY_MAX || '60s';
+export const RETRY_MAX_MS = durationMs(RETRY_MAX);
+const RETRY_BASE_MS = 200;
+const RETRY_CAP_MS = 2000;
+// 재시도 요청 수, 재시도로 끝내 성공한 회원 수, 재시도 뒤에도 실패한 회원 수. 태그 api는 reserve, prepare, confirm.
+const retryAttempts = new Counter('drop_retry_attempts');
+const retryRecovered = new Counter('drop_retry_recovered');
+const retryExhausted = new Counter('drop_retry_exhausted');
+// 재시도 끝에 4xx 업무 응답(예: 품절)을 받은 회원 수. 회복도 실패도 아니고 서버가 확정한 답이다.
+const retryAnswered = new Counter('drop_retry_answered');
+// 재시도 요청이 응답을 받은 지연. 첫 시도의 평가 지연(drop_eval_latency)에는 섞지 않는다.
+const retryEvalLatency = new Trend('drop_retry_eval_latency', true);
+// 첫 시도 시작부터 최종 성공까지의 시간. 태그 retried는 재시도가 있었는지(true, false).
+const timeToFinal = new Trend('drop_time_to_final', true);
 
-  const outcome = classify(res, tags);
-  const failed = outcome === 'server_error' || outcome === 'transport_error' || outcome === 'timeout';
-  // 정상 결과는 신규 점유와 품절뿐이다. 계정은 한 번만 쓰므로 나머지 거절은 구성이 틀렸다는 뜻이다.
-  const unexpected = failed || (outcome !== 'created' && outcome !== 'sold_out');
-  if (res.status !== 0) duration.add(res.timings.duration, { outcome, ...tags });
-  observe(res, unexpected, { api: 'reserve', ...tags });
-  errorRate.add(failed, tags);
-  check(res, { 'no server error': () => !failed });
-  let body = null;
-  if (outcome === 'created') {
-    try { body = res.json(); } catch (e) { /* 본문이 없으면 결제로 이어 가지 않는다 */ }
-  }
-  return { outcome, body, res };
+// 다음 재시도까지 기다릴 밀리초. Retry-After(초)가 있으면 따르고, 없으면 짧은 지수 백오프에 지터를 더한다.
+function retryWaitMs(res, attempt) {
+  const seconds = Number((res.headers || {})['Retry-After']);
+  const base = seconds > 0 ? seconds * 1000 : Math.min(RETRY_CAP_MS, RETRY_BASE_MS * 2 ** attempt);
+  return base * (1 + Math.random() * 0.5);
 }
 
-function classify(res, tags) {
+// 5xx, 연결 오류, 시간 초과는 결과를 모르거나 서버 쪽 일시 문제라 같은 키로 다시 보낸다.
+export function isRetryable(res) { return res.status === 0 || res.status >= 500; }
+
+// attemptFn(attempt)이 {res, ok, retryable}을 돌려주면 retryable이 아닐 때까지 같은 요청을 다시 보낸다.
+// deadlineMs까지 회원별 상한 안에서만 기다린다. 첫 시도(attempt 0)의 지연 기록은 attemptFn이 한다.
+export function retrying(api, tags, deadlineMs, attemptFn) {
+  const startedMs = Date.now();
+  const limitMs = Math.min(deadlineMs, startedMs + RETRY_MAX_MS);
+  let attempt = 0;
+  let r;
+  for (;;) {
+    r = attemptFn(attempt);
+    if (attempt > 0) {
+      retryAttempts.add(1, { api, ...tags });
+      if (transportKind(r.res) === 'response') retryEvalLatency.add(r.res.timings.duration, { api, ...tags });
+    }
+    if (r.ok || !r.retryable || !RETRY) break;
+    const wait = retryWaitMs(r.res, attempt);
+    if (Date.now() + wait > limitMs) break;
+    sleep(wait / 1000);
+    attempt++;
+  }
+  if (attempt > 0) (r.ok ? retryRecovered : r.retryable ? retryExhausted : retryAnswered).add(1, { api, ...tags });
+  if (r.ok) timeToFinal.add(Date.now() - startedMs, { api, retried: String(attempt > 0), ...tags });
+  return { ...r, attempts: attempt + 1 };
+}
+
+// 계정 하나가 SKU 하나에 재고 점유를 요청한다. Idempotency-Key는 회원과 드롭마다 하나로 고정이다.
+// tags는 요청과 지표에 함께 붙는다 (예: 계단식의 stage, 창 번호 win).
+// deadlineMs를 주면 시간 초과, 연결 오류, 5xx를 같은 키로 다시 보낸다. 재시도가 받은 200은 같은 reservationId의 회복이다.
+// 평가 지연, 예상 밖 오류율, 응답 지연은 첫 시도만 기록한다.
+// 결과 이름, 성공이면 응답 본문({reservationId, orderId, amount, ...}), k6 응답을 돌려준다.
+export function reserve(user, n, tags = {}, target = HOT, deadlineMs = null) {
+  const variantId = variantFor(n, target);
+  const payload = JSON.stringify({ variantId, recipient: `회원${user.id}`, phone: '010-0000-0000', address: '서울시 송파구 올림픽로 424' });
+  const params = {
+    headers: authHeaders(user, { 'Idempotency-Key': `perf-${target.dropId}-${user.id}` }),
+    tags: { name: 'POST /api/drops/{id}/reservations', ...tags },
+    timeout: HTTP_TIMEOUT,
+  };
+  const attemptOnce = (attempt) => {
+    const res = http.post(`${BASE_URL}/api/drops/${target.dropId}/reservations`, payload, params);
+    const outcome = classify(res, tags, attempt > 0);
+    const failed = outcome === 'server_error' || outcome === 'transport_error' || outcome === 'timeout';
+    if (attempt === 0) {
+      // 정상 결과는 신규 점유와 품절뿐이다. 계정은 한 번만 쓰므로 나머지 거절은 구성이 틀렸다는 뜻이다.
+      const unexpected = failed || (outcome !== 'created' && outcome !== 'sold_out');
+      if (res.status !== 0) duration.add(res.timings.duration, { outcome, ...tags });
+      observe(res, unexpected, { api: 'reserve', ...tags });
+      errorRate.add(failed, tags);
+      check(res, { 'no server error': () => !failed });
+    }
+    return { res, outcome, ok: !failed && outcome === 'created', retryable: failed };
+  };
+  const r = deadlineMs === null ? attemptOnce(0) : retrying('reserve', tags, deadlineMs, attemptOnce);
+  let body = null;
+  if (r.outcome === 'created') {
+    try { body = r.res.json(); } catch (e) { /* 본문이 없으면 결제로 이어 가지 않는다 */ }
+  }
+  return { outcome: r.outcome, body, res: r.res };
+}
+
+// 재시도가 받은 200은 첫 요청을 서버가 이미 처리했다는 뜻이다. 중복 점유가 아니라 같은 점유의 회복이라 created로 센다.
+function classify(res, tags, isRetry = false) {
   if (res.status === 0) {
     return transportKind(res) === 'timeout' ? count(timeoutError, 'timeout', tags) : count(transportError, 'transport_error', tags);
   }
   if (res.status === 201) return count(created, 'created', tags);
-  if (res.status === 200) return count(replayed, 'replayed', tags);
+  if (res.status === 200) return isRetry ? count(created, 'created', tags) : count(replayed, 'replayed', tags);
   if (res.status >= 500) return count(serverError, 'server_error', tags);
   let code = '';
   try { code = res.json('code'); } catch (e) { /* 본문이 JSON이 아니면 기타로 센다 */ }
