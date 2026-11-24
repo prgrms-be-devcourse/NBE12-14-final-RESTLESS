@@ -15,7 +15,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
-@Transactional(isolation = Isolation.READ_COMMITTED)
 public class DropQueueService {
     private final DropRepository drops;
     private final DropVariantRepository variants;
@@ -29,6 +28,7 @@ public class DropQueueService {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record View(DropQueueStatus status, Long variantId, Long position, Instant admittedUntil) { }
     public record Entered(View body, boolean existing) { }
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Entered enter(Long dropId, Long userId, Long variantId) {
         var drop = drops.findById(dropId).orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         if (!onSale(drop, clock.instant())) throw new BusinessException(ErrorCode.DROP_NOT_ON_SALE);
@@ -44,7 +44,7 @@ public class DropQueueService {
         if (previous.isPresent()) {
             var entry = previous.get();
             refresh(entry, now, true);
-            if (entry.live() && entry.getVariantId().equals(variantId)) return new Entered(view(entry, now), true);
+            if (entry.live() && entry.getVariantId().equals(variantId)) return new Entered(view(entry, now, entry.getStatus()), true);
             entry.close();
             entries.flush(); // Release the generated active key before replacement.
         }
@@ -54,33 +54,45 @@ public class DropQueueService {
         metrics.entered();
         return new Entered(waitingView(entry, now, snapshot), false);
     }
-    // Commit CLOSED before the controller produces a 404.
     public Optional<View> me(Long dropId, Long userId) {
-        var entry = entries.lockLatest(dropId, userId);
-        if (entry.isEmpty()) return Optional.empty();
+        var latest = entries.latest(dropId, userId);
+        if (latest.isEmpty()) return Optional.empty();
+        var row = latest.get();
         var now = clock.instant();
-        boolean sale = drops.findById(dropId).map(drop -> onSale(drop, now)).orElse(false);
-        refresh(entry.get(), now, sale);
-        if (entry.get().getStatus() == DropQueueStatus.CLOSED) return Optional.empty();
-        var result = view(entry.get(), now);
-        if (entry.get().live()) entry.get().heartbeat(now);
-        return Optional.of(result);
+        var status = effectiveStatus(row, now);
+        if (status == DropQueueStatus.WAITING && row.getEntry().heartbeatDue(now, settings.heartbeatInterval())) {
+            int updated = entries.recordHeartbeat(row.getEntry().getId(), now, now.minus(settings.heartbeatTimeout()),
+                    now.minus(settings.heartbeatInterval()));
+            if (updated == 0) {
+                latest = entries.latest(dropId, userId);
+                if (latest.isEmpty()) return Optional.empty();
+                row = latest.get();
+                now = clock.instant();
+                status = effectiveStatus(row, now);
+            }
+        }
+        return status == DropQueueStatus.CLOSED ? Optional.empty() : Optional.of(view(row.getEntry(), now, status));
     }
+
+    private DropQueueStatus effectiveStatus(DropQueueEntryRepository.Latest row, Instant now) {
+        return row.getEntry().effectiveStatus(now, settings.heartbeatTimeout(), row.getSale().isOnSale(now));
+    }
+
     private void refresh(DropQueueEntry entry, Instant now, boolean sale) {
         var before = entry.getStatus();
         entry.refresh(now, settings.heartbeatTimeout(), sale);
         if (before != entry.getStatus()) metrics.closed(entry.getStatus() == DropQueueStatus.EXPIRED
                 ? "expired" : sale ? "heartbeat" : "sale_ended");
     }
-    private View view(DropQueueEntry entry, Instant now) {
-        if (entry.getStatus() == DropQueueStatus.WAITING)
+    private View view(DropQueueEntry entry, Instant now, DropQueueStatus status) {
+        if (status == DropQueueStatus.WAITING)
             return waitingView(entry, now, positions.snapshot(entry.getVariantId()));
-        return new View(entry.getStatus(), entry.getVariantId(), null,
-                entry.getStatus() == DropQueueStatus.ADMITTED ? entry.getAdmittedUntil() : null);
+        return new View(status, entry.getVariantId(), null,
+                status == DropQueueStatus.ADMITTED ? entry.getAdmittedUntil() : null);
     }
     private View waitingView(DropQueueEntry entry, Instant now, DropQueuePositions.Snapshot snapshot) {
         long position = positions.position(entry.getVariantId(), entry.getId(), now, snapshot);
-        return new View(entry.getStatus(), entry.getVariantId(), position, null);
+        return new View(entry.getStatus(), entry.getVariantId(), Math.max(1, position), null);
     }
     private boolean onSale(Drop drop, Instant now) {
         return drop.isOnSale(now);

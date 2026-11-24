@@ -47,12 +47,17 @@ public class DropQueueEntry {
     public boolean live() { return status == DropQueueStatus.WAITING || status == DropQueueStatus.ADMITTED; }
 
     public void refresh(Instant now, Duration heartbeatTimeout, boolean onSale) {
+        status = effectiveStatus(now, heartbeatTimeout, onSale);
+    }
+
+    public DropQueueStatus effectiveStatus(Instant now, Duration heartbeatTimeout, boolean onSale) {
         if (status == DropQueueStatus.WAITING
                 && (!onSale || lastSeenAt.isBefore(now.minus(heartbeatTimeout)))) {
-            status = DropQueueStatus.CLOSED;
+            return DropQueueStatus.CLOSED;
         } else if (status == DropQueueStatus.ADMITTED && !now.isBefore(admittedUntil)) {
-            status = DropQueueStatus.EXPIRED;
+            return DropQueueStatus.EXPIRED;
         }
+        return status;
     }
 
     public void close() {
@@ -63,7 +68,9 @@ public class DropQueueEntry {
         if (live()) status = DropQueueStatus.UNAVAILABLE;
     }
 
-    public void heartbeat(Instant now) { lastSeenAt = now; }
+    public boolean heartbeatDue(Instant now, Duration interval) {
+        return status == DropQueueStatus.WAITING && lastSeenAt.isBefore(now.minus(interval));
+    }
 
     public void admit(Instant now, Duration ttl) {
         if (status != DropQueueStatus.WAITING) throw new IllegalStateException("Entry is not waiting");

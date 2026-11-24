@@ -1,13 +1,17 @@
 package com.restless.drop.application;
 
 import com.restless.drop.infrastructure.DropQueueEntryRepository;
+import jakarta.persistence.EntityManager;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
+import org.hibernate.Session;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 @Component
 @RequiredArgsConstructor
@@ -15,11 +19,19 @@ class DropQueuePositions {
     private final DropQueueEntryRepository entries;
     private final DropQueueSettings settings;
     private final Clock clock;
+    private final EntityManager entityManager;
     private final ConcurrentHashMap<Long, Snapshot> snapshots = new ConcurrentHashMap<>();
 
+    @Transactional(propagation = Propagation.SUPPORTS)
     Snapshot snapshot(long variantId) {
         var cached = snapshots.get(variantId);
         if (cached != null && cached.second == clock.instant().getEpochSecond()) return cached;
+        // Enter already owns a connection. Take one before the cache lock on polls too,
+        // so a pool full of enters cannot starve the poll rebuilding their snapshot.
+        return entityManager.unwrap(Session.class).doReturningWork(connection -> rebuild(variantId));
+    }
+
+    private Snapshot rebuild(long variantId) {
         return snapshots.compute(variantId, (key, previous) -> {
             var now = clock.instant();
             if (previous != null && previous.second == now.getEpochSecond()) return previous;

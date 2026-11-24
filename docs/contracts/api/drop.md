@@ -138,14 +138,14 @@ SKU의 `available = 0`이면 그 SKU는 **현재 구매 불가**다 (`reserved`�
   - 409 `DROP_SOLD_OUT`: 그 SKU의 `available = 0`(현재 구매 불가). 기존 코드를 재사용하고 메시지는 "현재 구매 불가"다. 행을 만들지 않는다.
   - 429 `TOO_MANY_REQUESTS`: 같은 회원이 10초에 5회를 넘겨 진입 요청 ([요청 횟수 제한](common.md#요청-횟수-제한))
 - 같은 회원이 같은 드롭에서 다른 SKU로 진입하면 201과 함께 새 SKU의 새 `WAITING`(새 입장 순번)을 만들고 기존 SKU의 대기를 뺀다. 기존 대기가 `ADMITTED`여도 같다. 새 SKU가 `available = 0`이면 409 `DROP_SOLD_OUT`이고 기존 대기는 그대로다. 같은 SKU로 다시 진입하면 기존 대기를 돌려준다.
-- 페이지를 나가면 상태 조회가 끊겨 30초 뒤 대기가 닫힌다. 별도 해제 API는 없다.
+- 페이지를 나가면 마지막 유효 조회 후 30~40초 사이에 이탈로 본다. 별도 해제 API는 없다.
 
 ### `GET /api/drops/{dropId}/queue/me` (회원)
 
 - 200 `{ "status": "WAITING" | "ADMITTED" | "EXPIRED" | "CONSUMED" | "UNAVAILABLE", "position": 3, "admittedUntil": "..." }` (`position`은 WAITING일 때만, `admittedUntil`은 ADMITTED일 때만). `variantId`도 함께 준다.
 - `UNAVAILABLE`: 그 SKU가 현재 구매 불가가 되어 대기나 미사용 입장 허가가 종료됐다. `{ "status": "UNAVAILABLE", "variantId": 10 }`. 404가 아니다. 화면이 "현재 구매 불가"를 보여 줄 수 있어야 하기 때문이다. 사용자가 다시 진입하면 새 기록이 최신이 된다.
-- 대기 중 상태 조회는 "아직 화면에 있음" 신호다. 조회가 `restless.drop.queue.heartbeat-timeout`보다 오래 끊기면 대기를 닫는다. 다시 들어오면 맨 뒤에서 다시 시작한다.
-  - `heartbeat-timeout`(기본 30초)은 `WAITING`의 마지막 상태 조회 시각 기준이다. `ADMITTED`에는 적용하지 않는다.
+- 대기 중 상태 조회는 "아직 화면에 있음" 신호다. 저장된 heartbeat가 `restless.drop.queue.heartbeat-timeout`보다 오래되면 404를 반환한다. 다시 들어오면 맨 뒤에서 다시 시작한다.
+  - WAITING 조회는 마지막 저장 후 10초를 넘겼을 때 heartbeat를 기록한다. 이탈 기준은 저장 시각에서 40초 초과다. `ADMITTED`에는 적용하지 않는다.
   - 상태 조회 간격 3~4초는 클라이언트 제안값이다. 계약상 의무도, 확정 정책도 아니다.
 - 대기 기록이 없거나 최신 기록이 CLOSED(이탈, 판매 종료)면 404. EXPIRED, CONSUMED, UNAVAILABLE은 200으로 그대로 보여 준다.
 - 이 요청은 어떤 경우에도 즉시 응답한다. 입장이 재개될 때까지 요청을 붙잡지 않는다.
@@ -158,7 +158,7 @@ SKU의 `available = 0`이면 그 SKU는 **현재 구매 불가**다 (`reserved`�
   - SKU마다 `min(max(0, available - 미사용 유효 ADMITTED 수), admit-per-run)`명을 같은 SKU의 입장 순번(`id`)대로 입장시킨다. 같은 SKU를 여러 작업이 동시에 처리해도 입장 허가가 `available`을 넘기지 않는다 (INV-16).
   - SKU의 `available = 0`이면 그 SKU는 입장시키지 않고 `WAITING`과 미사용 `ADMITTED`를 종료한다 (INV-17). `reserved` 수량은 보지 않는다. 다른 SKU는 영향이 없다.
   - 재고가 반환돼 `available > 0`이 되면 새로 진입한 사용자부터 같은 SKU의 입장 순번대로 입장시킨다. 종료된 입장 순번과 입장 허가는 복구하지 않는다.
-- 기본값: `heartbeat-timeout` 30초, `admit-per-run` 100명, 입장 허가 작업 주기 1초(`restless.drop.queue.scheduler.fixed-delay-ms`).
+- 기본값: `heartbeat-timeout` 40초, `admit-per-run` 100명, 입장 허가 작업 주기 1초(`restless.drop.queue.scheduler.fixed-delay-ms`).
 - 입장 허가 유효 시간 `restless.drop.queue.admission-ttl` (기본 5분). 재고 점유에 성공하면 CONSUMED.
 - 입장은 재고를 보장하지 않는다. 입장 후에도 품절이면 409 `DROP_SOLD_OUT`. TX1 조건부 재고 UPDATE가 재고 확보의 최종 검증이다.
 - 입장 허가는 해당 SKU의 재고 점유에만 쓴다. 종료된 입장 허가로는 점유할 수 없다 (403 `DROP_ADMISSION_REQUIRED`).

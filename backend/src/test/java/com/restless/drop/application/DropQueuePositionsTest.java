@@ -1,6 +1,10 @@
 package com.restless.drop.application;
 
 import com.restless.drop.infrastructure.DropQueueEntryRepository;
+import jakarta.persistence.EntityManager;
+import org.hibernate.Session;
+import org.hibernate.jdbc.ReturningWork;
+import org.junit.jupiter.api.BeforeEach;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -13,9 +17,18 @@ class DropQueuePositionsTest {
     private final DropQueueEntryRepository entries = mock();
     private final DropQueueIntegrationTest.MutableClock clock = new DropQueueIntegrationTest.MutableClock();
     private final Duration timeout = Duration.ofSeconds(30);
+    private final EntityManager entityManager = mock();
     private final DropQueuePositions positions = new DropQueuePositions(entries,
-            new DropQueueSettings(timeout, Duration.ofMinutes(5), 100), clock);
+            new DropQueueSettings(timeout, Duration.ofSeconds(5), Duration.ofMinutes(5), 100), clock, entityManager);
     private final long sku = 7;
+
+    @BeforeEach
+    void provideConnectionScope() {
+        Session session = mock();
+        when(entityManager.unwrap(Session.class)).thenReturn(session);
+        when(session.doReturningWork(any())).thenAnswer(call ->
+                call.<ReturningWork<?>>getArgument(0).execute(null));
+    }
 
     @Test
     void countsIdsInsideSnapshotAndOnlyQueriesBeyondLastId() {

@@ -37,7 +37,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(properties = {"restless.ratelimit.enabled=true", "pg.provider=fake",
-        "spring.docker.compose.enabled=false", "restless.drop.queue.required=true"})
+        "spring.docker.compose.enabled=false", "restless.drop.queue.required=true",
+        "restless.drop.queue.heartbeat-interval=50ms"})
 @AutoConfigureMockMvc
 @Import({TestcontainersConfiguration.class, QueueRateLimitIntegrationTest.TimeConfig.class})
 class QueueRateLimitIntegrationTest {

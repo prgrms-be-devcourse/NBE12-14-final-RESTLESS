@@ -45,7 +45,8 @@ restless:
       bucket-count: 4
     queue:
       required: true
-      heartbeat-timeout: 30s
+      heartbeat-timeout: 40s
+      # heartbeat-interval defaults to 10s (timeout / 4 for shorter timeouts).
       admission-ttl: 5m
       admit-per-run: 100
       scheduler:

@@ -1,6 +1,9 @@
 package com.restless.drop.infrastructure;
 
+import com.restless.drop.domain.Drop;
 import com.restless.drop.domain.DropQueueEntry;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -8,6 +11,25 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
 public interface DropQueueEntryRepository extends JpaRepository<DropQueueEntry, Long> {
+    interface Latest {
+        DropQueueEntry getEntry();
+        Drop getSale();
+    }
+
+    @Query("""
+            select e as entry, d as sale from DropQueueEntry e join Drop d on d.id = e.dropId
+            where e.dropId = :dropId and e.userId = :userId order by e.id desc limit 1
+            """)
+    Optional<Latest> latest(Long dropId, Long userId);
+
+    @Modifying
+    @Transactional
+    @Query(value = """
+            UPDATE drop_queue_entries SET last_seen_at=:now
+            WHERE id=:id AND status='WAITING' AND last_seen_at >= :cutoff AND last_seen_at < :dueBefore
+            """, nativeQuery = true)
+    int recordHeartbeat(long id, Instant now, Instant cutoff, Instant dueBefore);
+
     @Query(value = "SELECT * FROM drop_queue_entries WHERE drop_id=:dropId AND user_id=:userId ORDER BY id DESC LIMIT 1 FOR UPDATE", nativeQuery = true)
     Optional<DropQueueEntry> lockLatest(Long dropId, Long userId);
 

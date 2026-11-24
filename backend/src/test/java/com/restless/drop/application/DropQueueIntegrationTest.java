@@ -4,6 +4,10 @@ import com.restless.TestcontainersConfiguration;
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
 import com.restless.drop.application.dto.CreateDropRequest;
+import com.restless.drop.domain.DropQueueStatus;
+import jakarta.persistence.EntityManagerFactory;
+import org.hibernate.SessionFactory;
+import org.junit.jupiter.api.RepeatedTest;
 import com.restless.drop.acceptance.DropStock;
 import com.restless.drop.application.dto.CreateDropReservationRequest;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -45,6 +49,7 @@ class DropQueueIntegrationTest {
     @Autowired DropReservationService service;
     @Autowired DropQueueService queue;
     @Autowired SnapshotSelects selects;
+    @Autowired EntityManagerFactory emf;
     @Autowired TransactionTemplate transactions;
     @Autowired DropQueueAdmissionJob job;
     @Autowired DropQueueAdmissionTransactions batches;
@@ -111,8 +116,14 @@ class DropQueueIntegrationTest {
         assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.ADMITTED);
         clock.now = opens.plusSeconds(300);
         assertCode(() -> service.create(drop, user, "expired", request()), ErrorCode.DROP_ADMISSION_REQUIRED);
-        assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.EXPIRED);
+        var expired = meters.counter("drop.queue.closed", "reason", "expired");
+        var before = expired.count();
+        assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(DropQueueStatus.EXPIRED);
+        assertThat(expired.count()).isEqualTo(before);
+        assertThat(jdbc.queryForObject("SELECT status FROM drop_queue_entries WHERE drop_id=? AND user_id=?",
+                String.class, drop, user)).isEqualTo("ADMITTED");
         assertThat(queue.enter(drop, user, variant).existing()).isFalse();
+        assertThat(expired.count()).isEqualTo(before + 1);
     }
 
     @Test
@@ -135,16 +146,117 @@ class DropQueueIntegrationTest {
     }
 
     @Test
-    void heartbeatBoundaryClosesBefore404AndReentryGetsNewSequence() {
+    void heartbeatBoundaryReturns404BeforeCleanupAndReentryGetsNewSequence() {
         queue.enter(drop, user, variant);
         long first = jdbc.queryForObject("SELECT id FROM drop_queue_entries WHERE drop_id=? AND user_id=?", Long.class, drop, user);
-        clock.now = opens.plusSeconds(30);
+        clock.now = opens.plusSeconds(40);
         assertThat(queue.me(drop, user)).isPresent();
-        clock.now = opens.plusSeconds(61);
+        clock.now = opens.plusSeconds(80).plusNanos(1000);
         assertThat(queue.me(drop, user)).isEmpty();
-        assertThat(jdbc.queryForObject("SELECT status FROM drop_queue_entries WHERE id=?", String.class, first)).isEqualTo("CLOSED");
+        assertThat(jdbc.queryForObject("SELECT status FROM drop_queue_entries WHERE id=?", String.class, first)).isEqualTo("WAITING");
         assertThat(queue.enter(drop, user, variant).existing()).isFalse();
         assertThat(jdbc.queryForObject("SELECT MAX(id) FROM drop_queue_entries WHERE drop_id=? AND user_id=?", Long.class, drop, user)).isGreaterThan(first);
+    }
+
+    @Test
+    void pollsWithinIntervalUseOneSelectAndNoCommit() {
+        enterAs(user);
+        clock.now = opens.plusSeconds(10);
+        assertThat(queue.me(drop, user).orElseThrow().position()).isOne(); // warm snapshot
+        var stats = emf.unwrap(SessionFactory.class).getStatistics();
+        stats.setStatisticsEnabled(true);
+        try {
+            long commits = stats.getSuccessfulTransactionCount();
+            long statements = stats.getPrepareStatementCount();
+            for (int i = 0; i < 5; i++) {
+                assertThat(queue.me(drop, user).orElseThrow().position()).isOne();
+            }
+            assertThat(stats.getPrepareStatementCount() - statements).isEqualTo(5);
+            assertThat(stats.getSuccessfulTransactionCount()).isEqualTo(commits);
+            assertThat(lastSeen()).isEqualTo(opens);
+
+            clock.now = clock.now.plusNanos(1000);
+            statements = stats.getPrepareStatementCount();
+            for (int i = 0; i < 5; i++) {
+                assertThat(queue.me(drop, user).orElseThrow().position()).isOne();
+            }
+            assertThat(stats.getPrepareStatementCount() - statements).isEqualTo(6);
+            assertThat(stats.getSuccessfulTransactionCount() - commits).isOne();
+            assertThat(lastSeen()).isEqualTo(clock.now);
+        } finally {
+            stats.setStatisticsEnabled(false);
+        }
+    }
+
+    @RepeatedTest(4)
+    void inv17CloseCommitsBetweenPollReadAndHeartbeat() throws Exception {
+        enterAs(user);
+        clock.now = opens.plusSeconds(11);
+        DropStock.setAvailable(jdbc, variant, 0);
+        raceHeartbeat(() -> {
+            assertThat(batches.runBatch(variant)).isEqualTo(DropQueueAdmissionTransactions.Result.DONE);
+            assertThat(jdbc.queryForObject("""
+                    SELECT COUNT(*) FROM drop_queue_entries WHERE variant_id=? AND status IN ('WAITING','ADMITTED')
+                    """, Long.class, variant)).isZero();
+        }, DropQueueStatus.UNAVAILABLE, opens);
+    }
+
+    @Test
+    void tx1ConsumesGrantBetweenPollReadAndHeartbeat() throws Exception {
+        enterAs(user);
+        clock.now = opens.plusSeconds(11);
+        raceHeartbeat(() -> {
+            batches.runBatch(variant);
+            assertThat(service.create(drop, user, "overlap", request()).replayed()).isFalse();
+        }, DropQueueStatus.CONSUMED, opens);
+    }
+
+    @Test
+    void concurrentPollCannotOverwriteNewerHeartbeat() throws Exception {
+        enterAs(user);
+        clock.now = opens.plusSeconds(11);
+        var later = opens.plusSeconds(12);
+        raceHeartbeat(() -> {
+            clock.now = later;
+            assertThat(queue.me(drop, user).orElseThrow().position()).isOne();
+        }, DropQueueStatus.WAITING, later);
+    }
+
+    private void raceHeartbeat(Runnable transition, DropQueueStatus expected, Instant expectedLastSeen) throws Exception {
+        var beforeUpdate = new CountDownLatch(1);
+        var resume = new CountDownLatch(1);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var poll = executor.submit(() -> {
+                selects.beforeHeartbeat.set(() -> {
+                    beforeUpdate.countDown();
+                    try {
+                        assertThat(resume.await(10, TimeUnit.SECONDS)).isTrue();
+                    } catch (InterruptedException e) {
+                        throw new AssertionError(e);
+                    }
+                });
+                try {
+                    return queue.me(drop, user).orElseThrow();
+                } finally {
+                    selects.beforeHeartbeat.remove();
+                }
+            });
+            try {
+                assertThat(beforeUpdate.await(10, TimeUnit.SECONDS)).isTrue();
+                transition.run();
+            } finally {
+                resume.countDown();
+            }
+            Long position = expected == DropQueueStatus.WAITING ? 1L : null;
+            assertThat(poll.get(10, TimeUnit.SECONDS)).isEqualTo(new DropQueueService.View(expected, variant, position, null));
+        }
+        assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(expected);
+        assertThat(lastSeen()).isEqualTo(expectedLastSeen);
+    }
+
+    private Instant lastSeen() {
+        return jdbc.queryForObject("SELECT last_seen_at FROM drop_queue_entries WHERE drop_id=? AND user_id=?",
+                Timestamp.class, drop, user).toInstant();
     }
 
     @Test
@@ -227,7 +339,7 @@ class DropQueueIntegrationTest {
 
     @Test
     void staleWaitingClosesEvenWhenExistingGrantsCoverAllAvailableStock() {
-        assertCoveredWaitingCloses(opens.plusSeconds(31));
+        assertCoveredWaitingCloses(opens.plusSeconds(41));
     }
 
     @Test
@@ -324,7 +436,7 @@ class DropQueueIntegrationTest {
                   AND id <= ? AND last_seen_at >= ?""", Long.class, variant, myId, Timestamp.from(cutoff));
         assertThat(reference).isEqualTo(3);
         assertThat(me.body().position()).as("enter response").isEqualTo(4);
-        clock.now = cutoff.plusSeconds(30); // queue/me cutoff is now - 30s == cutoff
+        clock.now = cutoff.plusSeconds(40); // queue/me cutoff is now - 40s == cutoff
         assertThat(queue.me(drop, user).orElseThrow().position()).isEqualTo(reference);
         assertThat(jdbc.queryForList("""
                 SELECT column_name FROM information_schema.statistics
@@ -338,13 +450,13 @@ class DropQueueIntegrationTest {
         enterAs(newUser());
         clock.now = opens.plusSeconds(1);
         enterAs(user);
-        clock.now = opens.plusSeconds(30);
+        clock.now = opens.plusSeconds(40);
         int before = selects.count.get();
         assertThat(queue.me(drop, user).orElseThrow().position()).isEqualTo(2);
         clock.now = clock.now.plusMillis(999);
         assertThat(queue.me(drop, user).orElseThrow().position()).isEqualTo(2);
         assertThat(selects.count.get() - before).isOne();
-        clock.now = opens.plusSeconds(31);
+        clock.now = opens.plusSeconds(41);
         assertThat(queue.me(drop, user).orElseThrow().position()).isOne();
         assertThat(selects.count.get() - before).isEqualTo(2);
     }
@@ -397,8 +509,11 @@ class DropQueueIntegrationTest {
 
     static class SnapshotSelects implements StatementInspector {
         final AtomicInteger count = new AtomicInteger();
+        final ThreadLocal<Runnable> beforeHeartbeat = new ThreadLocal<>();
         @Override public String inspect(String sql) {
             if (sql.contains("SELECT id FROM drop_queue_entries USE INDEX")) count.incrementAndGet();
+            if (sql.startsWith("UPDATE drop_queue_entries SET last_seen_at") && beforeHeartbeat.get() != null)
+                beforeHeartbeat.get().run();
             return sql;
         }
     }

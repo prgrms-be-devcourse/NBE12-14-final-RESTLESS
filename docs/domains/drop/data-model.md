@@ -127,7 +127,7 @@ SKU 재고 버킷. SKU 수량은 버킷 합이다
 - `drop_id`, `user_id`: 드롭·회원 FK.
 - `variant_id`: 입장 신청 때 고른 SKU(`drop_variants.id`) FK. NOT NULL. 입장 순번, 입장 수 계산, 입장 허가 귀속의 기준이다.
 - `status`: WAITING / ADMITTED / CONSUMED / EXPIRED / CLOSED / UNAVAILABLE. 현재 구매 불가로 종료한 대기를 위한 상태 `UNAVAILABLE`을 추가한다(이름 결정 2026-11-19, [policy.md 7-1절](policy.md#7-1-sku별-구매-입장-제어-decided-2026-11-19-253)). CHECK 제약 `ck_drop_queue_status`도 이 값을 허용한다. 종료는 행 삭제가 아니라 이 컬럼의 변경이다.
-- `entered_at`, `last_seen_at`: 진입 시각과 마지막 상태 조회 시각.
+- `entered_at`, `last_seen_at`: 진입 시각과 마지막으로 기록한 WAITING heartbeat 시각. 진입 시 두 값은 같다.
 - `admitted_at`, `admitted_until`, `consumed_at`: 입장·입장 허가 만료·소비 시각.
 - `active_user_id`: WAITING 또는 ADMITTED일 때만 user_id인 생성 컬럼.
 - `UNIQUE(drop_id, active_user_id)`: 회원과 드롭당 살아 있는 대기(`WAITING`, `ADMITTED`)는 최대 1건. 종료된 행은 이 키에서 빠지므로 재고가 반환된 뒤 새 행으로 다시 진입할 수 있다. SKU별이어도 INV-05(드롭당 활성 구매 1건)에 맞춰 유지하는 안이다. SKU를 바꿔 다시 들어오면 기존 행을 `CLOSED`로 바꾼 뒤(키에서 빠진다) 새 행을 만든다. 같은 트랜잭션에서 먼저 flush해야 키가 겹치지 않는다.

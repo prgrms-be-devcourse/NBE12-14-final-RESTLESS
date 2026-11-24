@@ -21,7 +21,7 @@ class DropQueueAdmissionTransactionsTest {
     final DropQueueMetrics metrics = mock(DropQueueMetrics.class);
     final Instant now = Instant.parse("2030-01-01T00:00:00Z");
     final DropQueueAdmissionTransactions worker = new DropQueueAdmissionTransactions(gates, entries, variants,
-            drops, inventories, new DropQueueSettings(Duration.ofSeconds(30), Duration.ofMinutes(5), 2),
+            drops, inventories, new DropQueueSettings(Duration.ofSeconds(30), Duration.ofSeconds(5), Duration.ofMinutes(5), 2),
             metrics, Clock.fixed(now, ZoneOffset.UTC));
 
     @org.junit.jupiter.api.BeforeEach

@@ -36,7 +36,7 @@ ADMITTED → UNAVAILABLE
 | WAITING → ADMITTED | 같은 SKU의 추가 허가 가능 수 `max(0, available - 미사용 유효 ADMITTED 수)`가 1 이상이고 배치 제한 안일 때, 같은 SKU의 입장 순번(`id`)대로 |
 | ADMITTED → CONSUMED | 그 SKU의 재고 점유 성공과 같은 트랜잭션 (TX1) |
 | ADMITTED → EXPIRED | `now >= admitted_until` |
-| WAITING → CLOSED | 마지막 상태 조회가 30초보다 오래 끊김(페이지를 나감), 판매 기간 종료, 또는 같은 회원이 같은 드롭의 다른 SKU로 진입 |
+| WAITING → CLOSED | 마지막 저장 heartbeat가 40초보다 오래됨, 판매 기간 종료, 또는 같은 회원이 같은 드롭의 다른 SKU로 진입 |
 | ADMITTED → CLOSED | 같은 회원이 같은 드롭의 다른 SKU로 진입. 미사용 입장 허가를 포기한 것이다 |
 | WAITING 또는 ADMITTED → UNAVAILABLE | 그 SKU의 `available = 0`을 입장 허가 작업이 관찰함. `reserved` 수량과 무관. 다른 SKU는 영향 없음 |
 
