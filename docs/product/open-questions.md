@@ -40,7 +40,7 @@ PROPOSED 항목이다. 승인 전에는 결정으로 보지 않는다.
 |---|---|
 | Outbox/Kafka 채택 | [ADR-0001](../decisions/0001-event-handling.md) 재검토 조건에 따름 |
 | PostgreSQL 전환 | 비교 실험 후 |
-| Redis 입장 제어 전환 | 비교 실험 후 |
+| Redis 입장 제어 전환 | 비교 실험 후. 대기실을 Redis로 옮기는 안은 [ADR-0006](../decisions/0006-drop-waiting-room-redis.md) PROPOSED 초안이다. 결정은 사람이 하며 승인 전에는 결정으로 보지 않는다 |
 | 다중 EC2 도입 | 병목과 목표 확인 후 |
 
 ## 4. 결정됨
@@ -68,6 +68,7 @@ PROPOSED 항목이다. 승인 전에는 결정으로 보지 않는다.
 | 드롭 대기 종료의 동시성 처리 방식 (#253) | DECIDED (2026-11-19): 같은 SKU의 입장과 종료 트랜잭션을 DB 락으로 한 번에 하나씩 직렬화한다. 이미 처리 중이면 기다리지 않고 그 SKU만 건너뛴다. 서버 안 메모리 락은 쓰지 않는다. 사용자 구매(TX1)는 이 락을 잡지 않는다. 구체 수단은 #254에서 게이트 행(`drop_queue_gates`)으로 구현했다. 종료는 입장 허가 작업이 `available = 0`을 관찰했을 때 수행하며 진입 직후 입장 허가 작업 한 번의 주기만큼 지연을 허용한다. 입장 허가 작업 주기는 1초다(2026-11-19 결정, 현재 기본값 유지) ([transactions.md D4](../domains/drop/transactions.md)) |
 | 드롭 같은 회원의 SKU 변경 진입 (#253) | DECIDED (2026-11-19): 새 SKU로 새로 `WAITING`하고 기존 SKU의 대기를 뺀다(`CLOSED`). 새 SKU가 `available = 0`이면 거절하고 기존 대기를 유지한다. 페이지를 나가면 기존 heartbeat 규칙(30초)으로 해제한다. 기존 대기가 `ADMITTED`(미사용 입장 허가)일 때도 같은 처리이며 2026-11-19에 사람이 확인했다 |
 | 드롭 입장 허가와 다른 SKU 점유 요청의 오류 코드 (#253) | DECIDED (2026-11-19): 403 `DROP_ADMISSION_REQUIRED`. 정상 화면에서는 생기지 않는 요청을 막는 방어 검사다 |
+| 드롭 대기열 조회 간격 제안과 조기 거절 (P3) | DECIDED (2026-11-24, 사용자 위임 결정, 사람이 나중에 검토): 서버가 응답 `pollAfterMs`로 다음 조회 간격을 제안한다. WAITING 순번 1~20은 1초, 21~200은 2초, 201~1000은 3초, 그 뒤 5초이고 상한은 10초다. 진입과 상태 조회는 서버별 동시 처리 상한을 넘으면 503 `QUEUE_BUSY`와 `Retry-After`로 바로 거절한다. 구현은 1단계 [#390](https://github.com/prgrms-be-devcourse/NBE12-14-final-RESTLESS/issues/390)이며 아직 구현 전이다. 요청 횟수 제한의 기본 한도(#271)는 이 결정과 별개이고 2절 PROPOSED 그대로다 |
 | 공연장·좌석 배치 등록/선택 | DECIDED: 배치는 초기 데이터로 운영자 등록. 미등록 배치는 화면 없이 자료 전달·검토 후 등록. 주최자는 등록 배치 선택, 예매 오픈 이후 변경 금지 ([상세](../domains/ticketing/venue-consistency.md)) |
 
 ## 5. 보류

@@ -60,6 +60,21 @@ perf/ec2/perf-ec2.sh finish
 
 오래 쓰지 않으면 EC2, RDS 순서로 중지한다.
 
+## DB 프로브
+
+[db-probe.sh](db-probe.sh)는 RDS 콘솔 값과 Performance Insights를 쓸 수 없을 때 DB가 무엇을 하는지 보는 읽기 전용 대체 수단이다. `perf-ec2.sh`와 같이 `perf.env`를 읽고, DB 이름이 `perf-`로 시작하지 않거나 prod가 들어 있거나 프로필이 perf가 아니면 멈춘다. 값은 출력하지 않는다. DB를 바꾸지 않는다.
+
+```bash
+perf/ec2/db-probe.sh status ~/probe-before.txt   # 측정 전 전역 카운터
+perf/ec2/db-probe.sh sample 300 ~/probe-sample.txt   # 300초 동안 0.5초마다 실행 중인 SQL 표본. k6 시작 직전에 켠다
+perf/ec2/db-probe.sh status ~/probe-after.txt    # 측정 후. 전후 차이를 본다
+```
+
+- `status`는 커밋 수, redo fsync, 읽은 행 수, 잠금 대기 같은 누적 카운터다. RDS 인스턴스 전체 값이므로 다른 테스트가 없을 때만 해석한다.
+- `sample`은 연결 한 개로 `information_schema.PROCESSLIST`를 읽는다. 컬럼은 시각, 연결 ID, 경과 초, 상태, SQL 앞 160자다. 몫은 실행 중인 SQL의 몫이고 CPU 시간 몫이 아니다.
+- `PERF_ENV_FILE`로 env 파일 경로를, `MYSQL`로 mysql 명령을 바꿀 수 있다. `mysql`이 없으면 `mysql:8.4` 컨테이너를 쓴다.
+- 서버를 두 대 쓰는 측정에서는 RDS에 닿는 서버 한 곳에서만 돌린다 ([실행 절차 7절](../../docs/testing/drop-performance-procedure.md#7-alb-멀티-인스턴스-측정)).
+
 ## 기록할 값
 
 | 항목 | 위치 |
