@@ -42,7 +42,7 @@ perf/ec2/perf-ec2.sh lockstats
 ```
 
 6. 노트북에서 시나리오를 실행한다 ([scenarios](../scenarios/README.md)).
-7. 실행마다 EC2에서 `lockstats`와 `verify <scale>`을 실행한다. 드롭 불변식, 금액, FK 고아 행 검사는 0이어야 한다. `seed baseline` 검사 중 `hot drop untouched` 한 건은 부하 뒤에 실패하는 것이 정상이다. 그 밖의 실패는 정합성 위반이다.
+7. 실행마다 EC2에서 `lockstats`와 `verify <scale>`을 실행한다. 드롭 불변식, 금액, FK 고아 행 검사는 0이어야 한다. `seed baseline` 검사는 부하 뒤에 실패하는 것이 정상이다. 드롭 `sale` 측정 뒤에는 그중 `hot drop untouched` 한 건만 실패해야 하고 그 밖의 실패는 정합성 위반이다.
 8. 계정을 다 썼거나 스케일을 바꿀 때는 DB를 다시 만든다.
 
 ```bash
