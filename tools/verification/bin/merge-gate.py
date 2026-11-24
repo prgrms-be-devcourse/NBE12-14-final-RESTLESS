@@ -63,7 +63,7 @@ HIGH_PATHS = [
 # 운영 코드에 새로 생긴 줄. 잠금과 트랜잭션 경계, 쓰기 쿼리.
 LOCK_LINE = re.compile(r"Transactional|TransactionTemplate|Propagation\.|Isolation\.|FOR\s+UPDATE|SKIP\s+LOCKED"
                        r"|@Lock\b|PESSIMISTIC_|LockModeType|\bsynchronized\b|ReentrantLock|advisory_lock|GET_LOCK"
-                       r"|@Version\b|@Modifying|getLock\(|\.lock\(|tryLock|\bRLock\b|setIfAbsent|opsFor\w+|RedisTemplate"
+                       r"|@Version\b|@Modifying|ddl-auto|flyway\.|lock[-_]timeout|open-in-view|maximum-pool-size|connection-timeout|getLock\(|\.lock\(|tryLock|\bRLock\b|setIfAbsent|opsFor\w+|RedisTemplate"
                        r"|\bUPDATE\s+\w+\s+SET\b|\bINSERT\s+INTO\b|\bDELETE\s+FROM\b", re.I)
 # 테스트에서 사라지거나 바뀐 줄이 이런 줄이면 단언을 약하게 만들 수 있다.
 ASSERT_REMOVED = re.compile(r"\bassert\w*|\.(?:is|has|contains|matches|does|all|none|any|satisf|extracting|usingRecursive|as)\w*\("
@@ -119,6 +119,18 @@ def unquote(path):
     return path
 
 
+def same_path(header):
+    """--- 줄이 없는 블록(바이너리, 모드만 바뀜)의 경로. 이름을 바꾸지 않았으면 a/P b/P라서 쪼갤 수 있다.
+    따옴표 경로는 못 쪼개고 None이다."""
+    rest = header[len("diff --git "):]
+    n = len(rest)
+    if rest.startswith('"') or (n - 5) % 2:
+        return None
+    half = (n - 5) // 2
+    first, second = rest[2:2 + half], rest[5 + half:]
+    return first if rest[:2] == "a/" and rest[2 + half:5 + half] == " b/" and first == second else None
+
+
 def parse_diff(text):
     """gh pr diff 출력을 {경로: {added, removed, status, old}}로. status는 added, removed, modified.
     경로는 diff --git 줄이 아니라 --- 와 +++ 와 rename 줄에서 읽는다. 첫 @@ 뒤의 --- 로 시작하는 줄은 내용이다.
@@ -151,11 +163,11 @@ def parse_diff(text):
                 e["new"] = unquote(line[4:])[2:]
             elif line.startswith("Binary files"):
                 e["binary"] = True
-        key = e["new"] or e["old"]
+        key = e["new"] or e["old"] or same_path(block.splitlines()[0])
         if key:
             out[key] = e
         else:
-            out[f"?{len(out)}"] = {**e, "unreadable": True}
+            out["?" + block.splitlines()[0][:80]] = {**e, "unreadable": True}
     return out
 
 
@@ -165,8 +177,9 @@ def parse_compare(files):
     for f in files:
         patch = f.get("patch")
         status = {"added": "added", "removed": "removed"}.get(f.get("status"), "modified")
+        # patch가 없으면 바이너리나 큰 파일이다. 이름만 바꾼 경우(renamed)가 아니면 읽을 수 없는 것으로 본다.
         entry = {"added": [], "removed": [], "status": status, "old": f.get("previous_filename", f["filename"]),
-                 "unreadable": patch is None and f.get("changes", 0) > 0}
+                 "unreadable": patch is None and f.get("status") != "renamed"}
         for line in (patch or "").splitlines():
             if line.startswith("+"):
                 entry["added"].append(line[1:])
@@ -400,6 +413,9 @@ def main():
         print(f"CI 증거: 쓸 수 없음. backend {backend[-1].get('conclusion') or '진행 중'}")
     if backend and not ci_ok:
         blocks.append("backend CI가 성공하지 않음")
+    tools = [c for c in pr["statusCheckRollup"] if c.get("name") == "tools"]
+    if tools and not all(c.get("conclusion") == "SUCCESS" for c in tools):
+        blocks.append("tools CI(분류기와 테스트 선택 자체 시험)가 성공하지 않음")
 
     for n in notes:
         print(f"참고: {n}")

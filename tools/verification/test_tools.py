@@ -228,6 +228,24 @@ class RiskTest(unittest.TestCase):
         d = gate.parse_diff(text)
         self.assertEqual(d["x.sql"]["removed"], ["-- drop this", "select 1 for update;"])
 
+    def test_binary_and_mode_only_changes_are_named_and_not_unreadable(self):
+        text = ("diff --git a/docs/a.png b/docs/a.png\nnew file mode 100644\nBinary files /dev/null and b/docs/a.png differ\n"
+                "diff --git a/perf/x.sh b/perf/x.sh\nold mode 100644\nnew mode 100755\n")
+        d = gate.parse_diff(text)
+        self.assertEqual(sorted(d), ["docs/a.png", "perf/x.sh"])
+        self.assertEqual(tier(["perf/x.sh"], {"perf/x.sh": d["perf/x.sh"]})[0], gate.MID)
+
+    def test_compare_binary_file_is_unreadable(self):
+        d = gate.parse_compare([{"filename": "backend/src/main/resources/x.jar", "status": "modified", "changes": 0}])
+        self.assertEqual(gate.followup_ok(d)[0], False)
+        r = gate.parse_compare([{"filename": "a.md", "status": "renamed", "previous_filename": "b.md", "changes": 0}])
+        self.assertFalse(r["a.md"]["unreadable"])
+
+    def test_config_keys_that_change_transaction_or_schema_behavior_are_high(self):
+        f = "backend/src/main/resources/application.yml"
+        for line in ["    open-in-view: true", "    hibernate.ddl-auto: update", "lock-timeout: 0"]:
+            self.assertEqual(tier([f], diff(f, [line]))[0], gate.HIGH, line)
+
     def test_file_missing_from_diff_is_high(self):
         self.assertEqual(tier(["docs/a.md", "docs/b.md"], diff("docs/a.md", ["x"]))[0], gate.HIGH)
 
