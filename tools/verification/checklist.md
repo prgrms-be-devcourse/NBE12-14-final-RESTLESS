@@ -26,10 +26,11 @@ precheck에 해당 유형의 반례를 모두 적는다. 해당 없으면 이유
 
 ## 3. 실행 증거
 
-- 전체 build는 같은 대상 SHA의 CI `backend` 작업 결과를 증거로 쓸 수 있다. 조건은 셋이다.
+- 전체 build는 같은 대상 SHA의 CI `backend` 작업 결과를 증거로 쓸 수 있다. 조건은 넷이다.
   1. CI 실행의 PR head SHA가 검증 SHA와 같다. PR CI는 그 시점 base와 합친 병합본을 build하므로, 검증 SHA 자체보다 머지 결과에 가깝다.
   2. 변경에 `.github/workflows/`, `backend/build.gradle`, `backend/settings.gradle`, `backend/gradle/`, `backend/gradlew`, `frontend/package.json` 수정이 없다.
   3. CI 테스트 결과 artifact(`backend-test-results`)에서 테스트 수와 실패 0을 확인해 review.md에 적는다. artifact는 7일 보관이라 그 뒤에는 직접 build한다.
+  4. CI가 전체 테스트를 돌렸다. PR과 dev push CI는 영향받는 테스트만 돌릴 수 있다 (`tools/ci/select-backend-tests.py`). artifact의 `test-scope.txt` 첫 줄이 `scope: full`이고 테스트가 1195개 이상이어야 한다. `merge-gate.py`가 같은 규칙으로 PR의 범위를 알려 준다.
 - 하나라도 어긋나면 검증자가 직접 `./gradlew build`를 실행한다. 대상 테스트와 변이 시험은 항상 직접 실행한다.
 - 로그와 임시 probe 결과는 메인 폴더의 `.ai-output/verification/<issue>/`에 절대 경로로 쓴다. worktree 안의 `.ai-output`은 worktree 삭제 때 사라진다 (L6).
 
