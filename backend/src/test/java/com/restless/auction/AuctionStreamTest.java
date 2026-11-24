@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.restless.TestcontainersConfiguration;
 import com.restless.auction.api.AuctionStreams;
 import com.restless.auction.application.AuctionCloseService;
+import com.restless.auction.application.AuctionQueryService;
 import com.restless.auction.application.BidService;
 import com.restless.auction.application.SellerAuctionService;
 import com.restless.auction.domain.Auction;
@@ -30,6 +31,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -49,7 +51,9 @@ class AuctionStreamTest {
     @Autowired AuctionCloseService closeService;
     @Autowired SellerAuctionService sellerAuctionService;
     @Autowired JwtTokenProvider tokenProvider;
-    @Autowired JsonMapper json;
+    // AuctionStreamJsonTest와 Spring 컨텍스트를 같이 쓰려고 같은 이름과 타입의 spy를 둔다. 스텁하지 않으므로 실제 빈처럼 동작한다.
+    @MockitoSpyBean JsonMapper json;
+    @MockitoSpyBean AuctionQueryService queries;
     @Autowired JdbcTemplate jdbc;
     AuctionFixtures f;
     Long seller;

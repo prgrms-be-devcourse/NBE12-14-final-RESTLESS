@@ -23,11 +23,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** 시작·종료 서비스를 직접 부른다 (스케줄러는 꺼져 있음). */
 @SpringBootTest(properties = "spring.docker.compose.enabled=false")
+// MockMvc는 쓰지 않는다. 경매 API 테스트와 같은 Spring 컨텍스트를 다시 쓰려고 설정을 맞춘다.
+@AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class AuctionCloseServiceTest {
     @Autowired AuctionCloseService closeService;
