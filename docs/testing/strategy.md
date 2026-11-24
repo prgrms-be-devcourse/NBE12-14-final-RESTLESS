@@ -77,9 +77,9 @@ JUnit 5, Spring Boot Test, MySQL Testcontainers, Mockito, k6. 필요하면 Redis
 ## 7-1. CI 테스트 범위
 
 - PR과 dev push는 영향받는 테스트만 돌릴 수 있다. 규칙은 `tools/ci/select-backend-tests.py`에 있다.
-- 도메인 하나만 바뀌면 그 도메인, 그 도메인을 쓰는 도메인, 그 도메인이 구현한 인터페이스를 가진 모듈의 테스트를 돌린다. ArchUnit과 기동 smoke test는 항상 돈다.
+- 도메인 하나만 바뀌면 그 도메인, 그 도메인을 쓰는 도메인, 그 도메인이 구현한 인터페이스를 가진 모듈, 그 도메인의 빈을 이름으로 덮어쓰는 테스트의 모듈을 돌린다. ArchUnit과 기동 smoke test는 항상 돈다.
 - 공유 모듈(common, auth, member, order, payment, concert), migration, Spring 설정, 공용 테스트 fixture, Gradle과 CI 설정이 바뀌면 전체를 돈다. 분류할 수 없는 경로, 변경 목록 조회 실패도 전체다.
-- dev push는 마지막 커밋이 아니라 push 전체 범위(before..after)를 본다. main push는 항상 전체다.
+- dev push는 마지막으로 성공한 dev push CI의 커밋부터 지금까지 전체 변경을 본다. 실패했거나 취소된 push의 변경도 다음 실행에 들어간다. 그 커밋을 못 찾으면 전체다. main push는 항상 전체다.
 - 컴파일과 패키징은 범위와 상관없이 항상 한다. 문서만 바뀌면 백엔드 build를 건너뛴다.
 - dev 전체 테스트는 매일 03:00(KST) 정기 실행과 수동 실행으로 돈다. 전체 기준은 1195개다.
 - dev 이미지는 영향 범위 테스트만 통과해도 발행된다. 정기 전체 테스트에서만 잡히는 회귀는 이미지 발행 뒤에 발견될 수 있다.
