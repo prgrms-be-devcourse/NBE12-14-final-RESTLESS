@@ -84,7 +84,7 @@ PG 장애 복구는 범위 밖이다. 중복과 동시 구매, 환불, 이중 �
 
 ## 7. ALB 멀티 인스턴스 측정
 
-앱 서버 두 대를 ALB 뒤에 두고 같은 RDS를 쓰는 측정이다. 서버 두 대 조건으로 잴 때 쓴다. 서버 한 대 결과와 비교하면 서버 수를 변인으로 기록한다. 이 절은 2절 순서를 서버 두 대로 넓힌 것이고 수치는 두지 않는다. 회차별 결과는 [#391](https://github.com/prgrms-be-devcourse/NBE12-14-final-RESTLESS/issues/391)에 있다. AWS 접속과 ALB 생성은 EC2 소유자가 한다. ALB는 중지가 안 되므로 측정이 끝나면 삭제하고 대상 그룹은 남긴다.
+앱 서버 두 대를 ALB 뒤에 두고 같은 RDS를 쓰는 측정이다. 서버 두 대 조건으로 잴 때 쓴다. 서버 한 대 결과와 비교하면 서버 수를 변인으로 기록한다. 이 절은 2절 순서를 서버 두 대로 넓힌 것이고 수치는 두지 않는다. 회차별 결과는 [#391](https://github.com/prgrms-be-devcourse/NBE12-14-final-RESTLESS/issues/391)에 있다. AWS 접속과 ALB 생성은 EC2 소유자가 한다. ALB는 중지가 안 되므로 멀티 측정이 모두 끝나면 삭제하고 대상 그룹은 남긴다.
 
 ### 7-1. 준비 순서
 
@@ -138,7 +138,7 @@ k6 run perf/scenarios/drop-sale.js 2>&1 | tee .ai-output/perf/<날짜>-<측정>/
 
 - 시나리오는 호스트가 `perf-`로 시작하지 않으면 시작하지 않는다. ALB 이름도 `perf-`로 시작하게 `/etc/hosts`에 둔다.
 - `ulimit -n`을 올리지 않으면 부하 발생기 쪽 연결 오류가 서버 성능으로 오해된다.
-- 풀 크기는 두 서버(`perf-app`, `perf-app2`)의 `http://<호스트>:8081/actuator/prometheus`에서 `hikaricp_connections_max`로 본다. 측정 뒤에는 입장 카운터 `drop_queue_admitted_total`이 입장 허가 작업을 켠 서버에만 늘었는지 본다. 작업을 끈 서버에는 이 카운터가 아예 나타나지 않으며 정상이다. k6의 시작 점검은 `MANAGEMENT_URL`의 서버 1만 보고 설정은 확인하지 않는다.
+- 풀 크기는 두 서버(`perf-app`, `perf-app2`)의 `http://<호스트>:8081/actuator/prometheus`에서 `hikaricp_connections_max`로 본다. 측정 뒤에는 입장 카운터 `drop_queue_admitted_total`이 입장 허가 작업을 켠 서버에만 늘었는지 본다. 작업을 끈 서버에는 이 카운터가 아예 나타나지 않으며 정상이다. k6의 시작 점검은 `MANAGEMENT_URL`의 서버 1만 본다. 입장 허가 작업이 어느 서버에서 도는지는 k6가 확인하지 않는다.
 - 서버 두 대의 앱 CPU, Tomcat busy, Hikari active와 pending을 서버별로 따로 본다. 요청 수가 고르게 나뉘었는지도 서버별 `http_server_requests_seconds_count` 합으로 확인한다.
 - 수집이 가끔 시간 초과로 빠질 수 있다. 빠진 횟수를 기록한다. 스파이크 한가운데에서 빠졌는지 본다.
 
