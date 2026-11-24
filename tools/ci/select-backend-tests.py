@@ -11,6 +11,9 @@
 
 규칙. 분류할 수 없으면 전체를 돌린다.
 - 공유 모듈(SHARED)의 운영 코드나 테스트가 바뀌면 전체.
+- 드롭 모듈(FULL_MODULES)이 바뀌어도 전체. 주문과 결제는 SHARED라서 이미 전체다. 이 세 곳은 재고, 결제 상태,
+  중복 요청 방지를 다뤄 높음 위험도(tools/verification/checklist.md 5절)가 되는 일이 잦고, merge-gate가
+  전체 실행의 test-scope 결과를 검증자의 CI 증거로 쓴다. 선택 실행이 놓친 회귀를 머지 전에 잡는 효과도 있다.
 - backend/src/main/java/com/restless/<모듈>/ 과 backend/src/test/java/com/restless/<모듈>/ 밖의 backend 파일이
   바뀌면 전체. Flyway migration, Spring 설정, 공용 테스트 fixture(루트 패키지, test resources),
   Gradle 설정, Dockerfile이 여기 든다.
@@ -35,6 +38,8 @@ MAIN = f"backend/src/main/java/{PKG}/"
 TEST = f"backend/src/test/java/{PKG}/"
 # 여러 모듈이 쓰거나 공용 계약을 가진 모듈. 바뀌면 전체를 돌린다.
 SHARED = {"common", "auth", "member", "order", "payment", "concert"}
+# 선택 실행 대신 항상 전체를 돌릴 도메인. SHARED가 아니어도 여기 들면 전체다.
+FULL_MODULES = {"drop"}
 FULL_PREFIXES = (".github/", "tools/ci/")
 ALWAYS = ["com.restless.architecture.*", "com.restless.RestlessApplicationTests"]
 REF = re.compile(r"com\.restless\.([a-z]+)\.")
@@ -121,6 +126,8 @@ def select(files, repo):
             return "full", [], f"루트 패키지 파일: {f}"
         if m in SHARED:
             return "full", [], f"공유 모듈 {m}: {f}"
+        if m in FULL_MODULES:
+            return "full", [], f"드롭, 주문, 결제는 항상 전체 {m}: {f}"
         changed.add(m)
     if not changed:
         return "none", [], "백엔드 변경 없음"

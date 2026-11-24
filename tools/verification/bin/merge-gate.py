@@ -3,7 +3,10 @@
 
   python3 tools/verification/bin/merge-gate.py <PR 번호> [--verify-dir DIR]
 
-변경 종류별 요구와 CI 증거 조건의 정본은 tools/verification/checklist.md 3절과 5절이다.
+  python3 tools/verification/bin/merge-gate.py <PR 번호> --classify-only   # 위험도와 근거만 출력
+
+위험도(높음, 중간, 낮음)는 diff로 자동 분류한다. 높음만 새 컨텍스트 독립 검증 PASS를 요구한다.
+단계 기준, 변경 종류별 요구, CI 증거 조건의 정본은 tools/verification/checklist.md 3절과 5절이다.
 아래 경로 목록은 그 표와 같게 유지한다 (test_tools.py가 대조한다).
 종료 코드: 0 머지 가능, 1 막힘, 2 실행 오류.
 """
@@ -39,6 +42,35 @@ MUTATION_REQUIRED = ["backend/src/main/java/com/restless/payment/application/Pay
                      "backend/src/main/java/com/restless/payment/domain/*",
                      "backend/src/main/java/com/restless/drop/*Inventory*",
                      "backend/src/main/java/com/restless/drop/*Reservation*"]
+
+# 위험도. 정본은 checklist.md 5절. 애매하면 높은 쪽이다.
+HIGH, MID, LOW = "높음", "중간", "낮음"
+RANK = {LOW: 0, MID: 1, HIGH: 2}
+HIGH_PATHS = [
+    ("Flyway 마이그레이션", ["backend/src/main/resources/db/migration/*"]),
+    ("공개 API 계약", ["docs/contracts/*"]),
+    ("채점 테스트", ["backend/src/test/java/com/restless/drop/acceptance/*",
+                 "backend/src/test/java/com/restless/architecture/*",
+                 "backend/src/test/resources/harness/*", "tools/harness/*"]),
+    ("불변식 핵심 코드", MUTATION_REQUIRED),
+    ("불변식, 트랜잭션, 상태 전이 문서", ["docs/domains/*/invariants.md", "docs/domains/*/transactions.md",
+                               "docs/domains/*/state-machines.md", "docs/domains/*/idempotency.md",
+                               "docs/domains/*/seat-ownership.md", "docs/operations/failure-handling.md"]),
+    ("검증과 CI 도구 자체", ["tools/verification/*", "tools/ci/*", ".github/*"]),
+    ("빌드 설정", [p for p in BUILD_CONFIG if not p.startswith(".github/")]),
+]
+# 운영 코드에 새로 생긴 줄. 잠금과 트랜잭션 경계, 쓰기 쿼리.
+LOCK_ADDED = re.compile(r"@Transactional|TransactionTemplate|Propagation\.|Isolation\.|FOR\s+UPDATE|SKIP\s+LOCKED"
+                        r"|@Lock\b|PESSIMISTIC_|LockModeType|\bsynchronized\b|ReentrantLock|advisory_lock|GET_LOCK"
+                        r"|@Version\b|@Modifying", re.I)
+# 테스트에서 사라지거나 바뀐 줄이 이런 줄이면 단언을 약하게 만들 수 있다.
+ASSERT_REMOVED = re.compile(r"\bassert\w*\s*\(|\bassertThat\b|\.(?:is|has|contains|matches)\w*\(|\bverify\w*\(|\bexpect\w*\("
+                            r"|\bfail\(|@Test\b|@ParameterizedTest|@RepeatedTest|@Nested\b|\$\.|\.andExpect")
+SKIP_ADDED = re.compile(r"@Disabled|@Ignore\b|\bassume\w*\(|\.skip\(")
+FOLLOWUP_MAX_LINES = 30
+RISK_LABEL = {"risk:high": HIGH, "risk:medium": MID}
+RISK_BODY = re.compile(r"^\s*위험도:\s*(높음|중간)\s*$", re.M)
+RISK_DOWN = re.compile(r"^\s*위험도:\s*낮음\s*$", re.M)
 RECORD = re.compile(r"^\s*(?:[-*|]\s*)?판정 기록:\s*(PASS|FAIL|INCOMPLETE)\s+([0-9a-f]{40})(?![0-9a-f])")
 NO_REVIEW = re.compile(r"독립 검증 없음:\s*\S")
 
@@ -66,6 +98,124 @@ def ci_test_scope(check):
     if r.returncode != 0:
         return None
     return scope_from_annotations(r.stdout.splitlines())
+
+
+def is_test_path(path):
+    return "/src/test/" in path or path.endswith(("Test.java", ".test.js", ".spec.js"))
+
+
+def parse_diff(text):
+    """gh pr diff 출력을 {경로: {added, removed, status}}로. status는 added, removed, modified."""
+    out, cur = {}, None
+    for line in text.splitlines():
+        if line.startswith("diff --git "):
+            cur = None
+            m = re.match(r"diff --git a/(.+) b/(.+)$", line)
+            if m:
+                cur = out.setdefault(m.group(2), {"added": [], "removed": [], "status": "modified", "old": m.group(1)})
+        elif cur is None:
+            continue
+        elif line.startswith("new file mode"):
+            cur["status"] = "added"
+        elif line.startswith("deleted file mode"):
+            cur["status"] = "removed"
+        elif line.startswith("+++ ") or line.startswith("--- "):
+            continue
+        elif line.startswith("+"):
+            cur["added"].append(line[1:])
+        elif line.startswith("-"):
+            cur["removed"].append(line[1:])
+    return out
+
+
+def parse_compare(files):
+    """GitHub compare API의 files 배열을 parse_diff와 같은 모양으로. patch가 없으면(큰 파일, 바이너리) 읽을 수 없다."""
+    out = {}
+    for f in files:
+        patch = f.get("patch")
+        status = {"added": "added", "removed": "removed"}.get(f.get("status"), "modified")
+        entry = {"added": [], "removed": [], "status": status, "old": f.get("previous_filename", f["filename"]),
+                 "unreadable": patch is None and f.get("changes", 0) > 0}
+        for line in (patch or "").splitlines():
+            if line.startswith("+"):
+                entry["added"].append(line[1:])
+            elif line.startswith("-"):
+                entry["removed"].append(line[1:])
+        out[f["filename"]] = entry
+    return out
+
+
+def changed_lines(patches):
+    return sum(len(p["added"]) + len(p["removed"]) for p in patches.values())
+
+
+def assess_risk(files, patches, labels=(), body=""):
+    """(위험도, 근거 목록). patches가 None이면 diff를 읽지 못한 것이라 높음이다.
+    사람은 라벨 risk:high, risk:medium이나 본문 `위험도: 높음`으로 올릴 수만 있고 내릴 수는 없다."""
+    reasons = []
+    if patches is None:
+        reasons.append("diff를 읽지 못함. 애매하면 높음")
+        tier = HIGH
+    else:
+        tier = LOW
+        for f in files:
+            for why, pats in HIGH_PATHS:
+                if match(f, pats):
+                    reasons.append(f"{why}: {f}")
+            if os.path.basename(f) in AGENT_FILES:
+                reasons.append(f"에이전트 지침: {f}")
+        for f, p in patches.items():
+            if p.get("unreadable"):
+                reasons.append(f"diff를 읽지 못함: {f}")
+            if f.startswith("backend/src/main/") or f.endswith(".sql"):
+                hit = next((l.strip() for l in p["added"]
+                            if LOCK_ADDED.search(l) and not l.strip().startswith(("//", "*", "/*", "--", "#"))), None)
+                if hit and "db/migration" not in f:
+                    reasons.append(f"잠금, 트랜잭션, 쓰기 쿼리가 새로 생김: {f}: {hit[:80]}")
+            if is_test_path(f):
+                if p["status"] == "removed":
+                    reasons.append(f"테스트 파일 삭제: {f}")
+                gone = next((l.strip() for l in p["removed"] if ASSERT_REMOVED.search(l)), None)
+                if gone and p["status"] != "removed":
+                    reasons.append(f"기존 단언이나 테스트 줄 삭제 또는 변경: {f}: {gone[:80]}")
+                skip = next((l.strip() for l in p["added"] if SKIP_ADDED.search(l)), None)
+                if skip:
+                    reasons.append(f"테스트를 건너뛰는 줄이 생김: {f}: {skip[:80]}")
+        if reasons:
+            tier = HIGH
+        elif all(is_doc(f) for f in files) and files:
+            tier = LOW
+            reasons.append("문서만 변경")
+        elif files and all(is_test_path(f) for f in files):
+            tier = LOW
+            reasons.append("테스트 추가만, 기존 단언 삭제나 변경 없음")
+        else:
+            tier = MID
+            other = [f for f in files if not is_doc(f) and not is_test_path(f) and not f.endswith(".md")] \
+                or [f for f in files if not is_doc(f) and not is_test_path(f)]
+            reasons.append(f"운영 코드, 설정, perf 스크립트: {', '.join(other[:3])}{' 외' if len(other) > 3 else ''}")
+    if not files:
+        tier, reasons = HIGH, ["변경 파일 목록이 비어 있음. 애매하면 높음"]
+    # 사람이 올리는 것만 반영한다.
+    asked = [RISK_LABEL[l] for l in labels if l in RISK_LABEL] + RISK_BODY.findall(body or "")
+    for a in asked:
+        if RANK[a] > RANK[tier]:
+            tier = a
+            reasons.append(f"사람이 라벨이나 본문 표시로 {a}으로 올림")
+    if any(l == "risk:low" for l in labels) or RISK_DOWN.search(body or ""):
+        reasons.append("낮추는 표시는 무시함. 위험도는 올리기만 가능")
+    return tier, reasons
+
+
+def followup_ok(delta):
+    """독립 PASS 뒤에 쌓인 후속 커밋이 작고 높음이 아니면 True와 근거."""
+    n = changed_lines(delta)
+    tier, reasons = assess_risk(list(delta), delta)
+    if tier == HIGH:
+        return False, f"후속 변경이 높음: {reasons[0]}"
+    if n > FOLLOWUP_MAX_LINES:
+        return False, f"후속 변경 {n}줄이 {FOLLOWUP_MAX_LINES}줄을 넘음"
+    return True, f"후속 변경 {n}줄, {tier}"
 
 
 def gh(*args):
@@ -102,30 +252,59 @@ def last_record(text):
     return m.groups() if m else None
 
 
+def pr_patches(n):
+    """PR 전체 diff. 너무 크면 gh가 실패하므로 None이고, 그때 분류는 높음이다."""
+    r = subprocess.run(["gh", "pr", "diff", str(n)], capture_output=True, text=True)
+    return parse_diff(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
+
+
+def compare_delta(sha, head):
+    """독립 PASS를 받은 sha와 지금 head 사이 변경. 읽지 못하면 None."""
+    r = subprocess.run(["gh", "api", f"repos/{{owner}}/{{repo}}/compare/{sha}...{head}",
+                        "--jq", "{files: [.files[] | {filename, status, patch, changes, previous_filename}]}"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    try:
+        return parse_compare(json.loads(r.stdout)["files"])
+    except (ValueError, KeyError):
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pr", type=int)
     ap.add_argument("--verify-dir", default=os.path.join(MAIN, ".ai-output/verification"))
+    ap.add_argument("--classify-only", action="store_true", help="위험도와 근거만 출력하고 끝낸다")
     a = ap.parse_args()
 
     pr = json.loads(gh("pr", "view", str(a.pr), "--json",
-                       "headRefOid,files,closingIssuesReferences,statusCheckRollup,body,title"))
+                       "headRefOid,files,closingIssuesReferences,statusCheckRollup,body,title,labels"))
     head = pr["headRefOid"]
     files = [f["path"] for f in pr["files"]]
     issues = [i["number"] for i in pr["closingIssuesReferences"]]
     kind = classify(files)
+    tier, why = assess_risk(files, pr_patches(a.pr), [l["name"] for l in pr["labels"]], pr["body"])
     blocks, notes, reviews = [], [], []
 
     print(f"PR #{a.pr} {pr['title']}")
     print(f"head SHA: {head}")
     print(f"변경 종류: {kind} (파일 {len(files)}개)")
+    print(f"위험도: {tier}")
+    for w in why:
+        print(f"  근거: {w}")
     print(f"닫는 이슈: {', '.join(map(str, issues)) or '없음'}")
+    if a.classify_only:
+        return 0
 
-    if kind == "format-doc":
-        if NO_REVIEW.search(pr["body"]):
-            notes.append("서식 변경. PR 본문에 독립 검증 없음과 이유가 있음")
-        else:
-            blocks.append("서식 변경이지만 PR 본문에 `독립 검증 없음: <이유>`가 없음")
+    if tier != HIGH:
+        need = "작성자 자기 검증, CI, 하네스. 독립 검증 없이 diff 확인으로 충분" if tier == MID \
+            else "CI와 하네스 통과로 충분. 독립 검증 없음"
+        notes.append(f"위험도 {tier}: {need}")
+        if tier == MID:
+            notes.append("운영 배포 전이면 머지 뒤 검증도 허용. 머지 전 diff 확인자를 PR에 적을 것")
+        if kind == "policy-doc":
+            notes.append("정책, 계약, 검증 절차, 불변식 문서 변경. 사람 확인 필요")
     else:
         passed = False
         for n in issues:
@@ -143,7 +322,13 @@ def main():
             verdict, sha = rec
             print(f"#{n} 마지막 판정 기록: {verdict} {sha[:12]}")
             if sha != head:
-                blocks.append(f"#{n}: 판정 기록 SHA {sha[:12]}가 head {head[:12]}와 다름. 재검증하거나 트리를 비교할 것")
+                ok, detail = (False, "PASS가 아님") if verdict != "PASS" else \
+                    (lambda d: (False, "후속 변경을 읽지 못함") if d is None else followup_ok(d))(compare_delta(sha, head))
+                if ok:
+                    notes.append(f"#{n}: 판정 SHA {sha[:12]} 뒤 작은 후속 커밋. {detail}. 재검증 생략")
+                    passed = True
+                else:
+                    blocks.append(f"#{n}: 판정 기록 SHA {sha[:12]}가 head {head[:12]}와 다름 ({detail}). 재검증하거나 트리를 비교할 것")
             elif verdict != "PASS":
                 blocks.append(f"#{n}: head SHA의 판정이 {verdict}")
             else:
@@ -156,7 +341,7 @@ def main():
             notes.append("정책, 계약, 검증 절차, 불변식 문서 변경. 독립 PASS에 더해 사람 확인 필요")
 
     hot = [f for f in files if match(f, MUTATION_REQUIRED)]
-    if hot and not any("변이" in t for t in reviews):
+    if hot and tier == HIGH and not any("변이" in t for t in reviews):
         blocks.append(f"변이 시험 필수 경로 변경 {hot}. review.md에 변이 결과가 없음")
 
     cfg = [f for f in files if match(f, BUILD_CONFIG)]
@@ -169,19 +354,22 @@ def main():
         print("CI 증거: 쓸 수 없음. backend 검사 결과 없음")
     elif ci_ok and scope is None:
         print("CI 증거: 쓸 수 없음. CI가 돌린 테스트 범위를 읽지 못함. 검증자가 직접 build할 것")
+    elif ci_ok and scope[0] == "none":
+        print("CI 증거: 백엔드 변경 없음. build 증거가 필요 없음")
     elif ci_ok and scope[0] != "full":
         print(f"CI 증거: 쓸 수 없음. CI 범위 {scope[0]} {scope[1]}. 검증자가 직접 build할 것")
     elif ci_ok:
-        print("CI 증거: 조건 1, 2, 4 충족. 조건 3(artifact 테스트 수)은 review.md에서 확인할 것")
+        print("CI 증거: 조건 1, 2, 4 충족. 검증자는 전체 build를 다시 돌리지 않는다. 조건 3(artifact 테스트 수)은 review.md에서 확인할 것")
     else:
         print(f"CI 증거: 쓸 수 없음. backend {backend[-1].get('conclusion') or '진행 중'}")
-    if kind != "format-doc" and backend and not ci_ok:
+    if backend and not ci_ok:
         blocks.append("backend CI가 성공하지 않음")
 
     for n in notes:
         print(f"참고: {n}")
     for b in blocks:
         print(f"막힘: {b}")
+    print(f"원장 기록: 위험도 {tier}")
     print("RESULT:", "BLOCK" if blocks else "PASS")
     return 1 if blocks else 0
 

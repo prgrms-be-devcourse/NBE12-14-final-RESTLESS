@@ -31,7 +31,7 @@ Codex는 레포 루트에서 실행하면 이 파일을 자동으로 읽지 않�
 
 ## 검증 (`backend/`에서)
 
-구현 검증·PR 승인 준비 전에 저장소 루트의 `tools/verification/skills/independent-verification/SKILL.md`를 읽고 따른다. Codex와 Claude 모두 commit·push·PR을 수행할 수 있다. 구현과 독립 검증의 분리는 유지한다.
+구현 검증과 PR 승인 준비 전에 저장소 루트의 `tools/verification/skills/independent-verification/SKILL.md`를 읽고 따른다. Codex와 Claude 모두 commit, push, PR을 수행할 수 있다. 구현과 독립 검증의 분리는 유지한다. 독립 검증이 필요한 범위는 위험도로 정한다. `python3 tools/verification/bin/merge-gate.py <PR> --classify-only`로 단계를 보고, 높음만 새 컨텍스트 검증을 받는다 (`tools/verification/checklist.md` 5절).
 
 - 드롭 테스트: `./gradlew test --tests 'com.restless.drop.*'`
 - 모듈 경계: `./gradlew test --tests 'com.restless.architecture.*'`
