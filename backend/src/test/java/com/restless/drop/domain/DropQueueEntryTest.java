@@ -31,4 +31,22 @@ class DropQueueEntryTest {
         assertThat(entry.effectiveStatus(now.plus(ttl), timeout, false)).isEqualTo(EXPIRED);
         assertThat(entry.getStatus()).isEqualTo(ADMITTED);
     }
+
+    @Test
+    void expireClosesOnlyAdmissionPastDeadlineAndReportsItOnce() {
+        var ttl = Duration.ofMinutes(5);
+        assertThat(entry.expire(now.plus(ttl))).isFalse();
+        assertThat(entry.getStatus()).isEqualTo(WAITING);
+        entry.admit(now, ttl);
+        assertThat(entry.expire(now.plus(ttl).minusNanos(1000))).isFalse();
+        assertThat(entry.getStatus()).isEqualTo(ADMITTED);
+        assertThat(entry.expire(now.plus(ttl))).isTrue();
+        assertThat(entry.getStatus()).isEqualTo(EXPIRED);
+        assertThat(entry.expire(now.plus(ttl))).isFalse();
+        var consumed = DropQueueEntry.waiting(1L, 3L, 3L, now);
+        consumed.admit(now, ttl);
+        consumed.consume(now);
+        assertThat(consumed.expire(now.plus(ttl).plusSeconds(1))).isFalse();
+        assertThat(consumed.getStatus()).isEqualTo(CONSUMED);
+    }
 }
