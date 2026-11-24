@@ -238,6 +238,7 @@ Content-Type: application/json
 | 409 | `BOOKING_NOT_OPEN`, `BOOKING_CLOSED` | 예매 시간 범위 밖 |
 | 409 | `IDEMPOTENCY_KEY_CONFLICT` | 같은 키로 다른 회차, 좌석 요청 |
 | 409 | `SEAT_LOCK_TIMEOUT` | 잠금, 생성 경합 등의 최대 3회 시도 소진. 같은 키로 재요청 가능 |
+| 429 | `TOO_MANY_REQUESTS` | 같은 회원이 1초에 10회를 넘겨 요청 ([요청 횟수 제한](README.md#요청-횟수-제한)) |
 
 ## 선점 취소
 

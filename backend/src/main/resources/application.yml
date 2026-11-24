@@ -22,7 +22,7 @@ spring:
 restless:
   ratelimit:
     enabled: true
-    maximum-size: 10000
+    maximum-size: 100000
     expire-after-access: 2m
     login:
       limit: 20
@@ -39,6 +39,20 @@ restless:
     queue-status:
       limit: 5
       window: 1s
+    # 몰리는 쓰기 API의 회원별 한도. 네 개를 모두 적어야 기동한다.
+    write:
+      fan-meeting-application:
+        limit: 10
+        window: 1s
+      ticket-reservation:
+        limit: 10
+        window: 1s
+      auction-bid:
+        limit: 10
+        window: 1s
+      drop-reservation:
+        limit: 10
+        window: 1s
   drop:
     inventory:
       # ADR-0005: stock buckets per new SKU, min(this, total). 1..16, read only at creation.

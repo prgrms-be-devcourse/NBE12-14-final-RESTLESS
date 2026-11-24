@@ -17,7 +17,10 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class RequestRateLimiter {
-    enum RuleName { LOGIN, SIGNUP, REFRESH, QUEUE_ENTRY, QUEUE_STATUS }
+    enum RuleName {
+        LOGIN, SIGNUP, REFRESH, QUEUE_ENTRY, QUEUE_STATUS,
+        FAN_MEETING_APPLICATION, TICKET_RESERVATION, AUCTION_BID, DROP_RESERVATION
+    }
 
     private final Clock clock;
     private final RateLimitProperties properties;
@@ -47,6 +50,7 @@ public class RequestRateLimiter {
     synchronized long retryAfterSeconds(RuleName name, String subject) {
         if (!properties.enabled()) return 0;
         RateLimitProperties.Rule rule = rule(name);
+        if (rule == null) return 0;
         Instant now = clock.instant();
         Key key = new Key(name, subject);
         Window window = windows.getIfPresent(key);
@@ -71,6 +75,20 @@ public class RequestRateLimiter {
             case REFRESH -> properties.refresh();
             case QUEUE_ENTRY -> properties.queueEntry();
             case QUEUE_STATUS -> properties.queueStatus();
+            case FAN_MEETING_APPLICATION, TICKET_RESERVATION, AUCTION_BID, DROP_RESERVATION -> writeRule(name);
+        };
+    }
+
+    /** 쓰기 한도가 설정에 없으면 null이다. 그러면 세지 않고 허용한다. */
+    private RateLimitProperties.Rule writeRule(RuleName name) {
+        RateLimitProperties.Write write = properties.write();
+        if (write == null) return null;
+        return switch (name) {
+            case FAN_MEETING_APPLICATION -> write.fanMeetingApplication();
+            case TICKET_RESERVATION -> write.ticketReservation();
+            case AUCTION_BID -> write.auctionBid();
+            case DROP_RESERVATION -> write.dropReservation();
+            default -> null;
         };
     }
 

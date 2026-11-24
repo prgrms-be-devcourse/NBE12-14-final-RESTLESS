@@ -28,7 +28,8 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         RequestRateLimiter.RuleName rule = selectRule(request.getMethod(), pattern.toString());
         if (rule == null) return true;
         String subject = switch (rule) {
-            case QUEUE_ENTRY, QUEUE_STATUS -> memberId();
+            case QUEUE_ENTRY, QUEUE_STATUS, FAN_MEETING_APPLICATION, TICKET_RESERVATION, AUCTION_BID,
+                    DROP_RESERVATION -> memberId();
             // 프록시나 ALB 뒤에서는 모두 프록시 IP로 보여 전원이 함께 막힐 수 있다.
             // 그때 신뢰할 프록시에 대한 전달 헤더 설정이 필요하다. 임의 X-Forwarded-For는 쓰지 않는다.
             default -> request.getRemoteAddr();
@@ -48,6 +49,11 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                 case "/api/auth/signup" -> RequestRateLimiter.RuleName.SIGNUP;
                 case "/api/auth/refresh" -> RequestRateLimiter.RuleName.REFRESH;
                 case "/api/drops/{dropId}/queue/entries" -> RequestRateLimiter.RuleName.QUEUE_ENTRY;
+                case "/api/fan-meetings/{eventId}/applications" ->
+                        RequestRateLimiter.RuleName.FAN_MEETING_APPLICATION;
+                case "/api/ticket-reservations" -> RequestRateLimiter.RuleName.TICKET_RESERVATION;
+                case "/api/auctions/{auctionId}/bids" -> RequestRateLimiter.RuleName.AUCTION_BID;
+                case "/api/drops/{dropId}/reservations" -> RequestRateLimiter.RuleName.DROP_RESERVATION;
                 default -> null;
             };
         }

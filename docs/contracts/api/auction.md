@@ -212,6 +212,7 @@ Content-Type: application/json
 - `Idempotency-Key`는 1 ~ 100자다. 없거나 비었거나 100자를 넘으면 400 `INVALID_REQUEST`.
 - 같은 키로 다른 경매나 다른 금액을 보내면 409 `IDEMPOTENCY_KEY_CONFLICT`.
 - 거절된 요청은 저장하지 않는다. 같은 키로 재시도하면 새 요청으로 다시 판단한다.
+- 같은 회원이 1초에 10회를 넘겨 입찰하면 429 `TOO_MANY_REQUESTS` ([요청 횟수 제한](README.md#요청-횟수-제한)).
 
 금액 부족 409:
 

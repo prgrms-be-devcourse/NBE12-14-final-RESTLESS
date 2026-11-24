@@ -75,11 +75,17 @@
 | POST | `/api/auth/refresh` | IP | 1분에 30회 |
 | POST | `/api/drops/{dropId}/queue/entries` | 로그인 사용자 ID | 10초에 5회 |
 | GET, HEAD | `/api/drops/{dropId}/queue/me` | 로그인 사용자 ID | 1초에 5회 |
+| POST | `/api/fan-meetings/{eventId}/applications` | 로그인 사용자 ID | 1초에 10회 |
+| POST | `/api/ticket-reservations` | 로그인 사용자 ID | 1초에 10회 |
+| POST | `/api/auctions/{auctionId}/bids` | 로그인 사용자 ID | 1초에 10회 |
+| POST | `/api/drops/{dropId}/reservations` | 로그인 사용자 ID | 1초에 10회 |
 
 Spring MVC가 같은 상태 조회 handler에 연결하는 HEAD는 GET과 동일한 사용자 counter를 소모한다.
-첫 요청부터 고정 길이의 창을 센다. 규칙별로 분리하며 사용자 한도는 dropId와 무관하게 합산한다.
+첫 요청부터 고정 길이의 창을 센다. 규칙별로 분리하며 사용자 한도는 dropId, eventId, auctionId와 무관하게 합산한다.
+실패한 요청과 같은 `Idempotency-Key` 재요청도 센다. 막힌 동안의 요청은 기다리는 시간을 늘리지 않는다.
 IP는 `request.getRemoteAddr()` 기준이며 `X-Forwarded-For`를 사용하지 않는다.
-429로 거절된 상태 조회는 heartbeat를 갱신하지 않는다. 위 5개 외의 경로는 제한하지 않는다.
+429로 거절된 상태 조회는 heartbeat를 갱신하지 않는다. 위 9개 외의 경로는 제한하지 않는다.
+쓰기 4개의 한도(`restless.ratelimit.write`)는 통째로 빼면 제한하지 않고, 일부만 적으면 서버가 기동하지 않는다.
 `restless.ratelimit.enabled=false`면 제한을 끈다. perf 프로필과 일반 테스트에서는 끈다.
 
 ## 전체 엔드포인트

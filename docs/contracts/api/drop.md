@@ -95,6 +95,7 @@
   - 409 `DROP_ACTIVE_PURCHASE_EXISTS`: 같은 회원이 같은 드롭에서 진행 중인 거래가 있음 (INV-05)
   - 403 `DROP_ADMISSION_REQUIRED`: 입장 제어 사용 시 유효한 입장 허가 없음 (D4, INV-06). 종료된 입장 허가, 요청 `variantId`와 다른 SKU의 입장 허가도 같은 오류로 거절한다 (2026-11-19 결정. 정상 화면에서는 생기지 않는 요청을 막는 방어 검사다)
   - 400 `INVALID_REQUEST`: 키·배송지 검증
+  - 429 `TOO_MANY_REQUESTS`: 같은 회원이 1초에 10회를 넘겨 요청 ([요청 횟수 제한](README.md#요청-횟수-제한))
 - TTL 설정 `restless.drop.reservation.ttl` (기본 5분).
 - 입장 제어 사용 여부 설정 `restless.drop.queue.required` (기본 `true`). `false`면 입장 허가 없이 재고 점유한다. 트래픽 실험 EXP-02(입장 제어 켬/끔 비교)와 D2 수용 테스트가 쓴다.
 
