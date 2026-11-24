@@ -83,5 +83,46 @@ class SelectTest(unittest.TestCase):
         self.assertEqual(self.select(f"{TEST}/architecture/A.java"), ("partial", ALWAYS))
 
 
+    def test_wildcard_imported_interface_counts_as_implemented(self):
+        self.java(MAIN, "payment", "public interface PaymentResultHandler {}")
+        self.java(MAIN, "fanmeeting", "import com.restless.payment.application.payable.*;\n"
+                                      "class Handler implements PaymentResultHandler {}")
+        self.java(TEST, "fanmeeting", "")
+        self.java(TEST, "payment", "")
+        scope, patterns = self.select(f"{MAIN}/fanmeeting/A.java")
+        self.assertIn("com.restless.payment.*", patterns)
+
+    def test_test_overriding_a_bean_by_name_counts_as_use(self):
+        self.java(MAIN, "credit", "class CreditChargeHandler {}")
+        self.java(TEST, "drop", '@Bean("creditChargeHandler") Object fake() { return null; }')
+        scope, patterns = self.select(f"{MAIN}/credit/A.java")
+        self.assertIn("com.restless.drop.*", patterns)
+
+
+REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
+
+
+@unittest.skipUnless(os.path.isdir(os.path.join(REPO, MAIN)), "backend 소스가 없음")
+class RealRepoTest(unittest.TestCase):
+    """실제 코드 기준. 모듈 사이 결합이 바뀌면 이 기대값도 다시 본다."""
+
+    def patterns(self, path):
+        scope, patterns, _ = select_tests.select([path], REPO)
+        return scope, set(patterns)
+
+    def test_drop_change_runs_modules_that_execute_drop_code(self):
+        scope, patterns = self.patterns(f"{MAIN}/drop/application/DropPaymentResultHandler.java")
+        self.assertEqual(scope, "partial")
+        # payment: PaymentResultHandler 구현과 dropPaymentResultHandler 빈 덮어쓰기
+        # member: WithdrawalGuard 구현, order: OrderPayableResolver 구현
+        self.assertTrue({"com.restless.drop.*", "com.restless.payment.*", "com.restless.member.*",
+                         "com.restless.order.*"} <= patterns, patterns)
+        self.assertTrue(set(ALWAYS) <= patterns)
+
+    def test_shared_modules_run_everything(self):
+        for m in sorted(select_tests.SHARED):
+            self.assertEqual(self.patterns(f"{MAIN}/{m}/X.java")[0], "full", m)
+
+
 if __name__ == "__main__":
     unittest.main()

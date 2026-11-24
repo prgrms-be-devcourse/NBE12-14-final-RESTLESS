@@ -17,9 +17,10 @@
 - .github/ 나 tools/ci/ 가 바뀌면 전체.
 - 도메인 모듈이 바뀌면 그 도메인의 테스트를 돌린다. 함께 돌리는 것:
   - 그 도메인을 운영 코드에서 쓰는 도메인 (거슬러 올라가며). 공유 모듈에 닿으면 전체.
-  - 테스트 코드에서 그 도메인을 쓰는 모듈의 테스트.
-  - 그 도메인이 구현하는 인터페이스를 가진 모듈의 테스트. 예: 드롭은 member의 WithdrawalGuard와
-    order의 OrderPayableResolver를 구현하므로 회원과 주문 테스트가 드롭 코드를 실행한다.
+  - 테스트 코드에서 그 도메인을 쓰는 모듈의 테스트. 그 도메인 클래스의 빈 이름 문자열을 쓰는 테스트도 포함한다.
+  - 그 도메인이 구현하거나 상속하는 타입을 가진 모듈의 테스트. 예: 드롭은 member의 WithdrawalGuard,
+    order의 OrderPayableResolver, payment의 PaymentResultHandler를 구현하므로 회원, 주문, 결제 테스트가
+    드롭 코드를 실행한다. 와일드카드 import도 찾는다.
   - ArchUnit 모듈 경계 테스트와 애플리케이션 기동 smoke test (RestlessApplicationTests).
 - 바뀐 도메인에 테스트가 하나도 없으면 전체.
 - 백엔드와 CI 설정 밖의 파일만 바뀌면 none. 문서, 프론트엔드, perf 스크립트가 여기 든다.
@@ -38,34 +39,61 @@ FULL_PREFIXES = (".github/", "tools/ci/")
 ALWAYS = ["com.restless.architecture.*", "com.restless.RestlessApplicationTests"]
 REF = re.compile(r"com\.restless\.([a-z]+)\.")
 IMPORT = re.compile(r"import com\.restless\.([a-z]+)\.[\w.]*\.(\w+);")
-IMPLEMENTS = re.compile(r"\bimplements\s+([\w\s,<>.]+?)\s*\{")
+WILDCARD = re.compile(r"import com\.restless\.([a-z]+)\.[\w.]*\*;")
+DECLARES = re.compile(r"\b(?:class|interface|enum|record)\s+(\w+)")
+# 빈 이름으로 볼 문자열. 두 단어 이상인 camelCase만 본다. "page" 같은 흔한 문자열과 겹치지 않게 한다.
+STRING = re.compile(r'"([a-z]+[A-Z]\w*)"')
+SUPERTYPES = re.compile(r"\b(?:implements|extends)\s+([\w\s,<>.?]+?)\s*(?:\{|implements\b|permits\b)")
 
 
-def scan(repo, side_root):
-    """모듈별로 참조하는 다른 모듈과, 구현하는 다른 모듈의 타입이 속한 모듈."""
+def java_files(repo, side_root):
     base = os.path.join(repo, side_root)
-    refs, impls = {}, {}
     for m in sorted(os.listdir(base)):
         path = os.path.join(base, m)
         if not os.path.isdir(path):
             continue
-        used, implemented = set(), set()
+        texts = []
         for dirpath, _, names in os.walk(path):
             for name in names:
-                if not name.endswith(".java"):
-                    continue
-                with open(os.path.join(dirpath, name), encoding="utf-8") as f:
-                    text = f.read()
-                used.update(REF.findall(text))
-                imported = {t: mod for mod, t in IMPORT.findall(text)}
-                for clause in IMPLEMENTS.findall(text):
-                    for t in re.findall(r"\w+", clause):
-                        if t in imported:
-                            implemented.add(imported[t])
+                if name.endswith(".java"):
+                    with open(os.path.join(dirpath, name), encoding="utf-8") as f:
+                        texts.append(f.read())
+        yield m, texts
+
+
+def scan(repo, side_root, declared=None, bean_names=None):
+    """모듈별로 참조하는 다른 모듈과, 구현하거나 상속하는 다른 모듈의 타입이 속한 모듈.
+    import가 와일드카드여도 declared(타입 이름 -> 선언한 모듈)로 찾는다."""
+    refs, impls = {}, {}
+    for m, texts in java_files(repo, side_root):
+        used, implemented = set(), set()
+        for text in texts:
+            used.update(REF.findall(text))
+            # 테스트가 다른 모듈의 빈을 이름으로 덮어쓰는 경우. 예: @Bean("dropPaymentResultHandler")
+            if bean_names:
+                for literal in STRING.findall(text):
+                    used |= bean_names.get(literal, set())
+            explicit = {t: mod for mod, t in IMPORT.findall(text)}
+            wildcard = set(WILDCARD.findall(text))
+            for clause in SUPERTYPES.findall(text):
+                for t in re.findall(r"\w+", clause):
+                    if t in explicit:
+                        implemented.add(explicit[t])
+                    elif declared:
+                        implemented |= declared.get(t, set()) & wildcard
         used.discard(m)
         implemented.discard(m)
         refs[m], impls[m] = used, implemented
     return refs, impls
+
+
+def declared_types(repo, side_root):
+    declared = {}
+    for m, texts in java_files(repo, side_root):
+        for text in texts:
+            for t in DECLARES.findall(text):
+                declared.setdefault(t, set()).add(m)
+    return declared
 
 
 def module_of(path, root):
@@ -75,8 +103,10 @@ def module_of(path, root):
 
 def select(files, repo):
     """Returns (scope, test patterns, reason)."""
-    main_refs, main_impls = scan(repo, MAIN)
-    test_refs, _ = scan(repo, TEST)
+    declared = declared_types(repo, MAIN)
+    bean_names = {t[0].lower() + t[1:]: mods for t, mods in declared.items()}
+    main_refs, main_impls = scan(repo, MAIN, declared)
+    test_refs, _ = scan(repo, TEST, bean_names=bean_names)
     changed = set()
     for f in files:
         if f.startswith(FULL_PREFIXES):
