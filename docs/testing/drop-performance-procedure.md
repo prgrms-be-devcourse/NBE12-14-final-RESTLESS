@@ -153,7 +153,7 @@ RDS 콘솔의 CPU는 1분 값이고 Performance Insights와 performance_schema�
 
 앱 CPU가 첫 병목일 때 무엇이 CPU를 쓰는지 보려고 켠다. 프로파일러 부담이 있으므로 JFR을 켠 회차의 처리량을 켜지 않은 회차와 바로 비교하지 않는다. 서버 두 대는 입장 허가 작업과 DB 프로브가 서버 1에만 있어 대칭이 아니다. 서버 한 대에만 켜서 다른 서버와 비교하려면 이 차이를 함께 적는다.
 
-1. 켤 서버에서 `perf-ec2.sh stop-app`으로 멈춘 뒤 컨테이너를 지우고 직접 띄운다. `perf-ec2.sh start`는 JVM 옵션을 받지 않는다. 이미지 기본 옵션을 덮어쓰므로 기본값도 같이 적는다.
+1. 켤 서버에서는 7-1의 5번 `start` 대신 이 명령으로 띄운다. 먼저 `perf-ec2.sh stop-app`으로 멈춘 뒤 컨테이너를 지우고 직접 띄운다. `perf-ec2.sh start`는 JVM 옵션을 받지 않는다. 이미지 기본 옵션을 덮어쓰므로 기본값도 같이 적는다.
 
 ```bash
 docker rm -f restless-perf
@@ -164,13 +164,13 @@ curl -sf http://127.0.0.1:8081/actuator/health   # UP이 될 때까지 반복한
 ```
 
 2. 스택 깊이 기본값 64는 Tomcat과 앱 코드 같은 바깥 계층을 과소 집계한다. 위 명령은 256으로 올렸다.
-3. 측정 뒤 `docker stop -t 60 restless-perf`로 종료한다. 종료할 때 파일이 저장되므로 기본 10초로 끊지 않는다. 컨테이너를 지우기 전에 `docker cp restless-perf:/tmp/run.jfr ~/run-<날짜>.jfr`로 서버 홈에 꺼낸다. 저장소 폴더에는 두지 않는다. 노트북에는 서버 접속 방식대로 받아 결과 폴더에 둔다.
+3. 측정 뒤 7-5의 1번에서 이 서버의 `after-run` 파일을 받은 다음 `docker stop -t 60 restless-perf`로 종료한다. 종료할 때 파일이 저장되므로 기본 10초로 끊지 않는다. 컨테이너를 지우기 전에 `docker cp restless-perf:/tmp/run.jfr ~/run-<날짜>.jfr`로 서버 홈에 꺼낸다. 저장소 폴더에는 두지 않는다. 노트북에는 서버 접속 방식대로 받아 결과 폴더에 둔다.
 4. 노트북의 JDK 21에서 복사한 파일을 본다. `jfr print --events jdk.CPULoad`와 `jdk.GarbageCollection`으로 CPU와 GC 정지를 보고, `jfr print --events jdk.ExecutionSample`로 판매 1분 창의 실행 샘플을 뽑는다. 샘플은 스택의 첫 JDK 밖 프레임 패키지로 직접 묶는다. 이 묶음 작업에는 정해 둔 스크립트가 없다. self 몫만 믿는다. 깊이 제한이 있으면 엔드포인트별 CPU는 나눌 수 없다.
 5. 끝나면 서버를 `perf-ec2.sh start <태그>`로 되돌린다. JFR 파일은 커밋하지 않는다.
 
 ### 7-5. 측정 뒤 확인
 
-1. 수집을 멈추고 서버마다 `curl -s http://perf-app:8081/actuator/prometheus -o .ai-output/perf/<날짜>-<측정>/after-run-server1.prom`을 받는다. 서버 2는 `perf-app2`와 `after-run-server2.prom`으로 같게 한다. 서버 1에서 `lockstats`와 DB 프로브 `status`를 후 값으로 남긴다.
+1. 수집을 멈추고 서버마다 `curl -s http://perf-app:8081/actuator/prometheus -o .ai-output/perf/<날짜>-<측정>/after-run-server1.prom`을 받는다. 서버 2는 `perf-app2`와 `after-run-server2.prom`으로 같게 한다. DB 프로브 `sample` 파일도 노트북 결과 폴더로 받는다. JFR 파일은 서버 종료 뒤 같은 방식으로 받는다. 받는 방법은 서버 접속 방식을 따른다. 서버 1에서 `lockstats`와 DB 프로브 `status`를 후 값으로 남긴다.
 2. 진행 중 거래가 수렴했는지 보고 서버 1에서 `verify sale`을 돌린다. 출력을 결과 폴더에 저장한다. tail만 보지 않는다.
 3. 실패 항목을 이름으로 확인한다. 부하 뒤 정상인 실패는 hot drop untouched 한 건뿐이다. 그 밖의 실패는 정합성 위반으로 보고 그 회차를 채택하지 않는다.
 4. 정리는 이 순서로 한다. 사용자가 한다. 먼저 팀원이 싱글 테스트에 쓰는 서버 1(fanq-server)을 대상 그룹에서 등록 해제한다. 다음 회차 전에 다시 등록한다. 멀티 측정이 모두 끝나면 ALB를 삭제하고 대상 그룹은 남긴다. 서버 2는 계속 쓸지 정하고, 안 쓰면 멈추고 EIP도 해제한다. 서버 1은 그대로 둔다. perf 전용 기간에는 `finish`를 하지 않는다 ([EC2 도구](../../perf/ec2/README.md)).
