@@ -80,15 +80,19 @@ class DropQueueAcceptanceTest extends DropAcceptanceSupport {
         }
 
         runJob("dropQueueAdmissionJob");
+        // 진입 중 초가 바뀌면 스냅샷에 입장자가 남아 순번이 최대 1초 늦는다. 다음 초에서 정확한 순번을 확인한다.
+        awaitNextEpochSecond();
 
         List<Long> admitted = users.stream().filter(u -> "ADMITTED".equals(queueMe(u, drop).string("$.status"))).toList();
         assertThat(admitted).hasSize(2);
+        List<Long> positions = new ArrayList<>();
         for (Long u : users) {
             if (admitted.contains(u)) continue;
             Response me = queueMe(u, drop);
             assertThat(me.string("$.status")).isEqualTo("WAITING");
-            assertThat(me.longAt("$.position")).isBetween(1L, 3L);
+            positions.add(me.longAt("$.position"));
         }
+        assertThat(positions).as("입장하지 못한 3명은 입장자를 뺀 순번 1, 2, 3").containsExactly(1L, 2L, 3L);
 
         Long buyer = admitted.getFirst();
         Response hold = reserve(buyer, drop, "admitted-key");
