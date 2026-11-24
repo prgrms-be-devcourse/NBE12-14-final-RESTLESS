@@ -445,6 +445,45 @@ class DropQueueIntegrationTest {
                 .containsExactly("variant_id", "status", "id", "last_seen_at");
     }
 
+    // INV-17 boundary: the tail COUNT and the waiting gauge use the 40s heartbeat timeout, not 30s.
+    // The snapshot is cached first, so rows added afterwards are only counted by the tail query.
+    @Test
+    void tailCountUsesFortySecondHeartbeatBoundary() {
+        enterAs(newUser());
+        clock.now = opens.plusSeconds(35);
+        enterAs(newUser()); // fills the snapshot for this epoch second
+        queue.me(drop, user).ifPresent(ignored -> { });
+        var cutoff = clock.now.minusSeconds(40);
+        insertWaiting(cutoff.minusNanos(1_000)); // 40s plus 1 microsecond: excluded
+        insertWaiting(cutoff); // exactly 40s: counted
+        insertWaiting(clock.now.minusSeconds(35)); // between 30s and 40s: counted
+        insertWaiting(clock.now.minusSeconds(31)); // between 30s and 40s: counted
+        var me = enterAs(user);
+        // snapshot ids: first user (35s old, counted via cutoff) and second user, then 3 counted tail rows and self
+        long expected = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM drop_queue_entries WHERE variant_id=? AND status='WAITING'
+                  AND id <= (SELECT MAX(id) FROM drop_queue_entries WHERE drop_id=? AND user_id=?)
+                  AND last_seen_at >= ?""", Long.class, variant, drop, user, Timestamp.from(cutoff));
+        assertThat(expected).isEqualTo(6);
+        assertThat(me.body().position()).isEqualTo(expected);
+        assertThat(queue.me(drop, user).orElseThrow().position()).isEqualTo(expected);
+    }
+
+    @Test
+    void waitingGaugeUsesFortySecondHeartbeatBoundary() {
+        clock.now = opens.plusSeconds(100);
+        double before = meters.get("drop.queue.waiting").gauge().value();
+        insertWaiting(clock.now.minusSeconds(40).minusNanos(1_000)); // excluded
+        insertWaiting(clock.now.minusSeconds(40)); // exactly 40s: counted
+        insertWaiting(clock.now.minusSeconds(35)); // between 30s and 40s: counted
+        assertThat(meters.get("drop.queue.waiting").gauge().value()).isEqualTo(before + 2);
+    }
+
+    private void insertWaiting(Instant lastSeen) {
+        jdbc.update("INSERT INTO drop_queue_entries (drop_id,user_id,variant_id,status,entered_at,last_seen_at) VALUES (?,?,?,'WAITING',?,?)",
+                drop, newUser(), variant, Timestamp.from(lastSeen), Timestamp.from(lastSeen));
+    }
+
     @Test
     void sameSecondPollsReuseOneSnapshotUntilHeartbeatCutoffMoves() {
         enterAs(newUser());
