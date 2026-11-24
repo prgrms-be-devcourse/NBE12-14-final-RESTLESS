@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/resources/db/migration/V*__drop_*.sql`, `backend/src/main/java/com/restless/drop/domain/`
 >
-> 마지막 확인: 2026-11-22 (#330 재고 버킷 분할 migration V20261122_1400, 1401과 대조. 2026-11-20 #285 용어를 재고 점유로 통일. 2026-11-19 #254 SKU별 입장 제어 migration과 대조. 나머지는 2026-11-14 #92 구현과 대조)
+> 마지막 확인: 2026-11-24 (#377 입장 순번 인덱스 V20261124_1700과 대조. 2026-11-22 #330 재고 버킷 분할 migration V20261122_1400, 1401과 대조. 2026-11-20 #285 용어를 재고 점유로 통일. 2026-11-19 #254 SKU별 입장 제어 migration과 대조. 나머지는 2026-11-14 #92 구현과 대조)
 
 ![Drop ERD](drop-erd.svg)
 
@@ -135,6 +135,7 @@ SKU 재고 버킷. SKU 수량은 버킷 합이다
 - 입장 가능 수 계산 `max(0, available - 미사용 유효 ADMITTED 수)`는 SKU 버킷 `available_quantity` 합과 이 표의 `ADMITTED` 행을 함께 읽는다. 두 값을 읽고 입장 허가로 전이하는 사이에 다른 입장 허가 작업이 끼어들지 못해야 한다 (INV-16, [transactions.md](transactions.md) D4).
 - `WAITING`의 순서는 `id`(애플리케이션 입장 순번)이며 DB 락 획득 순서가 아니다. 재진입은 새 `id`를 받으므로 항상 뒤에 선다.
 - 회원별 최신 상태는 `(drop_id, user_id, id)`, 전체 대기 Gauge는 `(status, last_seen_at)` 인덱스를 사용한다.
+- 입장 순번 COUNT는 `(variant_id, status, id, last_seen_at)` 인덱스 `ix_drop_queue_sku_position`만 읽는다. 쿼리에 `USE INDEX`로 이 인덱스를 지정한다. 인덱스 이름을 바꾸면 쿼리도 같이 고친다 (#377).
 - 만료, 소비, 종료 이력은 조회할 수 있으며, 재진입하면 새 행을 추가한다. 종료된 입장 순번과 입장 허가는 복구하지 않는다. CLOSED 이력만 있으면 상태 조회는 404다. 최신 행이 `UNAVAILABLE`이면 404가 아니라 그 상태를 돌려준다.
 
 ## DROP_QUEUE_GATES
