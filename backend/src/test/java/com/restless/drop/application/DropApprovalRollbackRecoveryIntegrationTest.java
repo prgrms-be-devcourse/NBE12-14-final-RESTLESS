@@ -2,6 +2,7 @@ package com.restless.drop.application;
 
 import com.restless.drop.acceptance.DropStock;
 import com.restless.TestcontainersConfiguration;
+import com.restless.drop.application.DropPaymentTestClockConfig.MutableClock;
 import com.restless.common.error.BusinessException;
 import com.restless.drop.application.dto.CreateDropRequest;
 import com.restless.drop.application.dto.CreateDropReservationRequest;
@@ -22,7 +23,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.*;
 // This test covers payment settlement, not queue admission.
 @SpringBootTest(properties = {"pg.provider=fake", "spring.docker.compose.enabled=false",
         "restless.drop.queue.required=false"})
-@Import({TestcontainersConfiguration.class, DropApprovalRollbackRecoveryIntegrationTest.Config.class})
+@Import({TestcontainersConfiguration.class, DropPaymentTestClockConfig.class})
 class DropApprovalRollbackRecoveryIntegrationTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired DropAdminService admin;
@@ -140,16 +140,5 @@ class DropApprovalRollbackRecoveryIntegrationTest {
     private void stock(int available, int reserved, int sold) {
         assertThat(DropStock.totals(jdbc, variant)).containsEntry("total", 1).containsEntry("available", available)
                 .containsEntry("reserved", reserved).containsEntry("sold", sold);
-    }
-
-    @TestConfiguration(proxyBeanMethods = false)
-    static class Config {
-        @Bean @Primary MutableClock paymentTestClock() { return new MutableClock(); }
-    }
-    static class MutableClock extends Clock {
-        volatile Instant now = Instant.EPOCH;
-        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
-        @Override public Clock withZone(ZoneId zone) { return Clock.fixed(now, zone); }
-        @Override public Instant instant() { return now; }
     }
 }
