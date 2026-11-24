@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/domain/`, `backend/src/main/java/com/restless/order/domain/`, `backend/src/main/java/com/restless/payment/domain/`
 >
-> 마지막 확인: 2026-11-22 (#330 `DropReservation`에 재고 버킷 번호가 생겼다. 상태와 전이는 바뀌지 않았다. 2026-11-20 #285 용어 정리, 2절은 #254에서 구현됐다. 2026-11-19 #253 SKU별 입장 제어 정책 반영. 나머지는 2026-11-14 #92 구현과 대조)
+> 마지막 확인: 2026-11-24 (#388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 `DropReservation`에 재고 버킷 번호가 생겼다. 상태와 전이는 바뀌지 않았다. 2026-11-20 #285 용어 정리, 2절은 #254에서 구현됐다. 2026-11-19 #253 SKU별 입장 제어 정책 반영. 나머지는 2026-11-14 #92 구현과 대조)
 
 Order, Payment, Reservation 상태는 따로 저장하고, 조합 간 정합성을 검증한다.
 
@@ -35,10 +35,10 @@ ADMITTED → UNAVAILABLE
 | NONE → WAITING | 판매 중이고 그 SKU의 `available > 0`일 때 SKU를 골라 진입. `variant_id` 저장. `available = 0`이면 진입을 거절하고 행을 만들지 않는다 |
 | WAITING → ADMITTED | 같은 SKU의 추가 허가 가능 수 `max(0, available - 미사용 유효 ADMITTED 수)`가 1 이상이고 배치 제한 안일 때, 같은 SKU의 입장 순번(`id`)대로 |
 | ADMITTED → CONSUMED | 그 SKU의 재고 점유 성공과 같은 트랜잭션 (TX1) |
-| ADMITTED → EXPIRED | `now >= admitted_until` |
+| ADMITTED → EXPIRED | `now >= admitted_until`. 조회는 응답만 EXPIRED로 하고, 행은 입장 허가 작업이 닫는다. 품절 종료 때도 기한이 지난 행은 UNAVAILABLE이 아니라 EXPIRED다 |
 | WAITING → CLOSED | 마지막 저장 heartbeat가 40초보다 오래됨, 판매 기간 종료, 또는 같은 회원이 같은 드롭의 다른 SKU로 진입 |
 | ADMITTED → CLOSED | 같은 회원이 같은 드롭의 다른 SKU로 진입. 미사용 입장 허가를 포기한 것이다 |
-| WAITING 또는 ADMITTED → UNAVAILABLE | 그 SKU의 `available = 0`을 입장 허가 작업이 관찰함. `reserved` 수량과 무관. 다른 SKU는 영향 없음 |
+| WAITING 또는 ADMITTED → UNAVAILABLE | 그 SKU의 `available = 0`을 입장 허가 작업이 관찰함. 기한이 지난 ADMITTED는 제외. `reserved` 수량과 무관. 다른 SKU는 영향 없음 |
 
 `UNAVAILABLE`은 2026-11-19에 정한 종료 상태 이름이다. 검토한 후보(`CLOSED` 재사용, `EXPIRED` 재사용, `SOLD_OUT`)는 [policy.md 7-1절](policy.md#7-1-sku별-구매-입장-제어-decided-2026-11-19-253)에 있다.
 
