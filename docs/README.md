@@ -27,7 +27,7 @@
 | 팬미팅 응모, 추첨, 결제, 승격 | domains/fanmeeting/ 전체, contracts/api/fanmeeting.md, contracts/events/fanmeeting.md |
 | 테스트 작성 | testing/strategy.md, 해당 도메인 invariants.md (팬미팅은 test-scenarios.md도) |
 | AI 구현 검증·PR 승인 준비 | [독립 검증 절차와 필수 스킬](testing/independent-verification.md) |
-| 성능 개선 | testing/performance.md, [드롭 계획과 병목 기록](testing/drop-performance-plan.md), [실행](testing/drop-performance-procedure.md) (ALB 멀티 인스턴스, DB 프로브, JFR은 7절, 도구는 [perf/ec2](../perf/ec2/README.md)), [측정 규약](testing/drop-performance-measurement.md), 관련 ADR |
+| 성능 개선 | testing/performance.md, [드롭 계획과 병목 기록](testing/drop-performance-plan.md), [실행](testing/drop-performance-procedure.md) (7절: ALB 멀티 인스턴스, DB 프로브, JFR), [EC2 도구](../perf/ec2/README.md), [측정 규약](testing/drop-performance-measurement.md), 관련 ADR |
 | 서비스 의도, 사용자 시나리오, 범위, 역할, 완료기준 | [product/proposal.md](product/proposal.md) |
 | 정책이 애매할 때 | product/open-questions.md (목록에 있으면 임의로 정하지 않는다) |
 
