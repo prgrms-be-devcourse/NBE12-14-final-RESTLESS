@@ -46,6 +46,12 @@ MUTATION_REQUIRED = ["backend/src/main/java/com/restless/payment/application/Pay
 # 위험도. 정본은 checklist.md 5절. 애매하면 높은 쪽이다.
 HIGH, MID, LOW = "높음", "중간", "낮음"
 RANK = {LOW: 0, MID: 1, HIGH: 2}
+# AGENTS.md Never break 표의 코드가 사는 모듈. application과 domain 패키지는 로직만 바뀌어도 높음이다.
+# api, infrastructure, common, config는 잠금 줄과 쓰기 쿼리 규칙으로 판단한다.
+NEVER_BREAK_MODULES = ["drop", "order", "payment", "fanmeeting", "ticketing", "auction"]
+MAIN_PKG = "backend/src/main/java/com/restless"
+CORE_CODE = [f"{MAIN_PKG}/{m}/{pkg}/*" for m in NEVER_BREAK_MODULES for pkg in ("application", "domain")] \
+    + [f"{MAIN_PKG}/payment/*/pg/*"]
 HIGH_PATHS = [
     ("검증 절차 문서", ["docs/testing/independent-verification.md", "docs/testing/strategy.md"]),
     ("Flyway 마이그레이션", ["backend/src/main/resources/db/migration/*"]),
@@ -54,7 +60,8 @@ HIGH_PATHS = [
                  "backend/src/test/java/com/restless/architecture/*",
                  "backend/src/test/resources/harness/*", "tools/harness/*"]),
     ("불변식 핵심 코드", MUTATION_REQUIRED),
-    ("불변식, 트랜잭션, 상태 전이 문서", ["docs/domains/*/invariants.md", "docs/domains/*/transactions.md",
+    ("Never break 모듈의 application과 domain 코드", CORE_CODE),
+    ("불변식, 트랜잭션, 상태 전이 문서", ["docs/domains/*/policy.md", "docs/domains/*/invariants.md", "docs/domains/*/transactions.md",
                                "docs/domains/*/state-machines.md", "docs/domains/*/idempotency.md",
                                "docs/domains/*/seat-ownership.md", "docs/operations/failure-handling.md"]),
     ("검증과 CI 도구 자체", ["tools/verification/*", "tools/ci/*", ".github/*"]),
@@ -68,14 +75,22 @@ LOCK_LINE = re.compile(r"Transactional|TransactionTemplate|Propagation\.|Isolati
 # 테스트에서 사라지거나 바뀐 줄이 이런 줄이면 단언을 약하게 만들 수 있다.
 ASSERT_REMOVED = re.compile(r"\bassert\w*|\.(?:is|has|contains|matches|does|all|none|any|satisf|extracting|usingRecursive|as)\w*\("
                             r"|\bverify\w*\(|\bexpect\w*|\bfail\(|@Test\b|@ParameterizedTest|@RepeatedTest|@Nested\b|\$\.|\.andExpect"
-                            r"|await\w*\(|\bLatch|invokeAll|Timeout|\.join\(|\.get\(", re.I)
-SKIP_ADDED = re.compile(r"@Disabled|@Ignore\b|\bassume\w*\(|\.skip\(")
+                            r"|await\w*\(|\bLatch|invokeAll|Timeout|\.join\(|\.get\(|\.should\(|\bthen\(|\bwill\w*\(|\bgiven\(", re.I)
+SKIP_ADDED = re.compile(r"@Disabled|@Ignore\b|@EnabledIf|@DisabledIf|@EnabledOn|@DisabledOn|@EnabledFor|@DisabledFor|@Tag\(\"skip"
+                        r"|\bAssumptions?\.assume|\bassume\w*\(|\.skip\(|\btest\.only\b|\b(?:it|describe)\.only\b"
+                        r"|\bx(?:it|describe)\(|\b(?:it|describe|test)\.skip\b")
+# 기존 테스트에 더해진 줄이 실행을 조건부로 만들면 최소 중간이다.
+COND_ADDED = re.compile(r"\bif\s*\(|\bwhile\s*\(|^\s*return\s*;|\bcontinue\s*;|\?\s*[^:]+:|\btry\s*\{|\bcatch\s*\(")
+# 동시성 테스트와 공유 테스트 픽스처를 기존 파일에서 바꾸면 높음이다.
+CONCURRENCY_LINE = re.compile(r"Thread|Executor|Latch|Barrier|Semaphore|parallel|concurren|\bthreads?\b|\bworkers?\b|CompletableFuture|invokeAll|Phaser", re.I)
+FIXTURE_PATH = re.compile(r"(Support|Fixture|Testcontainers|TestConfig|Configuration|Abstract|Helper|Factory|Builder|TestUtil|Concurren|Race)\w*\.\w+$"
+                          r"|/(support|fixture|fixtures|testsupport|testutil)/|^backend/src/test/java/com/restless/[^/]+\.java$", re.I)
+
 FOLLOWUP_MAX_LINES = 30
 RISK_LABEL = {"risk:high": HIGH, "risk:medium": MID}
 RISK_BODY = re.compile(r"^\s*위험도:\s*(높음|중간)\s*$", re.M)
 RISK_DOWN = re.compile(r"^\s*위험도:\s*낮음\s*$", re.M)
 RECORD = re.compile(r"^\s*(?:[-*|]\s*)?판정 기록:\s*(PASS|FAIL|INCOMPLETE)\s+([0-9a-f]{40})(?![0-9a-f])")
-NO_REVIEW = re.compile(r"독립 검증 없음:\s*\S")
 
 
 SCOPE_NOTICE = re.compile(r"^Backend test scope: (full|partial|none)\b(.*)$")
@@ -104,8 +119,8 @@ def ci_test_scope(check):
 
 
 def is_test_path(path):
-    """테스트 코드 파일. src/test 아래 설정이나 리소스(yml, sql)는 테스트 코드가 아니라 중간이다."""
-    return path.endswith((".java", ".kt", ".js", ".ts")) and ("/src/test/" in path or path.endswith(("Test.java", ".test.js", ".spec.js")))
+    """테스트 코드 파일. src/test 아래 코드만 센다. 그 아래 설정이나 리소스(yml, sql)는 중간이고, src/main 아래는 이름이 Test로 끝나도 운영 코드다."""
+    return path.endswith((".java", ".kt", ".js", ".ts")) and "/src/test/" in path
 
 
 def unquote(path):
@@ -196,11 +211,12 @@ def changed_lines(patches):
 def assess_risk(files, patches, labels=(), body=""):
     """(위험도, 근거 목록). patches가 None이면 diff를 읽지 못한 것이라 높음이다.
     사람은 라벨 risk:high, risk:medium이나 본문 `위험도: 높음`으로 올릴 수만 있고 내릴 수는 없다."""
-    reasons = []
+    reasons, mid = [], []
+    paths = list(files)
     if not files or patches is None:
         reasons.append("변경 파일 목록이 비어 있거나 diff를 읽지 못함. 애매하면 높음")
     else:
-        # 경로 규칙은 파일 목록, diff, 이름을 바꾸기 전 경로의 합집합에 건다.
+        # 모든 판정은 파일 목록, diff 키, 이름을 바꾸기 전 경로의 합집합에 건다.
         paths = list(dict.fromkeys(list(files) + [k for k in patches if not k.startswith("?")]
                                    + [p["old"] for p in patches.values() if p.get("old")]))
         for f in paths:
@@ -213,7 +229,7 @@ def assess_risk(files, patches, labels=(), body=""):
             if f not in patches:
                 reasons.append(f"diff에서 찾지 못한 파일: {f}")
         for f, p in patches.items():
-            if p.get("unreadable") or p.get("binary") and is_test_path(f):
+            if p.get("unreadable") or (p.get("binary") and is_test_path(f)):
                 reasons.append(f"diff를 읽지 못함: {f}")
             prod = f.startswith("backend/src/main/") or f.endswith(".sql")
             if prod and "db/migration" not in f:
@@ -233,15 +249,28 @@ def assess_risk(files, patches, labels=(), body=""):
                 skip = next((l.strip() for l in p["added"] if SKIP_ADDED.search(l)), None)
                 if skip:
                     reasons.append(f"테스트를 건너뛰는 줄이 생김: {f}: {skip[:80]}")
+                if p["status"] == "modified":
+                    # 기존 테스트 파일을 바꾼 경우. 추가만 한 새 테스트와 다르게 본다.
+                    touched = p["added"] + p["removed"]
+                    if FIXTURE_PATH.search(f) or any(CONCURRENCY_LINE.search(l) for l in touched):
+                        reasons.append(f"기존 동시성 테스트나 공유 테스트 픽스처 변경: {f}")
+                    elif p["removed"]:
+                        mid.append(f"기존 테스트 파일에서 줄이 지워지거나 바뀜: {f}: {p['removed'][0].strip()[:80]}")
+                    else:
+                        cond = next((l.strip() for l in p["added"] if COND_ADDED.search(l)), None)
+                        if cond:
+                            mid.append(f"기존 테스트 파일에 조건부 실행이 더해짐: {f}: {cond[:80]}")
     if reasons:
         tier = HIGH
-    elif all(is_doc(f) or is_test_path(f) for f in files):
+    elif mid:
+        tier, reasons = MID, mid
+    elif all(is_doc(f) or is_test_path(f) for f in paths):
         tier = LOW
-        reasons.append("문서와 테스트 추가만, 기존 단언 삭제나 변경 없음" if any(is_test_path(f) for f in files)
+        reasons.append("문서와 테스트 추가만, 기존 테스트에서 지운 줄 없음" if any(is_test_path(f) for f in paths)
                        else "문서만 변경")
     else:
         tier = MID
-        other = [f for f in files if not is_doc(f) and not is_test_path(f)]
+        other = [f for f in paths if not is_doc(f) and not is_test_path(f)]
         other = [f for f in other if not f.endswith(".md")] or other
         reasons.append(f"운영 코드, 설정, perf 스크립트: {', '.join(other[:3])}{' 외' if len(other) > 3 else ''}")
     # 사람이 올리는 것만 반영한다.
@@ -298,6 +327,20 @@ def last_record(text):
     lines = [l for l in text.splitlines() if l.strip()]
     m = RECORD.match(lines[-1]) if lines else None
     return m.groups() if m else None
+
+
+def ci_blocks(files, rollup):
+    """backend 검사가 성공이 아니거나, 검증 도구를 바꿨는데 tools 검사가 성공이 아니면 막는다."""
+    out = []
+    backend = [c for c in rollup if c.get("name") == "backend"]
+    if backend and not all(c.get("conclusion") == "SUCCESS" for c in backend):
+        out.append("backend CI가 성공하지 않음")
+    tools = [c for c in rollup if c.get("name") == "tools"]
+    if tools and not all(c.get("conclusion") == "SUCCESS" for c in tools):
+        out.append("tools CI(분류기와 테스트 선택 자체 시험)가 성공하지 않음")
+    elif not tools and any(f.startswith(("tools/verification/", "tools/ci/")) for f in files):
+        out.append("검증 도구를 바꿨는데 tools CI 결과가 없음. CI를 다시 돌릴 것")
+    return out
 
 
 def pr_patches(n):
@@ -411,13 +454,7 @@ def main():
         print("CI 증거: 조건 1, 2, 4 충족. 검증자는 전체 build를 다시 돌리지 않는다. 조건 3(artifact 테스트 수)은 review.md에서 확인할 것")
     else:
         print(f"CI 증거: 쓸 수 없음. backend {backend[-1].get('conclusion') or '진행 중'}")
-    if backend and not ci_ok:
-        blocks.append("backend CI가 성공하지 않음")
-    tools = [c for c in pr["statusCheckRollup"] if c.get("name") == "tools"]
-    if tools and not all(c.get("conclusion") == "SUCCESS" for c in tools):
-        blocks.append("tools CI(분류기와 테스트 선택 자체 시험)가 성공하지 않음")
-    elif not tools and any(f.startswith(("tools/verification/", "tools/ci/")) for f in files):
-        blocks.append("검증 도구를 바꿨는데 tools CI 결과가 없음. CI를 다시 돌릴 것")
+    blocks.extend(ci_blocks(files, pr["statusCheckRollup"]))
 
     for n in notes:
         print(f"참고: {n}")
