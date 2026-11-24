@@ -70,4 +70,32 @@ class TicketSeatCompressionFilterTest {
         assertEquals("gzip", request("/api/performances/1/seats", "*;q=0.5", true, BODY, 200)
                 .getHeader(HttpHeaders.CONTENT_ENCODING));
     }
+
+    @Test
+    void preservesAlreadyEncodedAndNonJsonResponses() throws Exception {
+        for (boolean alreadyEncoded : new boolean[] {true, false}) {
+            var request = new MockHttpServletRequest("GET", "/api/performances/1/seats");
+            request.addHeader(HttpHeaders.ACCEPT_ENCODING, "gzip");
+            var response = new MockHttpServletResponse();
+            new TicketSeatCompressionFilter(true).doFilter(request, response, (req, res) -> {
+                var httpResponse = (jakarta.servlet.http.HttpServletResponse) res;
+                httpResponse.setContentType(alreadyEncoded ? "application/json" : "text/plain");
+                if (alreadyEncoded) httpResponse.setHeader(HttpHeaders.CONTENT_ENCODING, "br");
+                httpResponse.getOutputStream().write(BODY);
+            });
+            assertEquals(alreadyEncoded ? "br" : null, response.getHeader(HttpHeaders.CONTENT_ENCODING));
+            assertTrue(response.getHeaders(HttpHeaders.VARY).contains("Accept-Encoding"));
+            assertArrayEquals(BODY, response.getContentAsByteArray());
+        }
+    }
+
+    @Test
+    void rejectsNonFiniteAndOutOfRangeGzipQuality() throws Exception {
+        for (String encoding : new String[] {"gzip;q=NaN", "gzip;q=Infinity", "gzip;q=-0.1", "gzip;q=1.1"}) {
+            var response = request("/api/performances/1/seats", encoding, true, BODY, 200);
+            assertNull(response.getHeader(HttpHeaders.CONTENT_ENCODING));
+            assertTrue(response.getHeaders(HttpHeaders.VARY).contains("Accept-Encoding"));
+            assertArrayEquals(BODY, response.getContentAsByteArray());
+        }
+    }
 }

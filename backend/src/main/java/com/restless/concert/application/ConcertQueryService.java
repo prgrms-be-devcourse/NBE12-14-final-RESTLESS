@@ -1,6 +1,7 @@
 package com.restless.concert.application;
 
 import com.restless.common.error.BusinessException;
+import com.restless.common.observability.SeatQueryMetrics;
 import com.restless.concert.application.dto.BookingPerformance;
 import com.restless.concert.application.dto.ConcertDetail;
 import com.restless.concert.application.dto.ConcertPage;
@@ -30,6 +31,7 @@ public class ConcertQueryService {
     private final PerformanceRepository performanceRepository;
     private final LayoutSeatRepository layoutSeatRepository;
     private final ConcertRepository concertRepository;
+    private final SeatQueryMetrics seatQueryMetrics;
 
     /** 페이지에 포함된 회차·물리 좌석만 일괄 조회한다. 다른 도메인에 Repository를 노출하지 않는다. */
     @Transactional(readOnly = true)
@@ -90,9 +92,10 @@ public class ConcertQueryService {
 
     @Transactional(readOnly = true)
     public PerformanceLayout getPerformanceLayout(Long performanceId) {
-        Performance performance = performanceRepository.findById(performanceId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다."));
-        List<SeatPosition> seats = layoutSeatRepository.findAllById_LayoutId(performance.getLayoutId()).stream()
+        Performance performance = seatQueryMetrics.measure("performance", () -> performanceRepository.findById(performanceId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다.")));
+        List<SeatPosition> seats = seatQueryMetrics.measure("layout_seats",
+                () -> layoutSeatRepository.findAllById_LayoutId(performance.getLayoutId())).stream()
                 .map(seat -> new SeatPosition(seat.getId().getVenueSeatId(), seat.getSectionLabel(),
                         seat.getRowLabel(), seat.getSeatNumber(), seat.getPosX(), seat.getPosY()))
                 .toList();
