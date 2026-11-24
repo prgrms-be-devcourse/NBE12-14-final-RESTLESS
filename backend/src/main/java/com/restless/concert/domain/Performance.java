@@ -71,4 +71,11 @@ public class Performance {
         return new Performance(concertId, venueId, layoutId, startsAt, bookingOpensAt,
                 bookingClosesAt, maxTicketsPerUser, status);
     }
+
+    public void changeSchedule(Instant startsAt, Instant opensAt, Instant closesAt, int maximum) {
+        this.startsAt = startsAt;
+        this.bookingOpensAt = opensAt;
+        this.bookingClosesAt = closesAt;
+        this.maxTicketsPerUser = maximum;
+    }
 }

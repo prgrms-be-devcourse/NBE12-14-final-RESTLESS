@@ -11,10 +11,13 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Collection;
 
 public interface TicketSeatRepository extends JpaRepository<TicketSeat, Long> {
 
     List<TicketSeat> findAllByPerformanceId(Long performanceId);
+
+    List<TicketSeat> findAllByPerformanceIdIn(Collection<Long> performanceIds);
 
     @Query("select new com.restless.ticketing.application.dto.TicketSeatSnapshot(s.id, s.layoutId, s.venueSeatId, "
             + "s.grade, s.price, s.status) from TicketSeat s where s.performanceId = :performanceId order by s.id")

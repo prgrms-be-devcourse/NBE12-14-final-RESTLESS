@@ -100,7 +100,7 @@ public class TicketReservationService {
             return replay(original, performanceId, orderedIds, hash);
         }
 
-        BookingPerformance performance = concertQueryService.getBookingPerformance(performanceId);
+        BookingPerformance performance = concertQueryService.getBookingPerformanceForReservation(performanceId);
         TicketPurchaseLimit limit = ticketPurchaseLimitRepository.findByUserIdAndPerformanceId(userId, performanceId)
                 .orElseGet(() -> ticketPurchaseLimitRepository.saveAndFlush(TicketPurchaseLimit.create(userId, performanceId)));
 

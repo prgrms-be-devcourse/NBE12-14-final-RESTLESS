@@ -71,6 +71,14 @@ public class TicketSeat {
         status = TicketSeatStatus.HELD;
     }
 
+    public void changePricing(String grade, long price) {
+        if (status != TicketSeatStatus.AVAILABLE || currentHoldId != null) {
+            throw new IllegalStateException("선점되지 않은 좌석만 가격을 변경할 수 있습니다.");
+        }
+        this.grade = Objects.requireNonNull(grade);
+        this.price = price;
+    }
+
     public void sell(Long holdId) {
         if (status != TicketSeatStatus.HELD || !Objects.equals(currentHoldId, holdId)) {
             throw new IllegalStateException("좌석의 현재 선점 소유자만 판매 확정할 수 있습니다.");

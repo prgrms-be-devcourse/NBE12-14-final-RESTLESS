@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mockingDetails;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.restless.TestcontainersConfiguration;
@@ -91,6 +92,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @AutoConfigureMockMvc
 class TicketCheckoutServiceTest {
     @Autowired TicketCheckoutService checkout;
+    @Autowired OrganizerSeatPricingService seatPricing;
     @MockitoSpyBean TicketPaymentService paymentService;
     @Autowired TicketPaymentResultHandler handler;
     @Autowired TicketOrderPayableResolver orderPayables;
@@ -157,16 +159,15 @@ class TicketCheckoutServiceTest {
             return;
         }
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
-            jdbc.update("UPDATE performance_seats SET status = 'AVAILABLE', current_hold_id = NULL WHERE performance_id = ?",
-                    fixture.performanceId());
-            jdbc.update("DELETE FROM tickets WHERE performance_id = ?", fixture.performanceId());
-            jdbc.update("DELETE FROM seat_holds WHERE performance_id = ?", fixture.performanceId());
-            jdbc.update("DELETE FROM ticket_reservations WHERE performance_id IN (?, ?)",
-                    fixture.performanceId(), fixture.otherPerformanceId());
-            jdbc.update("DELETE FROM ticket_purchase_limits WHERE performance_id IN (?, ?)",
-                    fixture.performanceId(), fixture.otherPerformanceId());
-            jdbc.update("DELETE FROM performance_seats WHERE performance_id = ?", fixture.performanceId());
+            jdbc.update("UPDATE performance_seats SET status = 'AVAILABLE', current_hold_id = NULL WHERE performance_id IN (SELECT id FROM performances WHERE venue_id=?)",
+                    fixture.venueId());
+            jdbc.update("DELETE FROM tickets WHERE performance_id IN (SELECT id FROM performances WHERE venue_id=?)", fixture.venueId());
+            jdbc.update("DELETE FROM seat_holds WHERE performance_id IN (SELECT id FROM performances WHERE venue_id=?)", fixture.venueId());
+            jdbc.update("DELETE FROM ticket_reservations WHERE performance_id IN (SELECT id FROM performances WHERE venue_id=?)", fixture.venueId());
+            jdbc.update("DELETE FROM ticket_purchase_limits WHERE performance_id IN (SELECT id FROM performances WHERE venue_id=?)", fixture.venueId());
+            jdbc.update("DELETE FROM performance_seats WHERE performance_id IN (SELECT id FROM performances WHERE venue_id=?)", fixture.venueId());
             jdbc.update("DELETE FROM performances WHERE venue_id = ?", fixture.venueId());
+            jdbc.update("DELETE FROM concert_section_prices WHERE concert_id IN (SELECT id FROM concerts WHERE venue_id=?)", fixture.venueId());
             jdbc.update("DELETE FROM concerts WHERE venue_id = ?", fixture.venueId());
             jdbc.update("DELETE FROM layout_seats WHERE venue_id = ?", fixture.venueId());
             jdbc.update("DELETE FROM venue_layouts WHERE venue_id = ?", fixture.venueId());
@@ -1073,6 +1074,116 @@ class TicketCheckoutServiceTest {
 
     private record AcceptedReservation(TicketReservationInfo reservation, TicketCheckoutInfo checkout,
                                        PaymentAttemptContext attempt) { }
+
+    @Nested
+    @DisplayName("회차 구역별 좌석 가격 설정")
+    class OrganizerSeatPricing {
+        private List<OrganizerSeatPricingService.SectionPrice> prices(long a, long b) {
+            return List.of(new OrganizerSeatPricingService.SectionPrice("A", "VIP", a),
+                    new OrganizerSeatPricingService.SectionPrice("B", "R", b));
+        }
+
+        private void prepareLayout() {
+            jdbc.update("UPDATE users SET role='ORGANIZER' WHERE id=?", fixture.firstUserId());
+            jdbc.update("UPDATE users SET role='ORGANIZER' WHERE id=?", fixture.secondUserId());
+            jdbc.update("UPDATE layout_seats SET section_label='B' WHERE venue_seat_id=(SELECT venue_seat_id FROM performance_seats WHERE id=?)", fixture.seatIds().get(1));
+            jdbc.update("UPDATE layout_seats SET is_sellable=FALSE WHERE venue_seat_id=(SELECT venue_seat_id FROM performance_seats WHERE id=?)", fixture.seatIds().get(2));
+            jdbc.update("DELETE FROM performance_seats WHERE performance_id=?", fixture.performanceId());
+            jdbc.update("UPDATE performances SET booking_opens_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR), booking_closes_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 2 HOUR) WHERE id=?", fixture.performanceId());
+        }
+
+        @Test
+        @DisplayName("공통 가격을 설정하고 회차를 등록하면 판매 좌석과 결제 금액에 반영된다")
+        void createsAndUpdatesSectionPrices() throws Exception {
+            prepareLayout();
+            Long layoutId = jdbc.queryForObject("SELECT layout_id FROM performances WHERE id=?", Long.class, fixture.performanceId());
+            var organizer = jwt().jwt(token -> token.subject(fixture.firstUserId().toString()))
+                    .authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ORGANIZER"));
+            var other = jwt().jwt(token -> token.subject(fixture.secondUserId().toString()))
+                    .authorities(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ORGANIZER"));
+            Instant now = databaseNow();
+            Instant starts = now.plusSeconds(86400 * 3);
+            String date = starts.atZone(java.time.ZoneId.of("Asia/Seoul")).toLocalDate().toString();
+            String concert = "{\"venueId\":" + fixture.venueId() + ",\"layoutId\":" + layoutId
+                    + ",\"title\":\"Pricing\",\"periodStartDate\":\"" + date + "\",\"periodEndDate\":\"" + date
+                    + "\",\"durationMinutes\":120}";
+            mockMvc.perform(post("/api/organizer/concerts").with(organizer).contentType("application/json").content(concert))
+                    .andExpect(status().isCreated());
+            Long concertId = jdbc.queryForObject("SELECT MAX(id) FROM concerts WHERE venue_id=?", Long.class, fixture.venueId());
+            String path = "/api/organizer/concerts/{id}/section-prices";
+            String body = "{\"sections\":[{\"sectionLabel\":\"A\",\"grade\":\"VIP\",\"price\":150000},{\"sectionLabel\":\"B\",\"grade\":\"R\",\"price\":100000}]}";
+            mockMvc.perform(put(path, concertId).contentType("application/json").content(body)).andExpect(status().isUnauthorized());
+            mockMvc.perform(put(path, concertId).with(other).contentType("application/json").content(body)).andExpect(status().isNotFound());
+            mockMvc.perform(put(path, concertId).with(organizer).contentType("application/json").content(body)).andExpect(status().isOk());
+            mockMvc.perform(put(path, concertId).with(organizer).contentType("application/json").content(body)).andExpect(status().isOk());
+            body = body.replace("150000", "180000").replace("100000", "90000");
+            mockMvc.perform(put(path, concertId).with(organizer).contentType("application/json").content(body)).andExpect(status().isOk());
+            String performance = "{\"startsAt\":\"" + starts + "\",\"bookingOpensAt\":\"" + now.plusSeconds(3600)
+                    + "\",\"bookingClosesAt\":\"" + now.plusSeconds(7200) + "\",\"maxTicketsPerUser\":3}";
+            mockMvc.perform(post("/api/organizer/concerts/{id}/performances", concertId).with(organizer)
+                    .contentType("application/json").content(performance)).andExpect(status().isCreated());
+            Long performanceId = jdbc.queryForObject("SELECT id FROM performances WHERE concert_id=?", Long.class, concertId);
+            List<Long> ids = jdbc.queryForList("SELECT id FROM performance_seats WHERE performance_id=? ORDER BY id", Long.class, performanceId);
+            assertThat(ids).hasSize(2);
+            assertThat(jdbc.queryForList("SELECT price FROM performance_seats WHERE performance_id=? ORDER BY id", Long.class, performanceId))
+                    .containsExactly(180000L, 90000L);
+            mockMvc.perform(put(path, concertId).with(organizer).contentType("application/json").content(body)).andExpect(status().isBadRequest());
+            assertThat(jdbc.queryForList("SELECT id FROM performance_seats WHERE performance_id=? ORDER BY id", Long.class, performanceId)).isEqualTo(ids);
+            mockMvc.perform(post("/api/organizer/concerts/{id}/publish", concertId).with(organizer)).andExpect(status().isOk());
+            jdbc.update("UPDATE performances SET booking_opens_at=DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) WHERE id=?", performanceId);
+            var reservation = service.reserve(fixture.firstUserId(), UUID.randomUUID().toString(), performanceId, ids);
+            assertThat(checkout(reservation).totalAmount()).isEqualTo(270000L);
+        }
+
+        @Test
+        @DisplayName("가격 누락·중복과 설정 중 실패는 좌석을 일부만 생성하지 않는다")
+        void invalidInputAndRollbackLeaveNoSeats() {
+            prepareLayout();
+            assertThatThrownBy(() -> seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), List.of(prices(1, 2).getFirst())))
+                    .isInstanceOfSatisfying(BusinessException.class, ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+            assertThatThrownBy(() -> seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), List.of(prices(1, 2).getFirst(), prices(1, 2).getFirst())))
+                    .isInstanceOfSatisfying(BusinessException.class, ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+            TransactionTemplate tx = new TransactionTemplate(transactionManager);
+            tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+            assertThatThrownBy(() -> tx.execute(status -> {
+                seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), prices(1, 2));
+                throw new InjectedFailure();
+            })).isInstanceOf(InjectedFailure.class);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=?", Integer.class, fixture.performanceId())).isZero();
+        }
+
+        @Test
+        @DisplayName("동시 동일 가격 설정은 좌석을 한 번만 생성한다")
+        void concurrentSetupDoesNotDuplicateSeats() throws Exception {
+            prepareLayout();
+            var ready = new CountDownLatch(2);
+            var start = new CountDownLatch(1);
+            var pool = Executors.newFixedThreadPool(2);
+            try {
+                Callable<Boolean> action = () -> { ready.countDown(); await(start); return seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), prices(1, 2)).changed(); };
+                var first = pool.submit(action); var second = pool.submit(action);
+                assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue(); start.countDown();
+                assertThat(List.of(first.get(15, TimeUnit.SECONDS), second.get(15, TimeUnit.SECONDS))).containsExactlyInAnyOrder(true, false);
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=?", Integer.class, fixture.performanceId())).isEqualTo(2);
+            } finally { start.countDown(); pool.shutdownNow(); assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue(); }
+        }
+
+        @Test
+        @DisplayName("예매 시작 이후 또는 선점 이력이 있으면 기존 가격을 변경하지 않는다")
+        void rejectsChangesAfterOpenAndWithHoldHistory() {
+            prepareLayout();
+            seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), prices(1, 2));
+            jdbc.update("UPDATE performances SET booking_opens_at=DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 HOUR), booking_closes_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) WHERE id=?", fixture.performanceId());
+            assertThatThrownBy(() -> seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), prices(3, 4)))
+                    .isInstanceOfSatisfying(BusinessException.class, ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.TICKET_PRICING_CLOSED));
+            Long seatId = jdbc.queryForObject("SELECT MIN(id) FROM performance_seats WHERE performance_id=?", Long.class, fixture.performanceId());
+            service.reserve(fixture.firstUserId(), UUID.randomUUID().toString(), fixture.performanceId(), List.of(seatId));
+            jdbc.update("UPDATE performances SET booking_opens_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR), booking_closes_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 2 HOUR) WHERE id=?", fixture.performanceId());
+            assertThatThrownBy(() -> seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), prices(3, 4)))
+                    .isInstanceOfSatisfying(BusinessException.class, ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.TICKET_PRICING_CLOSED));
+            assertThat(jdbc.queryForList("SELECT price FROM performance_seats WHERE performance_id=? ORDER BY id", Long.class, fixture.performanceId())).containsExactly(1L, 2L);
+        }
+    }
 
     @Nested
     @DisplayName("정상 환불 요청 내부 검증")

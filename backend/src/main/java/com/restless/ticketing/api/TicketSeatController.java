@@ -6,6 +6,7 @@ import com.restless.ticketing.application.TicketSeatQueryService;
 import com.restless.ticketing.application.TicketReservationQueryService;
 import com.restless.ticketing.application.dto.TicketBookingAvailability;
 import com.restless.auth.LoginMember;
+import com.restless.concert.application.OrganizerPerformanceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,6 +22,7 @@ public class TicketSeatController {
 
     private final TicketSeatQueryService ticketSeatQueryService;
     private final TicketReservationQueryService reservationQueries;
+    private final OrganizerPerformanceService performanceAccess;
 
     @GetMapping("/{performanceId}/booking-availability")
     public TicketBookingAvailability availability(@LoginMember Long userId, @PathVariable Long performanceId) {
@@ -29,6 +31,7 @@ public class TicketSeatController {
 
     @GetMapping("/{performanceId}/seats")
     public List<TicketSeatInfo> getSeats(@PathVariable("performanceId") Long performanceId) {
+        performanceAccess.requirePublishedForPerformance(performanceId);
         return ticketSeatQueryService.getSeats(performanceId);
     }
 
