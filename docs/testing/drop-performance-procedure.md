@@ -94,7 +94,7 @@ PG 장애 복구는 범위 밖이다. 중복과 동시 구매, 환불, 이중 �
 - 보안 그룹은 노트북에서 서버 2의 8081과 ALB 리스너 포트(k6 예시는 80)를 열고, ALB에서 두 서버의 8080과 8081(헬스 체크)을 연다.
 - 서버 2도 [EC2 도구](../../perf/ec2/README.md) 순서 1처럼 CPU 크레딧을 무제한으로 바꾸고 `CPUCreditBalance` 시작값과 끝값을 적는다. 세부 모니터링도 켠다. 표준 크레딧이면 서버 2만 중간에 느려져 서버 결과로 오해된다.
 - 서버 두 대는 같은 이미지 태그를 쓴다. 다르면 달라진 변경을 기록에 적는다.
-- 두 서버의 `perf.env`는 같은 `perf-` DB와 같은 풀, Tomcat, 대기열, 가짜 PG 값을 가진다. 아래 입장 허가 설정만 예외다.
+- 두 서버의 `perf.env`는 같은 `perf-` DB와 같은 `JWT_SECRET`, 풀, Tomcat, 대기열, 가짜 PG 값을 가진다. 아래 입장 허가 설정만 예외다. 토큰은 서버 1의 `JWT_SECRET`으로 서명하므로 서버 2가 다르면 요청의 절반이 401이 된다. 비밀값은 출력하지 말고 각 서버에서 `sudo grep ^JWT_SECRET= /opt/restless/perf.env | sha256sum`을 실행해 해시만 비교한다.
 
 주의할 점:
 
@@ -110,6 +110,7 @@ PG 장애 복구는 범위 밖이다. 중복과 동시 구매, 환불, 이중 �
 5. 서버 1과 서버 2에서 같은 태그로 `start`를 한다. 서버 2의 `start`는 Flyway를 새로 적용하지 않고 이미 적용된 결과만 보여야 한다.
 6. 이전 회차에서 서버 1을 대상 그룹에서 등록 해제했다면 사용자가 다시 등록한다. 그다음 대상 그룹에서 두 서버가 healthy인지 본다. 콘솔을 쓸 수 없으면 측정 뒤 서버별 요청 수가 고른지로 분배를 확인한다.
 7. 서버 1에서 `lockstats`와 DB 프로브 `status`를 측정 전 값으로 남긴다 (7-3절).
+8. 변경 전 예측을 결과 폴더에 한 줄 적는다. 그다음 7-2로 간다.
 
 ### 7-2. 서버별 지표 수집과 k6
 
@@ -136,7 +137,7 @@ k6 run perf/scenarios/drop-sale.js 2>&1 | tee .ai-output/perf/<날짜>-<측정>/
 
 - 시나리오는 호스트가 `perf-`로 시작하지 않으면 시작하지 않는다. ALB 이름도 `perf-`로 시작하게 `/etc/hosts`에 둔다.
 - `ulimit -n`을 올리지 않으면 부하 발생기 쪽 연결 오류가 서버 성능으로 오해된다.
-- 유효 설정은 서버마다 따로 확인한다. 각 서버에서 `docker exec restless-perf env | grep RESTLESS_DROP_QUEUE_`을 실행한다. 출력에 없는 키는 application.yml 기본값을 쓴다. 풀 크기는 두 서버(`perf-app`, `perf-app2`)의 `http://<호스트>:8081/actuator/prometheus`에서 `hikaricp_connections_max`로 본다. 측정 뒤에는 입장 카운터 `drop_queue_admitted_total`이 입장 허가 작업을 켠 서버에만 늘었는지 본다. k6의 시작 점검은 `MANAGEMENT_URL`의 서버 1만 보고 설정은 확인하지 않는다.
+- 유효 설정은 서버마다 따로 확인한다. 각 서버에서 `docker exec restless-perf env | grep RESTLESS_DROP_QUEUE_`을 실행한다. 출력에 없는 키는 application.yml 기본값을 쓴다. 풀 크기는 두 서버(`perf-app`, `perf-app2`)의 `http://<호스트>:8081/actuator/prometheus`에서 `hikaricp_connections_max`로 본다. 측정 뒤에는 입장 카운터 `drop_queue_admitted_total`이 입장 허가 작업을 켠 서버에만 늘었는지 본다. 작업을 끈 서버에는 이 카운터가 아예 나타나지 않으며 정상이다. k6의 시작 점검은 `MANAGEMENT_URL`의 서버 1만 보고 설정은 확인하지 않는다.
 - 서버 두 대의 앱 CPU, Tomcat busy, Hikari active와 pending을 서버별로 따로 본다. 요청 수가 고르게 나뉘었는지도 서버별 `http_server_requests_seconds_count` 합으로 확인한다.
 - 수집이 가끔 시간 초과로 빠질 수 있다. 빠진 횟수를 기록한다. 스파이크 한가운데에서 빠졌는지 본다.
 
