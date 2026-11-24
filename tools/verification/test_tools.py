@@ -340,6 +340,29 @@ class RiskTest(unittest.TestCase):
         for f in ["docs/decisions/0006-x.md", "docs/product/open-questions.md", "docs/testing/drop-performance-plan.md"]:
             self.assertEqual(tier([f], diff(f, ["x"]))[0], gate.LOW, f)
 
+    def test_r1_abort_style_skips_are_not_low(self):
+        f = f"{TEST_J}/drop/application/FooTest.java"
+        for line in ["Assumptions.abort();", "assumingThat(x, () -> {});", "throw new TestAbortedException();",
+                     "Assume.assumeTrue(x);"]:
+            self.assertGreaterEqual(gate.RANK[tier([f], diff(f, [line]))[0]], gate.RANK[gate.MID], line)
+            self.assertEqual(tier([f], diff(f, [line]))[0], gate.HIGH, line)
+
+    def test_r2_high_pr_stays_high_with_a_medium_label_or_body(self):
+        f = "docs/contracts/api/drop.md"
+        self.assertEqual(tier([f], diff(f, ["x"]), ["risk:medium"], "위험도: 중간")[0], gate.HIGH)
+        # 올리기 루프가 같은 단계에서 바뀌지 않는지: 낮은 요청은 단계를 바꾸지 않는다.
+        g = "docs/a.md"
+        t, why = tier([g], diff(g, ["x"]), ["risk:medium"])
+        self.assertEqual(t, gate.MID)
+        self.assertTrue(any("올림" in w for w in why))
+        t, why = tier([f], diff(f, ["x"]), ["risk:medium"])
+        self.assertFalse(any("올림" in w for w in why))
+
+    def test_r3_every_domain_doc_is_high(self):
+        for f in ["docs/domains/ticketing/purchase-limit.md", "docs/domains/ticketing/expiration.md",
+                  "docs/domains/fanmeeting/anything.md", "docs/domains/drop/README.md"]:
+            self.assertEqual(tier([f], diff(f, ["> 마지막 확인: 2026-11-24"]))[0], gate.HIGH, f)
+
     def test_file_missing_from_diff_is_high(self):
         self.assertEqual(tier(["docs/a.md", "docs/b.md"], diff("docs/a.md", ["x"]))[0], gate.HIGH)
 

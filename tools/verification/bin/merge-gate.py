@@ -61,9 +61,7 @@ HIGH_PATHS = [
                  "backend/src/test/resources/harness/*", "tools/harness/*"]),
     ("불변식 핵심 코드", MUTATION_REQUIRED),
     ("Never break 모듈의 application과 domain 코드", CORE_CODE),
-    ("불변식, 트랜잭션, 상태 전이 문서", ["docs/domains/*/policy.md", "docs/domains/*/invariants.md", "docs/domains/*/transactions.md",
-                               "docs/domains/*/state-machines.md", "docs/domains/*/idempotency.md",
-                               "docs/domains/*/seat-ownership.md", "docs/operations/failure-handling.md"]),
+    ("도메인 문서와 장애 처리 문서", ["docs/domains/*", "docs/operations/failure-handling.md"]),
     ("검증과 CI 도구 자체", ["tools/verification/*", "tools/ci/*", ".github/*"]),
     ("빌드 설정", [p for p in BUILD_CONFIG if not p.startswith(".github/")]),
 ]
@@ -77,7 +75,7 @@ ASSERT_REMOVED = re.compile(r"\bassert\w*|\.(?:is|has|contains|matches|does|all|
                             r"|\bverify\w*\(|\bexpect\w*|\bfail\(|@Test\b|@ParameterizedTest|@RepeatedTest|@Nested\b|\$\.|\.andExpect"
                             r"|await\w*\(|\bLatch|invokeAll|Timeout|\.join\(|\.get\(|\.should\(|\bthen\(|\bwill\w*\(|\bgiven\(", re.I)
 SKIP_ADDED = re.compile(r"@Disabled|@Ignore\b|@EnabledIf|@DisabledIf|@EnabledOn|@DisabledOn|@EnabledFor|@DisabledFor|@Tag\(\"skip"
-                        r"|\bAssumptions?\.assume|\bassume\w*\(|\.skip\(|\btest\.only\b|\b(?:it|describe)\.only\b"
+                        r"|\bAssumptions?\.(?:assume|abort)|\bassumingThat\(|TestAbortedException|\bAssume\.assume|\bassume\w*\(|\.skip\(|\btest\.only\b|\b(?:it|describe)\.only\b"
                         r"|\bx(?:it|describe)\(|\b(?:it|describe|test)\.skip\b")
 # 기존 테스트에 더해진 줄이 실행을 조건부로 만들면 최소 중간이다.
 COND_ADDED = re.compile(r"\bif\s*\(|\bwhile\s*\(|^\s*return\s*;|\bcontinue\s*;|\?\s*[^:]+:|\btry\s*\{|\bcatch\s*\(")
