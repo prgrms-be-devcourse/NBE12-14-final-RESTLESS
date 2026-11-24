@@ -98,7 +98,7 @@ PG 장애 복구는 범위 밖이다. 중복과 동시 구매, 환불, 이중 �
 
 주의할 점:
 
-- 입장 허가 작업, 순번 스냅샷, 점유 만료 작업은 앱 인스턴스마다 돈다. 서버 둘이 같은 `admit-per-run`을 쓰면 초당 입장 수가 약 2배가 되어 서버 수 말고도 변인이 바뀐다. 기본은 서버 2의 `RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED`를 false로 두는 것이다. 입장 수가 한 대일 때와 같다. 대안으로 서버마다 `RESTLESS_DROP_QUEUE_ADMIT_PER_RUN`을 절반으로 둘 수 있지만, 두 서버의 주기가 겹치면 한쪽이 그 SKU를 건너뛰어 합이 한 대일 때보다 낮아질 수 있다. 고른 방법을 실행 기록에 적는다.
+- 입장 허가 작업, 순번 스냅샷, 점유 만료 작업, 미완료 결제 재확인 작업(`PAYMENT_RECONCILE_ENABLED`)은 앱 인스턴스마다 돈다. 마지막 두 가지는 두 서버에서 같은 값을 쓰고 실행 기록에 적는다. 서버 둘이 같은 `admit-per-run`을 쓰면 초당 입장 수가 약 2배가 되어 서버 수 말고도 변인이 바뀐다. 기본은 서버 2의 `RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED`를 false로 두는 것이다. 입장 수가 한 대일 때와 같다. 대안으로 서버마다 `RESTLESS_DROP_QUEUE_ADMIT_PER_RUN`을 절반으로 둘 수 있지만, 두 서버의 주기가 겹치면 한쪽이 그 SKU를 건너뛰어 합이 한 대일 때보다 낮아질 수 있다. 고른 방법을 실행 기록에 적는다.
 - `perf-ec2.sh check`는 대기열이 false가 아니면 경고를 낸다. 대기열 켬 측정이면 정상이다.
 
 순서:
@@ -107,10 +107,11 @@ PG 장애 복구는 범위 밖이다. 중복과 동시 구매, 환불, 이중 �
 2. 서버 2에서 `perf-ec2.sh stop-app`을 먼저 한다. 컨테이너가 없으면 오류가 나도 된다. 앱이 떠 있으면 DB 초기화 중에 잠금을 기다리거나 새 시드에 쓰기를 한다. 서버 2는 5번까지 멈춰 둔다.
 3. 서버 1에서 2절 2번처럼 `stop-app`, `reset-db`, `start` (Flyway 실행), `stop-app`, `seed sale`을 한다. Flyway와 시드는 서버 1에서만 한다. 서버 2는 DB를 만들거나 시드하지 않는다.
 4. 서버 1에서 `serve-tokens`로 토큰 CSV를 노트북에 받는다. 서버 2에는 시드와 토큰이 필요 없다.
-5. 서버 1과 서버 2에서 같은 태그로 `start`를 한다. 서버 2의 `start`는 Flyway를 새로 적용하지 않고 이미 적용된 결과만 보여야 한다.
-6. 이전 회차에서 서버 1을 대상 그룹에서 등록 해제했다면 사용자가 다시 등록한다. 그다음 대상 그룹에서 두 서버가 healthy인지 본다. 콘솔을 쓸 수 없으면 측정 뒤 서버별 요청 수가 고른지로 분배를 확인한다.
-7. 서버 1에서 `lockstats`와 DB 프로브 `status`를 측정 전 값으로 남긴다 (7-3절).
-8. 변경 전 예측을 결과 폴더에 한 줄 적는다. 그다음 7-2로 간다.
+5. 서버 2의 `perf.env`에서 입장 허가 설정을 위 주의대로 정한다. 그다음 서버 1과 서버 2에서 같은 태그로 `start`를 한다. 서버 2의 `start`는 Flyway를 새로 적용하지 않고 이미 적용된 결과만 보여야 한다.
+6. 각 서버에서 `docker exec restless-perf env | grep RESTLESS_DROP_QUEUE_`로 유효 설정을 확인하고 고른 방법을 실행 기록에 적는다. 출력에 없는 키는 application.yml 기본값을 쓴다.
+7. 이전 회차에서 서버 1을 대상 그룹에서 등록 해제했다면 사용자가 다시 등록한다. 그다음 대상 그룹에서 두 서버가 healthy인지 본다. 콘솔을 쓸 수 없으면 측정 뒤 서버별 요청 수가 고른지로 분배를 확인한다.
+8. 서버 1에서 `lockstats`와 DB 프로브 `status`를 측정 전 값으로 남긴다 (7-3절).
+9. 변경 전 예측을 결과 폴더에 한 줄 적는다. 그다음 7-2로 간다.
 
 ### 7-2. 서버별 지표 수집과 k6
 
@@ -137,7 +138,7 @@ k6 run perf/scenarios/drop-sale.js 2>&1 | tee .ai-output/perf/<날짜>-<측정>/
 
 - 시나리오는 호스트가 `perf-`로 시작하지 않으면 시작하지 않는다. ALB 이름도 `perf-`로 시작하게 `/etc/hosts`에 둔다.
 - `ulimit -n`을 올리지 않으면 부하 발생기 쪽 연결 오류가 서버 성능으로 오해된다.
-- 유효 설정은 서버마다 따로 확인한다. 각 서버에서 `docker exec restless-perf env | grep RESTLESS_DROP_QUEUE_`을 실행한다. 출력에 없는 키는 application.yml 기본값을 쓴다. 풀 크기는 두 서버(`perf-app`, `perf-app2`)의 `http://<호스트>:8081/actuator/prometheus`에서 `hikaricp_connections_max`로 본다. 측정 뒤에는 입장 카운터 `drop_queue_admitted_total`이 입장 허가 작업을 켠 서버에만 늘었는지 본다. 작업을 끈 서버에는 이 카운터가 아예 나타나지 않으며 정상이다. k6의 시작 점검은 `MANAGEMENT_URL`의 서버 1만 보고 설정은 확인하지 않는다.
+- 풀 크기는 두 서버(`perf-app`, `perf-app2`)의 `http://<호스트>:8081/actuator/prometheus`에서 `hikaricp_connections_max`로 본다. 측정 뒤에는 입장 카운터 `drop_queue_admitted_total`이 입장 허가 작업을 켠 서버에만 늘었는지 본다. 작업을 끈 서버에는 이 카운터가 아예 나타나지 않으며 정상이다. k6의 시작 점검은 `MANAGEMENT_URL`의 서버 1만 보고 설정은 확인하지 않는다.
 - 서버 두 대의 앱 CPU, Tomcat busy, Hikari active와 pending을 서버별로 따로 본다. 요청 수가 고르게 나뉘었는지도 서버별 `http_server_requests_seconds_count` 합으로 확인한다.
 - 수집이 가끔 시간 초과로 빠질 수 있다. 빠진 횟수를 기록한다. 스파이크 한가운데에서 빠졌는지 본다.
 
