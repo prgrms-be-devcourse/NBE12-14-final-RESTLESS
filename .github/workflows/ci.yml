@@ -4,14 +4,19 @@ on:
   pull_request:
   push:
     branches: [main, dev]
+  # PR과 dev push는 영향받는 테스트만 돌 수 있다. 그래서 dev 전체 테스트를 매일 한 번과 수동 실행으로 남긴다.
+  schedule:
+    - cron: '0 18 * * *'   # 매일 03:00 KST
+  workflow_dispatch:
 
 permissions:
   contents: read
   pull-requests: read
 
 # A new push to the same PR cancels the older run. Runs on main/dev are never cancelled.
+# Scheduled and manual runs get their own group so a dev push never replaces a pending full run.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -22,40 +27,89 @@ jobs:
       run:
         working-directory: backend
     steps:
-      # PR에서 백엔드 파일과 워크플로가 바뀌지 않았으면 빌드 단계만 건너뛴다. job은 그대로 성공으로 남는다.
-      # merge-gate.py가 backend 검사 결과를 보므로 job 자체를 건너뛰지 않는다. dev와 main push는 항상 전체를 돈다.
-      - name: Detect changes
-        id: changes
+      - uses: actions/checkout@v4
+        with:
+          # dev push는 before..after 전체 변경을 보려면 이력이 필요하다.
+          fetch-depth: 0
+      # 돌릴 테스트를 고른다. 규칙은 tools/ci/select-backend-tests.py에 있다.
+      # PR은 PR 전체 변경, dev push는 before..after 전체 변경을 본다. 한 push에 여러 커밋이나 PR이 들어와도 모두 본다.
+      # main push, 정기 실행, 수동 실행은 항상 전체다. 변경 목록을 못 얻거나 분류를 못 하면 전체로 보낸다.
+      # job은 build를 건너뛰어도 성공으로 끝난다. merge-gate.py가 backend 검사의 SUCCESS를 보기 때문이다.
+      - name: Select tests
+        id: tests
         working-directory: .
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')"
-          if printf '%s\n' "$files" | grep -qE '^(backend/|\.github/workflows/)'; then run=true; else run=false; fi
-          echo "run=$run" >> "$GITHUB_OUTPUT"
-          if [ "$run" = false ]; then echo "::notice::No backend/ or workflow change in this PR, so the backend build is skipped."; fi
-      - uses: actions/checkout@v4
-        if: steps.changes.outputs.run == 'true'
+          set -uo pipefail
+          files="$RUNNER_TEMP/changed-files.txt"
+          mode=diff
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" \
+              --jq '.[] | .filename, (.previous_filename // empty)' > "$files" || mode="full:PR 변경 목록 조회 실패"
+          elif [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/dev ]; then
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+              mode="full:push 이전 커밋 없음"
+            elif git diff --name-status -M "$BEFORE" "$AFTER" > "$RUNNER_TEMP/name-status.txt"; then
+              # rename과 copy는 이전 경로와 새 경로를 모두 넣는다.
+              cut -f2- "$RUNNER_TEMP/name-status.txt" | tr '\t' '\n' > "$files"
+            else
+              mode="full:dev push 변경 범위 조회 실패 $BEFORE..$AFTER"
+            fi
+          else
+            mode="full:$GITHUB_EVENT_NAME $GITHUB_REF 는 항상 전체"
+          fi
+          if [ "$mode" = diff ]; then
+            if out="$(python3 tools/ci/select-backend-tests.py < "$files")"; then
+              scope="$(sed -n 1p <<< "$out")"; patterns="$(sed -n 2p <<< "$out")"; reason="$(sed -n 3p <<< "$out")"
+            else
+              scope=full; patterns=""; reason="테스트 선택 스크립트 실패"
+            fi
+          else
+            scope=full; patterns=""; reason="${mode#full:}"
+          fi
+          if [ "$scope" = none ]; then run=false; else run=true; fi
+          {
+            echo "run=$run"
+            echo "scope=$scope"
+            echo "patterns=$patterns"
+          } >> "$GITHUB_OUTPUT"
+          mkdir -p backend/build
+          printf 'scope: %s\nreason: %s\npatterns: %s\n' "$scope" "$reason" "$patterns" > backend/build/test-scope.txt
+          printf '### Backend test scope: %s\n- %s\n- %s\n' "$scope" "$reason" "${patterns:-all tests}" >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Backend test scope: $scope ($reason)"
       - uses: actions/setup-java@v4
-        if: steps.changes.outputs.run == 'true'
+        if: steps.tests.outputs.run == 'true'
         with:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
-        if: steps.changes.outputs.run == 'true'
-      - run: ./gradlew build
-        if: steps.changes.outputs.run == 'true'
+        if: steps.tests.outputs.run == 'true'
+      # 컴파일과 bootJar 패키징은 범위와 상관없이 build가 항상 한다. 테스트만 --tests로 좁힌다.
+      - name: Build and test
+        if: steps.tests.outputs.run == 'true'
+        env:
+          PATTERNS: ${{ steps.tests.outputs.patterns }}
+        run: |
+          set -f
+          args=""
+          for p in $PATTERNS; do args="$args --tests $p"; done
+          ./gradlew test $args build
       # Keeps expected/actual values and stack traces that the job log does not show.
       # Uploaded on success too: an independent verifier counts tests from it instead of rebuilding.
+      # test-scope.txt tells a verifier whether this run was full (1195 tests) or selected.
       - uses: actions/upload-artifact@v4
-        if: always() && steps.changes.outputs.run == 'true'
+        if: always() && steps.tests.outputs.run == 'true'
         with:
           name: backend-test-results
           path: |
             backend/build/reports/tests/test/
             backend/build/test-results/test/
+            backend/build/test-scope.txt
           retention-days: 7
           if-no-files-found: ignore
 
@@ -75,7 +129,9 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')"
+          if ! files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')"; then
+            echo "::warning::PR file list failed, so the frontend build runs."; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
           if printf '%s\n' "$files" | grep -qE '^(frontend/|\.github/workflows/)'; then run=true; else run=false; fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
           if [ "$run" = false ]; then echo "::notice::No frontend/ or workflow change in this PR, so the frontend build is skipped."; fi
