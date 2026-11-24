@@ -97,13 +97,13 @@ PG 장애 복구는 범위 밖이다. 중복과 동시 구매, 환불, 이중 �
 
 주의할 점:
 
-- 입장 허가 작업, 순번 스냅샷, 만료 작업은 앱 인스턴스마다 돈다. 서버 둘이 같은 `admit-per-run`을 쓰면 초당 입장 수가 약 2배가 되어 서버 수 말고도 변인이 바뀐다. 한 가지를 골라 실행 기록에 적는다. 서버마다 `RESTLESS_DROP_QUEUE_ADMIT_PER_RUN`을 절반으로 두거나, 서버 2의 `RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED`를 false로 둔다.
+- 입장 허가 작업, 순번 스냅샷, 점유 만료 작업은 앱 인스턴스마다 돈다. 서버 둘이 같은 `admit-per-run`을 쓰면 초당 입장 수가 약 2배가 되어 서버 수 말고도 변인이 바뀐다. 기본은 서버 2의 `RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED`를 false로 두는 것이다. 입장 수가 한 대일 때와 같다. 대안으로 서버마다 `RESTLESS_DROP_QUEUE_ADMIT_PER_RUN`을 절반으로 둘 수 있지만, 두 서버의 주기가 겹치면 한쪽이 그 SKU를 건너뛰어 합이 한 대일 때보다 낮아질 수 있다. 고른 방법을 실행 기록에 적는다.
 - `perf-ec2.sh check`는 대기열이 false가 아니면 경고를 낸다. 대기열 켬 측정이면 정상이다.
 
 순서:
 
 1. 노트북 `/etc/hosts`에 서버 1, 서버 2, ALB를 모두 `perf-`로 시작하는 이름으로 둔다 (예: `perf-app`, `perf-app2`, `perf-alb`). ALB 주소는 바뀔 수 있으니 측정하는 날 `dig +short <ALB DNS>`로 다시 보고 사용자가 고친다. 서버 2 주소도 재시작하면 바뀔 수 있다. ALB 리스너 포트도 확인한다. 아래 k6 예시는 80이다.
-2. 서버 2에서 `perf-ec2.sh stop-app`을 먼저 한다. 앱이 떠 있으면 DB 초기화 중에 잠금을 기다리거나 새 시드에 쓰기를 한다. 서버 2는 5번까지 멈춰 둔다.
+2. 서버 2에서 `perf-ec2.sh stop-app`을 먼저 한다. 컨테이너가 없으면 오류가 나도 된다. 앱이 떠 있으면 DB 초기화 중에 잠금을 기다리거나 새 시드에 쓰기를 한다. 서버 2는 5번까지 멈춰 둔다.
 3. 서버 1에서 2절 2번처럼 `stop-app`, `reset-db`, `start` (Flyway 실행), `stop-app`, `seed sale`을 한다. Flyway와 시드는 서버 1에서만 한다. 서버 2는 DB를 만들거나 시드하지 않는다.
 4. 서버 1에서 `serve-tokens`로 토큰 CSV를 노트북에 받는다. 서버 2에는 시드와 토큰이 필요 없다.
 5. 서버 1과 서버 2에서 같은 태그로 `start`를 한다. 서버 2의 `start`는 Flyway를 새로 적용하지 않고 이미 적용된 결과만 보여야 한다.
@@ -118,6 +118,8 @@ PG 장애 복구는 범위 밖이다. 중복과 동시 구매, 환불, 이중 �
 perf/scenarios/prom-collect.sh http://perf-app:8081  .ai-output/perf/<날짜>-<측정>/prom-server1
 perf/scenarios/prom-collect.sh http://perf-app2:8081 .ai-output/perf/<날짜>-<측정>/prom-server2
 ```
+
+DB 프로브 `sample`은 k6를 시작하기 직전에 서버 1의 두 번째 터미널에서 시작한다. 초 수는 워밍업, 판매 스파이크, 관측 구간을 모두 덮게 정한다. 브라우저 터미널에서는 끝날 때까지 막히므로 별도 창에서 돌린다.
 
 k6는 ALB로 보내고 관리 포트 지표는 서버 1에서 읽는다. 칠 수 있는 호스트를 모두 허용 목록에 넣는다.
 
@@ -142,7 +144,7 @@ k6 run perf/scenarios/drop-sale.js 2>&1 | tee .ai-output/perf/<날짜>-<측정>/
 RDS 콘솔의 CPU는 1분 값이고 Performance Insights와 performance_schema를 못 쓸 때가 있다. 그때는 [db-probe.sh](../../perf/ec2/db-probe.sh)로 대신한다. 읽기 전용이고 사용법은 [EC2 도구](../../perf/ec2/README.md#db-프로브)에 있다.
 
 - `status`: 측정 전과 후에 한 번씩 전역 카운터를 저장하고 차이를 본다. 커밋 수, redo fsync, 읽은 행 수, 잠금 대기를 얻는다. 이 값은 RDS 인스턴스 전체이므로 다른 테스트가 없는지 확인한다.
-- `sample`: 측정 중 약 0.5초마다 실행 중인 SQL을 표본으로 모은다. 간격에 질의 시간이 더해져 실제 수집은 `<초>`보다 조금 길다. 표본 수는 대략 `<초> x 2`회다. 스파이크 전에 시작해 스파이크 뒤까지 돌린다. 표본 몫은 CPU 시간이 아니라 실행 중인 SQL의 몫이다.
+- `sample`: 측정 중 약 0.5초마다 실행 중인 SQL을 표본으로 모은다. 간격에 질의 시간이 더해져 실제 수집은 `<초>`보다 조금 길다. 질의가 없는 순간에도 poll마다 `tick` 행이 한 줄 남으므로 `tick` 행 수로 poll 횟수와 수집이 끝났는지 안다. 스파이크 전에 시작해 스파이크 뒤까지 돌린다. 표본 몫은 CPU 시간이 아니라 실행 중인 SQL의 몫이다.
 - 표본 수집이 요약 시점에 끝나지 않았으면 그 사실을 적는다.
 - 표본을 SQL 종류별로 묶을 때는 문장 앞부분으로 나눈다. 순번 COUNT, COMMIT, 행 잠금 SELECT, heartbeat UPDATE 같은 몫을 본다.
 
@@ -161,13 +163,13 @@ curl -sf http://127.0.0.1:8081/actuator/health   # UP이 될 때까지 반복한
 ```
 
 2. 스택 깊이 기본값 64는 Tomcat과 앱 코드 같은 바깥 계층을 과소 집계한다. 위 명령은 256으로 올렸다.
-3. 측정 뒤 `docker stop -t 60 restless-perf`로 종료한다. 종료할 때 파일이 저장되므로 기본 10초로 끊지 않는다. 컨테이너를 지우기 전에 `docker cp restless-perf:/tmp/run.jfr .`으로 꺼내 결과 폴더에 둔다.
+3. 측정 뒤 `docker stop -t 60 restless-perf`로 종료한다. 종료할 때 파일이 저장되므로 기본 10초로 끊지 않는다. 컨테이너를 지우기 전에 `docker cp restless-perf:/tmp/run.jfr ~/run-<날짜>.jfr`로 서버 홈에 꺼낸다. 저장소 폴더에는 두지 않는다. 노트북에는 서버 접속 방식대로 받아 결과 폴더에 둔다.
 4. 판매 1분 창의 실행 샘플만 모아 처음 만나는 JDK 밖 프레임 기준으로 묶는다. `jfr print --events jdk.ExecutionSample`과 `jdk.CPULoad`, `jdk.GarbageCollection`을 쓴다. self 몫만 믿는다. 깊이 제한이 있으면 엔드포인트별 CPU는 나눌 수 없다.
 5. 끝나면 서버를 `perf-ec2.sh start <태그>`로 되돌린다. JFR 파일은 커밋하지 않는다.
 
 ### 7-5. 측정 뒤 확인
 
-1. 수집을 멈추고 `lockstats`와 DB 프로브 `status`를 후 값으로 남긴다.
+1. 수집을 멈추고 서버마다 8081에서 `after-run.prom`을 받는다. 서버 1에서 `lockstats`와 DB 프로브 `status`를 후 값으로 남긴다.
 2. 진행 중 거래가 수렴했는지 보고 서버 1에서 `verify sale`을 돌린다. 출력을 결과 폴더에 저장한다. tail만 보지 않는다.
 3. 실패 항목을 이름으로 확인한다. 부하 뒤 정상인 실패는 hot drop untouched 한 건뿐이다. 그 밖의 실패는 정합성 위반으로 보고 그 회차를 채택하지 않는다.
 4. 정리는 이 순서로 한다. 사용자가 한다. 먼저 팀원이 싱글 테스트에 쓰는 서버를 대상 그룹에서 등록 해제한다. 멀티 측정이 모두 끝나면 ALB를 삭제하고 대상 그룹은 남긴다. perf 전용 기간에는 `finish`를 하지 않는다 ([EC2 도구](../../perf/ec2/README.md)).

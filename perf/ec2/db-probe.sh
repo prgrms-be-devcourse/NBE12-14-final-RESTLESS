@@ -3,7 +3,7 @@
 # performance_schema가 꺼져 있고 Performance Insights 권한이 없을 때 쓰는 대체 수단이다.
 #
 #   db-probe.sh status <파일>        전역 카운터 스냅샷 (측정 전후로 한 번씩, 차이를 본다)
-#   db-probe.sh sample <초> <파일>   약 0.5초마다 실행 중인 SQL 표본 (연결 1개)
+#   db-probe.sh sample <초> <파일>   약 0.5초마다 실행 중인 SQL 표본 (연결 1개). poll마다 tick 행이 한 줄 남는다
 #
 # perf-ec2.sh와 같은 안전장치: perf.env의 DB 이름이 perf-로 시작해야 하고 prod가 들어 있으면 멈춘다.
 set -euo pipefail
@@ -50,6 +50,7 @@ case "$cmd" in
     load_env
     n=$(( secs * 2 ))
     for _ in $(seq "$n"); do
+      echo "SELECT NOW(3), 0, 0, 'tick', '';"
       echo "SELECT NOW(3), ID, TIME, IFNULL(STATE,''), REPLACE(LEFT(IFNULL(INFO,''),160),'\n',' ') FROM information_schema.PROCESSLIST WHERE DB='$DB_NAME' AND COMMAND='Query' AND ID<>CONNECTION_ID();"
       echo "DO SLEEP(0.5);"
     done | run > "$out"
