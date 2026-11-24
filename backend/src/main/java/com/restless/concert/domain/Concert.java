@@ -89,9 +89,10 @@ public class Concert {
         return concert;
     }
 
-    /** 신규 초안의 공통 배치. 소속·회차 유무는 application 서비스에서 검증한다. */
-    public void selectLayout(Long layoutId) {
+    /** 초안의 공연장·공통 배치. 소속·회차 유무는 application 서비스에서 검증한다. */
+    public void changeVenueAndLayout(Long venueId, Long layoutId) {
         requireDraft();
+        this.venueId = Objects.requireNonNull(venueId);
         this.layoutId = Objects.requireNonNull(layoutId);
     }
 

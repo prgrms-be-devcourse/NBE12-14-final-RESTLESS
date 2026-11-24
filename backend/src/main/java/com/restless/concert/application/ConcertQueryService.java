@@ -139,4 +139,12 @@ public class ConcertQueryService {
         return new BookingPerformance(performance.getLayoutId(), performance.getBookingOpensAt(),
                 performance.getBookingClosesAt(), performance.getMaxTicketsPerUser(), sellableSeatIds);
     }
+
+    /** 고객 좌석 조회 전에 회차가 공개 공연에 속하는지 확인한다. 초안·없는 회차는 404다. */
+    @Transactional(readOnly = true)
+    public void requirePublishedPerformance(Long performanceId) {
+        if (!performanceRepository.existsById(performanceId)
+                || !concertRepository.isPerformancePublished(performanceId).orElse(false))
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+    }
 }

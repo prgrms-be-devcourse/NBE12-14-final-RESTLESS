@@ -185,15 +185,4 @@ public class OrganizerPerformanceService {
             throw new BusinessException(ErrorCode.TICKET_PRICING_CLOSED);
         }
     }
-
-    public void requirePublished(Long concertId) {
-        concerts.findByIdAndPublishedTrue(concertId).orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-    }
-
-    @Transactional(readOnly = true)
-    public void requirePublishedForPerformance(Long performanceId) {
-        if (!performances.existsById(performanceId)
-                || !concerts.isPerformancePublished(performanceId).orElse(false))
-            throw new BusinessException(ErrorCode.NOT_FOUND);
-    }
 }
