@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/application/`
 >
-> 마지막 확인: 2026-11-24 (#390 D4 상태 조회와 진입에 동시 처리 상한과 `pollAfterMs` 추가, 트랜잭션 경계는 그대로. 이전: 2026-11-22 (#330 재고 버킷 분할: TX1 5번, 계측 표, 정산 대상 버킷, 입장 허가 작업의 재고 합 읽기. 2026-11-21 #325 완료 단계 타이머 추가. #322 TX1 순서 변경: 재고 UPDATE를 마지막으로. 2026-11-20 #285 TX3 롤백 뒤 상태를 `DropApprovalRollbackRecoveryIntegrationTest`, 장애 처리 문서와 대조. 용어 정리. 2026-11-19 #254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
+> 마지막 확인: 2026-11-24 (#390 D4 상태 조회와 진입에 동시 처리 상한과 `pollAfterMs` 추가, 트랜잭션 경계는 그대로. #388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 재고 버킷 분할: TX1 5번, 계측 표, 정산 대상 버킷, 입장 허가 작업의 재고 합 읽기. 2026-11-21 #325 완료 단계 타이머 추가. #322 TX1 순서 변경: 재고 UPDATE를 마지막으로. 2026-11-20 #285 TX3 롤백 뒤 상태를 `DropApprovalRollbackRecoveryIntegrationTest`, 장애 처리 문서와 대조. 용어 정리. 2026-11-19 #254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
 
 PG 호출 중에는 DB 트랜잭션을 열어 두지 않는다.
 
@@ -185,7 +185,7 @@ PG 취소 결과가 불명확하면 재고를 복원하지 않는다.
 - 대기열 진입과 상태 조회는 컨트롤러 앞의 인터셉터에서 서버별 동시 처리 상한을 먼저 확인한다 (2026-11-24 사용자 위임 결정, #390). 상한을 넘으면 트랜잭션과 커넥션을 쓰기 전에 503 `DROP_QUEUE_BUSY`로 끝낸다. 허용치는 요청이 정상으로 끝나든 예외로 끝나든 돌려준다. TX1, 결제, 결제 확정 경로에는 걸지 않는다. WAITING 응답에는 순번으로 정한 `pollAfterMs`를 싣는다. 순번 계산과 heartbeat 기록은 바꾸지 않았다.
 - 상태 조회는 최신 대기와 판매를 transaction 없이 함께 읽는다. 이탈과 판매 종료 WAITING은 404, 기한이 된 ADMITTED는 EXPIRED로 응답한다. 이 판정은 행을 바꾸지 않는다.
 - 저장 시각에서 10초를 넘긴 WAITING만 별도 transaction의 조건부 UPDATE로 heartbeat를 기록한다. UPDATE는 같은 id의 WAITING, 저장 시각 기준 40초 이내와 기록 간격을 다시 확인한다. 0행이면 최신 행을 다시 읽어 답한다.
-- 2026-11-24 run4와 run5에서 commit당 SQL이 약 11.7문장이었다. P1과 P4 결정으로 읽기 경로의 격리 수준 변경과 COMMIT을 없앴다. 주기적인 ADMITTED 만료 정리 작업은 없다. expired 메트릭은 재진입에서 실제 EXPIRED로 바뀔 때 기록한다.
+- 2026-11-24 run4와 run5에서 commit당 SQL이 약 11.7문장이었다. P1과 P4 결정으로 읽기 경로의 격리 수준 변경과 COMMIT을 없앴다. 기한이 지난 ADMITTED는 상태 조회가 아니라 입장 허가 작업이 EXPIRED로 닫고, expired 메트릭도 여기서 센다 (#388). 재진입은 이미 EXPIRED인 행을 다시 세지 않는다.
 - `position`은 같은 SKU의 `WAITING` 안에서의 입장 순번이다. 이미 종료된 최신 행은 그 상태(`UNAVAILABLE`)를 그대로 돌려준다. 어떤 경우에도 요청을 붙잡지 않는다.
 - 입장 허가 작업: 대기자가 있는 SKU마다 아래 짧은 batch transaction을 실행한다. 종료 batch 크기는 100이고 batch마다 새 transaction으로 재고를 읽는다. 대기를 유지하려고 트랜잭션, 커넥션, thread를 쥐지 않는다.
 
@@ -195,7 +195,8 @@ PG 취소 결과가 불명확하면 재고를 복원하지 않는다.
 2. 미사용 유효 ADMITTED 수 `c`를 센다 (`status = 'ADMITTED' AND now < admitted_until`).
 3. 그다음 SKU 버킷 `available_quantity` 합을 한 문장으로 읽는다. `reserved_quantity`는 보지 않는다 (#330).
 4. 분기:
-   - `available = 0`: 이 SKU의 `WAITING`과 미사용 `ADMITTED`를 종료 상태로 바꾼다. 행을 잠근 뒤 아직 그 상태인 행만 바꾸는 조건부 UPDATE다. 대기 행 락은 짧게 끝나므로(TX1, 조건부 heartbeat 쓰기) 다른 트랜잭션이 쥔 대기 행은 `SKIP LOCKED`로 건너뛰지 않고 락을 기다린다. 건너뛰면 살아 있는 행이 남아 INV-17을 어긴다. 기다리지 않고 건너뛰는 것은 SKU 게이트 락뿐이다. `CONSUMED`인 행과 그 점유는 건드리지 않는다. 한 트랜잭션이 너무 커지지 않도록 일정 개수씩 나눠 처리하고, 나눈 묶음마다 `available`을 다시 읽어 0이 아니면 거기서 멈춘다.
+   - `available = 0`: 이 SKU의 `WAITING`과 미사용 `ADMITTED`를 종료 상태로 바꾼다. 행을 잠근 뒤 아직 그 상태인 행만 바꾸는 조건부 UPDATE다. 대기 행 락은 짧게 끝나므로(TX1, 조건부 heartbeat 쓰기) 다른 트랜잭션이 쥔 대기 행은 `SKIP LOCKED`로 건너뛰지 않고 락을 기다린다. 건너뛰면 살아 있는 행이 남아 INV-17을 어긴다. 기다리지 않고 건너뛰는 것은 SKU 게이트 락뿐이다. 기한(`admitted_until`)이 이미 지난 `ADMITTED`는 `UNAVAILABLE`이 아니라 `EXPIRED`로 닫고 `drop.queue.closed`의 `reason=expired`로 센다. `CONSUMED`인 행과 그 점유는 건드리지 않는다. 한 트랜잭션이 너무 커지지 않도록 일정 개수씩 나눠 처리하고, 나눈 묶음마다 `available`을 다시 읽어 0이 아니면 거기서 멈춘다.
+   - `available > 0`이면 아래 분기 전에 기한이 지난 `ADMITTED`를 100행씩 `EXPIRED`로 닫는다 (`SKIP LOCKED`). 100행이면 commit 뒤 이어서 처리한다. 이 행은 `c`에 들어 있지 않아 INV-16에 영향이 없다. TX1이 쥔 행은 건너뛰고 다음 실행이 처리한다. 상태를 `ADMITTED`와 기한으로 다시 확인한 뒤에만 바꾸므로 `CONSUMED` 행은 그대로다. 판매 뒤에도 이 정리와 위 `available = 0` 종료로 live 목록에서 빠진다.
    - `available - c <= 0`: 남은 재고가 이미 입장 허가로 덮였다. 입장시키지 않고 끝낸다. 대기는 유지하되 heartbeat 이탈과 판매 종료 WAITING은 100행씩 별도 정리한다. 허가 여유가 없어도 이 정리는 생략하지 않는다.
    - 그 밖: `n = min(available - c, admit-per-run)`. 같은 SKU의 `WAITING`을 `id` 오름차순으로 `n`명까지 `ADMITTED`로 바꾼다. 이탈자는 CLOSED로 닫고 건너뛴다.
 5. Commit

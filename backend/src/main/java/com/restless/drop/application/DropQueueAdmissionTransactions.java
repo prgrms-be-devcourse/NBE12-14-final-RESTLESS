@@ -37,9 +37,15 @@ public class DropQueueAdmissionTransactions {
         int available = inventories.available(variantId);
         if (available == 0) {
             var batch = entries.lockLive(variantId, CLOSE_BATCH_SIZE);
+            var closeNow = clock.instant();
             for (var entry : batch) {
-                entry.unavailable();
-                metrics.unavailable();
+                // An admission past its deadline is EXPIRED, as the user already saw, not UNAVAILABLE.
+                if (entry.expire(closeNow)) {
+                    metrics.closed("expired");
+                } else {
+                    entry.unavailable();
+                    metrics.unavailable();
+                }
             }
             entries.flush();
             return batch.size() == CLOSE_BATCH_SIZE ? Result.MORE : Result.DONE;
@@ -50,6 +56,14 @@ public class DropQueueAdmissionTransactions {
         // Lifecycle cleanup must run even if valid grants already cover all available stock.
         // Bound this batch too; MORE commits before processing any further stale rows.
         var cleanupNow = clock.instant();
+        // Admissions past their deadline close as EXPIRED. They are not counted in c, so INV-16 is unaffected.
+        // SKIP LOCKED is safe here: a row held by TX1 is CONSUMED or valid, and a skipped row waits for the next run.
+        var lapsed = entries.lockExpiredAdmitted(variantId, cleanupNow, CLOSE_BATCH_SIZE);
+        for (var entry : lapsed) {
+            if (entry.expire(cleanupNow)) metrics.closed("expired");
+        }
+        entries.flush();
+        if (lapsed.size() == CLOSE_BATCH_SIZE) return Result.MORE;
         var stale = entries.lockStaleWaiting(variantId, drop.isOnSale(cleanupNow),
                 cleanupNow.minus(settings.heartbeatTimeout()), CLOSE_BATCH_SIZE);
         for (var entry : stale) {

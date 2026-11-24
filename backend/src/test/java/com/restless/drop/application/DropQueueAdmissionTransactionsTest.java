@@ -93,4 +93,39 @@ class DropQueueAdmissionTransactionsTest {
         assertThat(first.getStatus()).isEqualTo(DropQueueStatus.ADMITTED);
         assertThat(second.getStatus()).isEqualTo(DropQueueStatus.ADMITTED);
     }
+
+    @Test
+    void soldOutClosesLapsedAdmissionAsExpiredAndValidOneAsUnavailable() {
+        when(gates.tryLock(1L)).thenReturn(DropQueueGateRepository.LockResult.LOCKED);
+        when(inventories.available(1L)).thenReturn(0);
+        var lapsed = DropQueueEntry.waiting(2L, 1L, 1L, now.minusSeconds(400));
+        lapsed.admit(now.minusSeconds(301), Duration.ofMinutes(5));
+        var valid = DropQueueEntry.waiting(2L, 2L, 1L, now.minusSeconds(100));
+        valid.admit(now.minusSeconds(100), Duration.ofMinutes(5));
+        var waiting = DropQueueEntry.waiting(2L, 3L, 1L, now);
+        when(entries.lockLive(1L, 100)).thenReturn(List.of(lapsed, valid, waiting));
+        worker.runBatch(1L);
+        assertThat(lapsed.getStatus()).isEqualTo(DropQueueStatus.EXPIRED);
+        assertThat(valid.getStatus()).isEqualTo(DropQueueStatus.UNAVAILABLE);
+        assertThat(waiting.getStatus()).isEqualTo(DropQueueStatus.UNAVAILABLE);
+        verify(metrics).closed("expired");
+        verify(metrics, times(2)).unavailable();
+    }
+
+    @Test
+    void lapsedAdmissionClosesEvenWhenGrantsCoverStockAndBatchIsBounded() {
+        when(gates.tryLock(1L)).thenReturn(DropQueueGateRepository.LockResult.LOCKED);
+        when(inventories.available(1L)).thenReturn(1);
+        when(entries.validGrantCount(1L, now)).thenReturn(1L);
+        var batch = java.util.stream.LongStream.range(0, 100).mapToObj(id -> {
+            var e = DropQueueEntry.waiting(2L, id, 1L, now.minusSeconds(400));
+            e.admit(now.minusSeconds(301), Duration.ofMinutes(5));
+            return e;
+        }).toList();
+        when(entries.lockExpiredAdmitted(1L, now, 100)).thenReturn(batch);
+        assertThat(worker.runBatch(1L)).isEqualTo(DropQueueAdmissionTransactions.Result.MORE);
+        assertThat(batch).allMatch(e -> e.getStatus() == DropQueueStatus.EXPIRED);
+        verify(metrics, times(100)).closed("expired");
+        verify(entries, never()).lockWaiting(anyLong(), anyInt());
+    }
 }

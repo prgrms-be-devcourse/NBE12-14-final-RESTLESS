@@ -424,6 +424,8 @@ class DropSkuQueuePolicyAcceptanceTest extends DropAcceptanceSupport {
 
         assertThat(live(closed1, drop)).as("종료된 순번은 복구하지 않는다").isFalse();
         assertThat(live(closed2, drop)).isFalse();
+        // 종료된 대기가 스냅샷에 남아 있으면 순번이 최대 1초 늦는다. 다음 초에서 새 진입의 정확한 순번을 확인한다.
+        awaitNextEpochSecond();
         Long fresh = newUser();
         Response newcomer = enter(fresh, drop, drop.variant());
         assertThat(newcomer.status()).as(newcomer.body()).isEqualTo(201);
