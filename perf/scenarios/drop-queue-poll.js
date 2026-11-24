@@ -13,7 +13,7 @@ import {
   DROP_ID, MANAGEMENT_URL, loadUsers, summaryTrendStats, checkTarget, skipped, summarize, tracked, durationMs,
   emptyThresholds, latencyLine, pct, ROW_OFFSET, variantFor,
 } from './lib/drop-reservation.js';
-import { enterQueue, pollQueue } from './lib/drop-flow.js';
+import { enterQueue, pollQueue, nextWaitSeconds } from './lib/drop-flow.js';
 
 const WAITERS = Number(__ENV.WAITERS);
 if (!(WAITERS > 0)) throw new Error('WAITERS is required (e.g. 100, 500, 1000, 2000, 5000, 10000)');
@@ -39,6 +39,8 @@ const PHASES = ['fill', 'settle', 'warmup', 'measure'];
 const LOSS_REASONS = ['enter_failed', 'sold_out', 'closed', 'expired', 'consumed', 'unavailable', 'admitted'];
 const subMetrics = [
   'drop_eval_latency{api:enter}', 'drop_unexpected_error{api:enter}',
+  'drop_queue_busy{api:enter}', 'drop_queue_busy{api:poll,phase:measure}',
+  'drop_queue_busy_latency{api:enter}', 'drop_queue_busy_latency{api:poll}',
   ...PHASES.flatMap((p) => [`drop_eval_latency{api:poll,phase:${p}}`, `drop_unexpected_error{api:poll,phase:${p}}`,
     `drop_queue_poll{phase:${p}}`]),
   'drop_queue_poll{result:waiting,phase:measure}', 'drop_queue_poll{result:timeout,phase:measure}',
@@ -94,7 +96,14 @@ export default function () {
     const user = users[n];
     // 대기자는 계정 순서대로 핫 SKU에 나뉜다. 입장 순번은 SKU마다 따로 센다.
     const variantId = variantFor(n);
-    const entered = enterQueue(user, variantId, { phase: phaseAt(scenarioStart) });
+    let entered = enterQueue(user, variantId, { phase: phaseAt(scenarioStart) });
+    // 503 DROP_QUEUE_BUSY는 오류가 아니라 Retry-After 뒤 다시 진입한다.
+    while (entered.status === 'BUSY') {
+      const wait = nextWaitSeconds(entered, POLL_S);
+      if (Date.now() + wait * 1000 > end) break;
+      sleep(wait);
+      entered = enterQueue(user, variantId, { phase: phaseAt(scenarioStart) });
+    }
     if (entered.status !== 'WAITING') {
       if (entered.status === 'ADMITTED') admitted.add(1);
       const reason = { ADMITTED: 'admitted', SOLD_OUT: 'sold_out' }[entered.status] || 'enter_failed';
@@ -102,10 +111,15 @@ export default function () {
       return;
     }
     // 조회 오류와 타임아웃은 세고 계속 조회한다. 30초 넘게 끊기면 서버가 대기를 닫고 다음 조회가 404가 된다.
-    while (Date.now() + POLL_S * 1000 <= end) {
-      sleep(POLL_S);
-      const status = pollQueue(user, variantId, { phase: phaseAt(scenarioStart) });
-      if (status === 'WAITING' || status === 'ERROR') continue;
+    // 서버가 pollAfterMs를 주면 그 간격을 따르고, 없으면 POLL_SECONDS를 쓴다. BUSY는 Retry-After 뒤 다시 묻는다.
+    let last = entered;
+    for (;;) {
+      const wait = nextWaitSeconds(last, POLL_S);
+      if (Date.now() + wait * 1000 > end) break;
+      sleep(wait);
+      last = pollQueue(user, variantId, { phase: phaseAt(scenarioStart) });
+      const status = last.status;
+      if (status === 'WAITING' || status === 'ERROR' || status === 'BUSY') continue;
       if (status === 'ADMITTED') admitted.add(1);
       lost.add(1, { reason: status.toLowerCase() });
       return;
@@ -133,11 +147,15 @@ export function handleSummary(data) {
     ...PHASES.map((p) => `${latencyLine(`eval poll ${p}`, m(`drop_eval_latency{api:poll,phase:${p}}`))}`
       + `  unexpected ${pct(m(`drop_unexpected_error{api:poll,phase:${p}}`).rate)}`),
     `  measure: polls ${measured} in ${MEASURE_MS / 1000}s = ${(measured / (MEASURE_MS / 1000)).toFixed(1)}/s`
-      + ` (expected about ${(WAITERS / POLL_S).toFixed(0)}/s), waiting replies ${m('drop_queue_poll{result:waiting,phase:measure}').count || 0},`
+      + ` (about ${(WAITERS / POLL_S).toFixed(0)}/s if the server sends no pollAfterMs), waiting replies ${m('drop_queue_poll{result:waiting,phase:measure}').count || 0},`
       + ` timeouts ${m('drop_queue_poll{result:timeout,phase:measure}').count || 0}`,
+    `  queue busy (503 DROP_QUEUE_BUSY, retried after Retry-After): enter ${m('drop_queue_busy{api:enter}').count || 0}, `
+      + `poll in measure ${m('drop_queue_busy{api:poll,phase:measure}').count || 0}`,
+    latencyLine('busy enter (503 only)', m('drop_queue_busy_latency{api:enter}')),
+    latencyLine('busy poll (503 only)', m('drop_queue_busy_latency{api:poll}')),
   ];
   const out = summarize(data, {
-    headline: `drop ${DROP_ID} queue polling, waiters ${WAITERS}, poll every ${POLL_S}s`,
+    headline: `drop ${DROP_ID} queue polling, waiters ${WAITERS}, poll every ${POLL_S}s unless the server sends pollAfterMs`,
     conditions: { scenario: 'queue-poll', waiters: WAITERS, enterRate: ENTER_RATE, pollSeconds: POLL_S, fillMs: FILL_MS,
       settleMs: SETTLE_MS, warmMs: WARM_MS, measureMs: MEASURE_MS },
     extraLines: lines,

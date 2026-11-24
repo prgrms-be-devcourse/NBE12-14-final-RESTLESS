@@ -22,7 +22,7 @@ perf/scenarios/run-ticketing.sh page 100
 
 `page`는 로그인 완료 사용자의 첫 진입에서 좌석과 구매 가능 정보를 병렬 조회하고 기본적으로 추가 조회 없이 종료한다. 기본 진입은 3초 분산이며 `POLL_ENTRY=simultaneous`로 동시 진입을 지정한다. 포커스 복귀·선점 이후의 갱신은 포함하지 않는다. 구매 가능 정보 API가 배포된 이미지가 필요하다. `ticket_availability_requests`, `ticket_availability_errors`, `ticket_availability_duration`으로 해당 API를 따로 확인한다.
 
-다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 요약 결과는 `.ai-output/perf/ticketing-<시나리오>/summary-<UTC 날짜시간>.json`, HTML 보고서는 같은 폴더의 `report-<UTC 날짜시간>.html`에 자동 저장된다. 예: `.ai-output/perf/ticketing-spread/summary-20261118T010203Z.json`. 실행 중에는 `http://localhost:5665`에서 대시보드를 볼 수 있다. 실행기가 기본으로 대시보드와 HTML 내보내기를 켜므로 별도 k6 환경변수를 지정하지 않아도 된다.
+다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 요약 결과는 `.ai-output/perf/ticketing-<시나리오>/summary-<UTC 날짜시간>.json`, HTML 보고서는 같은 폴더의 `report-<UTC 날짜시간>.html`에 자동 저장된다. 예: `.ai-output/perf/ticketing-spread/summary-20261118T010203Z.json`. k6 표준 출력과 오류는 같은 폴더의 `k6-<UTC 날짜시간>.log`에 저장되며 터미널에도 표시된다. 실행 중에는 `http://localhost:5665`에서 대시보드를 볼 수 있다. 실행기가 기본으로 대시보드와 HTML 내보내기를 켜므로 별도 k6 환경변수를 지정하지 않아도 된다.
 
 `burst`는 준비된 각 사용자가 정해진 시각에 좌석 조회를 한 번씩 보낸다. 예를 들어 `perf/scenarios/run-ticketing.sh burst 5000`은 서로 다른 미사용 토큰 5,000개가 필요하다. 실행 전 좌석 및 관리 지표 확인 요청이 각각 한 번 추가된다. 기본적으로 준비 완료 20초 후 시작하며 `BURST_DELAY_SECONDS=30`으로 조절한다. `DURATION`은 적용되지 않고 `MAX_DURATION`(기본 5분)에 준비 대기와 응답 대기를 포함한다. `ticket_poll_requests`와 오류 임계값으로 완료 여부를 확인하고, `ticket_burst_start_delay`의 p95·최댓값으로 실제 요청 시작이 얼마나 퍼졌는지 살핀다. 이 값은 요청 전 로컬 시각 기준이며 서버 도착 시각은 아니다. 부하 생성기 성능이나 VU 초기화 때문에 설정 인원이 정확히 동시에 도착한다고 보장하지 않는다. 각 테스트 환경에 필요한 수만큼의 유효하고 미사용인 계정을 준비한다.
 
@@ -230,8 +230,9 @@ on은 회원마다 SKU 하나를 계정 순서대로 돌아가며 정하고 진�
 | `PEAK_RATE`, `RAMP` | 1000, 5s | 최고 도착률과 0에서 오르는 시간. 유지 시간은 참여자 수에 맞춰 계산한다. 기본값이면 7.5초 |
 | `MARGIN` | 200ms | 마지막 몇 명이 빠지지 않게 유지 구간에 더하는 시간. 넘친 작업은 `skipped_no_account`로 끝난다 |
 | `OBSERVE` | 300s | 신규 유입이 끝난 뒤 관측 시간. 이 시각까지 입장하지 못한 회원은 `unfinished`다 |
-| `POLL_SECONDS` | 2 | 상태 조회 간격. 실험 가정이고 API 계약의 값이 아니다 |
+| `POLL_SECONDS` | 2 | 서버 응답에 `pollAfterMs`가 없을 때 쓰는 조회 간격. 있으면 그 값을 따른다 |
 | `PAY` | 1 | 0이면 점유까지만 한다 |
+| `RETRY`, `RETRY_MAX` | 켬, 60s | 0이면 재시도를 끈다. `RETRY_MAX`는 회원별 재시도 상한 시간이고 입장 허가 유효시간(기본 5분)보다 짧게 둔다. 관측 종료 시각도 넘지 않는다 |
 | `WARMUP` | 시드에 워밍업 드롭이 있으면 켬 | 0이면 워밍업을 끈다 |
 | `WARM_RATE`, `WARM`, `WARM_GAP` | 30, 60s, 10s | 워밍업 도착률과 시간, 워밍업이 끝난 뒤 판매 시작까지 기다리는 시간. 계정은 참여자 뒤 행을 쓴다 |
 | `WINDOW_SECONDS` | 10 | 창 길이 |
@@ -241,6 +242,12 @@ on은 회원마다 SKU 하나를 계정 순서대로 돌아가며 정하고 진�
 - 요약의 `member results`가 회원별 최종 결과다. `paid`, `sold_out`, `unavailable`, `unfinished`, `queue_closed`, `admission_expired`, `payment_pending`, `payment_failed`, `error`로 나뉜다.
 - on의 `sold_out`에는 점유 품절과 진입 거절(그 SKU의 `available = 0`, 409 `DROP_SOLD_OUT`)이 함께 들어간다. `unavailable`은 대기 중 재고가 0이 되어 조회가 `UNAVAILABLE`을 받은 회원이다. 최종 매진은 아니다.
 - `first response`는 도착 뒤 첫 API의 평가 지연이다. `queue wait`는 진입 응답부터 입장을 확인한 시각까지다. `arrival to paid`는 도착부터 결제 승인까지다.
+- 대기 중 회원은 조회 응답의 `pollAfterMs`만큼 쉬고 다시 조회한다. 값이 없으면 `POLL_SECONDS`를 쓴다 (2026-11-24 서버 제안 간격, #390).
+- 503 `DROP_QUEUE_BUSY`는 서버가 동시 처리 상한을 넘겨 일찍 거절한 응답이다. 오류로 세지 않고 `Retry-After`에 최대 50% 지터를 더해 쉰 뒤 다시 보낸다. 요약의 `queue busy` 줄과 `drop_queue_busy` 카운터(태그 `api`는 enter, poll)에서 건수를, `drop_queue_busy_latency`에서 503 응답의 지연을 본다. 빠른 거절이 enter와 poll의 평가 지연이나 `first response`에 섞이지 않고 `unexpected` 비율에도 들어가지 않는다. 포화 구간의 p95는 busy 건수와 함께 읽는다.
+- 재시도: 실제 앱처럼 점유, 결제 준비, 결제 승인이 시간 초과, 연결 오류, 5xx(503 `DROP_QUEUE_BUSY` 포함)를 받으면 같은 `Idempotency-Key`와 같은 본문으로 다시 보낸다. 점유 키는 회원과 드롭마다 하나로 고정이고 서버는 같은 `reservationId`와 `orderId`를 200으로 돌려준다 (INV-07). 4xx 업무 오류(품절, 입장 허가 없음 등)는 다시 보내지 않는다. 간격은 `Retry-After`가 있으면 그 값, 없으면 200ms부터 2배씩 늘려 2s까지이며 둘 다 최대 50% 지터를 더한다.
+- 결제 승인은 서버가 READY가 아닌 시도에는 PG를 다시 부르지 않으므로 같은 키로 다시 보내도 안전하다. 승인 202(처리 중, 불명확)는 다시 승인하지 않고 `payment_pending`으로 끝낸다. 승인 요청이 응답 없이 끝나고 재시도로도 확인하지 못한 경우도 결과 불명이라 실패가 아니라 `payment_pending`으로 센다.
+- 재시도 지표: 요약의 `retry` 줄에 api별(reserve, prepare, confirm) 재시도 요청 수, 재시도로 회복된 회원 수, 재시도 뒤에도 실패한 회원 수, 재시도 끝에 4xx 업무 응답(품절 등)을 받은 회원 수가 나온다 (`drop_retry_attempts`, `drop_retry_recovered`, `drop_retry_exhausted`, `drop_retry_answered`). 재시도가 받은 200은 `drop_reservation_replayed`가 아니라 `drop_reservation_created`로 센다. 첫 시도의 지연만 `eval` 줄과 `first response`에 들어간다. 재시도 응답은 `drop_retry_eval_latency`, 첫 시도 시작부터 최종 성공까지는 `drop_time_to_final`(태그 `retried`가 true, false)로 따로 본다. 대기열 진입과 조회의 503은 위 `queue busy` 규칙을 그대로 따른다.
+- 다른 드롭 시나리오(spike, step, capacity, queue-poll)는 재시도를 하지 않는다.
 - on에서 생성기가 참여자만큼 VU를 만들지 못하면 `dropped_iterations`가 생긴다. 그 실행은 원래 조건을 만들지 못한 것이다.
 
 ### drop-reservation-capacity.js (용량 측정)
@@ -277,8 +284,10 @@ on은 회원마다 SKU 하나를 계정 순서대로 돌아가며 정하고 진�
 | `WAITERS` | 없음(필수) | 고정할 대기 인원. 절차는 100, 500, 1000, 2000, 5000, 10000 순서다 |
 | `ENTER_RATE` | 50 | 초당 진입 인원 |
 | `SETTLE`, `WARM`, `MEASURE` | 10s, 60s, 120s | 인원 안정화, 워밍업, 측정 시간 |
-| `POLL_SECONDS` | 2 | 상태 조회 간격 |
+| `POLL_SECONDS` | 2 | 서버 응답에 `pollAfterMs`가 없을 때 쓰는 조회 간격. 있으면 그 값을 따른다 |
 
+- 조회 응답의 `pollAfterMs`를 따르므로 새 서버에서는 초당 조회 수가 `WAITERS / POLL_SECONDS`보다 적다. 이전 서버와 비교할 때는 이 점을 조건에 적는다.
+- 503 `DROP_QUEUE_BUSY`는 오류가 아니라 `Retry-After` 뒤 재시도로 세고 요약의 `queue busy` 줄과 busy 지연 줄에 나온다. 평가 지연에는 섞이지 않는다.
 - 요약의 `fixed-N experiment held`는 모든 대기자가 측정 끝까지 WAITING이었다는 뜻이다. 한 명이라도 잃으면 `FAILED`다.
 - 입장 작업이 켜져 있어 ADMITTED가 보이면 `drop_queue_unexpected_admission` 임계값이 실행을 멈춘다.
 - 끝난 직후 서버의 `drop_queue_waiting` 값을 로그에 남긴다. 목표 인원과 같아야 한다.

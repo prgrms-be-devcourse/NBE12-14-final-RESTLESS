@@ -67,13 +67,15 @@ while [[ -e "$summary_path" ]]; do
 done
 export RUN_ID="${scenario}-${timestamp//[^a-zA-Z0-9_-]/}"
 export SUMMARY_PATH="$summary_path"
+k6_log="$run_dir/k6-$timestamp.log"
+(umask 077; : > "$k6_log")
 export K6_WEB_DASHBOARD="${K6_WEB_DASHBOARD:-true}"
 export K6_WEB_DASHBOARD_PORT="${K6_WEB_DASHBOARD_PORT:-5665}"
 export K6_WEB_DASHBOARD_EXPORT="${K6_WEB_DASHBOARD_EXPORT:-$run_dir/report-$timestamp.html}"
 printf '시나리오: %s | 사용자: %s | 실행 ID: %s\n' "$scenario" "$users" "$RUN_ID"
 if [[ "$MODE" == mixed ]]; then printf '조회: %s명 | 선점: %s명\n' "$PARTICIPANTS" "$HOLD_PARTICIPANTS"; fi
 if [[ "$MODE" != poll && "$MODE" != page && "$MODE" != burst ]]; then printf '선점 요청으로 테스트 데이터가 변경됩니다. 실험 간 초기 상태를 확인하세요.\n'; fi
-printf '요약 JSON: %s\nHTML 보고서: %s\n실행 중 대시보드: http://localhost:%s\n' "$SUMMARY_PATH" "$K6_WEB_DASHBOARD_EXPORT" "$K6_WEB_DASHBOARD_PORT"
+printf '요약 JSON: %s\nHTML 보고서: %s\nk6 로그: %s\n실행 중 대시보드: http://localhost:%s\n' "$SUMMARY_PATH" "$K6_WEB_DASHBOARD_EXPORT" "$k6_log" "$K6_WEB_DASHBOARD_PORT"
 command -v python3 >/dev/null || { echo 'python3를 찾을 수 없습니다.' >&2; exit 2; }
 if [[ -n "${TICKETING_K6_CONFIG:-}" && ! -r "$TICKETING_K6_CONFIG" ]]; then
   echo 'k6 설정 파일을 읽을 수 없습니다.' >&2; exit 2
@@ -116,7 +118,7 @@ else
   printf 'Mac 지표 수집은 macOS에서만 실행됩니다.\n' >&2
 fi
 if [[ -n "${TICKETING_K6_CONFIG:-}" ]]; then
-  "$K6_BIN" run --config "$TICKETING_K6_CONFIG" "$root/perf/scenarios/ticketing/${scenario}.js"
+  "$K6_BIN" run --config "$TICKETING_K6_CONFIG" "$root/perf/scenarios/ticketing/${scenario}.js" 2>&1 | tee -a "$k6_log"
 else
-  "$K6_BIN" run "$root/perf/scenarios/ticketing/${scenario}.js"
+  "$K6_BIN" run "$root/perf/scenarios/ticketing/${scenario}.js" 2>&1 | tee -a "$k6_log"
 fi

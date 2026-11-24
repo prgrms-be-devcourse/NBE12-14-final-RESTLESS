@@ -82,6 +82,8 @@ class DropQueueIntegrationTest {
                 List.of(new CreateDropRequest.Variant("SKU", "M", 39000L, 3)))).dropId();
         admin.publish(drop);
         variant = jdbc.queryForObject("SELECT id FROM drop_variants WHERE drop_id = ?", Long.class, drop);
+        // Rows left by earlier tests share this database. The job now expires them and would move global counters.
+        jdbc.update("UPDATE drop_queue_entries SET status='CLOSED' WHERE status IN ('WAITING','ADMITTED') AND variant_id <> ?", variant);
     }
 
     private CreateDropReservationRequest request() {
@@ -124,6 +126,121 @@ class DropQueueIntegrationTest {
                 String.class, drop, user)).isEqualTo("ADMITTED");
         assertThat(queue.enter(drop, user, variant).existing()).isFalse();
         assertThat(expired.count()).isEqualTo(before + 1);
+    }
+
+    private String entryStatus() {
+        return jdbc.queryForObject("SELECT status FROM drop_queue_entries WHERE drop_id=? AND user_id=? ORDER BY id DESC LIMIT 1",
+                String.class, drop, user);
+    }
+
+    @Test
+    void expiredAdmissionStaysExpiredWhenSoldOutAndIsCountedOnce() {
+        queue.enter(drop, user, variant);
+        job.runOnce();
+        clock.now = opens.plusSeconds(300);
+        assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(DropQueueStatus.EXPIRED);
+        var expired = meters.counter("drop.queue.closed", "reason", "expired");
+        var unavailable = meters.counter("drop.queue.unavailable");
+        var expiredBefore = expired.count();
+        var unavailableBefore = unavailable.count();
+        DropStock.setAvailable(jdbc, variant, 0);
+        job.runOnce();
+        assertThat(entryStatus()).isEqualTo("EXPIRED");
+        assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(DropQueueStatus.EXPIRED);
+        job.runOnce();
+        assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(DropQueueStatus.EXPIRED);
+        assertThat(expired.count()).isEqualTo(expiredBefore + 1);
+        assertThat(unavailable.count()).isEqualTo(unavailableBefore);
+    }
+
+    @Test
+    void soldOutClosureSplitsExpiredFromValidAdmissionsInOneBatch() {
+        queue.enter(drop, user, variant);
+        job.runOnce();
+        clock.now = opens.plusSeconds(200);
+        jdbc.update("""
+                INSERT INTO users (email,password_hash,nickname,role,status,created_at,updated_at)
+                VALUES (?, 'hash', 'later', 'USER', 'ACTIVE', ?, ?)
+                """, "later-" + UUID.randomUUID() + "@test", Timestamp.from(opens), Timestamp.from(opens));
+        var later = jdbc.queryForObject("SELECT MAX(id) FROM users", Long.class);
+        queue.enter(drop, later, variant);
+        job.runOnce();
+        clock.now = opens.plusSeconds(300);
+        DropStock.setAvailable(jdbc, variant, 0);
+        job.runOnce();
+        assertThat(entryStatus()).isEqualTo("EXPIRED");
+        assertThat(queue.me(drop, later).orElseThrow().status()).isEqualTo(DropQueueStatus.UNAVAILABLE);
+    }
+
+    @Test
+    void expiredAdmissionClosesWithStockLeftAndLeavesLiveList() {
+        queue.enter(drop, user, variant);
+        job.runOnce();
+        assertThat(jdbc.queryForList("SELECT DISTINCT variant_id FROM drop_queue_entries WHERE status IN ('WAITING','ADMITTED')", Long.class))
+                .containsExactly(variant);
+        clock.now = opens.plusSeconds(299);
+        job.runOnce();
+        assertThat(entryStatus()).isEqualTo("ADMITTED");
+        clock.now = opens.plusSeconds(300);
+        var expired = meters.counter("drop.queue.closed", "reason", "expired");
+        var before = expired.count();
+        job.runOnce();
+        assertThat(entryStatus()).isEqualTo("EXPIRED");
+        assertThat(expired.count()).isEqualTo(before + 1);
+        assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(DropQueueStatus.EXPIRED);
+        assertThat(queue.enter(drop, user, variant).existing()).isFalse();
+        assertThat(expired.count()).isEqualTo(before + 1);
+        job.runOnce();
+        assertThat(expired.count()).isEqualTo(before + 1);
+    }
+
+    @Test
+    void expiredCleanupSkipsRowHeldByTx1AndNeverTouchesConsumedRow() throws Exception {
+        queue.enter(drop, user, variant);
+        job.runOnce();
+        clock.now = opens.plusSeconds(300);
+        try (var connection = dataSource.getConnection(); var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            connection.setAutoCommit(false);
+            try (var statement = connection.prepareStatement("SELECT id FROM drop_queue_entries WHERE drop_id=? AND user_id=? FOR UPDATE")) {
+                statement.setLong(1, drop);
+                statement.setLong(2, user);
+                try (var rows = statement.executeQuery()) { assertThat(rows.next()).isTrue(); }
+            }
+            try {
+                // The held row is skipped, the batch does not wait.
+                assertThat(executor.submit(() -> batches.runBatch(variant)).get(3, java.util.concurrent.TimeUnit.SECONDS))
+                        .isEqualTo(DropQueueAdmissionTransactions.Result.DONE);
+                assertThat(entryStatus()).isEqualTo("ADMITTED");
+                // The holder consumes the row before cleanup can see it.
+                try (var statement = connection.prepareStatement("UPDATE drop_queue_entries SET status='CONSUMED', consumed_at=? WHERE drop_id=? AND user_id=?")) {
+                    statement.setTimestamp(1, Timestamp.from(opens.plusSeconds(299)));
+                    statement.setLong(2, drop);
+                    statement.setLong(3, user);
+                    statement.executeUpdate();
+                }
+            } finally { connection.commit(); }
+        }
+        var expired = meters.counter("drop.queue.closed", "reason", "expired");
+        var before = expired.count();
+        batches.runBatch(variant);
+        assertThat(entryStatus()).isEqualTo("CONSUMED");
+        DropStock.setAvailable(jdbc, variant, 0);
+        batches.runBatch(variant);
+        assertThat(entryStatus()).isEqualTo("CONSUMED");
+        assertThat(expired.count()).isEqualTo(before);
+    }
+
+    @Test
+    void pollAcrossExpiredCleanupKeepsAnsweringExpired() {
+        queue.enter(drop, user, variant);
+        job.runOnce();
+        clock.now = opens.plusSeconds(301);
+        var first = queue.me(drop, user).orElseThrow();
+        job.runOnce();
+        var second = queue.me(drop, user).orElseThrow();
+        assertThat(first).isEqualTo(second);
+        assertThat(second.status()).isEqualTo(DropQueueStatus.EXPIRED);
+        assertThat(second.admittedUntil()).isNull();
     }
 
     @Test
@@ -248,7 +365,7 @@ class DropQueueIntegrationTest {
                 resume.countDown();
             }
             Long position = expected == DropQueueStatus.WAITING ? 1L : null;
-            assertThat(poll.get(10, TimeUnit.SECONDS)).isEqualTo(new DropQueueService.View(expected, variant, position, null));
+            assertThat(poll.get(10, TimeUnit.SECONDS)).isEqualTo(new DropQueueService.View(expected, variant, position, null, position == null ? null : 1000L));
         }
         assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(expected);
         assertThat(lastSeen()).isEqualTo(expectedLastSeen);
@@ -443,6 +560,45 @@ class DropQueueIntegrationTest {
                 WHERE table_schema=DATABASE() AND table_name='drop_queue_entries' AND index_name='ix_drop_queue_sku_position'
                 ORDER BY seq_in_index""", String.class))
                 .containsExactly("variant_id", "status", "id", "last_seen_at");
+    }
+
+    // INV-17 boundary: the tail COUNT and the waiting gauge use the 40s heartbeat timeout, not 30s.
+    // The snapshot is cached first, so rows added afterwards are only counted by the tail query.
+    @Test
+    void tailCountUsesFortySecondHeartbeatBoundary() {
+        enterAs(newUser());
+        clock.now = opens.plusSeconds(35);
+        enterAs(newUser()); // fills the snapshot for this epoch second
+        queue.me(drop, user).ifPresent(ignored -> { });
+        var cutoff = clock.now.minusSeconds(40);
+        insertWaiting(cutoff.minusNanos(1_000)); // 40s plus 1 microsecond: excluded
+        insertWaiting(cutoff); // exactly 40s: counted
+        insertWaiting(clock.now.minusSeconds(35)); // between 30s and 40s: counted
+        insertWaiting(clock.now.minusSeconds(31)); // between 30s and 40s: counted
+        var me = enterAs(user);
+        // snapshot ids: first user (35s old, counted via cutoff) and second user, then 3 counted tail rows and self
+        long expected = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM drop_queue_entries WHERE variant_id=? AND status='WAITING'
+                  AND id <= (SELECT MAX(id) FROM drop_queue_entries WHERE drop_id=? AND user_id=?)
+                  AND last_seen_at >= ?""", Long.class, variant, drop, user, Timestamp.from(cutoff));
+        assertThat(expected).isEqualTo(6);
+        assertThat(me.body().position()).isEqualTo(expected);
+        assertThat(queue.me(drop, user).orElseThrow().position()).isEqualTo(expected);
+    }
+
+    @Test
+    void waitingGaugeUsesFortySecondHeartbeatBoundary() {
+        clock.now = opens.plusSeconds(100);
+        double before = meters.get("drop.queue.waiting").gauge().value();
+        insertWaiting(clock.now.minusSeconds(40).minusNanos(1_000)); // excluded
+        insertWaiting(clock.now.minusSeconds(40)); // exactly 40s: counted
+        insertWaiting(clock.now.minusSeconds(35)); // between 30s and 40s: counted
+        assertThat(meters.get("drop.queue.waiting").gauge().value()).isEqualTo(before + 2);
+    }
+
+    private void insertWaiting(Instant lastSeen) {
+        jdbc.update("INSERT INTO drop_queue_entries (drop_id,user_id,variant_id,status,entered_at,last_seen_at) VALUES (?,?,?,'WAITING',?,?)",
+                drop, newUser(), variant, Timestamp.from(lastSeen), Timestamp.from(lastSeen));
     }
 
     @Test

@@ -120,6 +120,15 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # merge-gate 분류기와 테스트 선택 규칙의 자체 시험. 높음 위험도 도구라서 항상 돌린다. 몇 초면 끝난다.
+  tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/verification/test_tools.py
+      - run: python3 -m unittest discover -s tools/ci -p 'test_*.py'
+
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 10

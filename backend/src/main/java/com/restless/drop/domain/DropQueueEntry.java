@@ -64,6 +64,13 @@ public class DropQueueEntry {
         if (live()) status = DropQueueStatus.CLOSED;
     }
 
+    /** Closes an ADMITTED row whose deadline has passed. Returns false for any other row, so it is counted once. */
+    public boolean expire(Instant now) {
+        if (status != DropQueueStatus.ADMITTED || now.isBefore(admittedUntil)) return false;
+        status = DropQueueStatus.EXPIRED;
+        return true;
+    }
+
     public void unavailable() {
         if (live()) status = DropQueueStatus.UNAVAILABLE;
     }

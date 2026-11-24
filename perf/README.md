@@ -6,7 +6,7 @@ EXP-01~04([성능 실험 계획](../docs/testing/performance.md))를 실행하�
 |---|---|
 | [seed/](seed/README.md) | 실험 입력 데이터. 빈 스키마에 대량 시드, 토큰 CSV, 정합성 점검 |
 | [scenarios/](scenarios/README.md) | k6 시나리오. EXP-01 드롭 재고 점유 스파이크, 계단식 용량 측정 |
-| [ec2/](ec2/README.md) | 배포 서버를 perf로 빌리는 순서와 명령. 시드, 토큰 전달, 정리 |
+| [ec2/](ec2/README.md) | 배포 서버를 perf로 빌리는 순서와 명령. 시드, 토큰 전달, 정리, DB 프로브 (`db-probe.sh`). 서버 두 대 측정은 [실행 절차 7절](../docs/testing/drop-performance-procedure.md#7-alb-멀티-인스턴스-측정) |
 
 ## 원칙
 

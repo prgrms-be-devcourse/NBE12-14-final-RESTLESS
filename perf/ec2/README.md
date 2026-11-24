@@ -42,7 +42,7 @@ perf/ec2/perf-ec2.sh lockstats
 ```
 
 6. 노트북에서 시나리오를 실행한다 ([scenarios](../scenarios/README.md)).
-7. 실행마다 EC2에서 `lockstats`와 `verify <scale>`을 실행한다. 드롭 불변식, 금액, FK 고아 행 검사는 0이어야 한다. `seed baseline` 검사는 부하 뒤에 실패하는 것이 정상이다.
+7. 실행마다 EC2에서 `lockstats`와 `verify <scale>`을 실행한다. 드롭 불변식, 금액, FK 고아 행 검사는 0이어야 한다. `seed baseline` 검사는 부하 뒤에 실패하는 것이 정상이다. 드롭 `sale` 측정 뒤에는 그중 `hot drop untouched` 한 건만 실패해야 하고 그 밖의 실패는 정합성 위반이다.
 8. 계정을 다 썼거나 스케일을 바꿀 때는 DB를 다시 만든다.
 
 ```bash
@@ -59,6 +59,22 @@ perf/ec2/perf-ec2.sh finish
 ```
 
 오래 쓰지 않으면 EC2, RDS 순서로 중지한다.
+
+## DB 프로브
+
+[db-probe.sh](db-probe.sh)는 RDS 콘솔 값과 Performance Insights를 쓸 수 없을 때 DB가 무엇을 하는지 보는 읽기 전용 대체 수단이다. `perf.env`를 읽으므로 EC2 소유자만 실행한다. 팀원 SSH 계정의 sudo 허용 목록에는 없다. `perf-ec2.sh`와 같이 `perf.env`를 읽고, DB 이름이 `perf-`로 시작하지 않거나 prod가 들어 있거나 프로필이 perf가 아니면 멈춘다. 비밀값은 출력하지 않는다. DB를 바꾸지 않는다.
+
+```bash
+perf/ec2/db-probe.sh status ~/probe-<날짜>-<측정>-before.txt   # 측정 전 전역 카운터
+perf/ec2/db-probe.sh sample 420 ~/probe-<날짜>-<측정>-sample.txt   # 약 0.5초마다 실행 중인 SQL 표본. 워밍업, 유입, 관측 시간을 모두 덮게 초 수를 정한다 (기본 drop-sale은 약 400초). k6 시작 직전에 켠다
+perf/ec2/db-probe.sh status ~/probe-<날짜>-<측정>-after.txt    # 측정 후. 전후 차이를 본다
+```
+
+- `status`는 커밋 수, redo fsync, 읽은 행 수, 잠금 대기 같은 누적 카운터다. RDS 인스턴스 전체 값이므로 다른 테스트가 없을 때만 해석한다.
+- `sample`은 연결 한 개로 `information_schema.PROCESSLIST`를 읽는다. 컬럼은 시각, 연결 ID, 경과 초, 상태, SQL 앞 160자다. poll마다 연결 ID 0인 `tick` 행이 한 줄 남아 poll 횟수를 센다. 몫은 실행 중인 SQL의 몫이고 CPU 시간 몫이 아니다.
+- `sample`이 0이 아닌 값으로 끝나면 표본이 중간에 끊긴 것이다. 출력 파일의 `tick` 행 수로 어디까지 모였는지 본다.
+- `PERF_ENV_FILE`로 env 파일 경로를, `MYSQL`로 mysql 명령을 바꿀 수 있다. `mysql`이 없으면 `mysql:8.4` 컨테이너를 쓴다.
+- 서버를 두 대 쓰는 측정에서는 서버 1에서만 돌린다. 앱 서버 CPU를 조금 쓴다 ([실행 절차 7절](../../docs/testing/drop-performance-procedure.md#7-alb-멀티-인스턴스-측정)).
 
 ## 기록할 값
 

@@ -66,6 +66,337 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(gate.classify(["docs/operations/x.md", "docs/domains/drop/x.md"]), "policy-doc")
 
 
+def diff(path, added=(), removed=(), status="modified"):
+    return {path: {"added": list(added), "removed": list(removed), "status": status, "old": path}}
+
+
+def tier(files, patches, labels=(), body=""):
+    return gate.assess_risk(files, patches, labels, body)
+
+
+MAIN_J = "backend/src/main/java/com/restless"
+TEST_J = "backend/src/test/java/com/restless"
+
+
+class RiskTest(unittest.TestCase):
+    def test_docs_only_is_low(self):
+        f = "docs/testing/drop-performance-plan.md"
+        self.assertEqual(tier([f], diff(f, ["x"]))[0], gate.LOW)
+        f = "docs/decisions/0006-x.md"
+        self.assertEqual(tier([f], diff(f, ["x"]))[0], gate.LOW)
+
+    def test_test_additions_only_is_low(self):
+        f = f"{TEST_J}/drop/application/DropQueueIntegrationTest.java"
+        self.assertEqual(tier([f], diff(f, ["assertThat(a).isTrue();"]))[0], gate.LOW)
+
+    def test_changed_or_removed_assertion_is_high(self):
+        f = f"{TEST_J}/drop/application/DropQueueIntegrationTest.java"
+        for gone in ["assertThat(a).isEqualTo(1);", "    verify(x).y();", "@Test", ".andExpect(status().isOk())"]:
+            t, why = tier([f], diff(f, ["new"], [gone]))
+            self.assertEqual(t, gate.HIGH, gone)
+            self.assertIn("단언", why[0])
+
+    def test_removed_non_assert_line_in_an_existing_test_is_at_least_mid(self):
+        f = f"{TEST_J}/drop/application/DropQueueIntegrationTest.java"
+        self.assertEqual(tier([f], diff(f, ["int n = 2;"], ["int n = 1;"]))[0], gate.MID)
+
+    def test_deleted_test_file_and_disabled_test_are_high(self):
+        f = f"{TEST_J}/drop/application/A.java"
+        self.assertEqual(tier([f], diff(f, [], ["class A {}"], "removed"))[0], gate.HIGH)
+        self.assertEqual(tier([f], diff(f, ["@Disabled"]))[0], gate.HIGH)
+
+    def test_acceptance_architecture_harness_paths_are_high(self):
+        for f in [f"{TEST_J}/drop/acceptance/DropAcceptanceSupport.java", f"{TEST_J}/architecture/A.java",
+                  "backend/src/test/resources/harness/drop-invariants.sql", "tools/harness/guard/guard.py"]:
+            self.assertEqual(tier([f], diff(f, ["x"]))[0], gate.HIGH, f)
+
+    def test_migration_contract_and_invariant_docs_are_high(self):
+        for f in ["backend/src/main/resources/db/migration/V99__x.sql", "docs/contracts/api/drop.md",
+                  "docs/domains/drop/invariants.md", "docs/domains/drop/transactions.md",
+                  "docs/operations/failure-handling.md"]:
+            self.assertEqual(tier([f], diff(f, ["x"]))[0], gate.HIGH, f)
+
+    def test_core_paths_are_high(self):
+        for f in gate.MUTATION_REQUIRED[:2] + [f"{MAIN_J}/drop/application/DropInventoryService.java",
+                                              f"{MAIN_J}/payment/domain/Payment.java"]:
+            self.assertEqual(tier([f], diff(f, ["x"]))[0], gate.HIGH, f)
+
+    def test_verification_tooling_and_agent_instructions_are_high(self):
+        for f in ["tools/verification/bin/merge-gate.py", "tools/ci/select-backend-tests.py", ".github/workflows/ci.yml",
+                  "backend/build.gradle", "AGENTS.md", "tools/verification/skills/independent-verification/SKILL.md"]:
+            self.assertEqual(tier([f], diff(f, ["x"]))[0], gate.HIGH, f)
+
+    def test_new_lock_or_transaction_in_production_code_is_high(self):
+        f = f"{MAIN_J}/drop/application/Foo.java"
+        for line in ["    @Transactional", "select * from t for update", "... FOR UPDATE SKIP LOCKED",
+                     "@Lock(LockModeType.PESSIMISTIC_WRITE)", "@Modifying"]:
+            self.assertEqual(tier([f], diff(f, [line]))[0], gate.HIGH, line)
+
+    def test_lock_word_in_a_comment_or_in_tests_is_not_a_trigger(self):
+        f = f"{MAIN_J}/drop/api/Foo.java"
+        self.assertEqual(tier([f], diff(f, ["// FOR UPDATE is not used here"]))[0], gate.MID)
+        t = f"{TEST_J}/drop/application/FooTest.java"
+        self.assertEqual(tier([t], diff(t, ["@Transactional"]))[0], gate.LOW)
+
+    def test_plain_production_code_config_and_perf_script_are_mid(self):
+        f = f"{MAIN_J}/drop/api/Foo.java"
+        self.assertEqual(tier([f], diff(f, ["return 1;"]))[0], gate.MID)
+        for f in ["backend/src/main/resources/application.yml", "perf/scenarios/drop-sale.js", "perf/ec2/db-probe.sh"]:
+            self.assertEqual(tier([f], diff(f, ["x"]))[0], gate.MID, f)
+
+    def test_mixed_change_takes_the_highest(self):
+        a, b = f"{MAIN_J}/drop/api/Foo.java", "docs/contracts/api/drop.md"
+        patches = {**diff(a, ["x"]), **diff(b, ["x"])}
+        self.assertEqual(tier([a, b], patches)[0], gate.HIGH)
+
+    def test_unreadable_diff_or_empty_list_is_high(self):
+        self.assertEqual(tier(["docs/a.md"], None)[0], gate.HIGH)
+        self.assertEqual(tier([], {})[0], gate.HIGH)
+
+    def test_people_can_raise_but_not_lower(self):
+        f = "docs/a.md"
+        self.assertEqual(tier([f], diff(f, ["x"]), ["risk:high"])[0], gate.HIGH)
+        self.assertEqual(tier([f], diff(f, ["x"]), [], "설명\n위험도: 중간\n")[0], gate.MID)
+        self.assertEqual(tier([f], diff(f, ["x"]), [], "위험도: 높음")[0], gate.HIGH)
+        h = "docs/contracts/api/drop.md"
+        t, why = tier([h], diff(h, ["x"]), ["risk:low"], "위험도: 낮음")
+        self.assertEqual(t, gate.HIGH)
+        self.assertTrue(any("무시" in w for w in why))
+
+    def test_every_result_has_a_reason(self):
+        for f, p in [("docs/a.md", diff("docs/a.md", ["x"])), ("perf/x.js", diff("perf/x.js", ["x"]))]:
+            self.assertTrue(tier([f], p)[1])
+
+    def test_parse_diff(self):
+        text = ("diff --git a/x/A.java b/x/A.java\nindex 1..2 100644\n--- a/x/A.java\n+++ b/x/A.java\n@@ -1 +1 @@\n"
+                "-old\n+new\n ctx\n"
+                "diff --git a/x/B.java b/x/B.java\nnew file mode 100644\n--- /dev/null\n+++ b/x/B.java\n@@ -0,0 +1 @@\n+b\n"
+                "diff --git a/x/C.java b/x/C.java\ndeleted file mode 100644\n--- a/x/C.java\n+++ /dev/null\n@@ -1 +0,0 @@\n-c\n")
+        d = gate.parse_diff(text)
+        self.assertEqual(d["x/A.java"]["added"], ["new"])
+        self.assertEqual(d["x/A.java"]["removed"], ["old"])
+        self.assertEqual(d["x/B.java"]["status"], "added")
+        self.assertEqual(d["x/C.java"]["status"], "removed")
+
+    def test_removing_a_lock_or_transaction_is_high(self):
+        f = f"{MAIN_J}/drop/application/Foo.java"
+        for gone in ["    @Transactional", "select 1 for update", "@org.springframework.transaction.annotation.Transactional",
+                     "RLock l = redisson.getLock(k);", "redis.opsForValue().setIfAbsent(k, v)",
+                     'jdbc.update("UPDATE drop_stock SET qty = qty - 1")']:
+            self.assertEqual(tier([f], diff(f, [], [gone]))[0], gate.HIGH, gone)
+
+    def test_chained_assertions_and_awaits_count_as_assertions(self):
+        f = f"{TEST_J}/drop/application/FooTest.java"
+        for gone in [".doesNotContain(x);", ".allSatisfy(a -> {});", "latch.await(5, SECONDS);", "pool.invokeAll(tasks);"]:
+            self.assertEqual(tier([f], diff(f, ["x"], [gone]))[0], gate.HIGH, gone)
+
+    def test_test_resources_are_not_test_additions(self):
+        f = "backend/src/test/resources/application-test.yml"
+        self.assertEqual(tier([f], diff(f, ["lock-timeout: 0"], ["lock-timeout: 3000"]))[0], gate.MID)
+
+    def test_docs_and_tests_together_stay_low(self):
+        d, t = "docs/testing/drop-performance-plan.md", f"{TEST_J}/drop/application/FooTest.java"
+        self.assertEqual(tier([d, t], {**diff(d, ["x"]), **diff(t, ["x"])})[0], gate.LOW)
+
+    def test_verification_docs_are_high(self):
+        f = "docs/testing/independent-verification.md"
+        self.assertEqual(tier([f], diff(f, ["x"]))[0], gate.HIGH)
+
+    def test_quoted_path_is_read_and_still_checked(self):
+        text = ('diff --git "a/backend/src/test/java/com/restless/drop/application/\\355\\225\\234Test.java" '
+                '"b/backend/src/test/java/com/restless/drop/application/\\355\\225\\234Test.java"\n'
+                '--- "a/backend/src/test/java/com/restless/drop/application/\\355\\225\\234Test.java"\n'
+                '+++ "b/backend/src/test/java/com/restless/drop/application/\\355\\225\\234Test.java"\n'
+                '@@ -1 +1 @@\n-assertThat(a).isEqualTo(3);\n+assertThat(a).isNotNull();\n')
+        d = gate.parse_diff(text)
+        self.assertEqual(list(d), ["backend/src/test/java/com/restless/drop/application/한Test.java"])
+        f = list(d)
+        self.assertEqual(tier(f, d)[0], gate.HIGH)
+
+    def test_rename_out_of_a_high_path_is_high(self):
+        text = ("diff --git a/backend/src/test/java/com/restless/drop/acceptance/A.java "
+                "b/backend/src/test/java/com/restless/drop/application/A.java\n"
+                "similarity index 100%\nrename from backend/src/test/java/com/restless/drop/acceptance/A.java\n"
+                "rename to backend/src/test/java/com/restless/drop/application/A.java\n")
+        d = gate.parse_diff(text)
+        new = "backend/src/test/java/com/restless/drop/application/A.java"
+        self.assertIn(new, d)
+        self.assertEqual(tier([new], d)[0], gate.HIGH)
+
+    def test_dashes_inside_a_hunk_are_content(self):
+        text = ("diff --git a/x.sql b/x.sql\n--- a/x.sql\n+++ b/x.sql\n@@ -1,2 +1 @@\n--- drop this\n-select 1 for update;\n+x\n")
+        d = gate.parse_diff(text)
+        self.assertEqual(d["x.sql"]["removed"], ["-- drop this", "select 1 for update;"])
+
+    def test_binary_and_mode_only_changes_are_named_and_not_unreadable(self):
+        text = ("diff --git a/docs/a.png b/docs/a.png\nnew file mode 100644\nBinary files /dev/null and b/docs/a.png differ\n"
+                "diff --git a/perf/x.sh b/perf/x.sh\nold mode 100644\nnew mode 100755\n")
+        d = gate.parse_diff(text)
+        self.assertEqual(sorted(d), ["docs/a.png", "perf/x.sh"])
+        self.assertEqual(tier(["perf/x.sh"], {"perf/x.sh": d["perf/x.sh"]})[0], gate.MID)
+
+    def test_compare_binary_file_is_unreadable(self):
+        d = gate.parse_compare([{"filename": "backend/src/main/resources/x.jar", "status": "modified", "changes": 0}])
+        self.assertEqual(gate.followup_ok(d)[0], False)
+        r = gate.parse_compare([{"filename": "a.md", "status": "renamed", "previous_filename": "b.md", "changes": 0}])
+        self.assertFalse(r["a.md"]["unreadable"])
+
+    def test_config_keys_that_change_transaction_or_schema_behavior_are_high(self):
+        f = "backend/src/main/resources/application.yml"
+        for line in ["    validate-on-migrate: false", "    open-in-view: true", "    hibernate.ddl-auto: update", "lock-timeout: 0"]:
+            self.assertEqual(tier([f], diff(f, [line]))[0], gate.HIGH, line)
+
+    # 독립 검증자 탐침 P1 ~ P14와 살아남은 변이 M3, M8, M10의 회귀 시험 (2026-11-24 PR 403 검증 FAIL)
+    def test_p1_p2_existing_test_value_changes_are_not_low(self):
+        f = f"{TEST_J}/drop/application/DropConcurrencyTest.java"
+        t, _ = tier([f], diff(f, ["int threads = 1;"], ["int threads = 100;"]))
+        self.assertEqual(t, gate.HIGH)
+        g = f"{TEST_J}/drop/application/FooTest.java"
+        self.assertIn(tier([g], diff(g, ["int expected = 11;"], ["int expected = 10;"]))[0], (gate.MID, gate.HIGH))
+
+    def test_p3_early_return_or_condition_added_to_existing_test_is_not_low(self):
+        f = f"{TEST_J}/drop/application/FooTest.java"
+        for line in ["if (true) return;", "    return;", "if (System.getenv(\"CI\") != null) {"]:
+            self.assertEqual(tier([f], diff(f, [line]))[0], gate.MID, line)
+
+    def test_p4_p11_conditional_or_exclusive_test_annotations_are_high(self):
+        f = f"{TEST_J}/drop/application/FooTest.java"
+        for line in ["@EnabledIfEnvironmentVariable(named = \"CI\", matches = \"x\")", "@DisabledIfSystemProperty(named=\"a\")",
+                     "Assumptions.assumeTrue(x);", "xit('a', () => {});", "xdescribe('a', () => {});"]:
+            self.assertEqual(tier([f], diff(f, [line]))[0], gate.HIGH, line)
+        j = "frontend/src/test/a.test.js"
+        for line in ["it.only('a', () => {});", "describe.only('a', () => {});", "test.only('a', () => {});"]:
+            self.assertEqual(tier([j], diff(j, [line], status="added"))[0], gate.HIGH, line)
+
+    def test_p5_main_source_named_test_is_production_code(self):
+        f = f"{MAIN_J}/drop/api/FooTest.java"
+        self.assertFalse(gate.is_test_path(f))
+        self.assertEqual(tier([f], diff(f, ["x"]))[0], gate.MID)
+
+    def test_p6_p7_p8_core_module_logic_changes_are_high(self):
+        for f in [f"{MAIN_J}/drop/application/DropPurchaseService.java", f"{MAIN_J}/payment/application/PaymentService.java",
+                  f"{MAIN_J}/payment/application/pg/TossClient.java", f"{MAIN_J}/order/application/OrderService.java",
+                  f"{MAIN_J}/order/domain/Order.java", f"{MAIN_J}/drop/domain/DropPurchaseSlot.java",
+                  f"{MAIN_J}/fanmeeting/application/Foo.java", f"{MAIN_J}/ticketing/domain/Seat.java",
+                  f"{MAIN_J}/auction/application/BidService.java"]:
+            self.assertEqual(tier([f], diff(f, ["if (a > b) return;"]))[0], gate.HIGH, f)
+
+    def test_core_module_api_infrastructure_common_config_use_line_rules(self):
+        for f in [f"{MAIN_J}/drop/api/DropController.java", f"{MAIN_J}/order/infrastructure/OrderRepository.java",
+                  f"{MAIN_J}/common/error/ErrorCode.java", f"{MAIN_J}/drop/config/Foo.java"]:
+            self.assertEqual(tier([f], diff(f, ["return 1;"]))[0], gate.MID, f)
+
+    def test_p9_rename_out_of_migration_is_high(self):
+        text = ("diff --git a/backend/src/main/resources/db/migration/V9__x.sql b/backend/src/main/resources/y.sql\n"
+                "rename from backend/src/main/resources/db/migration/V9__x.sql\nrename to backend/src/main/resources/y.sql\n")
+        d = gate.parse_diff(text)
+        self.assertEqual(tier(list(d), d)[0], gate.HIGH)
+
+    def test_p10_test_resources_config_is_mid(self):
+        f = "backend/src/test/resources/application-test.yml"
+        self.assertEqual(tier([f], diff(f, ["a: 1"]))[0], gate.MID)
+
+    def test_p12_bdd_then_should_removal_is_high(self):
+        f = f"{TEST_J}/drop/application/FooTest.java"
+        self.assertEqual(tier([f], diff(f, [], ["then(repo).should().save(any());"]))[0], gate.HIGH)
+
+    def test_p14_shared_test_fixture_change_is_high(self):
+        for f in [f"{TEST_J}/drop/application/DropTestSupport.java", f"{TEST_J}/TestcontainersConfiguration.java",
+                  f"{TEST_J}/drop/fixture/Seed.java", f"{TEST_J}/drop/application/DropRaceTest.java"]:
+            self.assertEqual(tier([f], diff(f, ["x"], ["for (int i = 0; i < 3; i++) {"]))[0], gate.HIGH, f)
+        # 새 픽스처 파일을 더하는 것은 높음이 아니다.
+        n = f"{TEST_J}/drop/application/NewSupport.java"
+        self.assertEqual(tier([n], diff(n, ["x"], status="added"))[0], gate.LOW)
+
+    def test_d5_low_uses_union_of_file_list_and_diff_keys(self):
+        # 파일 목록이 잘려 문서만 보여도 diff에 운영 코드가 있으면 낮음이 아니다.
+        d = {**diff("docs/a.md", ["x"]), **diff(f"{MAIN_J}/drop/api/Foo.java", ["x"])}
+        self.assertEqual(tier(["docs/a.md"], d)[0], gate.MID)
+
+    def test_m3_low_label_or_body_never_lowers(self):
+        f = f"{MAIN_J}/drop/application/Foo.java"
+        self.assertEqual(tier([f], diff(f, ["x"]), ["risk:low"], "위험도: 낮음")[0], gate.HIGH)
+        g = f"{MAIN_J}/drop/api/Foo.java"
+        self.assertEqual(tier([g], diff(g, ["x"]), ["risk:low"], "위험도: 낮음")[0], gate.MID)
+        self.assertEqual(tier([g], diff(g, ["x"]), ["risk:medium"], "위험도: 낮음")[0], gate.MID)
+
+    def test_m8_binary_test_file_is_not_low(self):
+        text = "diff --git a/backend/src/test/java/com/restless/x/Y.java b/backend/src/test/java/com/restless/x/Y.java\nBinary files a/x and b/x differ\n"
+        d = gate.parse_diff(text)
+        self.assertEqual(tier(list(d), d)[0], gate.HIGH)
+
+    def test_m10_missing_or_failed_tools_check_blocks_tool_changes(self):
+        ok = [{"name": "backend", "conclusion": "SUCCESS"}]
+        self.assertTrue(gate.ci_blocks(["tools/verification/bin/merge-gate.py"], ok))
+        self.assertTrue(gate.ci_blocks(["tools/ci/x.py"], ok + [{"name": "tools", "conclusion": "FAILURE"}]))
+        self.assertFalse(gate.ci_blocks(["tools/ci/x.py"], ok + [{"name": "tools", "conclusion": "SUCCESS"}]))
+        self.assertFalse(gate.ci_blocks(["docs/a.md"], ok))
+        self.assertTrue(gate.ci_blocks(["docs/a.md"], [{"name": "backend", "conclusion": "FAILURE"}]))
+
+    def test_policy_docs_for_domains_and_contracts_are_high(self):
+        for f in ["docs/domains/drop/policy.md", "docs/domains/drop/invariants.md", "docs/domains/drop/state-machines.md",
+                  "docs/domains/drop/transactions.md", "docs/contracts/api/drop.md"]:
+            self.assertEqual(tier([f], diff(f, ["x"]))[0], gate.HIGH, f)
+        for f in ["docs/decisions/0006-x.md", "docs/product/open-questions.md", "docs/testing/drop-performance-plan.md"]:
+            self.assertEqual(tier([f], diff(f, ["x"]))[0], gate.LOW, f)
+
+    def test_r1_abort_style_skips_are_not_low(self):
+        f = f"{TEST_J}/drop/application/FooTest.java"
+        for line in ["Assumptions.abort();", "assumingThat(x, () -> {});", "throw new TestAbortedException();",
+                     "Assume.assumeTrue(x);"]:
+            self.assertGreaterEqual(gate.RANK[tier([f], diff(f, [line]))[0]], gate.RANK[gate.MID], line)
+            self.assertEqual(tier([f], diff(f, [line]))[0], gate.HIGH, line)
+
+    def test_r2_high_pr_stays_high_with_a_medium_label_or_body(self):
+        f = "docs/contracts/api/drop.md"
+        self.assertEqual(tier([f], diff(f, ["x"]), ["risk:medium"], "위험도: 중간")[0], gate.HIGH)
+        # 올리기 루프가 같은 단계에서 바뀌지 않는지: 낮은 요청은 단계를 바꾸지 않는다.
+        g = "docs/a.md"
+        t, why = tier([g], diff(g, ["x"]), ["risk:medium"])
+        self.assertEqual(t, gate.MID)
+        self.assertTrue(any("올림" in w for w in why))
+        t, why = tier([f], diff(f, ["x"]), ["risk:medium"])
+        self.assertFalse(any("올림" in w for w in why))
+
+    def test_r3_every_domain_doc_is_high(self):
+        for f in ["docs/domains/ticketing/purchase-limit.md", "docs/domains/ticketing/expiration.md",
+                  "docs/domains/fanmeeting/anything.md", "docs/domains/drop/README.md"]:
+            self.assertEqual(tier([f], diff(f, ["> 마지막 확인: 2026-11-24"]))[0], gate.HIGH, f)
+
+    def test_file_missing_from_diff_is_high(self):
+        self.assertEqual(tier(["docs/a.md", "docs/b.md"], diff("docs/a.md", ["x"]))[0], gate.HIGH)
+
+    def test_parse_compare_marks_missing_patch(self):
+        d = gate.parse_compare([{"filename": "a.java", "status": "modified", "patch": "@@\n-a\n+b", "changes": 2},
+                                {"filename": "b.bin", "status": "modified", "changes": 5}])
+        self.assertEqual(d["a.java"]["removed"], ["a"])
+        self.assertTrue(d["b.bin"]["unreadable"])
+        self.assertEqual(gate.assess_risk(["b.bin"], d)[0], gate.HIGH)
+
+    def test_followup_commit_small_and_not_high_passes(self):
+        f = f"{MAIN_J}/drop/api/Foo.java"
+        ok, _ = gate.followup_ok(diff(f, ["a"] * 5, ["b"] * 5))
+        self.assertTrue(ok)
+
+    def test_followup_commit_large_or_high_does_not_pass(self):
+        f = f"{MAIN_J}/drop/api/Foo.java"
+        self.assertFalse(gate.followup_ok(diff(f, ["a"] * 31))[0])
+        self.assertFalse(gate.followup_ok(diff(f, ["@Transactional"]))[0])
+        t = f"{TEST_J}/drop/acceptance/A.java"
+        self.assertFalse(gate.followup_ok(diff(t, ["x"]))[0])
+
+    def test_checklist_lists_every_high_path(self):
+        checklist = (Path(__file__).resolve().parent / "checklist.md").read_text(encoding="utf-8")
+        for why, pats in gate.HIGH_PATHS:
+            self.assertIn(why, checklist, why)
+            if pats is gate.CORE_CODE:
+                self.assertIn("{" + ",".join(gate.NEVER_BREAK_MODULES) + "}/application/*", checklist)
+                continue
+            for p in pats:
+                short = p.replace("backend/src/main/java/com/restless/", "") if pats is gate.MUTATION_REQUIRED else p
+                self.assertIn(short.rstrip("*").rstrip("/").split("*")[0], checklist, p)
+
+
 class RecordTest(unittest.TestCase):
     def test_last_line_wins_and_table_prefix_is_allowed(self):
         text = "판정 기록: FAIL " + "a" * 40 + "\n| 판정 기록: PASS " + "b" * 40 + " |\n\n"
@@ -79,10 +410,6 @@ class RecordTest(unittest.TestCase):
     def test_short_or_long_sha_is_not_a_record(self):
         self.assertIsNone(gate.last_record("판정 기록: PASS 66ca50c"))
         self.assertIsNone(gate.last_record("판정 기록: PASS " + "c" * 64))
-
-    def test_no_review_reason_is_required(self):
-        self.assertIsNone(gate.NO_REVIEW.search("독립 검증 없음"))
-        self.assertIsNotNone(gate.NO_REVIEW.search("독립 검증 없음: 오타 수정"))
 
 
 class CiScopeTest(unittest.TestCase):

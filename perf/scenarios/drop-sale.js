@@ -11,10 +11,10 @@ import { sleep } from 'k6';
 import exec from 'k6/execution';
 import {
   DROP_ID, VARIANT_IDS, TOTAL_STOCK, manifest, loadUsers, baseThresholds, summaryTrendStats, checkTarget,
-  reserve, variantFor, skipped, summarize, tracked, windowTag, durationMs, emptyThresholds, latencyLine, pct, ROW_OFFSET, HOT,
+  reserve, variantFor, skipped, summarize, tracked, windowTag, durationMs, emptyThresholds, latencyLine, pct, ROW_OFFSET, HOT, RETRY, RETRY_MAX,
 } from './lib/drop-reservation.js';
 import {
-  enterQueue, pollQueue, pay, recordFirstResponse, recordQueueWait, recordMember, PAY_TIMEOUT,
+  enterQueue, pollQueue, nextWaitSeconds, pay, recordFirstResponse, recordQueueWait, recordMember, PAY_TIMEOUT,
 } from './lib/drop-flow.js';
 
 const QUEUE = __ENV.QUEUE || 'off';
@@ -70,7 +70,14 @@ const subMetrics = [
   ...RESULTS.flatMap((r) => [`drop_member_result{result:${r},${SALE}}`, `drop_member_total{result:${r},${SALE}}`]),
   `drop_queue_poll{result:waiting,${SALE}}`, `drop_queue_poll{result:closed,${SALE}}`, `drop_queue_poll{result:unavailable,${SALE}}`,
   `drop_queue_enter{result:sold_out,${SALE}}`,
+  `drop_queue_busy{api:enter,${SALE}}`, `drop_queue_busy{api:poll,${SALE}}`,
+  `drop_queue_busy_latency{api:enter,${SALE}}`, `drop_queue_busy_latency{api:poll,${SALE}}`,
   `drop_first_response{${SALE}}`, `drop_queue_wait{${SALE}}`, `iteration_started{${SALE}}`, `iteration_finished{${SALE}}`,
+  ...['reserve', 'prepare', 'confirm'].flatMap((api) => [
+    `drop_retry_attempts{api:${api},${SALE}}`, `drop_retry_recovered{api:${api},${SALE}}`, `drop_retry_exhausted{api:${api},${SALE}}`, `drop_retry_answered{api:${api},${SALE}}`,
+    `drop_retry_eval_latency{api:${api},${SALE}}`,
+    `drop_time_to_final{api:${api},retried:false,${SALE}}`, `drop_time_to_final{api:${api},retried:true,${SALE}}`,
+  ]),
   `drop_sold_out{${SALE}}`, 'drop_member_result{scenario:warmup}', 'drop_member_result{result:paid,scenario:warmup}',
 ];
 // 창별 구매 경로 지연과 조회 지연. 요청은 시작한 창에 귀속한다. 정확한 분석은 --out 원자료로 한다.
@@ -123,7 +130,7 @@ export const options = {
 export function setup() {
   checkTarget();
   console.log(`drop=${DROP_ID} variants=${VARIANT_IDS} stock=${TOTAL_STOCK} participants=${PARTICIPANTS} queue=${QUEUE} pay=${PAY} `
-    + `peak=${PEAK_RATE}/s ramp=${RAMP_MS}ms hold=${HOLD_MS}ms margin=${MARGIN_MS}ms observe=${OBSERVE_MS}ms poll=${POLL_S}s `
+    + `peak=${PEAK_RATE}/s ramp=${RAMP_MS}ms hold=${HOLD_MS}ms margin=${MARGIN_MS}ms observe=${OBSERVE_MS}ms poll=${POLL_S}s(fallback when pollAfterMs is absent) `
     + `maxVUs=${MAX_VUS} rowOffset=${ROW_OFFSET} `
     + (WARMUP ? `warmup=drop ${WARMUP.dropId} ${WARM_RATE}/s x ${WARM_MS}ms (${WARM_COUNT} accounts from row ${PARTICIPANTS}) gap=${WARM_GAP_MS}ms` : 'warmup=none'));
   if (QUEUE === 'on') console.log('queue=on: the app must run with restless.drop.queue.required=true and the admission scheduler enabled');
@@ -158,18 +165,30 @@ function member(user, n, deadline, tag, target) {
   if (QUEUE === 'on') {
     // 진입, 조회, 점유가 같은 SKU를 쓴다. 입장 허가는 진입한 SKU에만 통한다.
     const variantId = variantFor(n, target);
-    const entered = enterQueue(user, variantId, tag(), target.dropId);
-    recordFirstResponse(entered.res);
+    let entered = enterQueue(user, variantId, tag(), target.dropId);
+    // 503 거절은 첫 응답 지연에 넣지 않는다. 아래 busy 지연으로만 본다.
+    if (entered.status !== 'BUSY') recordFirstResponse(entered.res);
+    // 서버가 503 DROP_QUEUE_BUSY로 일찍 거절하면 오류가 아니라 Retry-After 뒤 다시 진입한다.
+    while (entered.status === 'BUSY') {
+      const wait = nextWaitSeconds(entered, POLL_S);
+      if (Date.now() + wait * 1000 > deadline) return recordMember('unfinished', startedMs);
+      sleep(wait);
+      entered = enterQueue(user, variantId, tag(), target.dropId);
+    }
     // 그 SKU가 이미 현재 구매 불가면 진입부터 거절된다. 점유의 품절과 같은 결과로 센다.
     if (entered.status === 'SOLD_OUT') return recordMember('sold_out', startedMs);
     if (entered.status === 'ERROR' || entered.status === 'NOT_ON_SALE') return recordMember('error', startedMs);
     let status = entered.status;
     const enteredMs = Date.now();
     // 조회 오류는 세고 계속 조회한다. 실제 화면도 다음 주기에 다시 묻는다.
-    while (status === 'WAITING' || status === 'ERROR') {
-      if (Date.now() + POLL_S * 1000 > deadline) return recordMember('unfinished', startedMs);
-      sleep(POLL_S);
-      status = pollQueue(user, variantId, tag(), target.dropId);
+    // 서버가 pollAfterMs를 주면 그 간격을 따르고, 없으면 POLL_SECONDS를 쓴다. 503 DROP_QUEUE_BUSY는 Retry-After 뒤 다시 묻는다.
+    let last = entered;
+    while (status === 'WAITING' || status === 'ERROR' || status === 'BUSY') {
+      const wait = nextWaitSeconds(last, POLL_S);
+      if (Date.now() + wait * 1000 > deadline) return recordMember('unfinished', startedMs);
+      sleep(wait);
+      last = pollQueue(user, variantId, tag(), target.dropId);
+      status = last.status;
     }
     if (status === 'CLOSED') return recordMember('queue_closed', startedMs);
     // 재고가 0이 되어 입장 허가 작업이 대기를 끝냈다. 최종 매진은 아니라서 품절과 나눠 센다.
@@ -178,12 +197,12 @@ function member(user, n, deadline, tag, target) {
     recordQueueWait(Date.now() - enteredMs);
   }
 
-  const reserved = reserve(user, n, tag(), target);
+  const reserved = reserve(user, n, tag(), target, deadline);
   if (QUEUE === 'off') recordFirstResponse(reserved.res);
   if (reserved.outcome === 'sold_out') return recordMember('sold_out', startedMs);
   if (reserved.outcome !== 'created' || !reserved.body) return recordMember('error', startedMs);
   if (!PAY) return recordMember('reserved', startedMs);
-  const paid = pay(user, reserved.body, tag(), target.dropId);
+  const paid = pay(user, reserved.body, tag(), target.dropId, deadline);
   return recordMember(paid, startedMs);
 }
 
@@ -202,7 +221,22 @@ export function handleSummary(data) {
       latencyLine('queue wait', m(`drop_queue_wait{${SALE}}`)),
       `  polls waiting ${m(`drop_queue_poll{result:waiting,${SALE}}`).count || 0}, closed ${m(`drop_queue_poll{result:closed,${SALE}}`).count || 0}, `
         + `unavailable ${m(`drop_queue_poll{result:unavailable,${SALE}}`).count || 0}; enter rejected sold out ${m(`drop_queue_enter{result:sold_out,${SALE}}`).count || 0}`,
+      `  queue busy (503 DROP_QUEUE_BUSY, retried after Retry-After): enter ${m(`drop_queue_busy{api:enter,${SALE}}`).count || 0}, `
+        + `poll ${m(`drop_queue_busy{api:poll,${SALE}}`).count || 0}`,
+      latencyLine('busy enter (503 only)', m(`drop_queue_busy_latency{api:enter,${SALE}}`)),
+      latencyLine('busy poll (503 only)', m(`drop_queue_busy_latency{api:poll,${SALE}}`)),
     ] : []),
+    `  retry (${RETRY ? `on, per member up to ${RETRY_MAX}` : 'off'}): same Idempotency-Key for timeouts, connection errors and 5xx. `
+      + 'First-attempt latency stays in eval lines above; retry responses and time to final success are listed here.',
+    ...['reserve', 'prepare', 'confirm'].flatMap((api) => {
+      const c = (name) => m(`${name}{api:${api},${SALE}}`).count || 0;
+      return [
+        `    ${api.padEnd(8)} retry requests ${c('drop_retry_attempts')}, recovered ${c('drop_retry_recovered')}, still failed after retry ${c('drop_retry_exhausted')}, answered 4xx ${c('drop_retry_answered')}`,
+        latencyLine(`${api} retry response`, m(`drop_retry_eval_latency{api:${api},${SALE}}`)),
+        latencyLine(`${api} final, first try`, m(`drop_time_to_final{api:${api},retried:false,${SALE}}`)),
+        latencyLine(`${api} final, retried`, m(`drop_time_to_final{api:${api},retried:true,${SALE}}`)),
+      ];
+    }),
     latencyLine('arrival to paid', m(`drop_member_total{result:paid,${SALE}}`)),
     latencyLine('arrival to sold out', m(`drop_member_total{result:sold_out,${SALE}}`)),
     `  windows of ${WINDOW_S}s (reserve eval latency, requests attributed to their start window):`,
@@ -218,7 +252,7 @@ export function handleSummary(data) {
   return summarize(data, {
     headline: `drop ${DROP_ID} sale, queue ${QUEUE}, stock ${TOTAL_STOCK}, participants ${PARTICIPANTS}, peak ${PEAK_RATE}/s`,
     conditions: { scenario: 'sale', queue: QUEUE, pay: PAY, participants: PARTICIPANTS, ratio: RATIO, peakRate: PEAK_RATE,
-      rampMs: RAMP_MS, holdMs: HOLD_MS, marginMs: MARGIN_MS, observeMs: OBSERVE_MS, pollSeconds: POLL_S, windowSeconds: WINDOW_S,
+      rampMs: RAMP_MS, holdMs: HOLD_MS, marginMs: MARGIN_MS, observeMs: OBSERVE_MS, pollSeconds: POLL_S, retry: RETRY, retryMax: RETRY_MAX, windowSeconds: WINDOW_S,
       payTimeout: PAY_TIMEOUT, preVUs: PRE_VUS, maxVUs: MAX_VUS,
       warmup: WARMUP ? { dropId: WARMUP.dropId, rate: WARM_RATE, ms: WARM_MS, gapMs: WARM_GAP_MS, accounts: WARM_COUNT } : null },
     extraLines: lines,

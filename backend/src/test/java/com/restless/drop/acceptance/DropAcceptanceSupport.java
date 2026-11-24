@@ -119,6 +119,19 @@ abstract class DropAcceptanceSupport {
         }
     }
 
+    /**
+     * 순번은 SKU별 1초 스냅샷에서 센다 (policy 7절, 표시 순번은 최대 1초 늦을 수 있다).
+     * 입장이나 종료로 대기 행이 줄어든 뒤 정확한 순번을 단언하려면, 이 메서드로 다음 epoch 초로 넘어가 스냅샷이 새로 만들어지게 한다.
+     */
+    static void awaitNextEpochSecond() {
+        try {
+            Thread.sleep(1000 - System.currentTimeMillis() % 1000 + 20);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
     static Instant now() {
         return Instant.now().truncatedTo(ChronoUnit.SECONDS);
     }

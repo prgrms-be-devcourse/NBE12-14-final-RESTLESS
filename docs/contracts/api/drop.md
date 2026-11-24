@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/api/`, `backend/src/main/java/com/restless/drop/application/dto/`, `backend/src/test/java/com/restless/drop/acceptance/`
 >
-> 마지막 확인: 2026-11-22 (#330 재고 버킷 분할. D1 등록과 D2 트랜잭션 문장, D2 품절 판정의 뜻을 고쳤다. 요청, 응답, 오류 코드는 그대로다. 2026-11-20 #285 상태 표기 갱신, 대기열 경로의 429를 #278 `application.yml`, `QueueRateLimitIntegrationTest`와 대조. 2026-11-19 #253 SKU별 입장 제어 정책의 계약 반영. D4는 #254 SKU별 입장 제어 구현과 대조했다. 나머지는 2026-11-14 기준: #92 등록 검증과 판매 상태, #41 탈퇴 제한, #97 탈퇴 동의, #105 검색과 정렬, #109 주문 상세 결제 대상)
+> 마지막 확인: 2026-11-24 (#390 대기열 응답의 선택 필드 `pollAfterMs`, 동시 처리 상한 초과 503 `DROP_QUEUE_BUSY`. 기존 필드와 오류 코드는 그대로다. 이전: 2026-11-22 (#330 재고 버킷 분할. D1 등록과 D2 트랜잭션 문장, D2 품절 판정의 뜻을 고쳤다. 요청, 응답, 오류 코드는 그대로다. 2026-11-20 #285 상태 표기 갱신, 대기열 경로의 429를 #278 `application.yml`, `QueueRateLimitIntegrationTest`와 대조. 2026-11-19 #253 SKU별 입장 제어 정책의 계약 반영. D4는 #254 SKU별 입장 제어 구현과 대조했다. 나머지는 2026-11-14 기준: #92 등록 검증과 판매 상태, #41 탈퇴 제한, #97 탈퇴 동의, #105 검색과 정렬, #109 주문 상세 결제 대상)
 
 - 상태: v1 IMPLEMENTED (2026-11-13 합의). 수용 테스트(`backend/src/test/java/com/restless/drop/acceptance/`)가 이 계약을 기준으로 판정한다.
 - Base URL: `/api` ([ADR-0002](../../decisions/0002-common-conventions.md)). 오류는 공통 형식 `{code, message, details, traceId, timestamp}` ([common.md](common.md)).
@@ -127,7 +127,7 @@ SKU의 `available = 0`이면 그 SKU는 **현재 구매 불가**다 (`reserved`�
 
 - 요청: `{ "variantId": 10 }`. 진입 때 SKU를 고르고 서버가 `variant_id`로 저장한다.
 - 입장 신청을 한다. 이미 입장 대기 중이면 같은 대기를 돌려준다(1건).
-- 201 신규 / 200 기존 `{ "status": "WAITING", "variantId": 10, "position": 12 }`. 이미 입장 허가를 받은 상태면 200 `{ "status": "ADMITTED", "variantId": 10, "admittedUntil": "..." }`.
+- 201 신규 / 200 기존 `{ "status": "WAITING", "variantId": 10, "position": 12, "pollAfterMs": 1000 }`. 이미 입장 허가를 받은 상태면 200 `{ "status": "ADMITTED", "variantId": 10, "admittedUntil": "..." }`.
 - 응답: 모든 응답에 `variantId`를 포함한다. `position`은 같은 SKU의 `WAITING` 안에서의 입장 순번이다. 다른 SKU의 대기는 입장 순번에 영향을 주지 않는다.
 - 진입 재요청은 heartbeat를 늘리지 않는다 (화면 신호는 아래 상태 조회).
 - 이전 대기가 `UNAVAILABLE` 등으로 끝났으면 새 행을 만들어 201과 새 입장 순번을 준다. 종료 전 입장 순번을 우대하지 않는다.
@@ -137,20 +137,50 @@ SKU의 `available = 0`이면 그 SKU는 **현재 구매 불가**다 (`reserved`�
   - 404 `NOT_FOUND`: 그 드롭 소속이 아닌 SKU, 없는 SKU
   - 409 `DROP_SOLD_OUT`: 그 SKU의 `available = 0`(현재 구매 불가). 기존 코드를 재사용하고 메시지는 "현재 구매 불가"다. 행을 만들지 않는다.
   - 429 `TOO_MANY_REQUESTS`: 같은 회원이 10초에 5회를 넘겨 진입 요청 ([요청 횟수 제한](common.md#요청-횟수-제한))
+  - 503 `DROP_QUEUE_BUSY`: 이 서버가 동시에 처리하는 진입 요청이 상한을 넘음 ([동시 처리 상한](#대기열-동시-처리-상한)). 행을 만들지 않는다. 같은 요청을 `Retry-After` 뒤 다시 보내도 안전하다.
 - 같은 회원이 같은 드롭에서 다른 SKU로 진입하면 201과 함께 새 SKU의 새 `WAITING`(새 입장 순번)을 만들고 기존 SKU의 대기를 뺀다. 기존 대기가 `ADMITTED`여도 같다. 새 SKU가 `available = 0`이면 409 `DROP_SOLD_OUT`이고 기존 대기는 그대로다. 같은 SKU로 다시 진입하면 기존 대기를 돌려준다.
 - 페이지를 나가면 마지막 유효 조회 후 30~40초 사이에 이탈로 본다. 별도 해제 API는 없다.
 
 ### `GET /api/drops/{dropId}/queue/me` (회원)
 
-- 200 `{ "status": "WAITING" | "ADMITTED" | "EXPIRED" | "CONSUMED" | "UNAVAILABLE", "position": 3, "admittedUntil": "..." }` (`position`은 WAITING일 때만, `admittedUntil`은 ADMITTED일 때만). `variantId`도 함께 준다.
+- 200 `{ "status": "WAITING" | "ADMITTED" | "EXPIRED" | "CONSUMED" | "UNAVAILABLE", "position": 3, "admittedUntil": "...", "pollAfterMs": 1000 }` (`position`과 `pollAfterMs`는 WAITING일 때만, `admittedUntil`은 ADMITTED일 때만). `variantId`도 함께 준다.
 - `UNAVAILABLE`: 그 SKU가 현재 구매 불가가 되어 대기나 미사용 입장 허가가 종료됐다. `{ "status": "UNAVAILABLE", "variantId": 10 }`. 404가 아니다. 화면이 "현재 구매 불가"를 보여 줄 수 있어야 하기 때문이다. 사용자가 다시 진입하면 새 기록이 최신이 된다.
 - 대기 중 상태 조회는 "아직 화면에 있음" 신호다. 저장된 heartbeat가 `restless.drop.queue.heartbeat-timeout`보다 오래되면 404를 반환한다. 다시 들어오면 맨 뒤에서 다시 시작한다.
   - WAITING 조회는 마지막 저장 후 10초를 넘겼을 때 heartbeat를 기록한다. 이탈 기준은 저장 시각에서 40초 초과다. `ADMITTED`에는 적용하지 않는다.
-  - 상태 조회 간격 3~4초는 클라이언트 제안값이다. 계약상 의무도, 확정 정책도 아니다.
+  - 다음 조회 간격은 서버가 `pollAfterMs`로 알려 준다 ([조회 간격](#조회-간격-pollafterms)). 클라이언트는 `pollAfterMs`보다 자주 조회하지 않는다.
 - 대기 기록이 없거나 최신 기록이 CLOSED(이탈, 판매 종료)면 404. EXPIRED, CONSUMED, UNAVAILABLE은 200으로 그대로 보여 준다.
 - 이 요청은 어떤 경우에도 즉시 응답한다. 입장이 재개될 때까지 요청을 붙잡지 않는다.
 - 같은 회원이 1초에 5회를 넘겨 조회하면 429 `TOO_MANY_REQUESTS`다. 429로 거절된 조회는 heartbeat를 갱신하지 않는다 ([요청 횟수 제한](common.md#요청-횟수-제한)).
+- 이 서버가 동시에 처리하는 상태 조회가 상한을 넘으면 503 `DROP_QUEUE_BUSY`다. 503으로 거절된 조회도 heartbeat를 갱신하지 않는다 ([동시 처리 상한](#대기열-동시-처리-상한)).
 - `available = 0`이 되어도 `WAITING`이 곧바로 `UNAVAILABLE`로 바뀌는 것은 아니다. 입장 허가 작업이 관찰한 뒤 바뀐다. 그 사이는 입장 허가 작업 한 번의 주기 안이며, 그동안에도 입장 허가 없이는 점유할 수 없다.
+
+### 조회 간격 (`pollAfterMs`)
+
+2026-11-24 사용자 위임 결정이다 (#390, 근거는 이슈의 측정 기록). 서버가 WAITING 응답에 다음 조회까지 기다릴 시간을 밀리초로 싣는다. 선택 필드이며 기존 필드는 그대로다.
+
+| 입장 순번 (`position`) | `pollAfterMs` |
+|---|---|
+| 1 ~ 20 | 1000 |
+| 21 ~ 200 | 2000 |
+| 201 ~ 1000 | 3000 |
+| 1001 이상 | 5000 |
+
+- 진입 응답과 상태 조회 응답의 WAITING에만 있다. ADMITTED, EXPIRED, CONSUMED, UNAVAILABLE에는 없다. 이 상태들은 대기가 끝났으므로 조회 간격이 뜻을 갖지 않는다.
+- 클라이언트는 `pollAfterMs`보다 자주 조회하지 않는다. 필드가 없으면 클라이언트가 정한 간격을 쓴다. 의무는 아니지만 따르지 않아도 사용자별 요청 횟수 제한(429)은 그대로 적용된다.
+- 구간 경계와 값은 `restless.drop.queue.poll.tiers`, `fallback-ms`로 바꾼다. 어떤 값도 `restless.drop.queue.poll.max-ms`(기본은 10초, heartbeat 기록 간격, 이탈 판정 시간의 3분의 1 중 가장 작은 값)를 넘지 않는다.
+- 설정은 기동 때 검증한다. `max-ms`가 heartbeat 기록 간격(기본 10초)보다 크거나, 이탈 판정 시간(기본 40초) 안에 3번 미만 들어오게 하면 기동이 실패한다. 구간은 순번이 늘고 간격이 줄지 않아야 한다.
+
+### 대기열 동시 처리 상한
+
+2026-11-24 사용자 위임 결정이다 (#390). 서버 한 대가 동시에 처리하는 대기열 진입과 상태 조회의 수에 상한을 둔다. 넘으면 기다리지 않고 바로 503을 준다. 클라이언트가 이미 포기한 요청에 스레드와 DB 커넥션을 쓰지 않게 하려는 것이다.
+
+- 응답: 503 `DROP_QUEUE_BUSY`와 `Retry-After`(초) 헤더. 오류 본문은 공통 형식이다.
+- 대상은 `POST .../queue/entries`와 `GET`, `HEAD .../queue/me`뿐이다. 재고 점유(TX1), 결제 준비와 승인, 결제 확정은 거절하지 않는다. 사용자별 요청 횟수 제한(429)은 그대로이고 먼저 적용한다.
+- 진입과 조회는 서로 다른 상한을 쓴다. 기본값은 `restless.drop.queue.concurrency.entry-max` 8, `status-max` 30이다. Hikari 풀 20과 Tomcat 스레드 200을 근거로 했고, 풀을 줄이면 같이 줄인다. 상한 값은 재측정으로 다시 정한다.
+- `Retry-After`는 진입 3초(`entry-retry-after-seconds`), 조회 1초(`status-retry-after-seconds`)가 기본이다. 진입은 사용자별 제한이 10초에 5회라서, 계약대로 3초 뒤 재시도하는 클라이언트가 429를 받지 않게 3초로 했다. 재시도 간격 x 제한 횟수가 제한 창보다 짧으면 기동이 실패한다.
+- 503은 서버 상태를 바꾸지 않는다. 진입은 행을 만들지 않고 조회는 heartbeat를 갱신하지 않는다. 같은 요청을 다시 보내도 안전하다.
+- 클라이언트는 `Retry-After` 뒤에 다시 보낸다. 한꺼번에 몰리지 않게 지터를 더한다. 이 응답은 대기를 잃는 오류가 아니다. 이탈 판정 시간 안에 조회가 한 번도 닿지 않으면 대기가 닫힐 수 있다.
+- 메트릭 `drop.queue.busy`(태그 `kind`는 entry, status)가 거절 수를 센다.
 
 ### 입장 허가
 

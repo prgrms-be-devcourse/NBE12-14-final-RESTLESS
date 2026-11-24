@@ -14,8 +14,12 @@ TEST = "backend/src/test/java/com/restless"
 ALWAYS = ["com.restless.architecture.*", "com.restless.RestlessApplicationTests"]
 
 
-class SelectTest(unittest.TestCase):
+class Fixture(unittest.TestCase):
     def setUp(self):
+        # 아래 선택 규칙 시험은 drop을 일반 도메인 예시로 쓴다. 항상 전체 규칙은 FullModulesTest가 따로 본다.
+        self.real_full_modules = select_tests.FULL_MODULES
+        select_tests.FULL_MODULES = set()
+        self.addCleanup(setattr, select_tests, "FULL_MODULES", self.real_full_modules)
         self.tmp = tempfile.TemporaryDirectory()
         self.repo = self.tmp.name
         # member is shared. drop implements member's interface. auction uses credit. reporting has no tests.
@@ -43,6 +47,8 @@ class SelectTest(unittest.TestCase):
         scope, patterns, _ = select_tests.select(list(files), self.repo)
         return scope, patterns
 
+
+class SelectTest(Fixture):
     def test_domain_change_runs_domain_interface_owner_test_users_and_always(self):
         self.assertEqual(self.select(f"{MAIN}/drop/A.java"),
                          ("partial", ["com.restless.drop.*", "com.restless.member.*",
@@ -99,6 +105,33 @@ class SelectTest(unittest.TestCase):
         self.assertIn("com.restless.drop.*", patterns)
 
 
+class FullModulesTest(Fixture):
+
+    """실제 FULL_MODULES 설정으로 본다. setUp이 비운 값을 되돌린다."""
+
+    def setUp(self):
+        super().setUp()
+        select_tests.FULL_MODULES = self.real_full_modules
+
+    def test_drop_main_and_test_change_runs_everything(self):
+        self.assertEqual(self.select(f"{MAIN}/drop/A.java"), ("full", []))
+        self.assertEqual(self.select(f"{TEST}/drop/A.java"), ("full", []))
+        self.assertEqual(self.select("docs/a.md", f"{TEST}/drop/acceptance/A.java"), ("full", []))
+
+    def test_order_and_payment_are_shared_so_full(self):
+        for m in ("order", "payment"):
+            self.assertIn(m, select_tests.SHARED)
+
+    def test_other_domains_stay_selected(self):
+        self.assertEqual(self.select(f"{MAIN}/credit/A.java")[0], "partial")
+
+    def test_drop_is_not_full_for_docs_or_perf_only(self):
+        self.assertEqual(self.select("docs/domains/drop/policy.md", "perf/scenarios/drop-sale.js"), ("none", []))
+
+    def test_configured_modules(self):
+        self.assertEqual(self.real_full_modules, {"drop"})
+
+
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 
 
@@ -110,13 +143,14 @@ class RealRepoTest(unittest.TestCase):
         scope, patterns, _ = select_tests.select([path], REPO)
         return scope, set(patterns)
 
-    def test_drop_change_runs_modules_that_execute_drop_code(self):
-        scope, patterns = self.patterns(f"{MAIN}/drop/application/DropPaymentResultHandler.java")
+    def test_drop_change_runs_everything(self):
+        # 드롭은 항상 전체다. 모듈 사이 결합을 따진 선택 실행은 다른 도메인에서 본다.
+        self.assertEqual(self.patterns(f"{MAIN}/drop/application/DropPaymentResultHandler.java")[0], "full")
+        self.assertEqual(self.patterns(f"{TEST}/drop/acceptance/DropQueueAcceptanceTest.java")[0], "full")
+
+    def test_non_shared_domain_still_selects(self):
+        scope, patterns = self.patterns(f"{MAIN}/auction/application/AuctionService.java")
         self.assertEqual(scope, "partial")
-        # payment: PaymentResultHandler 구현과 dropPaymentResultHandler 빈 덮어쓰기
-        # member: WithdrawalGuard 구현, order: OrderPayableResolver 구현
-        self.assertTrue({"com.restless.drop.*", "com.restless.payment.*", "com.restless.member.*",
-                         "com.restless.order.*"} <= patterns, patterns)
         self.assertTrue(set(ALWAYS) <= patterns)
 
     def test_shared_modules_run_everything(self):
