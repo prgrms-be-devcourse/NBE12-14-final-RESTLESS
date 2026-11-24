@@ -98,7 +98,7 @@ PG 장애 복구는 범위 밖이다. 중복과 동시 구매, 환불, 이중 �
 
 주의할 점:
 
-- 입장 허가 작업, 순번 스냅샷, 점유 만료 작업, 점유 만료 작업(`RESTLESS_DROP_EXPIRY_ENABLED`), 미완료 결제 재확인 작업(`PAYMENT_RECONCILE_ENABLED`)은 앱 인스턴스마다 돈다. 마지막 두 가지는 두 서버에서 같은 값을 쓰고 실행 기록에 적는다. 서버 둘이 같은 `admit-per-run`을 쓰면 초당 입장 수가 약 2배가 되어 서버 수 말고도 변인이 바뀐다. 기본은 서버 2의 `RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED`를 false로 두는 것이다. 입장 수가 한 대일 때와 같다. 대안으로 서버마다 `RESTLESS_DROP_QUEUE_ADMIT_PER_RUN`을 절반으로 둘 수 있지만, 두 서버의 주기가 겹치면 한쪽이 그 SKU를 건너뛰어 합이 한 대일 때보다 낮아질 수 있다. 고른 방법을 실행 기록에 적는다.
+- 입장 허가 작업, 순번 스냅샷, 점유 만료 작업(`RESTLESS_DROP_EXPIRY_ENABLED`), 미완료 결제 재확인 작업(`PAYMENT_RECONCILE_ENABLED`)은 앱 인스턴스마다 돈다. 마지막 두 가지는 두 서버에서 같은 값을 쓰고 실행 기록에 적는다. 서버 둘이 같은 `admit-per-run`을 쓰면 초당 입장 수가 약 2배가 되어 서버 수 말고도 변인이 바뀐다. 기본은 서버 2의 `RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED`를 false로 두는 것이다. 입장 수가 한 대일 때와 같다. 대안으로 서버마다 `RESTLESS_DROP_QUEUE_ADMIT_PER_RUN`을 절반으로 둘 수 있지만, 두 서버의 주기가 겹치면 한쪽이 그 SKU를 건너뛰어 합이 한 대일 때보다 낮아질 수 있다. 고른 방법을 실행 기록에 적는다.
 - `perf-ec2.sh check`는 대기열이 false가 아니면 경고를 낸다. 대기열 켬 측정이면 정상이다.
 
 순서:
