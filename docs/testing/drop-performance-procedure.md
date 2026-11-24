@@ -166,7 +166,7 @@ curl -sf http://127.0.0.1:8081/actuator/health   # UP이 될 때까지 반복한
 ```
 
 2. 스택 깊이 기본값 64는 Tomcat과 앱 코드 같은 바깥 계층을 과소 집계한다. 위 명령은 256으로 올렸다.
-3. 측정 뒤 7-5의 1번과 2번(`after-run` 파일, 후 값, 수렴 확인, `verify`)을 마친 다음 `docker stop -t 60 restless-perf`로 종료한다. 종료할 때 파일이 저장되므로 기본 10초로 끊지 않는다. 컨테이너를 지우기 전에 `docker cp restless-perf:/tmp/run.jfr ~/run-<날짜>.jfr`로 서버 홈에 꺼낸다. 저장소 폴더에는 두지 않는다. 노트북에는 EC2 소유자가 `scp`로 받아 결과 폴더에 둔다. 브라우저 터미널로는 내려받을 수 없다.
+3. 측정 뒤 7-5의 1번과 2번(`after-run` 파일, 후 값, 수렴 확인, `verify`)을 마친 다음 `docker stop -t 60 restless-perf`로 종료한다. 종료할 때 파일이 저장되므로 기본 10초로 끊지 않는다. 컨테이너를 지우기 전에 `docker cp restless-perf:/tmp/run.jfr ~/run-<날짜>-<측정>.jfr`로 서버 홈에 꺼낸다. 저장소 폴더에는 두지 않는다. 노트북에는 EC2 소유자가 `scp`로 받아 결과 폴더에 둔다. 브라우저 터미널로는 내려받을 수 없다.
 4. 노트북의 JDK 21에서 복사한 파일을 본다. `jfr print --events jdk.CPULoad`와 `jdk.GarbageCollection`으로 CPU와 GC 정지를 보고, `jfr print --events jdk.ExecutionSample`로 판매 1분 창의 실행 샘플을 뽑는다. 샘플은 스택의 첫 JDK 밖 프레임 패키지로 직접 묶는다. 이 묶음 작업에는 정해 둔 스크립트가 없다. self 몫만 믿는다. 깊이 제한이 있으면 엔드포인트별 CPU는 나눌 수 없다.
 5. 끝나면 서버를 `perf-ec2.sh start <태그>`로 되돌린다. JFR 파일은 커밋하지 않는다.
 

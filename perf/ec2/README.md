@@ -65,9 +65,9 @@ perf/ec2/perf-ec2.sh finish
 [db-probe.sh](db-probe.sh)는 RDS 콘솔 값과 Performance Insights를 쓸 수 없을 때 DB가 무엇을 하는지 보는 읽기 전용 대체 수단이다. `perf.env`를 읽으므로 EC2 소유자만 실행한다. 팀원 SSH 계정의 sudo 허용 목록에는 없다. `perf-ec2.sh`와 같이 `perf.env`를 읽고, DB 이름이 `perf-`로 시작하지 않거나 prod가 들어 있거나 프로필이 perf가 아니면 멈춘다. 비밀값은 출력하지 않는다. DB를 바꾸지 않는다.
 
 ```bash
-perf/ec2/db-probe.sh status ~/probe-<날짜>-before.txt   # 측정 전 전역 카운터
-perf/ec2/db-probe.sh sample 420 ~/probe-<날짜>-sample.txt   # 약 0.5초마다 실행 중인 SQL 표본. 워밍업, 유입, 관측 시간을 모두 덮게 초 수를 정한다 (기본 drop-sale은 약 400초). k6 시작 직전에 켠다
-perf/ec2/db-probe.sh status ~/probe-<날짜>-after.txt    # 측정 후. 전후 차이를 본다
+perf/ec2/db-probe.sh status ~/probe-<날짜>-<측정>-before.txt   # 측정 전 전역 카운터
+perf/ec2/db-probe.sh sample 420 ~/probe-<날짜>-<측정>-sample.txt   # 약 0.5초마다 실행 중인 SQL 표본. 워밍업, 유입, 관측 시간을 모두 덮게 초 수를 정한다 (기본 drop-sale은 약 400초). k6 시작 직전에 켠다
+perf/ec2/db-probe.sh status ~/probe-<날짜>-<측정>-after.txt    # 측정 후. 전후 차이를 본다
 ```
 
 - `status`는 커밋 수, redo fsync, 읽은 행 수, 잠금 대기 같은 누적 카운터다. RDS 인스턴스 전체 값이므로 다른 테스트가 없을 때만 해석한다.
