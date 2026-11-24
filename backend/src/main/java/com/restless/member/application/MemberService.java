@@ -3,6 +3,7 @@ package com.restless.member.application;
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
 import com.restless.member.domain.Member;
+import com.restless.member.domain.MemberStatus;
 import com.restless.member.infrastructure.MemberRepository;
 import java.time.Clock;
 import java.time.Instant;
@@ -76,6 +77,12 @@ public class MemberService {
                 .collect(Collectors.toSet());
     }
 
+    /** 탈퇴로 기록된 회원이면 true. 없는 회원은 false다. 인증이 탈퇴 회원의 쓰기 요청을 막을 때 쓴다. */
+    @Transactional(readOnly = true)
+    public boolean isWithdrawn(Long memberId) {
+        return memberRepository.existsByIdAndStatus(memberId, MemberStatus.WITHDRAWN);
+    }
+
     /** 가입 시각. 탈퇴 회원도 돌려준다. 없는 회원이면 MEMBER_NOT_FOUND. */
     @Transactional(readOnly = true)
     public Instant joinedAt(Long memberId) {
@@ -95,7 +102,7 @@ public class MemberService {
         return member;
     }
 
-    static final String WITHDRAWN_MESSAGE = "탈퇴한 회원입니다.";
+    public static final String WITHDRAWN_MESSAGE = "탈퇴한 회원입니다.";
 
     /** 프로필 수정. 탈퇴한 회원이면 404 MEMBER_NOT_FOUND. */
     @Transactional

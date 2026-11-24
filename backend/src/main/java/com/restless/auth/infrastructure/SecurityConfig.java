@@ -28,6 +28,7 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>기본: 모든 요청은 로그인 필요.</li>
  *   <li>공개: 가입, 로그인, health, 아래 {@link #PUBLIC_GET_PATHS}의 조회.</li>
  *   <li>{@code /api/admin/**}: ADMIN만.</li>
+ *   <li>탈퇴한 회원의 쓰기 요청: 거절 ({@link WithdrawnMemberSecurityConfig}).</li>
  * </ul>
  *
  * <p>로그인 없이 볼 조회 API를 만들면 {@link #PUBLIC_GET_PATHS}에 추가한다.

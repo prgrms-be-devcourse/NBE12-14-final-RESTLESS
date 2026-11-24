@@ -61,6 +61,9 @@ restless:
       cancel-stale-after: 30s
       not-found-final-after: 15m
   auth:
+    withdrawn-block:
+      # 탈퇴한 회원의 쓰기 요청을 막는다. 쓰기마다 회원을 한 번 조회하므로 perf 프로필에서는 끈다.
+      enabled: true
     jwt:
       # HS256 서명 키, 32바이트 이상. dev는 application-dev.yml에 기본값이 있고, prod는 환경변수로만 넣는다.
       secret: ${JWT_SECRET}

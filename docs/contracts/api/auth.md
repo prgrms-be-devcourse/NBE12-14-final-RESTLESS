@@ -64,7 +64,8 @@
 
 - 행은 지우지 않는다(`status = WITHDRAWN`, `deleted_at`). 주문, 결제, 응모 같은 다른 도메인 기록은 그대로 남는다.
 - 모든 기기의 Refresh Token을 폐기한다. 다시 로그인할 수 없고, 같은 이메일로 다시 가입할 수도 없다(`uk_users_email`).
-- Access Token은 만료(최대 1시간)까지 남는다. 회원 API는 404를 주지만 다른 도메인 API는 통과할 수 있으니, 결제·응모처럼 중요한 처리는 서비스에서 `memberService.getActive(userId)`로 한 번 더 확인한다.
+- Access Token은 만료(최대 1시간)까지 남는다. 그 토큰으로 보낸 쓰기 요청(POST, PUT, PATCH, DELETE)은 모든 도메인에서 404 `MEMBER_NOT_FOUND`(`탈퇴한 회원입니다.`)로 막는다. 가입, 로그인, 갱신, 로그아웃은 막지 않는다. 역할이 모자라면 403이 먼저다 (`WithdrawnMemberFilter`). `restless.auth.withdrawn-block.enabled=false`면 끈다. 기본은 켜짐이고 perf 프로필에서만 끈다(`WITHDRAWN_BLOCK_ENABLED=true`로 켤 수 있다).
+- 조회 요청은 막지 않는다. 회원 API는 404를 주지만 다른 도메인 조회는 통과할 수 있다. 탈퇴 확인 직후 탈퇴하는 동시 요청도 통과할 수 있으니, 결제처럼 중요한 처리는 서비스에서 `memberService.getActive(userId)`로 한 번 더 확인한다.
 - **진행 중인 거래가 있으면 막는다 (`WithdrawalGuard`).** 도메인은 `member.application.WithdrawalGuard`를 구현한 `@Component`를 자기 패키지에 두면 된다. 하나라도 `true`를 돌려주면 409 `MEMBER_HAS_ACTIVE_PARTICIPATION`. 지금 등록된 Guard는 팬미팅(`FanMeetingWithdrawalGuard`)과 드롭(`DropWithdrawalGuard`)이다.
 
 ```java

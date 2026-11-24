@@ -49,3 +49,7 @@ management:
 restless:
   ratelimit:
     enabled: false
+  auth:
+    withdrawn-block:
+      # 쓰기마다 늘어나는 회원 조회를 이전 측정과 섞지 않는다. 전후 비교 때만 켠다.
+      enabled: ${WITHDRAWN_BLOCK_ENABLED:false}
