@@ -66,7 +66,7 @@ perf/ec2/perf-ec2.sh finish
 
 ```bash
 perf/ec2/db-probe.sh status ~/probe-before.txt   # 측정 전 전역 카운터
-perf/ec2/db-probe.sh sample 300 ~/probe-sample.txt   # 300초 동안 0.5초마다 실행 중인 SQL 표본. k6 시작 직전에 켠다
+perf/ec2/db-probe.sh sample 420 ~/probe-sample.txt   # 약 0.5초마다 실행 중인 SQL 표본. 워밍업, 유입, 관측 시간을 모두 덮게 초 수를 정한다 (기본 drop-sale은 약 400초). k6 시작 직전에 켠다
 perf/ec2/db-probe.sh status ~/probe-after.txt    # 측정 후. 전후 차이를 본다
 ```
 

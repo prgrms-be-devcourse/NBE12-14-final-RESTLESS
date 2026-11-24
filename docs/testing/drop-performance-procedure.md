@@ -135,8 +135,8 @@ k6 run perf/scenarios/drop-sale.js 2>&1 | tee .ai-output/perf/<날짜>-<측정>/
 
 - 시나리오는 호스트가 `perf-`로 시작하지 않으면 시작하지 않는다. ALB 이름도 `perf-`로 시작하게 `/etc/hosts`에 둔다.
 - `ulimit -n`을 올리지 않으면 부하 발생기 쪽 연결 오류가 서버 성능으로 오해된다.
-- 유효 설정은 서버마다 따로 확인한다. 각 서버에서 `docker exec restless-perf printenv RESTLESS_DROP_QUEUE_REQUIRED RESTLESS_DROP_QUEUE_SCHEDULER_ENABLED RESTLESS_DROP_QUEUE_ADMIT_PER_RUN`을 실행한다. 풀 크기는 `curl http://perf-app:8081/actuator/prometheus`와 `perf-app2`의 `hikaricp_connections_max`로 본다. 측정 뒤에는 입장 카운터 `drop_queue_admitted_total`이 입장 허가 작업을 켠 서버에만 늘었는지 본다. k6의 시작 점검은 `MANAGEMENT_URL`의 서버 1만 보고 설정은 확인하지 않는다.
-- 서버 두 대의 앱 CPU, Tomcat busy, Hikari active와 pending을 서버별로 따로 본다. 요청 수가 고르게 나뉘었는지도 서버별 `http.server.requests` 합으로 확인한다.
+- 유효 설정은 서버마다 따로 확인한다. 각 서버에서 `docker exec restless-perf env | grep RESTLESS_DROP_QUEUE_`을 실행한다. 출력에 없는 키는 application.yml 기본값을 쓴다. 풀 크기는 `curl http://perf-app:8081/actuator/prometheus`와 `perf-app2`의 `hikaricp_connections_max`로 본다. 측정 뒤에는 입장 카운터 `drop_queue_admitted_total`이 입장 허가 작업을 켠 서버에만 늘었는지 본다. k6의 시작 점검은 `MANAGEMENT_URL`의 서버 1만 보고 설정은 확인하지 않는다.
+- 서버 두 대의 앱 CPU, Tomcat busy, Hikari active와 pending을 서버별로 따로 본다. 요청 수가 고르게 나뉘었는지도 서버별 `http_server_requests_seconds_count` 합으로 확인한다.
 - 수집이 가끔 시간 초과로 빠질 수 있다. 빠진 횟수를 기록한다. 스파이크 한가운데에서 빠졌는지 본다.
 
 ### 7-3. DB 프로브
