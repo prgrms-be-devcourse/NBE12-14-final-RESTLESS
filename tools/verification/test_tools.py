@@ -85,6 +85,17 @@ class RecordTest(unittest.TestCase):
         self.assertIsNotNone(gate.NO_REVIEW.search("독립 검증 없음: 오타 수정"))
 
 
+class CiScopeTest(unittest.TestCase):
+    def test_reads_scope_notice_among_other_annotations(self):
+        gate = load("merge-gate")
+        msgs = ["Node.js 20 is deprecated.", "Backend test scope: partial (바뀐 도메인 drop)"]
+        self.assertEqual(gate.scope_from_annotations(msgs), ("partial", "(바뀐 도메인 drop)"))
+        self.assertEqual(gate.scope_from_annotations(["Backend test scope: full (CI 설정 변경)"])[0], "full")
+
+    def test_missing_notice_is_unknown(self):
+        self.assertIsNone(load("merge-gate").scope_from_annotations(["setup-java v4 is deprecated."]))
+
+
 class SpecLintTest(unittest.TestCase):
     def run_lint(self, body):
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
