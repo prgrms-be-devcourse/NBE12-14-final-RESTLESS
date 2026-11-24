@@ -8,9 +8,12 @@ import com.restless.fanmeeting.application.FanMeetingDrawTransitions;
 import com.restless.fanmeeting.application.MemberPort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+/** 같은 members 스파이를 쓰는 FanMeetingPreviewCompletionTest와 Spring 컨텍스트를 같이 쓰도록 같은 ClockConfig를 가져온다. */
+@Import(FanMeetingPromotionSupport.ClockConfig.class)
 class FanMeetingDrawComputeTransactionTest extends FanMeetingOrderApiSupport {
     @Autowired FanMeetingDrawTransitions draws;
     @MockitoSpyBean MemberPort members;
