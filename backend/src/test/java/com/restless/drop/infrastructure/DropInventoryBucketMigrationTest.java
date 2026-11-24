@@ -16,6 +16,8 @@ import static org.assertj.core.api.Assertions.*;
  */
 class DropInventoryBucketMigrationTest {
     private static final String BEFORE = "20261121.0900";
+    // Pin the target so later migrations (#377) do not change the executed count of the two bucket migrations.
+    private static final String AFTER = "20261122.1401";
 
     @Test
     void backfillKeepsSkuSumsAndPutsExistingHoldsAndSalesInBucketZero() {
@@ -26,7 +28,7 @@ class DropInventoryBucketMigrationTest {
                 flyway(dataSource, BEFORE).migrate();
                 var jdbc = new JdbcTemplate(dataSource);
                 seedLegacy(jdbc);
-                var result = flyway(dataSource, null).migrate();
+                var result = flyway(dataSource, AFTER).migrate();
                 assertThat(result.migrationsExecuted).isEqualTo(2);
 
                 // SKU 1: total 10 = available 5 + reserved 2 + sold 3 -> K 4, available 2,1,1,1 with bucket 0 holding the rest

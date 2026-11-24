@@ -36,6 +36,7 @@ class DropQueueIntegrationTest {
     @Autowired DropAdminService admin;
     @Autowired DropReservationService service;
     @Autowired DropQueueService queue;
+    @Autowired com.restless.drop.infrastructure.DropQueueEntryRepository entries;
     @Autowired DropQueueAdmissionJob job;
     @Autowired DropQueueAdmissionTransactions batches;
     @Autowired DropQueueGateRepair gateRepair;
@@ -279,6 +280,59 @@ class DropQueueIntegrationTest {
         job.runOnce();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_gates WHERE variant_id=?", Integer.class, variant)).isEqualTo(1);
         assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.ADMITTED);
+    }
+
+    // #377: position counts fresh WAITING rows of the same SKU up to and including the caller's id.
+    @Test
+    void positionCountsOnlyFreshWaitingAheadInSameSku() {
+        var cutoff = opens.plusSeconds(1);
+        clock.now = cutoff.minusNanos(1_000);
+        enterAs(newUser()); // stale by 1 microsecond: excluded
+        clock.now = cutoff;
+        enterAs(newUser()); // last_seen_at == cutoff: counted
+        clock.now = cutoff.plusSeconds(1);
+        var admitted = newUser();
+        enterAs(admitted);
+        jdbc.update("UPDATE drop_queue_entries SET status='ADMITTED', admitted_at=?, admitted_until=? WHERE drop_id=? AND user_id=?",
+                Timestamp.from(clock.now), Timestamp.from(clock.now.plusSeconds(300)), drop, admitted); // not WAITING: excluded
+        var other = admin.create(new CreateDropRequest(
+                jdbc.queryForObject("SELECT concert_id FROM drops WHERE id=?", Long.class, drop),
+                "other", "description", "url", opens, opens.plusSeconds(3600),
+                List.of(new CreateDropRequest.Variant("B", "L", 100L, 1)))).dropId();
+        admin.publish(other);
+        var otherSku = jdbc.queryForObject("SELECT id FROM drop_variants WHERE drop_id=?", Long.class, other);
+        queue.enter(other, newUser(), otherSku); // other SKU: excluded
+        clock.now = cutoff.plusSeconds(2);
+        enterAs(newUser()); // fresh, ahead: counted
+        clock.now = cutoff.plusSeconds(3);
+        var me = enterAs(user); // self: counted
+        clock.now = cutoff.plusSeconds(4);
+        enterAs(newUser()); // behind: excluded
+        var myId = jdbc.queryForObject("SELECT id FROM drop_queue_entries WHERE drop_id=? AND user_id=?", Long.class, drop, user);
+
+        assertThat(entries.position(variant, myId, cutoff)).isEqualTo(3);
+        assertThat(me.body().position()).as("enter response").isEqualTo(4);
+        clock.now = cutoff.plusSeconds(30); // queue/me cutoff is now - 30s == cutoff
+        assertThat(queue.me(drop, user).orElseThrow().position()).isEqualTo(3);
+        assertThat(jdbc.queryForList("""
+                SELECT column_name FROM information_schema.statistics
+                WHERE table_schema=DATABASE() AND table_name='drop_queue_entries' AND index_name='ix_drop_queue_sku_position'
+                ORDER BY seq_in_index""", String.class))
+                .containsExactly("variant_id", "status", "id", "last_seen_at");
+    }
+
+    private DropQueueService.Entered enterAs(Long member) {
+        return queue.enter(drop, member, variant);
+    }
+
+    private Long newUser() {
+        var email = UUID.randomUUID() + "@position.test";
+        var now = Timestamp.from(opens);
+        jdbc.update("""
+                INSERT INTO users (email, password_hash, nickname, role, status, created_at, updated_at)
+                VALUES (?, 'hash', 'position', 'USER', 'ACTIVE', ?, ?)
+                """, email, now, now);
+        return jdbc.queryForObject("SELECT id FROM users WHERE email = ?", Long.class, email);
     }
 
     private void assertCode(Runnable call, ErrorCode code) {
