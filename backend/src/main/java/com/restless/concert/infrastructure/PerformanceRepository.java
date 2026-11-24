@@ -4,6 +4,7 @@ import com.restless.concert.domain.Performance;
 import com.restless.concert.application.dto.TicketSeatDescription;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -11,6 +12,9 @@ import org.springframework.data.repository.query.Param;
 public interface PerformanceRepository extends JpaRepository<Performance, Long> {
 
     List<Performance> findAllByConcertIdOrderByStartsAtAsc(Long concertId);
+
+    @Query("select p.maxTicketsPerUser from Performance p where p.id = :id")
+    Optional<Integer> findMaxTicketsPerUser(@Param("id") Long id);
 
     @Query("""
             select new com.restless.concert.application.dto.TicketSeatDescription(

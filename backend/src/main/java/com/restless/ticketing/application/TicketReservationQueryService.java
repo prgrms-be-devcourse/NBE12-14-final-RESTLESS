@@ -41,7 +41,7 @@ public class TicketReservationQueryService {
     public TicketBookingAvailability getAvailability(Long userId, Long performanceId) {
         validateUser(userId);
         if (performanceId == null || performanceId <= 0) throw new BusinessException(ErrorCode.INVALID_REQUEST);
-        int maximum = concerts.getBookingPerformance(performanceId).maxTicketsPerUser();
+        int maximum = concerts.getMaxTicketsPerUser(performanceId);
         var limit = purchaseLimits.findFirstByUserIdAndPerformanceId(userId, performanceId);
         int confirmed = limit.map(com.restless.ticketing.domain.TicketPurchaseLimit::getConfirmedCount).orElse(0);
         int reserved = limit.map(com.restless.ticketing.domain.TicketPurchaseLimit::getReservedCount).orElse(0);
