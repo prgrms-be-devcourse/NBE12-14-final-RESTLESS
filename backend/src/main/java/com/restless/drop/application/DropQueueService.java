@@ -24,6 +24,7 @@ public class DropQueueService {
     private final DropPurchaseSlotRepository slots;
     private final DropQueueSettings settings;
     private final DropQueueMetrics metrics;
+    private final DropQueuePositions positions;
     private final Clock clock;
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record View(DropQueueStatus status, Long variantId, Long position, Instant admittedUntil) { }
@@ -47,9 +48,11 @@ public class DropQueueService {
             entry.close();
             entries.flush(); // Release the generated active key before replacement.
         }
+        // Capture committed queue ids before this transaction inserts its own row.
+        var snapshot = positions.snapshot(variantId);
         var entry = entries.saveAndFlush(DropQueueEntry.waiting(dropId, userId, variantId, now));
         metrics.entered();
-        return new Entered(view(entry, now), false);
+        return new Entered(waitingView(entry, now, snapshot), false);
     }
     // Commit CLOSED before the controller produces a 404.
     public Optional<View> me(Long dropId, Long userId) {
@@ -59,8 +62,9 @@ public class DropQueueService {
         boolean sale = drops.findById(dropId).map(drop -> onSale(drop, now)).orElse(false);
         refresh(entry.get(), now, sale);
         if (entry.get().getStatus() == DropQueueStatus.CLOSED) return Optional.empty();
+        var result = view(entry.get(), now);
         if (entry.get().live()) entry.get().heartbeat(now);
-        return Optional.of(view(entry.get(), now));
+        return Optional.of(result);
     }
     private void refresh(DropQueueEntry entry, Instant now, boolean sale) {
         var before = entry.getStatus();
@@ -69,9 +73,14 @@ public class DropQueueService {
                 ? "expired" : sale ? "heartbeat" : "sale_ended");
     }
     private View view(DropQueueEntry entry, Instant now) {
-        return new View(entry.getStatus(), entry.getVariantId(), entry.getStatus() == DropQueueStatus.WAITING
-                ? entries.position(entry.getVariantId(), entry.getId(), now.minus(settings.heartbeatTimeout())) : null,
+        if (entry.getStatus() == DropQueueStatus.WAITING)
+            return waitingView(entry, now, positions.snapshot(entry.getVariantId()));
+        return new View(entry.getStatus(), entry.getVariantId(), null,
                 entry.getStatus() == DropQueueStatus.ADMITTED ? entry.getAdmittedUntil() : null);
+    }
+    private View waitingView(DropQueueEntry entry, Instant now, DropQueuePositions.Snapshot snapshot) {
+        long position = positions.position(entry.getVariantId(), entry.getId(), now, snapshot);
+        return new View(entry.getStatus(), entry.getVariantId(), position, null);
     }
     private boolean onSale(Drop drop, Instant now) {
         return drop.isOnSale(now);

@@ -9,21 +9,29 @@ import com.restless.drop.application.dto.CreateDropReservationRequest;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Timestamp;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.hibernate.resource.jdbc.spi.StatementInspector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.hibernate.autoconfigure.HibernatePropertiesCustomizer;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -36,7 +44,8 @@ class DropQueueIntegrationTest {
     @Autowired DropAdminService admin;
     @Autowired DropReservationService service;
     @Autowired DropQueueService queue;
-    @Autowired com.restless.drop.infrastructure.DropQueueEntryRepository entries;
+    @Autowired SnapshotSelects selects;
+    @Autowired TransactionTemplate transactions;
     @Autowired DropQueueAdmissionJob job;
     @Autowired DropQueueAdmissionTransactions batches;
     @Autowired DropQueueGateRepair gateRepair;
@@ -310,15 +319,88 @@ class DropQueueIntegrationTest {
         enterAs(newUser()); // behind: excluded
         var myId = jdbc.queryForObject("SELECT id FROM drop_queue_entries WHERE drop_id=? AND user_id=?", Long.class, drop, user);
 
-        assertThat(entries.position(variant, myId, cutoff)).isEqualTo(3);
+        var reference = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM drop_queue_entries WHERE variant_id=? AND status='WAITING'
+                  AND id <= ? AND last_seen_at >= ?""", Long.class, variant, myId, Timestamp.from(cutoff));
+        assertThat(reference).isEqualTo(3);
         assertThat(me.body().position()).as("enter response").isEqualTo(4);
         clock.now = cutoff.plusSeconds(30); // queue/me cutoff is now - 30s == cutoff
-        assertThat(queue.me(drop, user).orElseThrow().position()).isEqualTo(3);
+        assertThat(queue.me(drop, user).orElseThrow().position()).isEqualTo(reference);
         assertThat(jdbc.queryForList("""
                 SELECT column_name FROM information_schema.statistics
                 WHERE table_schema=DATABASE() AND table_name='drop_queue_entries' AND index_name='ix_drop_queue_sku_position'
                 ORDER BY seq_in_index""", String.class))
                 .containsExactly("variant_id", "status", "id", "last_seen_at");
+    }
+
+    @Test
+    void sameSecondPollsReuseOneSnapshotUntilHeartbeatCutoffMoves() {
+        enterAs(newUser());
+        clock.now = opens.plusSeconds(1);
+        enterAs(user);
+        clock.now = opens.plusSeconds(30);
+        int before = selects.count.get();
+        assertThat(queue.me(drop, user).orElseThrow().position()).isEqualTo(2);
+        clock.now = clock.now.plusMillis(999);
+        assertThat(queue.me(drop, user).orElseThrow().position()).isEqualTo(2);
+        assertThat(selects.count.get() - before).isOne();
+        clock.now = opens.plusSeconds(31);
+        assertThat(queue.me(drop, user).orElseThrow().position()).isOne();
+        assertThat(selects.count.get() - before).isEqualTo(2);
+    }
+
+    @Test
+    void rolledBackFirstEntryDoesNotOccupyASharedPosition() {
+        transactions.executeWithoutResult(transaction -> {
+            assertThat(enterAs(user).body().position()).isOne();
+            transaction.setRollbackOnly();
+        });
+        assertThat(queue.me(drop, user)).isEmpty();
+        assertThat(enterAs(newUser()).body().position()).isOne();
+    }
+
+    @Test
+    void concurrentPollsAndEntersShareOneSkuRead() throws Exception {
+        var waiting = new ArrayList<Long>();
+        var joining = new ArrayList<Long>();
+        for (int i = 0; i < 10; i++) {
+            waiting.add(newUser());
+            enterAs(waiting.get(i));
+            joining.add(newUser());
+        }
+        clock.now = opens.plusSeconds(1);
+        int before = selects.count.get();
+        var ready = new CountDownLatch(210);
+        var start = new CountDownLatch(1);
+        var tasks = new ArrayList<Future<Long>>();
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int i = 0; i < 210; i++) {
+                boolean enter = i >= 200;
+                long member = (enter ? joining : waiting).get(i % 10);
+                tasks.add(executor.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    return enter ? enterAs(member).body().position() : queue.me(drop, member).orElseThrow().position();
+                }));
+            }
+            try {
+                assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            } finally {
+                start.countDown();
+            }
+            for (var task : tasks) assertThat(task.get(30, TimeUnit.SECONDS)).isBetween(1L, 20L);
+        }
+        assertThat(selects.count.get() - before).isOne();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_entries WHERE variant_id=? AND status='WAITING'",
+                Long.class, variant)).isEqualTo(20);
+    }
+
+    static class SnapshotSelects implements StatementInspector {
+        final AtomicInteger count = new AtomicInteger();
+        @Override public String inspect(String sql) {
+            if (sql.contains("SELECT id FROM drop_queue_entries USE INDEX")) count.incrementAndGet();
+            return sql;
+        }
     }
 
     private DropQueueService.Entered enterAs(Long member) {
@@ -342,12 +424,16 @@ class DropQueueIntegrationTest {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class TimeConfig {
+        @Bean SnapshotSelects snapshotSelects() { return new SnapshotSelects(); }
+        @Bean HibernatePropertiesCustomizer countSelects(SnapshotSelects selects) {
+            return properties -> properties.put("hibernate.session_factory.statement_inspector", selects);
+        }
         @Bean @Primary
         MutableClock testClock() { return new MutableClock(); }
     }
 
     static class MutableClock extends Clock {
-        Instant now = Instant.EPOCH;
+        volatile Instant now = Instant.EPOCH;
         @Override public ZoneId getZone() { return ZoneOffset.UTC; }
         @Override public Clock withZone(ZoneId zone) { return Clock.fixed(now, zone); }
         @Override public Instant instant() { return now; }
