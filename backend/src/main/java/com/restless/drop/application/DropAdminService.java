@@ -114,6 +114,17 @@ public class DropAdminService {
         return new Admin(drop.getId(), drop.getStatus());
     }
 
+    /** 삭제 (#430). 주최자는 본인 드롭, 관리자는 모든 드롭을 삭제한다. 남의 드롭은 404다. */
+    @Transactional
+    public Admin cancelAsOrganizer(Long actorId, Long dropId) {
+        boolean admin = isAdmin(actorId);
+        Drop drop = drops.findByIdForUpdate(dropId)
+                .filter(d -> d.isManageableBy(actorId, admin))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        drop.cancel(clock.instant());
+        return new Admin(drop.getId(), drop.getStatus());
+    }
+
     /** 주최자는 본인 드롭을, 관리자는 전체 드롭을 등록 최신순으로 본다. 게시 전 드롭도 포함한다. */
     @Transactional(readOnly = true)
     public ManagedPage listManaged(Long actorId) {

@@ -28,6 +28,11 @@ public class OrganizerDropController {
         return service.publishAsOrganizer(actorId, dropId);
     }
 
+    @DeleteMapping("/{dropId}")
+    public Admin cancel(@LoginMember Long actorId, @PathVariable Long dropId) {
+        return service.cancelAsOrganizer(actorId, dropId);
+    }
+
     @GetMapping
     public ManagedPage listMine(@LoginMember Long actorId) {
         return service.listManaged(actorId);
