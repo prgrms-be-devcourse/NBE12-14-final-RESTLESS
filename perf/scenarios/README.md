@@ -247,6 +247,7 @@ on은 회원마다 SKU 하나를 계정 순서대로 돌아가며 정하고 진�
 - 재시도: 실제 앱처럼 점유, 결제 준비, 결제 승인이 시간 초과, 연결 오류, 5xx(503 `DROP_QUEUE_BUSY` 포함)를 받으면 같은 `Idempotency-Key`와 같은 본문으로 다시 보낸다. 점유 키는 회원과 드롭마다 하나로 고정이고 서버는 같은 `reservationId`와 `orderId`를 200으로 돌려준다 (INV-07). 4xx 업무 오류(품절, 입장 허가 없음 등)는 다시 보내지 않는다. 간격은 `Retry-After`가 있으면 그 값, 없으면 200ms부터 2배씩 늘려 2s까지이며 둘 다 최대 50% 지터를 더한다.
 - 결제 승인은 서버가 READY가 아닌 시도에는 PG를 다시 부르지 않으므로 같은 키로 다시 보내도 안전하다. 승인 202(처리 중, 불명확)는 다시 승인하지 않고 `payment_pending`으로 끝낸다. 승인 요청이 응답 없이 끝나고 재시도로도 확인하지 못한 경우도 결과 불명이라 실패가 아니라 `payment_pending`으로 센다.
 - 재시도 지표: 요약의 `retry` 줄에 api별(reserve, prepare, confirm) 재시도 요청 수, 재시도로 회복된 회원 수, 재시도 뒤에도 실패한 회원 수, 재시도 끝에 4xx 업무 응답(품절 등)을 받은 회원 수가 나온다 (`drop_retry_attempts`, `drop_retry_recovered`, `drop_retry_exhausted`, `drop_retry_answered`). 재시도가 받은 200은 `drop_reservation_replayed`가 아니라 `drop_reservation_created`로 센다. 첫 시도의 지연만 `eval` 줄과 `first response`에 들어간다. 재시도 응답은 `drop_retry_eval_latency`, 첫 시도 시작부터 최종 성공까지는 `drop_time_to_final`(태그 `retried`가 true, false)로 따로 본다. 대기열 진입과 조회의 503은 위 `queue busy` 규칙을 그대로 따른다.
+- 진입이 응답 없이 끝나면(시간 초과, 연결 오류, 5xx) 서버에 진입이 커밋됐을 수 있어 상태 조회로 확인한다. 조회가 대기나 입장 허가를 돌려주면 그대로 이어 가고, 404면 다시 진입한다. `RETRY_MAX`와 관측 종료 안에서 확인하지 못하면 error로 끝낸다. 요약의 `enter without response` 줄과 `drop_queue_enter_unknown` 카운터(태그 `result`는 found, reentered, gave_up)에 나온다. 상태 확인 조회는 `eval poll`에, 404 뒤 다시 보낸 진입은 `eval enter`에 들어간다. `RETRY=0`이면 예전처럼 error로 끝낸다 (#421).
 - 다른 드롭 시나리오(spike, step, capacity, queue-poll)는 재시도를 하지 않는다.
 - on에서 생성기가 참여자만큼 VU를 만들지 못하면 `dropped_iterations`가 생긴다. 그 실행은 원래 조건을 만들지 못한 것이다.
 
