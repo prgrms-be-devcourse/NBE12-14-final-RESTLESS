@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/domain/`, `backend/src/main/java/com/restless/order/domain/`, `backend/src/main/java/com/restless/payment/domain/`
 >
-> 마지막 확인: 2026-11-25 (#430 삭제 전환 추가. #429 Drop에 주최자와 소유자 확인 추가와 대조. 상태 전이와 불변식 영향 없음. 이전: 2026-11-24 (#388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 `DropReservation`에 재고 버킷 번호가 생겼다. 상태와 전이는 바뀌지 않았다. 2026-11-20 #285 용어 정리, 2절은 #254에서 구현됐다. 2026-11-19 #253 SKU별 입장 제어 정책 반영. 나머지는 2026-11-14 #92 구현과 대조)
+> 마지막 확인: 2026-11-25 (#446 `RESERVED`, `CONFIRMING`, 결제 `READY`의 뜻을 결제 준비와 승인 시작으로 나눠 적음. 상태와 전이는 그대로. #430 삭제 전환 추가. #429 Drop에 주최자와 소유자 확인 추가와 대조. 상태 전이와 불변식 영향 없음. 이전: 2026-11-24 (#388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 `DropReservation`에 재고 버킷 번호가 생겼다. 상태와 전이는 바뀌지 않았다. 2026-11-20 #285 용어 정리, 2절은 #254에서 구현됐다. 2026-11-19 #253 SKU별 입장 제어 정책 반영. 나머지는 2026-11-14 #92 구현과 대조)
 
 Order, Payment, Reservation 상태는 따로 저장하고, 조합 간 정합성을 검증한다.
 
@@ -84,8 +84,8 @@ CONFIRMING, RECONCILING, COMPENSATING은 일반 만료 작업이 반환하지 �
 
 | 상태 | 의미 |
 |---|---|
-| RESERVED | 재고 확보, 주문 생성 완료 |
-| CONFIRMING | PG 최종 승인 시작 |
+| RESERVED | 재고 점유, 주문 생성 완료 (TX1). 결제 준비(결제 시도 `READY`)와 토스 결제창 인증 중에도 이 상태다 |
+| CONFIRMING | 승인 시작(TX2)을 커밋함. PG 승인 결과를 기다림 |
 | RECONCILING | 승인 결과 조회, 복구 중 |
 | COMPENSATING | 승인된 PG 거래의 보상 취소 중 |
 | CONFIRMED | 구매 확정 |
@@ -116,6 +116,8 @@ UNKNOWN → APPROVED / FAILED
 APPROVED → CANCEL_PENDING → CANCELLED / CANCEL_UNKNOWN / APPROVED
 CANCEL_UNKNOWN → CANCELLED / APPROVED
 ```
+
+`READY`는 결제 준비(`POST /api/payments`)가 만든 시도다. 승인 시작 전이라 예약과 주문 상태를 바꾸지 않는다. `READY → PROCESSING`은 승인 요청(`POST /api/payments/confirm`)의 TX2에서 예약 `RESERVED → CONFIRMING`, 주문 `PENDING_PAYMENT → PAYMENT_CONFIRMING`과 같이 커밋한다.
 
 | 전이 | 쓰는 경우 |
 |---|---|
