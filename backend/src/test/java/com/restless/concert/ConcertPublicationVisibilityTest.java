@@ -89,6 +89,28 @@ class ConcertPublicationVisibilityTest {
     }
 
     @Test
+    @DisplayName("드롭은 공개된 공연에만 연결할 수 있다")
+    void dropRequiresPublishedConcert() throws Exception {
+        Member admin = Member.register(UUID.randomUUID() + "@example.com", "hash", "admin", Instant.now());
+        entityManager.persist(admin);
+        entityManager.flush();
+        jdbc.update("UPDATE users SET role='ADMIN' WHERE id=?", admin.getId());
+        var asAdmin = jwt().jwt(token -> token.subject(admin.getId().toString())).authorities(new SimpleGrantedAuthority("ROLE_ADMIN"));
+        String body = "{\"concertId\":" + concertId + ",\"title\":\"드롭\",\"description\":\"설명\",\"imageUrl\":\"https://example.com/a.png\","
+                + "\"opensAt\":\"" + Instant.now() + "\",\"closesAt\":\"" + Instant.now().plusSeconds(3600) + "\","
+                + "\"variants\":[{\"skuCode\":\"SKU\",\"optionName\":\"M\",\"priceAmount\":1000,\"totalQuantity\":1}]}";
+        jdbc.update("UPDATE concerts SET is_published=FALSE WHERE id=?", concertId);
+        entityManager.clear();
+        mockMvc.perform(post("/api/admin/drops").with(asAdmin).contentType("application/json").content(body))
+                .andExpect(status().isNotFound());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drops WHERE concert_id=?", Integer.class, concertId)).isZero();
+        jdbc.update("UPDATE concerts SET is_published=TRUE WHERE id=?", concertId);
+        entityManager.clear();
+        mockMvc.perform(post("/api/admin/drops").with(asAdmin).contentType("application/json").content(body))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
     @DisplayName("비공개 공연과 그 회차는 고객 조회·좌석 조회·선점에서 찾을 수 없다")
     void unpublishedConcertIsHiddenFromCustomers() throws Exception {
         var customer = jwt().jwt(token -> token.subject(customerId.toString())).authorities(new SimpleGrantedAuthority("ROLE_USER"));
