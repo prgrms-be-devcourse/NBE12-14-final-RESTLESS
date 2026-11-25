@@ -44,6 +44,15 @@ public class Concert {
     @Column(name = "published_at")
     private Instant publishedAt;
 
+    /** 한 번이라도 공개했는지. 비공개로 돌려도 남는다. */
+    @Column(name = "ever_published", nullable = false)
+    private boolean everPublished;
+
+    /** 모든 회차가 쓰는 예매 오픈 시각. 회차별 값이 다른 기존 공연은 NULL이다. */
+    @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
+    @Column(name = "booking_opens_at")
+    private Instant bookingOpensAt;
+
     @Column(name = "layout_id")
     private Long layoutId;
 
@@ -70,6 +79,7 @@ public class Concert {
         this.status = Objects.requireNonNull(status);
         this.createdAt = Objects.requireNonNull(now);
         this.published = true;
+        this.everPublished = true;
     }
 
     public static Concert create(Long venueId, Long sellerId, String title, String status, Instant now) {
@@ -78,9 +88,11 @@ public class Concert {
 
     public static Concert createDraft(Long venueId, Long sellerId, String title, String status, Instant now,
                                       String description, LocalDate periodStartDate, LocalDate periodEndDate,
-                                      Integer durationMinutes, Long layoutId) {
+                                      Integer durationMinutes, Long layoutId, Instant bookingOpensAt) {
         Concert concert = new Concert(venueId, sellerId, title, status, now);
         concert.published = false;
+        concert.everPublished = false;
+        concert.bookingOpensAt = bookingOpensAt;
         concert.description = description;
         concert.periodStartDate = periodStartDate;
         concert.periodEndDate = periodEndDate;
@@ -101,11 +113,17 @@ public class Concert {
         if (!published) {
             publishedAt = Objects.requireNonNull(now);
             published = true;
+            everPublished = true;
         }
     }
 
+    /** 회차 값 갱신과 변경 가능 시점 검증은 application 서비스가 담당한다. */
+    public void changeBookingOpensAt(Instant bookingOpensAt) {
+        this.bookingOpensAt = Objects.requireNonNull(bookingOpensAt);
+    }
+
     private void requireDraft() {
-        if (published) throw new IllegalStateException("공개된 공연의 공통 설정은 변경할 수 없습니다.");
+        if (everPublished) throw new IllegalStateException("공개된 공연의 공통 설정은 변경할 수 없습니다.");
     }
 
     public void changeDetails(String title, String description, LocalDate start, LocalDate end, Integer duration) {

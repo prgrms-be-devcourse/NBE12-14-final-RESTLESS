@@ -88,7 +88,8 @@ class OrganizerConcertApiTest {
     void createsConcertOwnedByAuthenticatedOrganizer() throws Exception {
         Long selectedLayout = layoutFor(venueId);
         String body = "{\"venueId\":" + venueId + ",\"layoutId\":" + selectedLayout + ",\"title\":\"봄 공연\",\"sellerId\":" + otherId
-                + ",\"description\":\"공연 소개\",\"periodStartDate\":\"2027-03-01\",\"periodEndDate\":\"2027-03-03\",\"durationMinutes\":120}";
+                + ",\"description\":\"공연 소개\",\"periodStartDate\":\"2027-03-01\",\"periodEndDate\":\"2027-03-03\",\"durationMinutes\":120"
+                + ",\"bookingOpensAt\":\"2027-02-20T00:00:00Z\"}";
         var result = mockMvc.perform(post("/api/organizer/concerts").with(actor(ownerId, "ORGANIZER"))
                         .contentType("application/json").content(body))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.organizerId").value(ownerId))
@@ -96,6 +97,7 @@ class OrganizerConcertApiTest {
                 .andExpect(jsonPath("$.venueName").value("Hall")).andExpect(jsonPath("$.venueAddress").value("Seoul"))
                 .andExpect(jsonPath("$.description").value("공연 소개")).andExpect(jsonPath("$.periodStartDate").value("2027-03-01"))
                 .andExpect(jsonPath("$.periodEndDate").value("2027-03-03")).andExpect(jsonPath("$.durationMinutes").value(120))
+                .andExpect(jsonPath("$.bookingOpensAt").value("2027-02-20T00:00:00Z"))
                 .andReturn();
         Number concertId = com.jayway.jsonpath.JsonPath.read(result.getResponse().getContentAsString(), "$.concertId");
         entityManager.flush();
@@ -166,7 +168,8 @@ class OrganizerConcertApiTest {
     }
 
     private Long concertWithPeriod(LocalDate start, LocalDate end, Long layoutId, boolean withPrice) {
-        Concert concert = Concert.createDraft(venueId, ownerId, "공연", "SCHEDULED", Instant.now(), null, start, end, 120, layoutId);
+        Concert concert = Concert.createDraft(venueId, ownerId, "공연", "SCHEDULED", Instant.now(), null, start, end, 120, layoutId,
+                Instant.parse(OPENS));
         entityManager.persist(concert);
         entityManager.flush();
         if (withPrice) {
@@ -193,9 +196,11 @@ class OrganizerConcertApiTest {
         entityManager.flush();
     }
 
-    private String performanceBody(String startsAt, String opensAt, String closesAt, int maximum) {
-        return "{\"startsAt\":\"" + startsAt
-                + "\",\"bookingOpensAt\":\"" + opensAt + "\",\"bookingClosesAt\":\"" + closesAt
+    /** concertWithPeriod가 만드는 공연의 예매 오픈 시각 */
+    private static final String OPENS = "2027-02-20T00:00:00Z";
+
+    private String performanceBody(String startsAt, String closesAt, int maximum) {
+        return "{\"startsAt\":\"" + startsAt + "\",\"bookingClosesAt\":\"" + closesAt
                 + "\",\"maxTicketsPerUser\":" + maximum + "}";
     }
 
@@ -214,7 +219,7 @@ class OrganizerConcertApiTest {
         entityManager.persist(Performance.create(withPerformance, venueId, layoutId, Instant.parse("2027-03-01T00:00:00Z"),
                 Instant.parse("2027-02-01T00:00:00Z"), Instant.parse("2027-02-28T00:00:00Z"), 2, "SCHEDULED"));
         entityManager.flush();
-        jdbc.update("UPDATE concerts SET is_published=TRUE WHERE id=?", published);
+        jdbc.update("UPDATE concerts SET is_published=TRUE, ever_published=TRUE WHERE id=?", published);
         entityManager.clear();
         for (Long id : java.util.List.of(withPerformance, published)) {
             mockMvc.perform(put(path, id).with(actor(adminId, "ADMIN")).contentType("application/json")
@@ -255,7 +260,7 @@ class OrganizerConcertApiTest {
         Long layoutId = layoutFor(venueId);
         addSellableSeat(layoutId);
         Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
-        String body = performanceBody("2027-03-01T00:00:00Z", "2027-02-20T00:00:00Z", "2027-02-25T00:00:00Z", 2);
+        String body = performanceBody("2027-03-01T00:00:00Z", "2027-02-25T00:00:00Z", 2);
         var result = mockMvc.perform(post("/api/organizer/concerts/{id}/performances", concertId).with(actor(ownerId, "ORGANIZER"))
                 .contentType("application/json").content(body)).andExpect(status().isCreated()).andReturn();
         Number id = com.jayway.jsonpath.JsonPath.read(result.getResponse().getContentAsString(), "$.performanceId");
@@ -298,7 +303,7 @@ class OrganizerConcertApiTest {
         addSellableSeat(layoutId);
         Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
         var created = mockMvc.perform(post("/api/organizer/concerts/{id}/performances", concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
-                .content(performanceBody("2027-03-01T00:00:00Z", "2027-02-20T00:00:00Z", "2027-02-25T00:00:00Z", 2))).andExpect(status().isCreated()).andReturn();
+                .content(performanceBody("2027-03-01T00:00:00Z", "2027-02-25T00:00:00Z", 2))).andExpect(status().isCreated()).andReturn();
         long performanceId = ((Number) com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.performanceId")).longValue();
         Long seatId = jdbc.queryForObject("SELECT id FROM performance_seats WHERE performance_id=?", Long.class, performanceId);
         jdbc.update("INSERT INTO ticket_reservations (user_id,performance_id,request_key,status,hold_expires_at,created_at) VALUES (?,?,?,'EXPIRED',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))", customerId, performanceId, UUID.randomUUID().toString());
@@ -309,7 +314,7 @@ class OrganizerConcertApiTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=?", Integer.class, performanceId)).isEqualTo(1);
         Long published = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
         entityManager.flush();
-        jdbc.update("UPDATE concerts SET is_published=TRUE WHERE id=?", published);
+        jdbc.update("UPDATE concerts SET is_published=TRUE, ever_published=TRUE WHERE id=?", published);
         entityManager.clear();
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/organizer/concerts/{id}", published)
                 .with(actor(adminId, "ADMIN"))).andExpect(status().isConflict());
@@ -345,7 +350,7 @@ class OrganizerConcertApiTest {
         org.springframework.test.context.transaction.TestTransaction.flagForCommit();
         org.springframework.test.context.transaction.TestTransaction.end();
         String path = "/api/organizer/concerts/{id}/performances/batch";
-        String body = "{\"bookingOpensAt\":\"2027-02-20T00:00:00Z\",\"maxTicketsPerUser\":2,\"performances\":["
+        String body = "{\"maxTicketsPerUser\":2,\"performances\":["
                 + "{\"startsAt\":\"2027-03-01T00:00:00Z\",\"bookingClosesAt\":\"2027-02-25T00:00:00Z\"},"
                 + "{\"startsAt\":\"2027-03-01T01:00:00Z\",\"bookingClosesAt\":\"2027-02-25T00:00:00Z\"}]}";
         mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER"))
@@ -367,7 +372,7 @@ class OrganizerConcertApiTest {
         Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3));
         String path = "/api/organizer/concerts/{id}/performances/batch";
         String item = "{\"startsAt\":\"2027-03-01T00:00:00Z\",\"bookingClosesAt\":\"2027-02-25T00:00:00Z\"}";
-        String prefix = "{\"bookingOpensAt\":\"2027-02-20T00:00:00Z\",\"maxTicketsPerUser\":2,\"performances\":[";
+        String prefix = "{\"maxTicketsPerUser\":2,\"performances\":[";
         for (String body : new String[]{prefix + "]}", prefix + String.join(",", java.util.Collections.nCopies(11, item)) + "]}"}) {
             mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER"))
                     .contentType("application/json").content(body)).andExpect(status().isBadRequest());
@@ -391,7 +396,7 @@ class OrganizerConcertApiTest {
         entityManager.flush();
         org.springframework.test.context.transaction.TestTransaction.flagForCommit();
         org.springframework.test.context.transaction.TestTransaction.end();
-        String body = performanceBody("2027-02-28T15:00:00Z", "2027-02-20T00:00:00Z", "2027-02-28T15:00:00Z", 3);
+        String body = performanceBody("2027-02-28T15:00:00Z", "2027-02-28T15:00:00Z", 3);
         String path = "/api/organizer/concerts/{id}/performances";
         mockMvc.perform(post(path, concertId).contentType("application/json").content(body)).andExpect(status().isUnauthorized());
         mockMvc.perform(post(path, concertId).with(actor(userId, "USER")).contentType("application/json").content(body)).andExpect(status().isForbidden());
@@ -430,17 +435,17 @@ class OrganizerConcertApiTest {
         String opens = "2027-02-20T00:00:00Z", closes = "2027-02-25T00:00:00Z";
         for (String start : new String[]{"2027-02-28T14:59:59Z", "2027-03-03T15:00:00Z"}) {
             mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
-                    .content(performanceBody(start, opens, closes, 3))).andExpect(status().isBadRequest());
+                    .content(performanceBody(start, closes, 3))).andExpect(status().isBadRequest());
         }
         for (String body : new String[]{
-                performanceBody("2027-03-03T14:59:59Z", closes, closes, 3),
-                performanceBody("2027-03-01T00:00:00Z", opens, "2027-03-01T00:00:01Z", 3),
-                performanceBody("2027-03-01T00:00:00Z", opens, closes, 0)}) {
+                performanceBody("2027-03-03T14:59:59Z", opens, 3),
+                performanceBody("2027-03-01T00:00:00Z", "2027-03-01T00:00:01Z", 3),
+                performanceBody("2027-03-01T00:00:00Z", closes, 0)}) {
             mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json").content(body))
                     .andExpect(status().isBadRequest());
         }
         mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
-                .content(performanceBody("2027-03-03T14:59:59Z", opens, closes, 3))).andExpect(status().isCreated());
+                .content(performanceBody("2027-03-03T14:59:59Z", closes, 3))).andExpect(status().isCreated());
     }
 
     @Test
@@ -456,11 +461,11 @@ class OrganizerConcertApiTest {
         String path = "/api/organizer/concerts/{id}/performances";
         String starts = "2027-03-01T00:00:00Z", opens = "2027-02-20T00:00:00Z", closes = "2027-02-25T00:00:00Z";
         mockMvc.perform(post(path, missingPeriod).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
-                .content(performanceBody(starts, opens, closes, 3))).andExpect(status().isBadRequest());
+                .content(performanceBody(starts, closes, 3))).andExpect(status().isBadRequest());
         mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
-                .content(performanceBody(starts, opens, closes, 3))).andExpect(status().isCreated());
+                .content(performanceBody(starts, closes, 3))).andExpect(status().isCreated());
         mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
-                .content(performanceBody("2027-03-02T00:00:00Z", opens, closes, 3))).andExpect(status().isCreated());
+                .content(performanceBody("2027-03-02T00:00:00Z", closes, 3))).andExpect(status().isCreated());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats ps JOIN performances p ON p.id=ps.performance_id WHERE p.concert_id=?", Integer.class, concertId)).isEqualTo(2);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id=?", Integer.class, concertId)).isEqualTo(2);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id=?", Integer.class, missingPeriod)).isZero();
@@ -488,7 +493,7 @@ class OrganizerConcertApiTest {
                 .andExpect(jsonPath("$.length()").value(1)).andExpect(jsonPath("$[0].grade").value("R"));
         assertThat(jdbc.queryForObject("SELECT price FROM concert_section_prices WHERE concert_id=?", Long.class, concertId)).isEqualTo(2000L);
         entityManager.flush();
-        jdbc.update("UPDATE concerts SET is_published=TRUE WHERE id=?", concertId);
+        jdbc.update("UPDATE concerts SET is_published=TRUE, ever_published=TRUE WHERE id=?", concertId);
         entityManager.clear();
         mockMvc.perform(put(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json").content(body))
                 .andExpect(status().isBadRequest());
@@ -598,7 +603,7 @@ class OrganizerConcertApiTest {
         String opens = "2027-02-20T00:00:00Z", closes = "2027-02-25T00:00:00Z";
         for (String start : new String[]{"2027-03-01T00:00:00Z", "2027-03-02T00:00:00Z"}) {
             mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER"))
-                    .contentType("application/json").content(performanceBody(start, opens, closes, 3)))
+                    .contentType("application/json").content(performanceBody(start, closes, 3)))
                     .andExpect(status().isCreated());
         }
         String publishPath = "/api/organizer/concerts/{id}/publish";
@@ -626,7 +631,7 @@ class OrganizerConcertApiTest {
         String performancePath = "/api/organizer/concerts/{id}/performances";
         String opens = "2027-02-20T00:00:00Z", closes = "2027-02-25T00:00:00Z";
         mockMvc.perform(post(performancePath, concertId).with(actor(ownerId, "ORGANIZER"))
-                .contentType("application/json").content(performanceBody("2027-03-01T00:00:00Z", opens, closes, 3)))
+                .contentType("application/json").content(performanceBody("2027-03-01T00:00:00Z", closes, 3)))
                 .andExpect(status().isCreated());
         var ready = new java.util.concurrent.CountDownLatch(2);
         var start = new java.util.concurrent.CountDownLatch(1);
@@ -640,7 +645,7 @@ class OrganizerConcertApiTest {
             var creation = executor.submit(() -> {
                 ready.countDown(); start.await();
                 return mockMvc.perform(post(performancePath, concertId).with(actor(ownerId, "ORGANIZER"))
-                        .contentType("application/json").content(performanceBody("2027-03-02T00:00:00Z", opens, closes, 3)))
+                        .contentType("application/json").content(performanceBody("2027-03-02T00:00:00Z", closes, 3)))
                         .andReturn().getResponse().getStatus();
             });
             assertThat(ready.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
@@ -669,8 +674,8 @@ class OrganizerConcertApiTest {
         org.springframework.test.context.transaction.TestTransaction.end();
         String opens = "2027-02-20T00:00:00Z", closes = "2027-02-25T00:00:00Z";
         mockMvc.perform(post("/api/organizer/concerts/{id}/performances", concertId).with(actor(ownerId, "ORGANIZER"))
-                .contentType("application/json").content(performanceBody("2027-03-01T00:00:00Z", opens, closes, 3))).andExpect(status().isCreated());
-        String batch = "{\"bookingOpensAt\":\"" + opens + "\",\"maxTicketsPerUser\":3,\"performances\":["
+                .contentType("application/json").content(performanceBody("2027-03-01T00:00:00Z", closes, 3))).andExpect(status().isCreated());
+        String batch = "{\"maxTicketsPerUser\":3,\"performances\":["
                 + "{\"startsAt\":\"2027-03-02T00:00:00Z\",\"bookingClosesAt\":\"" + closes + "\"},"
                 + "{\"startsAt\":\"2027-03-03T00:00:00Z\",\"bookingClosesAt\":\"" + closes + "\"}]}";
         var ready = new java.util.concurrent.CountDownLatch(2);
@@ -708,7 +713,7 @@ class OrganizerConcertApiTest {
         Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
         org.springframework.test.context.transaction.TestTransaction.flagForCommit();
         org.springframework.test.context.transaction.TestTransaction.end();
-        String body = performanceBody("2027-03-01T00:00:00Z", "2027-02-20T00:00:00Z", "2027-02-25T00:00:00Z", 2);
+        String body = performanceBody("2027-03-01T00:00:00Z", "2027-02-25T00:00:00Z", 2);
         var ready = new java.util.concurrent.CountDownLatch(2);
         var start = new java.util.concurrent.CountDownLatch(1);
         var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
@@ -778,7 +783,7 @@ class OrganizerConcertApiTest {
                 Instant.parse("2027-02-20T00:00:00Z"), Instant.parse("2027-02-25T00:00:00Z"), 2, "SCHEDULED");
         entityManager.persist(performance);
         entityManager.flush();
-        jdbc.update("UPDATE concerts SET is_published=TRUE WHERE id=?", concertId);
+        jdbc.update("UPDATE concerts SET is_published=TRUE, ever_published=TRUE WHERE id=?", concertId);
         Long performanceId = performance.getId();
         org.springframework.test.context.transaction.TestTransaction.flagForCommit();
         org.springframework.test.context.transaction.TestTransaction.end();
@@ -794,7 +799,7 @@ class OrganizerConcertApiTest {
                         try { release.await(20, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                     }));
             assertThat(locked.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-            String body = performanceBody("2027-03-02T00:00:00Z", "2027-02-20T00:00:00Z", "2027-02-25T00:00:00Z", 2);
+            String body = performanceBody("2027-03-02T00:00:00Z", "2027-02-25T00:00:00Z", 2);
             var update = executor.submit(() -> mockMvc.perform(put("/api/organizer/performances/{id}", performanceId)
                     .with(actor(ownerId, "ORGANIZER")).contentType("application/json").content(body)).andReturn().getResponse().getStatus());
             assertThat(update.get(3, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(400);
@@ -825,7 +830,7 @@ class OrganizerConcertApiTest {
                         .with(actor(ownerId, "ORGANIZER"))).andReturn().getResponse().getStatus(); });
             var creation = executor.submit(() -> { ready.countDown(); start.await();
                 return mockMvc.perform(post("/api/organizer/concerts/{id}/performances", concertId).with(actor(ownerId, "ORGANIZER"))
-                        .contentType("application/json").content(performanceBody("2027-03-01T00:00:00Z", "2027-02-20T00:00:00Z", "2027-02-25T00:00:00Z", 2)))
+                        .contentType("application/json").content(performanceBody("2027-03-01T00:00:00Z", "2027-02-25T00:00:00Z", 2)))
                         .andReturn().getResponse().getStatus(); });
             assertThat(ready.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
             start.countDown();
@@ -846,7 +851,7 @@ class OrganizerConcertApiTest {
     }
 
     @Test
-    @DisplayName("한 회차라도 예매 시작이 지났거나 좌석 가격이 불일치하면 전체 공개되지 않는다")
+    @DisplayName("공연 예매 오픈이 지났거나, 회차 예매 오픈이 공연 값과 다르거나, 좌석 가격이 불일치하면 전체 공개되지 않는다")
     void rejectsIncompletePublication() throws Exception {
         Long layoutId = layoutFor(venueId);
         addSellableSeat(layoutId);
@@ -856,11 +861,16 @@ class OrganizerConcertApiTest {
         String performancePath = "/api/organizer/concerts/{id}/performances";
         for (String start : new String[]{"2027-03-01T00:00:00Z", "2027-03-02T00:00:00Z"}) {
             mockMvc.perform(post(performancePath, concertId).with(actor(ownerId, "ORGANIZER"))
-                    .contentType("application/json").content(performanceBody(start, "2027-02-20T00:00:00Z", "2027-02-25T00:00:00Z", 3)))
+                    .contentType("application/json").content(performanceBody(start, "2027-02-25T00:00:00Z", 3)))
                     .andExpect(status().isCreated());
         }
         entityManager.flush(); entityManager.clear();
-        jdbc.update("UPDATE performances SET booking_opens_at=DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE concert_id=? ORDER BY id DESC LIMIT 1", concertId);
+        jdbc.update("UPDATE concerts SET booking_opens_at=DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE id=?", concertId);
+        jdbc.update("UPDATE performances p JOIN concerts c ON c.id=p.concert_id SET p.booking_opens_at=c.booking_opens_at WHERE c.id=?", concertId);
+        mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER"))).andExpect(status().isBadRequest());
+        entityManager.clear();
+        jdbc.update("UPDATE concerts SET booking_opens_at='2027-02-20 00:00:00' WHERE id=?", concertId);
+        jdbc.update("UPDATE performances SET booking_opens_at='2027-02-21 00:00:00' WHERE concert_id=? ORDER BY id DESC LIMIT 1", concertId);
         mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER"))).andExpect(status().isBadRequest());
         entityManager.clear();
         jdbc.update("UPDATE performances SET booking_opens_at='2027-02-20 00:00:00' WHERE concert_id=?", concertId);
@@ -889,11 +899,11 @@ class OrganizerConcertApiTest {
         String path = "/api/organizer/concerts/{id}/performances";
         String opens = "2027-02-20T00:00:00Z", closes = "2027-02-25T00:00:00Z";
         mockMvc.perform(post(path, concertId).with(actor(adminId, "ADMIN")).contentType("application/json")
-                .content(performanceBody("2027-03-01T00:00:00Z", opens, closes, 2))).andExpect(status().isCreated());
+                .content(performanceBody("2027-03-01T00:00:00Z", closes, 2))).andExpect(status().isCreated());
         mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
-                .content(performanceBody("2027-03-01T01:59:59Z", opens, closes, 2))).andExpect(status().isBadRequest());
+                .content(performanceBody("2027-03-01T01:59:59Z", closes, 2))).andExpect(status().isBadRequest());
         mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
-                .content(performanceBody("2027-03-01T02:00:00Z", opens, closes, 2))).andExpect(status().isCreated());
+                .content(performanceBody("2027-03-01T02:00:00Z", closes, 2))).andExpect(status().isCreated());
         mockMvc.perform(put(pricePath, concertId).with(actor(adminId, "ADMIN"))
                 .contentType("application/json").content(prices)).andExpect(status().isBadRequest());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats ps JOIN performances p ON p.id=ps.performance_id WHERE p.concert_id=? AND ps.price=200", Integer.class, concertId)).isEqualTo(2);
@@ -907,7 +917,7 @@ class OrganizerConcertApiTest {
         org.springframework.test.context.transaction.TestTransaction.flagForCommit();
         org.springframework.test.context.transaction.TestTransaction.end();
         mockMvc.perform(post("/api/organizer/concerts/{id}/performances", concertId).with(actor(ownerId, "ORGANIZER"))
-                .contentType("application/json").content(performanceBody("2027-03-01T00:00:00Z", "2027-02-20T00:00:00Z", "2027-02-25T00:00:00Z", 2)))
+                .contentType("application/json").content(performanceBody("2027-03-01T00:00:00Z", "2027-02-25T00:00:00Z", 2)))
                 .andExpect(status().isBadRequest());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id=?", Integer.class, concertId)).isZero();
         jdbc.update("DELETE FROM concert_section_prices WHERE concert_id=?", concertId);
@@ -929,7 +939,7 @@ class OrganizerConcertApiTest {
         mockMvc.perform(put(path, concertId).with(actor(adminId, "ADMIN")).contentType("application/json")
                 .content(body.replace("120", "90"))).andExpect(status().isBadRequest());
         mockMvc.perform(post(path + "/performances", concertId).with(actor(adminId, "ADMIN"))
-                .contentType("application/json").content(performanceBody("2027-03-01T00:00:00Z", "2027-02-20T00:00:00Z", "2027-02-25T00:00:00Z", 2)))
+                .contentType("application/json").content(performanceBody("2027-03-01T00:00:00Z", "2027-02-25T00:00:00Z", 2)))
                 .andExpect(status().isBadRequest());
     }
 
@@ -956,7 +966,7 @@ class OrganizerConcertApiTest {
         Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3));
         Long layoutId = layoutFor(venueId);
         Performance performance = Performance.create(concertId, venueId, layoutId, Instant.parse("2027-03-01T00:00:00Z"),
-                Instant.parse("2027-02-01T00:00:00Z"), Instant.parse("2027-02-28T00:00:00Z"), 4, "SCHEDULED");
+                Instant.parse(OPENS), Instant.parse("2027-02-28T00:00:00Z"), 4, "SCHEDULED");
         entityManager.persist(performance); entityManager.flush(); entityManager.clear();
         String concertPath = "/api/organizer/concerts/{id}";
         String concertBody = "{\"title\":\"변경\",\"description\":\"소개\",\"periodStartDate\":\"2027-03-01\",\"periodEndDate\":\"2027-03-04\",\"durationMinutes\":120}";
@@ -966,7 +976,7 @@ class OrganizerConcertApiTest {
                 .contentType("application/json").content(concertBody)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("변경")).andExpect(jsonPath("$.durationMinutes").value(120));
         String path = "/api/organizer/performances/{id}";
-        String body = "{\"startsAt\":\"2027-03-02T00:00:00Z\",\"bookingOpensAt\":\"2027-02-02T00:00:00Z\",\"bookingClosesAt\":\"2027-03-01T00:00:00Z\",\"maxTicketsPerUser\":2}";
+        String body = performanceBody("2027-03-02T00:00:00Z", "2027-03-01T00:00:00Z", 2);
         mockMvc.perform(put(path, performance.getId()).with(actor(adminId, "ADMIN"))
                 .contentType("application/json").content(body)).andExpect(status().isOk());
         mockMvc.perform(put(path, performance.getId()).with(actor(ownerId, "ORGANIZER"))
@@ -976,10 +986,17 @@ class OrganizerConcertApiTest {
         mockMvc.perform(put(concertPath, concertId).with(actor(ownerId, "ORGANIZER"))
                 .contentType("application/json").content(excluded)).andExpect(status().isBadRequest());
         entityManager.flush(); entityManager.clear();
+        jdbc.update("UPDATE concerts SET booking_opens_at=DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) WHERE id=?", concertId);
         jdbc.update("UPDATE performances SET booking_opens_at=DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) WHERE id=?", performance.getId());
+        String raised = body.replace("\"maxTicketsPerUser\":2", "\"maxTicketsPerUser\":3");
         mockMvc.perform(put(path, performance.getId()).with(actor(ownerId, "ORGANIZER"))
-                .contentType("application/json").content(body.replace("\"maxTicketsPerUser\":2", "\"maxTicketsPerUser\":3")))
-                .andExpect(status().isOk());
+                .contentType("application/json").content(raised)).andExpect(status().isConflict());
+        // 거래 이력이 없는 초안은 공연 예매 오픈을 미래로 바꿔 다시 준비한다.
+        mockMvc.perform(put(concertPath + "/booking-opens-at", concertId).with(actor(ownerId, "ORGANIZER"))
+                .contentType("application/json").content("{\"bookingOpensAt\":\"2027-02-21T00:00:00Z\"}")).andExpect(status().isOk());
+        mockMvc.perform(put(path, performance.getId()).with(actor(ownerId, "ORGANIZER"))
+                .contentType("application/json").content(raised)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.bookingOpensAt").value("2027-02-21T00:00:00Z"));
         entityManager.flush(); entityManager.clear();
         jdbc.update("UPDATE performances SET booking_opens_at=DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) WHERE id=?", performance.getId());
         mockMvc.perform(put(concertPath, concertId).with(actor(ownerId, "ORGANIZER"))
@@ -988,5 +1005,73 @@ class OrganizerConcertApiTest {
         mockMvc.perform(put(concertPath, concertId).with(actor(ownerId, "ORGANIZER"))
                 .contentType("application/json").content(concertBody.replace("변경", "오픈 후 소개 수정")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.title").value("오픈 후 소개 수정"));
+    }
+
+    @Test
+    @DisplayName("회차 예매 마감을 비우면 전날 17시(공연장 시간대)이고, 공연 예매 오픈이 없거나 기본 마감보다 늦으면 등록하지 않는다")
+    void defaultsBookingCloseAndRequiresConcertOpens() throws Exception {
+        Long layoutId = layoutFor(venueId);
+        addSellableSeat(layoutId);
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        String path = "/api/organizer/concerts/{id}/performances";
+        // 2027-03-01T03:00Z는 서울 3월 1일 12시다. 기본 마감은 2월 28일 17시(서울) = 08:00Z.
+        mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                        .content("{\"startsAt\":\"2027-03-01T03:00:00Z\",\"maxTicketsPerUser\":2}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.bookingOpensAt").value(OPENS))
+                .andExpect(jsonPath("$.bookingClosesAt").value("2027-02-28T08:00:00Z"));
+        mockMvc.perform(post(path + "/batch", concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                        .content("{\"maxTicketsPerUser\":2,\"performances\":[{\"startsAt\":\"2027-03-02T03:00:00Z\"}]}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.performances[0].bookingOpensAt").value(OPENS))
+                .andExpect(jsonPath("$.performances[0].bookingClosesAt").value("2027-03-01T08:00:00Z"));
+        entityManager.flush(); entityManager.clear();
+        jdbc.update("UPDATE concerts SET booking_opens_at='2027-03-02 08:00:00' WHERE id=?", concertId);
+        mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                .content("{\"startsAt\":\"2027-03-03T03:00:00Z\",\"maxTicketsPerUser\":2}")).andExpect(status().isBadRequest());
+        Concert withoutOpens = Concert.createDraft(venueId, ownerId, "공연", "SCHEDULED", Instant.now(), null,
+                LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), 120, layoutId, null);
+        entityManager.persist(withoutOpens);
+        entityManager.persist(ConcertSectionPrice.create(withoutOpens.getId(), "A", "R", 100L));
+        entityManager.flush();
+        mockMvc.perform(post(path, withoutOpens.getId()).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                .content(performanceBody("2027-03-01T00:00:00Z", "2027-02-25T00:00:00Z", 2))).andExpect(status().isBadRequest());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id IN (?, ?)", Integer.class, concertId, withoutOpens.getId()))
+                .isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("공연 예매 오픈 변경은 모든 회차에 반영하고, 첫 공개 뒤에는 오픈 전일 때 미래 시각으로만 바꾼다")
+    void bookingOpensChangeAppliesToAllPerformances() throws Exception {
+        Long layoutId = layoutFor(venueId);
+        addSellableSeat(layoutId);
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        for (String start : new String[]{"2027-03-01T00:00:00Z", "2027-03-02T00:00:00Z"}) {
+            mockMvc.perform(post("/api/organizer/concerts/{id}/performances", concertId).with(actor(ownerId, "ORGANIZER"))
+                    .contentType("application/json").content(performanceBody(start, "2027-02-25T00:00:00Z", 3))).andExpect(status().isCreated());
+        }
+        String path = "/api/organizer/concerts/{id}/booking-opens-at";
+        String body = "{\"bookingOpensAt\":\"%s\"}";
+        mockMvc.perform(put(path, concertId).with(actor(otherId, "ORGANIZER")).contentType("application/json")
+                .content(body.formatted("2027-02-22T00:00:00Z"))).andExpect(status().isNotFound());
+        mockMvc.perform(put(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                .content(body.formatted("2027-02-25T00:00:00Z"))).andExpect(status().isBadRequest());
+        mockMvc.perform(put(path, concertId).with(actor(adminId, "ADMIN")).contentType("application/json")
+                .content(body.formatted("2027-02-22T00:00:00Z"))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.bookingOpensAt").value("2027-02-22T00:00:00Z"));
+        entityManager.flush();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id=? AND booking_opens_at='2027-02-22 00:00:00'",
+                Integer.class, concertId)).isEqualTo(2);
+        mockMvc.perform(post("/api/organizer/concerts/{id}/publish", concertId).with(actor(ownerId, "ORGANIZER"))).andExpect(status().isOk());
+        mockMvc.perform(put(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                .content(body.formatted("2027-02-23T00:00:00Z"))).andExpect(status().isOk());
+        mockMvc.perform(put(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                .content(body.formatted("2020-01-01T00:00:00Z"))).andExpect(status().isConflict());
+        entityManager.flush(); entityManager.clear();
+        jdbc.update("UPDATE concerts SET booking_opens_at=DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) WHERE id=?", concertId);
+        jdbc.update("UPDATE performances SET booking_opens_at=DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) WHERE concert_id=?", concertId);
+        mockMvc.perform(put(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                .content(body.formatted("2027-02-24T00:00:00Z"))).andExpect(status().isConflict());
+        entityManager.flush();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id=? AND booking_opens_at='2027-02-24 00:00:00'",
+                Integer.class, concertId)).isZero();
     }
 }

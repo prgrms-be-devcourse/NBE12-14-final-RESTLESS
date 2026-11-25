@@ -188,14 +188,13 @@ class TicketReservationServiceTest {
         var reservation = reserve(fixture.firstUserId(), "history", List.of(seat(0)));
         service.cancel(fixture.firstUserId(), reservation.reservationId());
         jdbc.update("UPDATE users SET role='ORGANIZER' WHERE id=?", fixture.firstUserId());
-        jdbc.update("UPDATE concerts SET is_published=FALSE, published_at=NULL WHERE venue_id=?", fixture.venueId());
+        jdbc.update("UPDATE concerts SET is_published=FALSE, ever_published=FALSE, published_at=NULL WHERE venue_id=?", fixture.venueId());
         jdbc.update("UPDATE concerts SET period_start_date='2026-01-01', period_end_date='2030-12-31', duration_minutes=120 WHERE venue_id=?", fixture.venueId());
         jdbc.update("UPDATE performances SET starts_at=DATE_ADD(starts_at, INTERVAL 1 DAY) WHERE id=?", fixture.otherPerformanceId());
         jdbc.update("UPDATE performances SET booking_opens_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR), booking_closes_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 2 HOUR) WHERE id IN (?, ?)", fixture.performanceId(), fixture.otherPerformanceId());
         Instant startsAt = jdbc.queryForObject("SELECT starts_at FROM performances WHERE id=?", LocalDateTime.class, fixture.performanceId()).toInstant(ZoneOffset.UTC);
-        Instant opensAt = jdbc.queryForObject("SELECT booking_opens_at FROM performances WHERE id=?", LocalDateTime.class, fixture.performanceId()).toInstant(ZoneOffset.UTC);
         Instant closesAt = jdbc.queryForObject("SELECT booking_closes_at FROM performances WHERE id=?", LocalDateTime.class, fixture.performanceId()).toInstant(ZoneOffset.UTC);
-        assertThatThrownBy(() -> organizerPerformances.update(fixture.firstUserId(), fixture.performanceId(), startsAt, opensAt, closesAt, 2))
+        assertThatThrownBy(() -> organizerPerformances.update(fixture.firstUserId(), fixture.performanceId(), startsAt, closesAt, 2))
                 .isInstanceOfSatisfying(BusinessException.class, ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.TICKET_SCHEDULE_CHANGE_CLOSED));
         Long concertId = jdbc.queryForObject("SELECT concert_id FROM performances WHERE id=?", Long.class, fixture.performanceId());
         assertThatThrownBy(() -> organizerConcerts.update(fixture.firstUserId(), concertId, "공연", null,
