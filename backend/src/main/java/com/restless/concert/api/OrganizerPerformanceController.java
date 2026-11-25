@@ -13,12 +13,21 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.http.HttpStatus;
 
 @RestController
 @RequestMapping("/api/organizer/performances")
 @RequiredArgsConstructor
 public class OrganizerPerformanceController {
     private final OrganizerPerformanceService performances;
+
+    @DeleteMapping("/{performanceId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@LoginMember Long userId, @PathVariable Long performanceId) {
+        performances.delete(userId, performanceId);
+    }
 
     @PutMapping("/{performanceId}")
     public PerformanceInfo update(@LoginMember Long userId, @PathVariable Long performanceId,

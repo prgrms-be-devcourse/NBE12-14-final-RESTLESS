@@ -215,6 +215,74 @@ class OrganizerConcertApiTest {
     }
 
     @Test
+    @DisplayName("회차 없는 초안 공연은 소유자가 삭제하고 다른 주최자는 404다")
+    void draftConcertDeletionChecksOwnership() throws Exception {
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutFor(venueId));
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/organizer/concerts/{id}", concertId)
+                .with(actor(otherId, "ORGANIZER"))).andExpect(status().isNotFound());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/organizer/concerts/{id}", concertId)
+                .with(actor(ownerId, "ORGANIZER"))).andExpect(status().isNoContent());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM concerts WHERE id=?", Integer.class, concertId)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM concert_section_prices WHERE concert_id=?", Integer.class, concertId)).isZero();
+    }
+
+    @Test
+    void deletePerformanceRemovesSeatsBeforeConcertCanBeDeleted() throws Exception {
+        Long layoutId = layoutFor(venueId);
+        addSellableSeat(layoutId);
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        String body = performanceBody("2027-03-01T00:00:00Z", "2027-02-20T00:00:00Z", "2027-02-25T00:00:00Z", 2);
+        var result = mockMvc.perform(post("/api/organizer/concerts/{id}/performances", concertId).with(actor(ownerId, "ORGANIZER"))
+                .contentType("application/json").content(body)).andExpect(status().isCreated()).andReturn();
+        Number id = com.jayway.jsonpath.JsonPath.read(result.getResponse().getContentAsString(), "$.performanceId");
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/organizer/concerts/{id}", concertId)
+                .with(actor(ownerId, "ORGANIZER"))).andExpect(status().isConflict());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/organizer/performances/{id}", id.longValue())
+                .with(actor(adminId, "ADMIN"))).andExpect(status().isNoContent());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=?", Integer.class, id.longValue())).isZero();
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/organizer/concerts/{id}", concertId)
+                .with(actor(ownerId, "ORGANIZER"))).andExpect(status().isNoContent());
+    }
+
+    @Test
+    void dropAndAuctionReferencesBlockEvenAdminDeletion() throws Exception {
+        Long layoutId = layoutFor(venueId);
+        Long dropConcert = concertWithPeriod(null, null, layoutId, false);
+        Long auctionConcert = concertWithPeriod(null, null, layoutId, false);
+        jdbc.update("INSERT INTO drops (concert_id,title,description,image_url,opens_at,closes_at,status,created_at) VALUES (?, 'drop','x','x','2027-01-01','2027-01-02','DRAFT',UTC_TIMESTAMP(6))", dropConcert);
+        jdbc.update("INSERT INTO auctions (seller_user_id,performance_id,title,item_name,item_description,starting_price_amount,minimum_increment_amount,access_policy,status,starts_at,base_ends_at,ends_at,extension_duration_seconds,created_at,updated_at) VALUES (?,?,'auction','item','x',1,1,'PUBLIC','SCHEDULED','2027-01-01','2027-01-02','2027-01-02',30,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))", ownerId, auctionConcert);
+        // 운영처럼 요청마다 별도 트랜잭션에서 FK 위반이 롤백되도록 준비 데이터를 커밋한다.
+        org.springframework.test.context.transaction.TestTransaction.flagForCommit();
+        org.springframework.test.context.transaction.TestTransaction.end();
+        try {
+            for (Long id : java.util.List.of(dropConcert, auctionConcert)) {
+                mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/organizer/concerts/{id}", id)
+                        .with(actor(adminId, "ADMIN"))).andExpect(status().isConflict());
+                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM concerts WHERE id=?", Integer.class, id)).isEqualTo(1);
+            }
+        } finally {
+            jdbc.update("DELETE FROM drops WHERE concert_id=?", dropConcert);
+            jdbc.update("DELETE FROM auctions WHERE performance_id=?", auctionConcert);
+            jdbc.update("DELETE FROM concerts WHERE id IN (?, ?)", dropConcert, auctionConcert);
+        }
+    }
+
+    @Test
+    void deletedAndExpiredReservationHistoryBlocksPerformanceDeletion() throws Exception {
+        Long layoutId = layoutFor(venueId);
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        Performance performance = Performance.create(concertId, venueId, layoutId, Instant.parse("2027-03-01T00:00:00Z"),
+                Instant.parse("2027-02-01T00:00:00Z"), Instant.parse("2027-02-28T00:00:00Z"), 2, "SCHEDULED");
+        entityManager.persist(performance);
+        entityManager.flush();
+        jdbc.update("INSERT INTO ticket_reservations (user_id,performance_id,request_key,status,hold_expires_at,created_at) VALUES (?,?,?,'RELEASED',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))",
+                customerId, performance.getId(), UUID.randomUUID().toString());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/organizer/performances/{id}", performance.getId())
+                .with(actor(adminId, "ADMIN"))).andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ticket_reservations WHERE performance_id=?", Integer.class, performance.getId())).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("회차 일괄 등록은 좌석까지 함께 생성하고 겹침이 있으면 전체 취소한다")
     void batchCreatesSeatsAndRollsBackOnOverlap() throws Exception {
         Long layoutId = layoutFor(venueId);
@@ -613,6 +681,41 @@ class OrganizerConcertApiTest {
     }
 
     @Test
+    @DisplayName("공연 삭제는 커밋 전 드롭 참조를 기다린 뒤 충돌로 거절한다")
+    void concertDeletionWaitsForUncommittedDropReference() throws Exception {
+        Long concertId = concertWithPeriod(null, null, layoutFor(venueId), false);
+        org.springframework.test.context.transaction.TestTransaction.flagForCommit();
+        org.springframework.test.context.transaction.TestTransaction.end();
+        var inserted = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var reference = executor.submit(() -> new org.springframework.transaction.support.TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> {
+                        jdbc.update("INSERT INTO drops (concert_id,title,description,image_url,opens_at,closes_at,status,created_at) VALUES (?, 'drop','x','x','2027-01-01','2027-01-02','DRAFT',UTC_TIMESTAMP(6))", concertId);
+                        inserted.countDown();
+                        try { release.await(20, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                    }));
+            assertThat(inserted.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            var deletion = executor.submit(() -> mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                    .delete("/api/organizer/concerts/{id}", concertId).with(actor(adminId, "ADMIN"))).andReturn().getResponse().getStatus());
+            // 드롭 INSERT의 FK 공유 잠금 때문에 공연 행 잠금을 얻지 못하고 대기해야 한다.
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> deletion.get(1, java.util.concurrent.TimeUnit.SECONDS))
+                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
+            release.countDown();
+            reference.get(20, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(deletion.get(20, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(409);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM concerts WHERE id=?", Integer.class, concertId)).isEqualTo(1);
+        } finally {
+            release.countDown(); executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            jdbc.update("DELETE FROM drops WHERE concert_id=?", concertId);
+            jdbc.update("DELETE FROM concert_section_prices WHERE concert_id=?", concertId);
+            jdbc.update("DELETE FROM concerts WHERE id=?", concertId);
+        }
+    }
+
+    @Test
     @DisplayName("공개된 공연의 회차 수정은 진행 중인 선점을 기다리지 않고 거절된다")
     void publishedPerformanceUpdateDoesNotWaitForHolds() throws Exception {
         Long layoutId = layoutFor(venueId);
@@ -646,6 +749,42 @@ class OrganizerConcertApiTest {
         } finally {
             release.countDown(); executor.shutdownNow();
             assertThat(executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            jdbc.update("DELETE FROM performances WHERE concert_id=?", concertId);
+            jdbc.update("DELETE FROM concert_section_prices WHERE concert_id=?", concertId);
+            jdbc.update("DELETE FROM concerts WHERE id=?", concertId);
+        }
+    }
+
+    @Test
+    void deletionAndPerformanceCreationSerialize() throws Exception {
+        Long layoutId = layoutFor(venueId);
+        addSellableSeat(layoutId);
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        org.springframework.test.context.transaction.TestTransaction.flagForCommit();
+        org.springframework.test.context.transaction.TestTransaction.end();
+        var ready = new java.util.concurrent.CountDownLatch(2);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var deletion = executor.submit(() -> { ready.countDown(); start.await();
+                return mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/organizer/concerts/{id}", concertId)
+                        .with(actor(ownerId, "ORGANIZER"))).andReturn().getResponse().getStatus(); });
+            var creation = executor.submit(() -> { ready.countDown(); start.await();
+                return mockMvc.perform(post("/api/organizer/concerts/{id}/performances", concertId).with(actor(ownerId, "ORGANIZER"))
+                        .contentType("application/json").content(performanceBody("2027-03-01T00:00:00Z", "2027-02-20T00:00:00Z", "2027-02-25T00:00:00Z", 2)))
+                        .andReturn().getResponse().getStatus(); });
+            assertThat(ready.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            int deleted = deletion.get(20, java.util.concurrent.TimeUnit.SECONDS);
+            int created = creation.get(20, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(deleted == 204 && created == 404 || deleted == 409 && created == 201).isTrue();
+            int expected = created == 201 ? 1 : 0;
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id=?", Integer.class, concertId)).isEqualTo(expected);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats s JOIN performances p ON p.id=s.performance_id WHERE p.concert_id=?", Integer.class, concertId)).isEqualTo(expected);
+        } finally {
+            start.countDown(); executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            jdbc.update("DELETE s FROM performance_seats s JOIN performances p ON p.id=s.performance_id WHERE p.concert_id=?", concertId);
             jdbc.update("DELETE FROM performances WHERE concert_id=?", concertId);
             jdbc.update("DELETE FROM concert_section_prices WHERE concert_id=?", concertId);
             jdbc.update("DELETE FROM concerts WHERE id=?", concertId);

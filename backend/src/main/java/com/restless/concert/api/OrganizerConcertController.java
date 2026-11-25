@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 
 @RestController
 @RequestMapping("/api/organizer/concerts")
@@ -34,6 +35,12 @@ public class OrganizerConcertController {
     private final OrganizerConcertService concerts;
     private final OrganizerPerformanceService performances;
     private final OrganizerLayoutService layouts;
+
+    @DeleteMapping("/{concertId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@LoginMember Long userId, @PathVariable Long concertId) {
+        concerts.delete(userId, concertId);
+    }
 
     @GetMapping
     public OrganizerConcertService.OrganizerConcertPage listMine(@LoginMember Long userId,
