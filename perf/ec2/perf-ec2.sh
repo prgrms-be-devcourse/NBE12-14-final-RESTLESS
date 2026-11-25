@@ -4,7 +4,7 @@
 #
 #   perf-ec2.sh check                 perf.env 키와 값 조건 확인 (값은 출력하지 않는다)
 #   perf-ec2.sh create-db             RDS에 perf DB 생성 (이름은 perf.env의 DB_URL)
-#   perf-ec2.sh start <image tag>     자동 배포 멈춤, restless 중지, restless-perf 기동, Flyway 확인
+#   perf-ec2.sh start <image tag> [--no-jfr]  자동 배포 멈춤, JFR을 켜고 restless-perf 기동, Flyway 확인
 #   perf-ec2.sh stop-app              restless-perf 중지 (시드, 토큰 전달 전)
 #   perf-ec2.sh seed <scale>          빈 perf DB에 시드, 토큰 묶음 생성
 #   perf-ec2.sh refresh <scale>       판매 기간과 토큰 만료 갱신
@@ -92,18 +92,35 @@ case "$cmd" in
     ;;
   start)
     tag="${1:?image tag is required, e.g. sha-<12 chars> or dev}"
+    [[ $# -eq 1 || ( $# -eq 2 && "$2" == --no-jfr ) ]] || die 'usage: start <image tag> [--no-jfr]'
     load_env
     sudo touch "$PAUSE_FILE"
     docker rm -f restless >/dev/null 2>&1 || true
     docker rm -f restless-perf >/dev/null 2>&1 || true
     docker pull -q "$IMAGE:$tag"
-    docker run -d --name restless-perf --env-file "$ENV_FILE" -p 8080:8080 -p 8081:8081 "$IMAGE:$tag" >/dev/null
+    if [[ "${2:-}" == --no-jfr ]]; then
+      set --
+    else
+      # docker run은 perf.env의 값을 이미지 ENV보다 우선한다.
+      java_options=$(
+        {
+          docker image inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$IMAGE:$tag" &&
+            read_env_file
+        } | awk '/^[[:blank:]]*JAVA_TOOL_OPTIONS=/ {
+          sub(/^[[:blank:]]*JAVA_TOOL_OPTIONS=/, "")
+          sub(/\r$/, "")
+          options = $0
+        } END { print options }'
+      )
+      set -- -e "JAVA_TOOL_OPTIONS=${java_options:+$java_options }-XX:FlightRecorderOptions:stackdepth=256 -XX:StartFlightRecording=settings=profile,disk=true,filename=/tmp/run.jfr,dumponexit=true"
+    fi
+    docker run -d --name restless-perf --env-file "$ENV_FILE" -p 8080:8080 -p 8081:8081 "$@" "$IMAGE:$tag" >/dev/null
     wait_health
     echo "restless-perf up: image $tag, revision $(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' restless-perf)"
     db_sql "SELECT COUNT(*) AS migrations, SUM(success = 0) AS failed, MAX(version) AS latest FROM flyway_schema_history"
     ;;
   stop-app)
-    docker stop restless-perf >/dev/null && echo "restless-perf stopped (deploy stays paused)"
+    docker stop -t 60 restless-perf >/dev/null && echo "restless-perf stopped (deploy stays paused)"
     ;;
   seed)
     scale="${1:?scale is required}"
