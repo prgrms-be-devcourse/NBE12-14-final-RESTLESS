@@ -298,6 +298,8 @@ data: {"auctionId":12,"status":"OPEN","revision":15,
 - 시작 전 경매가 수정되면 바뀐 상태를 보내고, 삭제되면 메시지 없이 연결을 닫는다.
 - 연결이 끊기면 상세 API로 최신 상태를 받은 뒤 다시 연결한다. 서버는 연결을 최대 30분 유지한 뒤 닫는다.
 - 연결할 때 경매가 없으면 404 `AUCTION_NOT_FOUND`(JSON), 토큰이 없으면 401이다.
+- 서버 전체 연결 수가 상한(기본 6,000)에 닿으면 새 연결은 503 `AUCTION_STREAM_BUSY`(JSON)와 `Retry-After`(초, 기본 5)를 받는다. 이미 열린 연결은 그대로 받는다. 클라이언트는 그동안 상세 API로 가격을 보여 주고, `Retry-After` 뒤에 다시 연결한다.
+- 서버는 15초마다 내용 없는 주석 줄(`:heartbeat`)을 보낸다. 떠난 연결을 정리하고 프록시가 조용한 연결을 끊지 않게 하려는 것이다. SSE 클라이언트는 주석을 메시지로 전달하지 않으므로 따로 처리할 것이 없다.
 - 토큰은 연결할 때만 검사한다. 연결 중에 Access Token이 만료돼도 열린 연결은 유지되고, 다시 연결할 때는 유효한 토큰이 필요하다.
 
 ## 오류 코드
@@ -314,5 +316,6 @@ data: {"auctionId":12,"status":"OPEN","revision":15,
 | `BID_BY_SELLER` | 409 | 판매자 본인 입찰 |
 | `BID_ALREADY_HIGHEST` | 409 | 이미 현재 최고 입찰자 |
 | `CREDIT_INSUFFICIENT` | 409 | 사용 가능 크레딧 부족 |
+| `AUCTION_STREAM_BUSY` | 503 | 실시간 연결 수 상한 초과. `Retry-After` 초 뒤 다시 연결 |
 | `IDEMPOTENCY_KEY_CONFLICT` | 409 | 같은 키로 다른 경매나 금액을 요청 |
 | `INVALID_REQUEST` | 400 | 입력 검증 실패 (일정, 연장 시간 범위, 금액 등). 공통 코드 |
