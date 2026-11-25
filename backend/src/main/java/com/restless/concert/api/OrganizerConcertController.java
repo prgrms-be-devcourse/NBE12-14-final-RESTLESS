@@ -65,6 +65,14 @@ public class OrganizerConcertController {
                 request.periodEndDate(), request.durationMinutes());
     }
 
+    @PutMapping("/{concertId}/venue-layout")
+    public OrganizerConcertInfo changeVenueAndLayout(@LoginMember Long userId, @PathVariable Long concertId,
+                                                      @Valid @RequestBody VenueLayoutRequest request) {
+        return concerts.changeVenueAndLayout(userId, concertId, request.venueId(), request.layoutId());
+    }
+
+    public record VenueLayoutRequest(@NotNull @Positive Long venueId, @NotNull @Positive Long layoutId) { }
+
     @PutMapping("/{concertId}/section-prices")
     public List<OrganizerConcertService.SectionPriceInfo> configurePrices(@LoginMember Long userId,
             @PathVariable Long concertId, @Valid @RequestBody SectionPricesRequest request) {
@@ -87,6 +95,20 @@ public class OrganizerConcertController {
         return performances.create(userId, concertId, request.startsAt(),
                 request.bookingOpensAt(), request.bookingClosesAt(), request.maxTicketsPerUser());
     }
+
+    @PostMapping("/{concertId}/performances/batch")
+    @ResponseStatus(HttpStatus.CREATED)
+    public BatchPerformanceResponse createPerformances(@LoginMember Long userId, @PathVariable Long concertId,
+                                                        @Valid @RequestBody BatchPerformanceRequest request) {
+        return new BatchPerformanceResponse(performances.createBatch(userId, concertId, request.bookingOpensAt(),
+                request.maxTicketsPerUser(), request.performances().stream()
+                        .map(item -> new OrganizerPerformanceService.BatchPerformance(item.startsAt(), item.bookingClosesAt())).toList()));
+    }
+
+    public record BatchPerformanceRequest(@NotNull Instant bookingOpensAt, @NotNull @Positive Integer maxTicketsPerUser,
+            @jakarta.validation.constraints.NotEmpty @Size(max = 10) List<@NotNull @Valid BatchPerformanceItem> performances) { }
+    public record BatchPerformanceItem(@NotNull Instant startsAt, @NotNull Instant bookingClosesAt) { }
+    public record BatchPerformanceResponse(List<PerformanceInfo> performances) { }
 
     public record CreateConcertRequest(@NotNull @Positive Long venueId, @NotNull @Positive Long layoutId,
                                        @NotBlank @Size(max = 200) String title,

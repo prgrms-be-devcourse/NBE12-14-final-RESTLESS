@@ -65,6 +65,27 @@ public class OrganizerPerformanceService {
 
     public record PerformanceSetup(PerformanceInfo performance, List<SeatSetupLayout.Seat> seats) { }
 
+    public record BatchPerformance(Instant startsAt, Instant bookingClosesAt) { }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public List<PerformanceInfo> createBatch(Long actorId, Long concertId, Instant opensAt, Integer maximum,
+                                             List<BatchPerformance> items) {
+        if (items == null || items.isEmpty() || items.size() > 10 || items.stream().anyMatch(java.util.Objects::isNull)) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "회차는 1개 이상 10개 이하로 등록해야 합니다.");
+        }
+        var result = new java.util.ArrayList<PerformanceInfo>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            var item = items.get(i);
+            try {
+                result.add(create(actorId, concertId, item.startsAt(), opensAt, item.bookingClosesAt(), maximum));
+            } catch (BusinessException ex) {
+                if (ex.getErrorCode() != ErrorCode.INVALID_REQUEST) throw ex;
+                throw new BusinessException(ex.getErrorCode(), ex.getMessage(), java.util.Map.of("performanceIndex", i));
+            }
+        }
+        return List.copyOf(result);
+    }
+
     public List<SeatSetupLayout.Seat> sellableSeatsForLayout(Long layoutId) {
         return layoutSeats.findAllById_LayoutId(layoutId).stream().filter(LayoutSeat::isSellable)
                 .map(seat -> new SeatSetupLayout.Seat(seat.getId().getVenueSeatId(), seat.getSectionLabel())).toList();
@@ -126,7 +147,9 @@ public class OrganizerPerformanceService {
         Long concertId = performances.findConcertId(performanceId).orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         Concert concert = concerts.findLockedById(concertId).filter(c -> role == MemberRole.ADMIN || c.getSellerId().equals(actorId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        Performance p = performances.findLockedById(performanceId).orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        // 공개된 공연의 회차는 바뀌지 않으므로 잠그지 않는다. 진행 중인 선점이 거절 응답을 기다리지 않게 한다.
+        Performance p = (concert.isPublished() ? performances.findById(performanceId) : performances.findLockedById(performanceId))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         Venue venue = venues.findById(concert.getVenueId()).orElseThrow(() -> new IllegalStateException("공연장이 없습니다."));
         LocalDate date = startsAt.atZone(ZoneId.of(venue.getTimezone())).toLocalDate();
         if (concert.getPeriodStartDate() == null || concert.getPeriodEndDate() == null
