@@ -11,6 +11,8 @@
 #   perf-ec2.sh verify <scale>        정합성 점검
 #   perf-ec2.sh serve-tokens          8080으로 토큰 묶음을 한 번만 내려보낸다 (restless-perf가 멈춰 있어야 한다)
 #   perf-ec2.sh lockstats             InnoDB 행 잠금 대기 누적값 (측정 전후 차이를 본다)
+#   perf-ec2.sh logs <시작 UTC> <종료 UTC>  perf 컨테이너 로그 조회 (최대 10000줄)
+#   perf-ec2.sh status                perf 컨테이너 이미지와 재시작 상태 조회
 #   perf-ec2.sh reset-db              perf DB를 지우고 다시 만든다 (스케일을 바꿀 때)
 #   perf-ec2.sh finish                restless-perf 삭제, 자동 배포 재개
 set -euo pipefail
@@ -130,6 +132,17 @@ case "$cmd" in
     load_env
     db_sql "SHOW GLOBAL STATUS WHERE Variable_name IN ('Innodb_row_lock_waits','Innodb_row_lock_time','Innodb_row_lock_time_max','Innodb_row_lock_current_waits','Threads_running','Innodb_deadlocks')" 2>/dev/null \
       || db_sql "SHOW GLOBAL STATUS LIKE 'Innodb_row_lock%'"
+    ;;
+  logs)
+    [[ $# -eq 2 ]] || die 'usage: logs <start UTC> <end UTC> (YYYY-MM-DDTHH:MM:SSZ)'
+    timestamp_pattern='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+    [[ "$1" =~ $timestamp_pattern && "$2" =~ $timestamp_pattern ]] || die 'timestamps must use YYYY-MM-DDTHH:MM:SSZ'
+    [[ "$1" < "$2" ]] || die 'start time must be earlier than end time'
+    docker logs --timestamps --since "$1" --until "$2" --tail 10000 restless-perf 2>&1
+    ;;
+  status)
+    [[ $# -eq 0 ]] || die 'usage: status'
+    docker inspect --format 'Image={{.Config.Image}} Revision={{index .Config.Labels "org.opencontainers.image.revision"}} RestartCount={{.RestartCount}} OOMKilled={{.State.OOMKilled}} StartedAt={{.State.StartedAt}}' restless-perf
     ;;
   reset-db)
     load_env
