@@ -1,9 +1,9 @@
 # 공연·공연장·티켓팅 데이터 사전
 
-- 기준: 현재 저장소의 Flyway CREATE와 통합 ALTER. 12개 테이블의 모든 컬럼을 설명한다.
+- 기준: 현재 저장소의 Flyway CREATE와 통합 ALTER, 공연 공개·공통 설정 마이그레이션. 13개 테이블의 모든 컬럼을 설명한다.
 - 이 문서는 컬럼의 의미를 설명한다. 실제 타입·NULL·제약의 정본은 아래 SQL이며, 상태 전이와 처리 정책은 관련 도메인 문서를 따른다.
 - DB 컬럼이 존재하는 것과 JPA 엔티티·서비스 구현 완료는 다르다. 현재 Venue/VenueSection/VenueSeat, VenueLayout/LayoutSeat(LayoutSeatId), Concert/Performance, TicketSeat, TicketPurchaseLimit, TicketReservation, SeatHold, Ticket 매핑을 구현했다. 실제 선점·결제·환불과 조회 API 등 업무 로직은 단계적으로 구현한다.
-- 전용 멱등성 테이블·실행권은 후속 구현으로, 이 데이터 사전의 현재 12개 테이블에 포함하지 않는다.
+- 전용 멱등성 테이블·실행권은 후속 구현으로, 이 데이터 사전의 현재 13개 테이블에 포함하지 않는다.
 
 ## 전체 구조
 
@@ -35,6 +35,7 @@
 | `venue_layouts` | 좌석 배치 버전 |
 | `layout_seats` | 배치에 포함된 좌석 |
 | `concerts` | 공연 |
+| `concert_section_prices` | 공연 공통 구역별 등급·가격 |
 | `performances` | 공연 회차 |
 | `performance_seats` | 회차별 판매 좌석 |
 | `ticket_reservations` | 예약 |
@@ -126,6 +127,9 @@
 | `description` | 공연 상세 설명 | 선택 입력, 최대 5,000자 |
 | `period_start_date`, `period_end_date` | 공연 기간 | 공연장 기준 날짜. 둘 다 없거나 함께 입력하며 시작일 ≤ 종료일 |
 | `duration_minutes` | 공연 소요 시간 | 선택 입력, 분 단위 양수 |
+| `is_published` | 공개 여부 | DB 기본값 TRUE. 기존 공연과 공개 여부를 지정하지 않은 INSERT는 공개다. 주최자 API로 만든 공연은 FALSE(비공개 초안)로 시작한다. FALSE이면 고객 조회·선점에서 404로 처리한다 |
+| `published_at` | 최초 공개 시각 | NULL 가능. 주최자가 공개할 때 서버 시각을 한 번 기록하고 재공개 요청에도 유지한다. 정책 전환 전 공연은 실제 공개 시각을 알 수 없어 NULL이다. CHECK: 비공개이면 NULL |
+| `layout_id` | 공연 공통 배치 ID | NULL 가능. venue_layouts.id. 신규 공연의 모든 회차가 이 배치를 쓴다. 기존 공연은 자동으로 채우지 않는다 |
 | `created_at` | 공연 정보 등록 시각 | 공연 시작 시각과 다름 |
 
 공연 장소의 이름과 주소는 `venue_id`가 가리키는 공연장 정보를 사용한다. 공연 기간은 회차별 공연 시각과 예매 기한을 대신하지 않는다. 회차 등록 시 시작 시각의 공연장 현지 날짜가 공연 기간 안에 있어야 한다.
@@ -229,6 +233,18 @@
 | `reserved_count` | 현재 확보 중인 좌석 수 | 선점·결제 진행·결과 불명확 수량 포함, 0 이상 |
 | `confirmed_count` | 확정 구매 수량 | 환불 확정 전까지 포함, 0 이상 |
 
+## 13. concert_section_prices — 공연 공통 구역 가격
+
+공연 공통 배치의 판매 구역별 등급과 가격이다. 신규 공연의 회차 판매 좌석은 이 값으로 만든다. 기존 회차의 `performance_seats` 가격은 바꾸지 않는다.
+
+| 컬럼 | 의미 | 설명 |
+|---|---|---|
+| `id` | 공통 가격 내부 식별자 | 자동 증가 PK |
+| `concert_id` | 소속 공연 ID | concerts.id |
+| `section_label` | 배치의 구역 표시명 | `layout_seats.section_label`과 같은 값. (concert_id, section_label) 유일 |
+| `grade` | 좌석 등급 | 예: VIP, R |
+| `price` | 구역 가격 | 원 단위 정수, CHECK `price > 0` |
+
 ## 상태와 수량을 읽는 방법
 
 예약 상태는 설계상 HELD, PAYMENT_PENDING, RECONCILING, CONFIRMED, RELEASED, REFUND_PENDING, REFUND_RECONCILING, CANCELLED다.
@@ -252,6 +268,7 @@
 - [공연장·공연 CREATE](../../../backend/src/main/resources/db/migration/V20261111_0910__ticketing_create_venue_and_concert_tables.sql)
 - [티켓팅 CREATE](../../../backend/src/main/resources/db/migration/V20261111_1000__ticketing_create_tables.sql)
 - [통합 ALTER](../../../backend/src/main/resources/db/migration/V20261112_1020__ticketing_enforce_integrity_and_hold_request_keys.sql)
+- [공연 공개·공통 설정](../../../backend/src/main/resources/db/migration/V20261124_1100__concert_publication_and_common_prices.sql), [공개 기본값](../../../backend/src/main/resources/db/migration/V20261125_1000__concert_published_default_true.sql)
 - [공연장 소속·배치 정책](venue-consistency.md), [예약·좌석 관계 제약](reservation-seat-consistency.md)
 - [현재 좌석 소유권](seat-ownership.md), [구매 제한·수량](purchase-limit.md)
 - [결제 트랜잭션](transactions.md), [PaymentResultHandler](payment-handler.md), [만료](expiration.md)

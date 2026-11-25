@@ -1,7 +1,7 @@
 # EC2 부하 테스트 런북
 
 EC2 담당자는 `~/restless`에서 `perf/ec2/perf-ec2.sh <명령>`으로 실행한다. 팀원은 각자 계정으로 SSH 접속해 `$R <명령>`으로 실행한다. 팀원용 절차는 [팀원 계정으로 실행](#팀원-계정으로-실행)에 있다.
-2026-11-18 ~ 2026-11-30은 perf 전용 기간이다. 테스트가 끝나도 `finish`를 하지 않는다.
+2026-11-18부터 perf 전용 기간이다. 종료일은 아직 정하지 않았다 ([perf 전용 기간](../README.md#perf-전용-기간)). 테스트가 끝나도 `finish`를 하지 않는다.
 
 ## 팀원 계정으로 실행
 
@@ -93,7 +93,7 @@ $R verify <스케일>                       # 서버
 - 접속이 안 된다: 공인 IP가 바뀌었을 수 있다. `curl -s https://checkip.amazonaws.com` 결과를 EC2 담당자에게 보낸다. 보안 그룹의 22, 8080, 8081 규칙을 바꿔야 한다.
 - 따옴표가 들어간 명령은 메신저 코드 블록으로 주고받는다.
 
-### 계정 정리 (EC2 담당자, 2026-11-30)
+### 계정 정리 (EC2 담당자, perf 전용 기간 종료 시)
 
 ```bash
 for U in $(getent group perf-runners | cut -d: -f4 | tr , " "); do sudo userdel -r "$U"; done
@@ -189,7 +189,7 @@ perf/ec2/perf-ec2.sh verify <스케일> | awk '$1=="check" && $NF!=0'
 # 5. 같은 도메인을 한 번 더 재려면 2번부터 반복한다
 
 # 6. 다음 도메인에 넘기기
-sudo vi /opt/restless/perf.env          # 내가 바꾼 값 되돌리기. 대기열 false, 추가한 줄 삭제
+sudo vi /opt/restless/perf.env          # 내가 바꾼 값 되돌리기. 대기열 true, 추가한 줄 삭제
 perf/ec2/perf-ec2.sh check              # 앱은 그대로 둔다. finish 하지 않는다
 ```
 
@@ -208,7 +208,7 @@ tar -xzf perf/seed/out/seed-out.tar.gz -C perf/seed/out && rm perf/seed/out/seed
 | 스케일 | sale, capacity | base 등 | base 등 |
 | 태그 | 각자 고정 | 각자 고정 | 각자 고정 |
 
-### 기간 종료 (2026-11-30)
+### 기간 종료
 
 ```bash
 perf/ec2/perf-ec2.sh finish             # 3분 안에 배포 컨테이너가 다시 뜬다

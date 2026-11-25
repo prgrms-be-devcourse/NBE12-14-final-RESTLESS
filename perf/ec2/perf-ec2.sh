@@ -79,7 +79,7 @@ case "$cmd" in
     echo "keys: $(read_env_file | grep -v '^#' | cut -d= -f1 | xargs)"
     echo "profile=$SPRING_PROFILES_ACTIVE db=$DB_NAME host=$DB_HOST queue_required=${RESTLESS_DROP_QUEUE_REQUIRED:-unset} management_port=${MANAGEMENT_PORT:-unset}"
     echo "pg fake: delay=${PG_FAKE_APPROVE_DELAY:-default 300ms} reject=${PG_FAKE_REJECT_RATE:-0} unknown=${PG_FAKE_UNKNOWN_RATE:-0} lost=${PG_FAKE_LOST_RESPONSE_RATE:-0}"
-    [[ "${RESTLESS_DROP_QUEUE_REQUIRED:-}" == "false" ]] || echo "warning: RESTLESS_DROP_QUEUE_REQUIRED is not false (reservation scenarios need the queue off)"
+    [[ "${RESTLESS_DROP_QUEUE_REQUIRED:-}" == "true" ]] || echo "warning: RESTLESS_DROP_QUEUE_REQUIRED is not true (default is on; only reservation capacity and spike runs turn it off, then set it back)"
     [[ ${#JWT_SECRET} -ge 32 ]] || die "JWT_SECRET is shorter than 32 bytes"
     echo "mysql client: $MYSQL"
     ;;
