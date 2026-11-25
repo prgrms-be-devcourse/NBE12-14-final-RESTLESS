@@ -189,7 +189,7 @@ perf/ec2/perf-ec2.sh verify <스케일> | awk '$1=="check" && $NF!=0'
 # 5. 같은 도메인을 한 번 더 재려면 2번부터 반복한다
 
 # 6. 다음 도메인에 넘기기
-sudo vi /opt/restless/perf.env          # 내가 바꾼 값 되돌리기. 대기열 false, 추가한 줄 삭제
+sudo vi /opt/restless/perf.env          # 내가 바꾼 값 되돌리기. 대기열 true, 추가한 줄 삭제
 perf/ec2/perf-ec2.sh check              # 앱은 그대로 둔다. finish 하지 않는다
 ```
 

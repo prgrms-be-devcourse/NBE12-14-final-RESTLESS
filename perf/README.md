@@ -41,7 +41,8 @@ EXP-01~04([성능 실험 계획](../docs/testing/performance.md))를 실행하�
 이 기간에는 EC2를 배포 서버로 되돌리지 않는다. 테스트가 끝날 때마다 prod로 바꾸는 절차를 없애려는 운영 규칙이다. 프로필, yml, 스크립트는 그대로다.
 
 - 테스트가 끝나도 `perf-ec2.sh finish`를 실행하지 않는다. 자동 배포는 멈춘 채로 둔다.
-- 끝낸 사람은 perf.env에서 실험용으로 바꾼 값을 되돌린다. 대기열은 `false`로 두고 추가한 줄은 지운다.
+- 끝낸 사람은 perf.env에서 실험용으로 바꾼 값을 되돌리고 추가한 줄은 지운다. 대기열(`RESTLESS_DROP_QUEUE_REQUIRED`)은 운영과 같게 `true`로 둔다.
+- 예약 경로 용량 측정과 순간 몰림 측정(`drop-reservation-capacity.js`, `drop-reservation-spike.js`)만 대기열을 끄고 돌린다. 끝나면 `true`로 되돌린다.
 - 다음 사람은 자기 perf.env 값과 DB로 `start`부터 한다. `start`가 남아 있는 `restless-perf`를 바꿔 띄운다.
 - 기간 중에는 데모 사이트가 열리지 않고 dev 머지가 서버에 반영되지 않는다.
 - 기간이 끝나는 날에 `finish`를 한 번 실행해 배포 컨테이너로 되돌린다. 종료일이 정해지면 이 절에 적는다.
