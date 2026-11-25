@@ -61,3 +61,5 @@ Focused 테스트 통과: `./gradlew test --tests 'com.restless.concert.Organize
 단건 회차 등록은 READ_COMMITTED로 실행한다. 기본 REPEATABLE READ에서는 공연 행 잠금 전에 회원 조회로 읽기 스냅샷이 고정돼, 동시에 커밋된 같은 시각 회차를 겹침 검사에서 보지 못하고 두 회차가 모두 생성됐다(`concurrentSingleCreationsCannotOverlap` 수정 전 실패 [201, 201]).
 
 V20261125_1000은 `concerts.is_published` 기본값을 TRUE로 바꾼다. 주최자 API 생성은 엔티티가 FALSE를 명시하므로 계속 초안이다. 공개 여부를 지정하지 않은 직접 INSERT는 공개로 저장된다(`directlyInsertedConcertDefaultsToPublished`). 기존 V20261124_1100은 수정하지 않았다.
+
+PR 분할(2026-11-25): 정책 문서(#413) → 공개 표식·고객 노출 차단 → 공연 초안·공통 가격 → 회차·판매 좌석·전체 공개(#401) 순으로 쌓았다. 정리 사항: 빈 `OrganizerSeatPricingController` 삭제, 쓰이지 않는 `countBySellerIdAndPublishedTrue`와 `LayoutSeatRepository`의 application DTO import 삭제, DB 기본값 공개 전환으로 불필요해진 드롭·공통 테스트 fixture의 공개 표식 복원. `TicketCheckoutServiceTest`의 정리 쿼리는 같은 공연장의 모든 회차로 넓힌 것이며(가격 테스트가 새 회차를 만듦) 기존 정리 대상을 모두 포함한다.
