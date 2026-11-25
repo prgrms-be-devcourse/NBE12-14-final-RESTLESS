@@ -56,6 +56,7 @@
 | POST | `/api/organizer/drops` | 드롭 등록. 요청, 응답, 검증은 `POST /api/admin/drops`와 같다 |
 | POST | `/api/organizer/drops/{dropId}/publish` | 게시. 응답과 상태 규칙은 관리자 게시와 같다 |
 | GET | `/api/organizer/drops` | 관리할 수 있는 드롭 목록 |
+| DELETE | `/api/organizer/drops/{dropId}` | 드롭 삭제 (#430) |
 
 - 주최자는 본인 공연에만 드롭을 등록한다. 관리자는 모든 공연에 등록한다. 드롭의 주최자는 등록 요청자가 아니라 공연의 주최자다.
 - 다른 주최자의 공연과 없는 공연은 모두 404 `NOT_FOUND`다. 다른 주최자의 드롭 게시도 404다. 다른 주최자의 상품이 있는지 알려 주지 않는다.
@@ -63,6 +64,13 @@
 - 목록: 주최자는 본인 드롭, 관리자는 전체 드롭을 등록 최신순(`createdAt`, `dropId` 내림차순)으로 받는다. 게시 전 드롭도 포함한다. 페이지는 없다.
 - 200 `{ "items": [ { "dropId", "concertId", "organizerId", "title", "status", "opensAt", "closesAt", "createdAt" } ] }`. 주최자가 없는 드롭의 `organizerId`는 `null`이다.
 - 로그인 안 함 401, ORGANIZER나 ADMIN이 아니면 403, 탈퇴한 회원은 404 `MEMBER_NOT_FOUND`.
+
+#### 삭제 (#430)
+
+- 200 `{ "dropId": 1, "status": "CANCELLED" }`. 판매 중이어도 삭제할 수 있다. 이미 삭제한 드롭은 409 `DROP_INVALID_STATE`, 다른 주최자의 드롭은 404다.
+- 삭제하면 목록, 상세, 새 재고 점유에서 빠진다. 삭제 뒤 결제 승인을 시작하는 요청은 거절되어 돈이 나가지 않는다.
+- 결제를 마친 구매는 삭제 즉시 환불하지 않는다. 매일 00:30(KST) 배치가 손님 환불과 같은 경로로 전액 환불하고 08:00(KST)에 멈춘다. 남은 건은 다음 날 이어서 한다.
+- 삭제 직전에 승인이 이미 시작된 결제는 승인될 수 있다. 그 구매도 다음 배치에서 환불한다. 결과가 불명확한 결제는 확정된 뒤 환불한다.
 
 ### `GET /api/drops` (공개)
 
