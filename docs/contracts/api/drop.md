@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/api/`, `backend/src/main/java/com/restless/drop/application/dto/`, `backend/src/test/java/com/restless/drop/acceptance/`
 >
-> 마지막 확인: 2026-11-25 (#423 진입 503의 `Retry-After` 기본값 3초에서 5초. 필드와 오류 코드는 그대로다). 이전: 2026-11-24 (#390 대기열 응답의 선택 필드 `pollAfterMs`, 동시 처리 상한 초과 503 `DROP_QUEUE_BUSY`. 기존 필드와 오류 코드는 그대로다. 이전: 2026-11-22 (#330 재고 버킷 분할. D1 등록과 D2 트랜잭션 문장, D2 품절 판정의 뜻을 고쳤다. 요청, 응답, 오류 코드는 그대로다. 2026-11-20 #285 상태 표기 갱신, 대기열 경로의 429를 #278 `application.yml`, `QueueRateLimitIntegrationTest`와 대조. 2026-11-19 #253 SKU별 입장 제어 정책의 계약 반영. D4는 #254 SKU별 입장 제어 구현과 대조했다. 나머지는 2026-11-14 기준: #92 등록 검증과 판매 상태, #41 탈퇴 제한, #97 탈퇴 동의, #105 검색과 정렬, #109 주문 상세 결제 대상)
+> 마지막 확인: 2026-11-25 (#438 주최자 오픈 시각 제한. #423 진입 503의 `Retry-After` 기본값 3초에서 5초. 필드와 오류 코드는 그대로다). 이전: 2026-11-24 (#390 대기열 응답의 선택 필드 `pollAfterMs`, 동시 처리 상한 초과 503 `DROP_QUEUE_BUSY`. 기존 필드와 오류 코드는 그대로다. 이전: 2026-11-22 (#330 재고 버킷 분할. D1 등록과 D2 트랜잭션 문장, D2 품절 판정의 뜻을 고쳤다. 요청, 응답, 오류 코드는 그대로다. 2026-11-20 #285 상태 표기 갱신, 대기열 경로의 429를 #278 `application.yml`, `QueueRateLimitIntegrationTest`와 대조. 2026-11-19 #253 SKU별 입장 제어 정책의 계약 반영. D4는 #254 SKU별 입장 제어 구현과 대조했다. 나머지는 2026-11-14 기준: #92 등록 검증과 판매 상태, #41 탈퇴 제한, #97 탈퇴 동의, #105 검색과 정렬, #109 주문 상세 결제 대상)
 
 - 상태: v1 IMPLEMENTED (2026-11-13 합의). 수용 테스트(`backend/src/test/java/com/restless/drop/acceptance/`)가 이 계약을 기준으로 판정한다.
 - Base URL: `/api` ([ADR-0002](../../decisions/0002-common-conventions.md)). 오류는 공통 형식 `{code, message, details, traceId, timestamp}` ([common.md](common.md)).
@@ -58,6 +58,7 @@
 | GET | `/api/organizer/drops` | 관리할 수 있는 드롭 목록 |
 | DELETE | `/api/organizer/drops/{dropId}` | 드롭 삭제 (#430) |
 
+- 주최자 등록의 `opensAt`은 KST 정각이고 08:00부터 22:00까지만 된다 (#438). 분, 초, 그보다 작은 단위가 0이 아니거나 범위를 벗어나면 400 `INVALID_REQUEST`다. 관리자 등록에는 적용하지 않는다.
 - 주최자는 본인 공연에만 드롭을 등록한다. 관리자는 모든 공연에 등록한다. 드롭의 주최자는 등록 요청자가 아니라 공연의 주최자다.
 - 다른 주최자의 공연과 없는 공연은 모두 404 `NOT_FOUND`다. 다른 주최자의 드롭 게시도 404다. 다른 주최자의 상품이 있는지 알려 주지 않는다.
 - `POST /api/admin/drops`로 등록한 드롭은 주최자가 없다. 관리자만 관리하고 주최자 목록에도 나오지 않는다.

@@ -12,6 +12,9 @@ import com.restless.TestcontainersConfiguration;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -124,6 +127,25 @@ class OrganizerDropApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("주최자 오픈 시각은 08시부터 22시까지 정각만 된다. 관리자 등록은 제한하지 않는다 (#438)")
+    void organizerOpenHourRule() throws Exception {
+        LocalDate tomorrow = LocalDate.now(KST).plusDays(1);
+        for (LocalTime ok : new LocalTime[] {LocalTime.of(8, 0), LocalTime.of(22, 0)}) {
+            mvc.perform(as(post("/api/organizer/drops"), organizerA, "ORGANIZER").contentType(MediaType.APPLICATION_JSON)
+                            .content(dropJson(concertA, tomorrow.atTime(ok).atZone(KST).toInstant())))
+                    .andExpect(status().isCreated());
+        }
+        for (LocalTime bad : new LocalTime[] {LocalTime.of(7, 0), LocalTime.of(23, 0), LocalTime.of(10, 30)}) {
+            mvc.perform(as(post("/api/organizer/drops"), organizerA, "ORGANIZER").contentType(MediaType.APPLICATION_JSON)
+                            .content(dropJson(concertA, tomorrow.atTime(bad).atZone(KST).toInstant())))
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        }
+        mvc.perform(as(post("/api/admin/drops"), admin, "ADMIN").contentType(MediaType.APPLICATION_JSON)
+                        .content(dropJson(concertA, tomorrow.atTime(10, 30).atZone(KST).toInstant())))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
     @DisplayName("일반 회원은 주최자 드롭 API를 쓸 수 없다")
     void userIsForbidden() throws Exception {
         Long user = member("USER");
@@ -160,8 +182,14 @@ class OrganizerDropApiIntegrationTest {
         return jdbc.queryForObject("SELECT status FROM drops WHERE id = ?", String.class, dropId);
     }
 
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    /** 주최자 오픈 시각은 08~22시 정각이어야 한다 (#438). 내일 10:00 KST로 연다. */
     private static String dropJson(Long concert) {
-        Instant opens = Instant.now().plus(Duration.ofDays(1));
+        return dropJson(concert, LocalDate.now(KST).plusDays(1).atTime(10, 0).atZone(KST).toInstant());
+    }
+
+    private static String dropJson(Long concert, Instant opens) {
         return """
                 {"concertId":%d,"title":"주최자 드롭","description":"설명","imageUrl":"https://example.com/a.png",
                  "opensAt":"%s","closesAt":"%s",
