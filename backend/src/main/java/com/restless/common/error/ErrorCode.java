@@ -40,6 +40,7 @@ public enum ErrorCode {
     RESERVATION_CANNOT_CANCEL(HttpStatus.CONFLICT, "결제 전 선점 예약만 취소할 수 있습니다."),
     SEAT_LOCK_TIMEOUT(HttpStatus.CONFLICT, "좌석 처리 경합이 발생했습니다. 같은 요청 키로 재시도해 주세요."),
     TICKET_SCHEDULE_CHANGE_CLOSED(HttpStatus.CONFLICT, "예매가 시작되었거나 선점 이력이 있어 일정을 변경할 수 없습니다."),
+    CONCERT_DELETE_CONFLICT(HttpStatus.CONFLICT, "연결된 데이터가 있어 삭제할 수 없습니다."),
 
     // 경매, 크레딧
     AUCTION_NOT_FOUND(HttpStatus.NOT_FOUND, "경매를 찾을 수 없습니다."),
@@ -66,7 +67,6 @@ public enum ErrorCode {
     PAYMENT_FAILED(HttpStatus.CONFLICT, "결제 승인이 실패했습니다."),
     PAYMENT_REJECTED(HttpStatus.CONFLICT, "구매를 확정할 수 없어 보상 취소합니다."),
     PAYMENT_NOT_REFUNDABLE(HttpStatus.CONFLICT, "환불할 수 없는 결제입니다."),
-    CONCERT_DELETE_CONFLICT(HttpStatus.CONFLICT, "연결된 데이터가 있어 삭제할 수 없습니다."),
     PAYMENT_REFUND_IN_PROGRESS(HttpStatus.CONFLICT, "환불이 진행 중입니다."),
     PAYMENT_ALREADY_REFUNDED(HttpStatus.CONFLICT, "이미 환불된 결제입니다."),
     PAYMENT_REFUND_REJECTED(HttpStatus.CONFLICT, "PG가 환불을 거절했습니다."),

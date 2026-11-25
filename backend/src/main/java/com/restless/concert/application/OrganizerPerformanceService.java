@@ -20,12 +20,16 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import com.restless.concert.domain.LayoutSeat;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 
@@ -84,7 +88,7 @@ public class OrganizerPerformanceService {
         try {
             performances.delete(performance);
             performances.flush();
-        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+        } catch (DataIntegrityViolationException ex) {
             throw new BusinessException(ErrorCode.CONCERT_DELETE_CONFLICT);
         }
     }
@@ -92,17 +96,17 @@ public class OrganizerPerformanceService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<PerformanceInfo> createBatch(Long actorId, Long concertId, Instant opensAt, Integer maximum,
                                              List<BatchPerformance> items) {
-        if (items == null || items.isEmpty() || items.size() > 10 || items.stream().anyMatch(java.util.Objects::isNull)) {
+        if (items == null || items.isEmpty() || items.size() > 10 || items.stream().anyMatch(Objects::isNull)) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "회차는 1개 이상 10개 이하로 등록해야 합니다.");
         }
-        var result = new java.util.ArrayList<PerformanceInfo>(items.size());
+        var result = new ArrayList<PerformanceInfo>(items.size());
         for (int i = 0; i < items.size(); i++) {
             var item = items.get(i);
             try {
                 result.add(create(actorId, concertId, item.startsAt(), opensAt, item.bookingClosesAt(), maximum));
             } catch (BusinessException ex) {
                 if (ex.getErrorCode() != ErrorCode.INVALID_REQUEST) throw ex;
-                throw new BusinessException(ex.getErrorCode(), ex.getMessage(), java.util.Map.of("performanceIndex", i));
+                throw new BusinessException(ex.getErrorCode(), ex.getMessage(), Map.of("performanceIndex", i));
             }
         }
         return List.copyOf(result);
