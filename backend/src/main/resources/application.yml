@@ -106,6 +106,14 @@ restless:
       flush-interval-ms: 200
       # SSE 연결 최대 유지 시간(ms). 지나면 서버가 닫고, 클라이언트는 상세를 다시 받은 뒤 재연결한다.
       timeout-ms: 1800000
+      # 서버 전체 SSE 연결 상한 (#244). 넘으면 새 연결만 503 AUCTION_STREAM_BUSY로 거절하고 기존 연결은 그대로 둔다.
+      # 근거: 연결당 힙 약 120KB(2026-11-18 측정), 힙 한도 약 1,200MB에서 입찰 몰림용 약 300MB를 남긴다 (policy.md 8절).
+      max-connections: ${AUCTION_STREAM_MAX_CONNECTIONS:6000}
+      # 거절 응답의 Retry-After(초). 클라이언트는 그동안 상세 API로 가격을 보여 준다.
+      retry-after-seconds: 5
+      # 모든 연결에 내용 없는 주석을 보내는 간격(ms) (#447). 서버는 써 봐야 떠난 클라이언트를 알 수 있으므로,
+      # 입찰이 없는 경매에서도 떠난 연결을 이 간격의 약 2배 안에 정리한다. 앞단 프록시의 무응답 끊김(보통 60초)도 막는다.
+      heartbeat-interval-ms: 15000
     query-cache:
       # 목록·상세 조회의 앱 메모리 캐시. 변경 이벤트로 상세를 즉시 갱신한다.
       enabled: true

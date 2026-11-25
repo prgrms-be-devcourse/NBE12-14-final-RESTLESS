@@ -37,6 +37,7 @@
 4. `(bidder_user_id, request_key)`로 찾은 기존 입찰이 없다
 
 하나라도 아니면 아래 트랜잭션으로 넘어가 처음부터 다시 판단한다. 경매가 없거나 캐시·요청 키 조회가 실패해도 입찰을 막지 않고 트랜잭션으로 넘긴다. 조회 실패는 로그와 `auction.bid.precheck.failure`로 남긴다.
+판단마다 `auction.bid.precheck{result, reason}`을 센다 (#448). `result=reject`는 `amount_too_low` 하나이고, `result=pass`(트랜잭션으로 넘김)의 이유는 `no_state`(캐시에 상태 없음), `not_open`, `seller`, `highest_bidder`, `amount_ok`, `replay`(같은 요청 키의 입찰 있음), `error`다.
 
 `OPEN` 경매의 최소 입찰 금액과 `ends_at`은 줄지 않는다. 그래서 조금 오래된 값보다 낮은 금액은 지금도 부족하고, 오래된 `ends_at` 전이면 실제 경매도 아직 끝나지 않았다. 요청 키는 금액 부족 후보만 확인해, 수락될 수 있는 입찰의 DB 조회를 늘리지 않는다.
 
@@ -149,8 +150,10 @@ AuctionChangedEvent (AFTER_COMMIT)
 - **연결 순서:** 연결을 먼저 등록한 뒤 현재 상태를 조회해 보낸다. 조회와 등록 사이에 바뀐 내용은 다음 전송에 다시 가고, 클라이언트는 같은 `revision`을 무시한다.
 - **전송 내용:** 한 번의 전송에서 상태 JSON은 한 번만 만들고, 같은 문자열을 그 경매의 연결 전체에 보낸다. JSON을 만들지 못하면 그 경매의 이번 전송은 건너뛰고 `flush` 실패로 기록하며 연결은 유지한다. 연결 직후 첫 전송에서 실패하면 그 연결을 등록해 두지 않는다.
 - **전송 스레드:** 경매 종료 스케줄러, 미완료 결제 재확인 작업과 스레드를 나누지 않으면 0.2초 간격이 밀리므로 전용 스레드를 쓴다. 한 경매의 전송이 실패해도 다른 경매는 계속 보낸다.
-- **설정** (`application.yml` `restless.auction.stream`): `flush-interval-ms`(기본 200), `timeout-ms`(연결 최대 유지 시간, 기본 30분. 지나면 서버가 닫고 클라이언트가 재연결한다).
-- **메트릭:** `auction.stream.connections`(열린 연결 수), `auction.stream.failure`(`stage` = `send` 끊긴 연결로 전송 실패, `flush` 한 경매 조회·전송 실패, `loop` 전송 주기 자체 실패).
+- **연결 상한 (#244):** 서버 전체 연결 수를 원자적으로 세어 상한 확인과 자리 확보를 한 번에 한다. 넘으면 연결을 만들지 않고 503 `AUCTION_STREAM_BUSY`를 준다. 자리는 연결이 목록에서 빠질 때 한 번만 돌려준다 (완료·오류·전송 실패가 겹쳐도 한 번). 경매가 없어 404가 되거나 첫 전송이 실패한 연결도 자리를 돌려준다.
+- **heartbeat (#447):** 같은 전송 스레드가 15초마다 모든 연결에 주석 줄을 보낸다. 한 연결에 두 스레드가 동시에 쓰지 않는다. 클라이언트가 떠나도 서버는 써 봐야 알 수 있으므로, 입찰이 없는 경매의 떠난 연결은 이 전송이 실패할 때 정리된다 (보통 1~2번째 heartbeat).
+- **설정** (`application.yml` `restless.auction.stream`): `flush-interval-ms`(기본 200), `timeout-ms`(연결 최대 유지 시간, 기본 30분. 지나면 서버가 닫고 클라이언트가 재연결한다), `max-connections`(기본 6,000, 환경변수 `AUCTION_STREAM_MAX_CONNECTIONS`), `retry-after-seconds`(기본 5), `heartbeat-interval-ms`(기본 15,000).
+- **메트릭:** `auction.stream.connections`(열린 연결 수), `auction.stream.rejected`(상한 거절 수), `auction.stream.heartbeat.removed`(heartbeat로 정리한 연결 수), `auction.stream.failure`(`stage` = `send` 끊긴 연결로 전송 실패, `flush` 한 경매 조회·전송 실패, `loop` 전송 주기 자체 실패, `heartbeat` heartbeat 주기 자체 실패).
 
 ## 조회 캐시 (트랜잭션 밖)
 

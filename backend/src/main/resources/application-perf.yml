@@ -32,7 +32,13 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus
+        # heapdump: SSE 연결 하나가 쓰는 힙을 나눠 보려고 연다 (#448). 관리 포트라 서비스 포트로는 받을 수 없다.
+        # 덤프에는 메모리에 있던 비밀값이 그대로 들어 있으므로 받은 파일은 공유하지 않고 분석 뒤 지운다.
+        include: health,info,prometheus,heapdump
+  endpoint:
+    heapdump:
+      # Spring Boot 기본값은 노출해도 호출할 수 없다(access none). 받기만 하므로 read-only로 연다.
+      access: read-only
   metrics:
     distribution:
       # p95, p99를 Prometheus에서 계산하려면 히스토그램 구간이 필요하다.

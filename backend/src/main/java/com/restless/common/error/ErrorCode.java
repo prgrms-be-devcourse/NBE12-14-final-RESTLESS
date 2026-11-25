@@ -54,6 +54,7 @@ public enum ErrorCode {
     BID_AMOUNT_TOO_LOW(HttpStatus.CONFLICT, "최소 입찰 가능 금액보다 낮습니다."),
     IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "같은 요청 키로 다른 요청을 보냈습니다."),
     CREDIT_INSUFFICIENT(HttpStatus.CONFLICT, "사용 가능한 크레딧이 부족합니다."),
+    AUCTION_STREAM_BUSY(HttpStatus.SERVICE_UNAVAILABLE, "실시간 연결이 몰려 연결하지 못했습니다. 잠시 후 다시 연결해 주세요."),
 
     // 결제
     ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "주문을 찾을 수 없습니다."),
