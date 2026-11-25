@@ -138,11 +138,11 @@ case "$cmd" in
     timestamp_pattern='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
     [[ "$1" =~ $timestamp_pattern && "$2" =~ $timestamp_pattern ]] || die 'timestamps must use YYYY-MM-DDTHH:MM:SSZ'
     [[ "$1" < "$2" ]] || die 'start time must be earlier than end time'
-    docker logs --timestamps --since "$1" --until "$2" --tail 10000 restless-perf 2>&1
+    docker logs --timestamps --since "$1" --until "$2" restless-perf 2>&1 | tail -n 10000
     ;;
   status)
     [[ $# -eq 0 ]] || die 'usage: status'
-    docker inspect --format 'Image={{.Config.Image}} Revision={{index .Config.Labels "org.opencontainers.image.revision"}} RestartCount={{.RestartCount}} OOMKilled={{.State.OOMKilled}} StartedAt={{.State.StartedAt}}' restless-perf
+    docker inspect --format 'Image={{.Config.Image}} Revision={{index .Config.Labels "org.opencontainers.image.revision"}} Status={{.State.Status}} ExitCode={{.State.ExitCode}} RestartCount={{.RestartCount}} OOMKilled={{.State.OOMKilled}} StartedAt={{.State.StartedAt}}' restless-perf
     ;;
   reset-db)
     load_env
@@ -159,7 +159,7 @@ case "$cmd" in
     echo "check: systemctl list-timers restless-deploy.timer; docker ps"
     ;;
   *)
-    sed -n '2,17p' "$0"
+    sed -n '2,/^set -euo pipefail/{ /^set -euo pipefail/!p; }' "$0"
     exit 1
     ;;
 esac

@@ -19,7 +19,13 @@ EC2 담당자는 `~/restless`에서 `perf/ec2/perf-ec2.sh <명령>`으로 실행
 
 `$R`은 `sudo -u ubuntu /home/ubuntu/restless/perf/ec2/perf-ec2.sh`, `$T`는 `sudo -u ubuntu /home/ubuntu/restless/perf/seed/ticketing.sh`이다. 접속하면 자동으로 잡히므로 직접 입력하지 않는다.
 `perf/seed/ticketing.sh verify 1`은 `$T verify 1`로 쓴다. `$R verify`는 스케일을 받는 다른 검증이다.
-로그 시간은 `YYYY-MM-DDTHH:MM:SSZ` 형식의 UTC로 입력한다. 예: `$R logs 2026-11-25T07:42:20Z 2026-11-25T07:47:00Z`. 출력은 최근 최대 10,000줄이며 로그에 민감한 정보가 포함될 수 있으므로 공유 전 확인한다. `$R status`는 환경변수 없이 이미지, revision, 재시작 횟수, OOM 여부와 시작 시각만 출력한다.
+로그 시간은 `YYYY-MM-DDTHH:MM:SSZ` 형식의 UTC로 입력한다. 예: `$R logs 2026-11-25T07:42:20Z 2026-11-25T07:47:00Z`. 해당 기간의 마지막 최대 10,000줄을 출력한다. 예외 메시지에 행 값이나 DB 호스트명이 들어갈 수 있으므로 공유 전 확인한다. `$R status`는 환경변수 없이 이미지, revision, 컨테이너 상태, 종료 코드, 재시작 횟수, OOM 여부와 시작 시각만 출력한다.
+
+노트북에서 로그를 파일로 받으려면 전체 경로를 사용한다. `$R`은 비대화형 SSH에서 설정되지 않을 수 있다.
+
+```bash
+ssh fanq-perf 'sudo -u ubuntu /home/ubuntu/restless/perf/ec2/perf-ec2.sh logs 2026-11-25T07:42:20Z 2026-11-25T07:47:00Z' > perf-app.log
+```
 저장소는 `/home/ubuntu/restless` 하나뿐이고 팀원은 `cd`로 들어갈 수 없다. 들어갈 필요도 없다.
 
 ### 처음 한 번
