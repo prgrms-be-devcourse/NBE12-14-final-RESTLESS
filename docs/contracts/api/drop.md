@@ -13,7 +13,7 @@
 
 | 단계 | API |
 |---|---|
-| D1 상품 등록·조회 | 운영자 등록·게시, 사용자 목록·상세 |
+| D1 상품 등록·조회 | 운영자 등록·게시, 주최자 등록·게시·목록 (#429), 사용자 목록·상세 |
 | D2 재고 점유 + 주문 생성 | 재고 점유 생성·조회 |
 | D3 결제 연결 | 재고 점유 취소, 결제는 공통 결제 API(`payableType = DROP`, `payableId = reservationId`) |
 | D4 입장 제어 | SKU별 입장 신청, 내 입장 상태 |
@@ -48,6 +48,21 @@
 ### `POST /api/admin/drops/{dropId}/publish` (ADMIN)
 
 - DRAFT → SCHEDULED. 200 `{ "dropId": 1, "status": "SCHEDULED" }`. DRAFT가 아니면 409 `DROP_INVALID_STATE`.
+
+### 주최자 드롭 API (ORGANIZER, ADMIN, #429)
+
+| Method | Endpoint | 기능 |
+|---|---|---|
+| POST | `/api/organizer/drops` | 드롭 등록. 요청, 응답, 검증은 `POST /api/admin/drops`와 같다 |
+| POST | `/api/organizer/drops/{dropId}/publish` | 게시. 응답과 상태 규칙은 관리자 게시와 같다 |
+| GET | `/api/organizer/drops` | 관리할 수 있는 드롭 목록 |
+
+- 주최자는 본인 공연에만 드롭을 등록한다. 관리자는 모든 공연에 등록한다. 드롭의 주최자는 등록 요청자가 아니라 공연의 주최자다.
+- 다른 주최자의 공연과 없는 공연은 모두 404 `NOT_FOUND`다. 다른 주최자의 드롭 게시도 404다. 다른 주최자의 상품이 있는지 알려 주지 않는다.
+- `POST /api/admin/drops`로 등록한 드롭은 주최자가 없다. 관리자만 관리하고 주최자 목록에도 나오지 않는다.
+- 목록: 주최자는 본인 드롭, 관리자는 전체 드롭을 등록 최신순(`createdAt`, `dropId` 내림차순)으로 받는다. 게시 전 드롭도 포함한다. 페이지는 없다.
+- 200 `{ "items": [ { "dropId", "concertId", "organizerId", "title", "status", "opensAt", "closesAt", "createdAt" } ] }`. 주최자가 없는 드롭의 `organizerId`는 `null`이다.
+- 로그인 안 함 401, ORGANIZER나 ADMIN이 아니면 403, 탈퇴한 회원은 404 `MEMBER_NOT_FOUND`.
 
 ### `GET /api/drops` (공개)
 

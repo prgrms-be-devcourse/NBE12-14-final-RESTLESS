@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/resources/db/migration/V*__drop_*.sql`, `backend/src/main/java/com/restless/drop/domain/`
 >
-> 마지막 확인: 2026-11-24 (#377 입장 순번 인덱스 V20261124_1700과 대조. 2026-11-22 #330 재고 버킷 분할 migration V20261122_1400, 1401과 대조. 2026-11-20 #285 용어를 재고 점유로 통일. 2026-11-19 #254 SKU별 입장 제어 migration과 대조. 나머지는 2026-11-14 #92 구현과 대조)
+> 마지막 확인: 2026-11-25 (#429 주최자 컬럼 V20261125_1500과 대조. 이전: 2026-11-24 (#377 입장 순번 인덱스 V20261124_1700과 대조. 2026-11-22 #330 재고 버킷 분할 migration V20261122_1400, 1401과 대조. 2026-11-20 #285 용어를 재고 점유로 통일. 2026-11-19 #254 SKU별 입장 제어 migration과 대조. 나머지는 2026-11-14 #92 구현과 대조)
 
 ![Drop ERD](drop-erd.svg)
 
@@ -18,6 +18,7 @@
 |---|---|
 | id | PK |
 | concert_id | 공연 FK. 현재 구현은 필수(NOT NULL FK, 등록 API도 필수). NULL 허용으로 바꿀지는 팀 확인 ([열린 결정](../../product/open-questions.md)) |
+| organizer_id | 드롭 주최자 회원 ID (#429). 주최자 API로 등록하면 공연 주최자(`concerts.seller_id`)를 복사한다. 관리자 API로 등록한 드롭과 기존 드롭은 NULL이고 관리자만 관리한다. users로 물리 FK는 두지 않는다. 인덱스 `idx_drops_organizer` |
 | title | 상품명 |
 | description | 설명 |
 | image_url | 대표 이미지 |
