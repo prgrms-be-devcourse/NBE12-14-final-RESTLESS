@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/application/`
 >
-> 마지막 확인: 2026-11-25 (#430 TX2 삭제 거절과 TX5-c 새벽 환불 추가. #429 주최자 등록과 게시 추가. 관리자 등록과 같은 트랜잭션 하나이고, 게시는 드롭 행 잠금 뒤 소유자를 확인한다. 이전: 2026-11-24 (#390 D4 상태 조회와 진입에 동시 처리 상한과 `pollAfterMs` 추가, 트랜잭션 경계는 그대로. #388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 재고 버킷 분할: TX1 5번, 계측 표, 정산 대상 버킷, 입장 허가 작업의 재고 합 읽기. 2026-11-21 #325 완료 단계 타이머 추가. #322 TX1 순서 변경: 재고 UPDATE를 마지막으로. 2026-11-20 #285 TX3 롤백 뒤 상태를 `DropApprovalRollbackRecoveryIntegrationTest`, 장애 처리 문서와 대조. 용어 정리. 2026-11-19 #254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
+> 마지막 확인: 2026-11-25 (#435 TX5-c 삭제 기준 시각 추가. #430 TX2 삭제 거절과 TX5-c 새벽 환불 추가. #429 주최자 등록과 게시 추가. 관리자 등록과 같은 트랜잭션 하나이고, 게시는 드롭 행 잠금 뒤 소유자를 확인한다. 이전: 2026-11-24 (#390 D4 상태 조회와 진입에 동시 처리 상한과 `pollAfterMs` 추가, 트랜잭션 경계는 그대로. #388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 재고 버킷 분할: TX1 5번, 계측 표, 정산 대상 버킷, 입장 허가 작업의 재고 합 읽기. 2026-11-21 #325 완료 단계 타이머 추가. #322 TX1 순서 변경: 재고 UPDATE를 마지막으로. 2026-11-20 #285 TX3 롤백 뒤 상태를 `DropApprovalRollbackRecoveryIntegrationTest`, 장애 처리 문서와 대조. 용어 정리. 2026-11-19 #254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
 
 PG 호출 중에는 DB 트랜잭션을 열어 두지 않는다.
 
@@ -169,14 +169,14 @@ PG 취소 결과가 불명확하면 재고를 복원하지 않는다.
 
 `DropCancelRefundJob`이 매일 00:30(KST)에 돈다. 트랜잭션을 열지 않는다.
 
-1. 삭제된 드롭의 `CONFIRMED` 점유를 `id` 순으로 100개씩 읽는다.
+1. 그날 00:30(KST) 전에 삭제된 드롭의 `CONFIRMED` 점유를 `id` 순으로 100개씩 읽는다. 그 뒤에 삭제된 드롭은 다음 날로 넘긴다. 기준 시각이 고정이라 서버가 여러 대여도 같다 (#435).
 2. 점유마다 `PaymentRefundService.refund`를 회원 ID, 현재 결제 ID, 고정 키 `drop-cancel-{reservationId}`로 부른다. 이후는 TX5-a, TX5-b와 같다. PG 호출 중에는 트랜잭션이 없다.
-3. 08:00(KST)이 되면 멈춘다. 남은 건은 다음 날 이어서 한다.
+3. 마감은 없다. 대상이 없을 때까지 돈다 (#435).
 
 - 키가 고정이라 재실행이나 서버 두 대 동시 실행에도 환불 요청은 결제당 하나다 (`payment_refunds`의 `(payment_id, kind, client_key)` UNIQUE).
 - 환불되면 점유가 `RESTORED`가 되어 다음 대상에서 빠진다. PG 최종 거절(`REFUND_REVIEW`)은 같은 키의 재요청이 거절을 재현하므로 PG를 다시 부르지 않는다. 운영 확인 대상이다.
 - 결과 불명확은 실패로 보지 않는다. 미완료 결제 재확인 작업이 마무리한다.
-- 메트릭 `drop.cancel_refund.processed{result}`: `completed`, `unknown`, `rejected`, `in_progress`, `not_refundable`, `skipped`, `window_closed`, `failed`.
+- 메트릭 `drop.cancel_refund.processed{result}`: `completed`, `unknown`, `rejected`, `in_progress`, `not_refundable`, `skipped`, `failed`.
 
 ## 공통 규칙 (TX2~TX5)
 

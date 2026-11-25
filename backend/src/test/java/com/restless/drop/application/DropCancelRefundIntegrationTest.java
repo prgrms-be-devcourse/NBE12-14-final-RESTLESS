@@ -96,27 +96,60 @@ class DropCancelRefundIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT cancelled_at FROM drops WHERE id = ?", Timestamp.class, dropId)).isNotNull();
 
         // The DB is shared with other tests, so only this purchase is checked, not the job total.
-        assertThat(job.runUntil(FAR_FUTURE)).isPositive();
+        assertThat(job.run(FAR_FUTURE)).isPositive();
 
         assertThat(orderStatus(reservation)).isEqualTo("REFUNDED");
         assertThat(reservationStatus(reservation)).isEqualTo("RESTORED");
         assertThat(refundCount(payment)).isEqualTo(1);
 
-        job.runUntil(FAR_FUTURE);
+        job.run(FAR_FUTURE);
         assertThat(refundCount(payment)).as("환불된 점유는 다시 고르지 않는다").isEqualTo(1);
     }
 
     @Test
-    @DisplayName("08:00이 지나면 배치는 멈추고 남은 건은 그대로 둔다")
-    void jobStopsAtWindowEnd() throws Exception {
+    @DisplayName("그날 00:30 뒤에 삭제된 드롭은 그날 처리하지 않고 다음 실행에서 환불한다 (#435)")
+    void dropDeletedAfterCutoffWaitsForNextRun() throws Exception {
+        Long reservation = reserve(buyer);
+        Long payment = pay(buyer, reservation);
+        // The cutoff is a second before the delete. MySQL rounds to microseconds, so a margin keeps the order.
+        Instant runStart = Instant.now().minusSeconds(1);
+        delete(organizer, "ORGANIZER").andExpect(status().isOk());
+
+        job.run(runStart);
+        assertThat(orderStatus(reservation)).as("07:59에 삭제한 것과 같다. 다음 날로 넘긴다").isEqualTo("PAID");
+        assertThat(refundCount(payment)).isZero();
+
+        job.run(Instant.now());
+        assertThat(orderStatus(reservation)).isEqualTo("REFUNDED");
+    }
+
+    @Test
+    @DisplayName("기준 시각과 같은 시각에 삭제된 드롭은 다음 날로 넘기고, 1마이크로초 앞서면 처리한다")
+    void cutoffIsExclusive() throws Exception {
         Long reservation = reserve(buyer);
         Long payment = pay(buyer, reservation);
         delete(organizer, "ORGANIZER").andExpect(status().isOk());
+        Instant deletedAt = jdbc.queryForObject("SELECT cancelled_at FROM drops WHERE id = ?", Timestamp.class, dropId)
+                .toInstant();
 
-        assertThat(job.runUntil(Instant.now().minusSeconds(1))).isZero();
-
-        assertThat(orderStatus(reservation)).isEqualTo("PAID");
+        job.run(deletedAt);
         assertThat(refundCount(payment)).isZero();
+
+        job.run(deletedAt.plusNanos(1000));
+        assertThat(refundCount(payment)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("삭제 시각이 없는 삭제 드롭도 환불한다")
+    void dropWithoutCancelledAtIsRefunded() throws Exception {
+        Long reservation = reserve(buyer);
+        Long payment = pay(buyer, reservation);
+        delete(organizer, "ORGANIZER").andExpect(status().isOk());
+        jdbc.update("UPDATE drops SET cancelled_at = NULL WHERE id = ?", dropId);
+
+        job.run(Instant.EPOCH);
+
+        assertThat(refundCount(payment)).isEqualTo(1);
     }
 
     @Test
@@ -168,7 +201,7 @@ class DropCancelRefundIntegrationTest {
         var pool = Executors.newFixedThreadPool(4);
         var start = new CountDownLatch(1);
         var runs = new ArrayList<Future<Integer>>();
-        for (int i = 0; i < 4; i++) runs.add(pool.submit(() -> { start.await(); return job.runUntil(FAR_FUTURE); }));
+        for (int i = 0; i < 4; i++) runs.add(pool.submit(() -> { start.await(); return job.run(FAR_FUTURE); }));
         start.countDown();
         for (var run : runs) run.get(60, TimeUnit.SECONDS);
         pool.shutdown();
@@ -177,7 +210,7 @@ class DropCancelRefundIntegrationTest {
         assertThat(refundCount(payment)).isEqualTo(1);
         assertThat(orderStatus(reservation)).isEqualTo("REFUNDED");
         assertThat(stock()).isEqualTo("5/5/0/0");
-        job.runUntil(FAR_FUTURE);
+        job.run(FAR_FUTURE);
         assertThat(cancels(payment)).isEqualTo(1);
     }
 
@@ -189,8 +222,8 @@ class DropCancelRefundIntegrationTest {
         delete(organizer, "ORGANIZER").andExpect(status().isOk());
         doReturn(new PgCancelResult.Rejected("NOT_CANCELABLE", "rejected")).when(pg).cancel(any());
 
-        job.runUntil(FAR_FUTURE);
-        job.runUntil(FAR_FUTURE);
+        job.run(FAR_FUTURE);
+        job.run(FAR_FUTURE);
 
         assertThat(cancels(payment)).isEqualTo(1);
         assertThat(orderStatus(reservation)).isEqualTo("REFUND_REVIEW");
@@ -207,8 +240,8 @@ class DropCancelRefundIntegrationTest {
         delete(organizer, "ORGANIZER").andExpect(status().isOk());
         doReturn(new PgCancelResult.Unknown("timeout", null)).when(pg).cancel(any());
 
-        job.runUntil(FAR_FUTURE);
-        job.runUntil(FAR_FUTURE);
+        job.run(FAR_FUTURE);
+        job.run(FAR_FUTURE);
 
         assertThat(cancels(payment)).isEqualTo(1);
         assertThat(orderStatus(reservation)).isEqualTo("REFUND_PENDING");
@@ -228,7 +261,7 @@ class DropCancelRefundIntegrationTest {
         delete(organizer, "ORGANIZER").andExpect(status().isOk());
         long before = cancels(payment);
 
-        job.runUntil(FAR_FUTURE);
+        job.run(FAR_FUTURE);
 
         assertThat(cancels(payment)).isEqualTo(before);
         assertThat(refundCount(payment)).isEqualTo(1);
