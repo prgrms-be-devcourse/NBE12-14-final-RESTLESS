@@ -17,8 +17,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
 /**
- * 삭제된 드롭의 결제 완료 건 환불 (#430). 매일 00:30(KST)에 돌고 08:00(KST)이 되면 멈춘다.
- * 남은 건은 다음 날 이어서 한다. 실행을 시작한 시각 이후에 삭제된 드롭은 다음 날 처리한다 (#435).
+ * 삭제된 드롭의 결제 완료 건 환불 (#430). 매일 00:30(KST)에 시작하고 마감 없이 대상이 없을 때까지 돈다 (#435).
+ * 기준 시각은 그날 00:30(KST)이다. 그 뒤에 삭제된 드롭은 다음 날 00:30에 처리한다. 서버가 여러 대여도 기준이 같다.
  * 회원이 직접 요청한 환불은 이 작업과 상관없이 즉시 처리된다.
  *
  * <p>손님 환불과 같은 {@link PaymentRefundService} 경로를 쓴다. 멱등 키는 점유마다 고정이라
@@ -29,7 +29,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class DropCancelRefundJob {
     static final ZoneId ZONE = ZoneId.of("Asia/Seoul");
-    static final LocalTime WINDOW_END = LocalTime.of(8, 0);
+    static final LocalTime RUN_AT = LocalTime.of(0, 30);
     static final String REASON = "드롭 삭제에 따른 환불";
     private static final int PAGE = 100;
     private static final Logger log = LoggerFactory.getLogger(DropCancelRefundJob.class);
@@ -40,16 +40,21 @@ public class DropCancelRefundJob {
     private final MeterRegistry meters;
 
     public void runOnce() {
-        Instant start = clock.instant();
-        runUntil(start, start.atZone(ZONE).toLocalDate().atTime(WINDOW_END).atZone(ZONE).toInstant());
+        run(cutoff(clock.instant()));
+    }
+
+    /** {@code now} 이전의 가장 최근 00:30(KST). 00:30 전에 손으로 돌리면 전날 00:30이다. */
+    static Instant cutoff(Instant now) {
+        var local = now.atZone(ZONE);
+        var today = local.toLocalDate().atTime(RUN_AT).atZone(ZONE);
+        return (local.isBefore(today) ? today.minusDays(1) : today).toInstant();
     }
 
     /**
      * @param cutoff 이 시각 전에 삭제된 드롭만 처리한다
-     * @param deadline 이 시각이 되면 멈춘다
      * @return 환불을 요청한 점유 수
      */
-    public int runUntil(Instant cutoff, Instant deadline) {
+    public int run(Instant cutoff) {
         int requested = 0;
         long after = 0;
         while (true) {
@@ -62,11 +67,6 @@ public class DropCancelRefundJob {
             }
             if (page.isEmpty()) return requested;
             for (Long id : page) {
-                if (!clock.instant().isBefore(deadline)) {
-                    count("window_closed");
-                    log.warn("Drop cancel refund stopped at window end nextReservationId={}", id);
-                    return requested;
-                }
                 if (refund(id)) requested++;
                 after = id;
             }
