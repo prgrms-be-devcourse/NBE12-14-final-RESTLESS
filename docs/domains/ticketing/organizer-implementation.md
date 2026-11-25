@@ -40,7 +40,7 @@
 
 로컬 Flyway 최신 성공 버전은 20261122.1401이며 V20261124_1000은 미적용이었다. V20261124_1100에는 상세 정보, 공개 표식·시각·공통 layout_id와 concert_section_prices 구조를 포함했다. 기존 DB에는 적용하지 않았다. 기존 공연은 공개 상태를 유지하고 신규 공연은 초안으로 생성한다. 공연 공통 배치와 공통 구역 가격 설정 API를 연결했으며, 회차 생성은 공통 배치·가격을 사용해 회차와 판매 좌석을 한 트랜잭션에서 생성한다. 고객 목록·상세·회차·좌석·예약 가능 수량·선점 경로는 공개 여부를 확인한다. 기존 회차의 배치·가격은 자동 이관하지 않는다.
 
-현재 단건 회차 등록, 초안 고객 접근 차단과 공연 전체 공개를 구현했다. MVP 범위인 일괄 회차 등록과 조건부 삭제는 미구현이다. 선택 공개·재공개와 비공개 전환은 후순위다. 기존 공개 공연 중 회차별 배치·가격이 다른 공연은 별도 확인 대상으로 유지한다.
+단건·일괄 회차 등록, 공연장·배치 변경, 초안 고객 접근 차단, 공연 전체 공개를 구현했다. 조건부 삭제는 후속이다. 선택 공개·재공개와 비공개 전환은 후순위다. 기존 공개 공연 중 회차별 배치·가격이 다른 공연은 별도 확인 대상으로 유지한다.
 
 Focused 테스트 통과: `./gradlew test --tests 'com.restless.concert.OrganizerConcertApiTest' --tests 'com.restless.ticketing.TicketSeatQueryApiTest' --tests 'com.restless.ticketing.TicketQueryApiTest'` (해당 시점 24 tests, BUILD SUCCESSFUL). 전체 빌드와 mutation gate는 실행하지 않았다.
 
@@ -48,7 +48,7 @@ Focused 테스트 통과: `./gradlew test --tests 'com.restless.concert.Organize
 
 관리자는 전체 공연의 관리 조회와 단건 회차·공통 가격 작업을 수행한다. 공개 공연의 일정 변경과 회차 추가를 막고, 초안 일정은 선점·예약 이력이 없을 때 미래 예매 시작 시각으로 복구할 수 있다. 회차 시간은 공연 단위 잠금 아래 소요 시간 기준으로 비교하며, 시간 간격은 시작 포함·종료 제외다. 기간·소요 시간 변경은 회차 시작 시간순으로 겹침을 검사한다. 좌석 초기화는 concert의 application 계약을 ticketing이 구현하며 회차 생성과 같은 트랜잭션에 참여한다. 공통 가격 교체는 삭제를 먼저 flush해 유일 제약 충돌을 방지한다.
 
-공연장·배치 변경, 일괄 등록 및 삭제는 아직 구현하지 않았다. 기존 공개 공연의 배치·가격 불일치는 별도 검토가 필요하다.
+공연장·배치 변경과 일괄 등록을 구현했다. 조건부 삭제는 후속이다. 기존 공개 공연의 배치·가격 불일치는 별도 검토가 필요하다.
 
 공연 전체 공개는 공연 행과 회차 행을 잠그고 모든 공통 설정·회차 일정·판매 좌석 일치 여부를 확인한 뒤 DB 현재 시각 기준으로 모든 예매 시작이 미래인지 검사한다. ticketing application 계약이 회차별 판매 좌석과 공연 공통 가격을 비교한다. 공연의 공개 표식 하나로 전체 회차에 동일하게 적용한다. 재요청은 기존 공개 시각을 보존한다.
 
@@ -58,8 +58,13 @@ Focused 테스트 통과: `./gradlew test --tests 'com.restless.concert.Organize
 
 추가 회귀 검증: `./gradlew test --tests 'com.restless.concert.OrganizerConcertApiTest'` 15건 통과. `./gradlew test --tests 'com.restless.ticketing.application.TicketReservationServiceTest.concurrentUsersCannotOwnTheSameSeat' --tests 'com.restless.ticketing.application.TicketReservationServiceTest.replayPreservesOriginalReservationAndRejectsDifferentContent' --tests 'com.restless.ticketing.application.TicketReservationServiceTest.concurrentSameKeyRequestsReturnOneReservation'` 3건 통과. 전체 빌드와 mutation gate는 실행하지 않았다.
 
+
 단건 회차 등록은 READ_COMMITTED로 실행한다. 기본 REPEATABLE READ에서는 공연 행 잠금 전에 회원 조회로 읽기 스냅샷이 고정돼, 동시에 커밋된 같은 시각 회차를 겹침 검사에서 보지 못하고 두 회차가 모두 생성됐다(`concurrentSingleCreationsCannotOverlap` 수정 전 실패 [201, 201]).
 
 V20261125_1000은 `concerts.is_published` 기본값을 TRUE로 바꾼다. 주최자 API 생성은 엔티티가 FALSE를 명시하므로 계속 초안이다. 공개 여부를 지정하지 않은 직접 INSERT는 공개로 저장된다(`directlyInsertedConcertDefaultsToPublished`). 기존 V20261124_1100은 수정하지 않았다.
 
 PR 분할(2026-11-25): 정책 문서(#413) → 공개 표식·고객 노출 차단 → 공연 초안·공통 가격 → 회차·판매 좌석·전체 공개(#401) 순으로 쌓았다. 정리 사항: 빈 `OrganizerSeatPricingController`와 호출되지 않던 회차별 가격 설정 `OrganizerSeatPricingService`(관련 `OrganizerPerformanceService.lockOwnedSeatLayout`·`ensureSeatPricingAllowed`, `TicketSeat.changePricing`, `TICKET_PRICING_*` 오류 코드와 이를 직접 호출하던 테스트 3개 포함) 삭제, 쓰이지 않는 `countBySellerIdAndPublishedTrue`와 `LayoutSeatRepository`의 application DTO import 삭제, DB 기본값 공개 전환으로 불필요해진 드롭·공통 테스트 fixture의 공개 표식 복원. `TicketCheckoutServiceTest`의 정리 쿼리는 같은 공연장의 모든 회차로 넓힌 것이며(가격 테스트가 새 회차를 만듦) 기존 정리 대상을 모두 포함한다.
+
+## 일괄 등록, 공연장·배치 변경
+
+회차 일괄 등록은 공연 행 잠금과 하나의 READ_COMMITTED 트랜잭션에서 회차 1~10개와 판매 좌석을 만든다. 단건 등록 메서드를 내부 호출하며 하나라도 실패하면 전체를 롤백하고, 검증 오류에 `details.performanceIndex`(0부터)를 담는다. 초안의 공연장·배치를 실제로 바꾸면 공통 가격을 삭제하고, 같은 값 재제출은 가격을 유지한다. 공개된 공연의 회차 수정은 회차 행을 잠그지 않고 400으로 거절해 진행 중인 선점을 기다리지 않는다(`publishedPerformanceUpdateDoesNotWaitForHolds`).

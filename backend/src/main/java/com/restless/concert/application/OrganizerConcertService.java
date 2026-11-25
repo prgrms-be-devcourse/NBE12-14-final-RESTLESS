@@ -67,6 +67,27 @@ public class OrganizerConcertService {
                                        long totalElements, int totalPages) { }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
+    public OrganizerConcertInfo changeVenueAndLayout(Long actorId, Long concertId, Long venueId, Long layoutId) {
+        MemberRole role = requireOrganizer(actorId);
+        if (concertId == null || concertId <= 0 || venueId == null || venueId <= 0 || layoutId == null || layoutId <= 0)
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        Concert concert = concerts.findLockedById(concertId)
+                .filter(c -> role == MemberRole.ADMIN || c.getSellerId().equals(actorId))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        Venue venue = venues.findById(venueId).orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        layouts.findById(layoutId).filter(l -> l.getVenueId().equals(venueId))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        if (Objects.equals(concert.getVenueId(), venueId) && Objects.equals(concert.getLayoutId(), layoutId))
+            return toInfo(concert, venue);
+        if (concert.isPublished() || concert.getPublishedAt() != null || !performances.findAllByConcertIdOrderByStartsAtAsc(concertId).isEmpty())
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "공개 이력과 회차가 없는 공연만 변경할 수 있습니다.");
+        sectionPrices.deleteAll(sectionPrices.findAllByConcertIdOrderBySectionLabelAsc(concertId));
+        sectionPrices.flush();
+        concert.changeVenueAndLayout(venueId, layoutId);
+        return toInfo(concert, venue);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public OrganizerConcertInfo publish(Long actorId, Long concertId) {
         MemberRole role = requireOrganizer(actorId);
         if (concertId == null || concertId <= 0) throw new BusinessException(ErrorCode.INVALID_REQUEST);

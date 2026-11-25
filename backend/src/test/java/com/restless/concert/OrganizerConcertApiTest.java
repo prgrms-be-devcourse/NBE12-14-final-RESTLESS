@@ -48,6 +48,7 @@ class OrganizerConcertApiTest {
     @Autowired EntityManager entityManager;
     @Autowired JdbcTemplate jdbc;
     @Autowired MockMvc mockMvc;
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
     private Long ownerId;
     private Long otherId;
     private Long adminId;
@@ -196,6 +197,84 @@ class OrganizerConcertApiTest {
         return "{\"startsAt\":\"" + startsAt
                 + "\",\"bookingOpensAt\":\"" + opensAt + "\",\"bookingClosesAt\":\"" + closesAt
                 + "\",\"maxTicketsPerUser\":" + maximum + "}";
+    }
+
+    @Test
+    @DisplayName("공연장·배치 변경은 다른 공연장의 배치, 회차가 있는 공연, 공개 공연을 거절한다")
+    void venueLayoutChangeGuards() throws Exception {
+        Long layoutId = layoutFor(venueId), newLayout = layoutFor(venueId);
+        Venue other = Venue.create("Other", "Busan", "Asia/Seoul", "ACTIVE", Instant.now());
+        entityManager.persist(other);
+        Long foreignLayout = layoutFor(other.getId());
+        Long withPerformance = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        Long published = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        String path = "/api/organizer/concerts/{id}/venue-layout", body = "{\"venueId\":" + venueId + ",\"layoutId\":";
+        mockMvc.perform(put(path, withPerformance).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                .content(body + foreignLayout + "}")).andExpect(status().isNotFound());
+        entityManager.persist(Performance.create(withPerformance, venueId, layoutId, Instant.parse("2027-03-01T00:00:00Z"),
+                Instant.parse("2027-02-01T00:00:00Z"), Instant.parse("2027-02-28T00:00:00Z"), 2, "SCHEDULED"));
+        entityManager.flush();
+        jdbc.update("UPDATE concerts SET is_published=TRUE WHERE id=?", published);
+        entityManager.clear();
+        for (Long id : java.util.List.of(withPerformance, published)) {
+            mockMvc.perform(put(path, id).with(actor(adminId, "ADMIN")).contentType("application/json")
+                    .content(body + newLayout + "}")).andExpect(status().isBadRequest());
+            assertThat(jdbc.queryForObject("SELECT layout_id FROM concerts WHERE id=?", Long.class, id)).isEqualTo(layoutId);
+        }
+    }
+
+    @Test
+    @DisplayName("공연장·배치를 실제로 바꾸면 공통 가격을 지우고 같은 값 재제출은 유지한다")
+    void venueLayoutChangeClearsPrices() throws Exception {
+        Long oldLayout = layoutFor(venueId);
+        Long newLayout = layoutFor(venueId);
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), oldLayout);
+        String path = "/api/organizer/concerts/{id}/venue-layout";
+        String same = "{\"venueId\":" + venueId + ",\"layoutId\":" + oldLayout + "}";
+        mockMvc.perform(put(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json").content(same)).andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM concert_section_prices WHERE concert_id=?", Integer.class, concertId)).isEqualTo(1);
+        String changed = "{\"venueId\":" + venueId + ",\"layoutId\":" + newLayout + "}";
+        mockMvc.perform(put(path, concertId).with(actor(adminId, "ADMIN")).contentType("application/json").content(changed)).andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM concert_section_prices WHERE concert_id=?", Integer.class, concertId)).isZero();
+    }
+
+    @Test
+    @DisplayName("회차 일괄 등록은 좌석까지 함께 생성하고 겹침이 있으면 전체 취소한다")
+    void batchCreatesSeatsAndRollsBackOnOverlap() throws Exception {
+        Long layoutId = layoutFor(venueId);
+        addSellableSeat(layoutId);
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        org.springframework.test.context.transaction.TestTransaction.flagForCommit();
+        org.springframework.test.context.transaction.TestTransaction.end();
+        String path = "/api/organizer/concerts/{id}/performances/batch";
+        String body = "{\"bookingOpensAt\":\"2027-02-20T00:00:00Z\",\"maxTicketsPerUser\":2,\"performances\":["
+                + "{\"startsAt\":\"2027-03-01T00:00:00Z\",\"bookingClosesAt\":\"2027-02-25T00:00:00Z\"},"
+                + "{\"startsAt\":\"2027-03-01T01:00:00Z\",\"bookingClosesAt\":\"2027-02-25T00:00:00Z\"}]}";
+        mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER"))
+                .contentType("application/json").content(body)).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details.performanceIndex").value(1));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id=?", Integer.class, concertId)).isZero();
+        mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER"))
+                .contentType("application/json").content(body.replace("01:00:00Z", "02:00:00Z")))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.performances.length()").value(2));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats s JOIN performances p ON p.id=s.performance_id WHERE p.concert_id=?", Integer.class, concertId)).isEqualTo(2);
+        jdbc.update("DELETE s FROM performance_seats s JOIN performances p ON p.id=s.performance_id WHERE p.concert_id=?", concertId);
+        jdbc.update("DELETE FROM performances WHERE concert_id=?", concertId);
+        jdbc.update("DELETE FROM concert_section_prices WHERE concert_id=?", concertId);
+        jdbc.update("DELETE FROM concerts WHERE id=?", concertId);
+    }
+
+    @Test
+    void batchRejectsEmptyAndMoreThanTenPerformances() throws Exception {
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3));
+        String path = "/api/organizer/concerts/{id}/performances/batch";
+        String item = "{\"startsAt\":\"2027-03-01T00:00:00Z\",\"bookingClosesAt\":\"2027-02-25T00:00:00Z\"}";
+        String prefix = "{\"bookingOpensAt\":\"2027-02-20T00:00:00Z\",\"maxTicketsPerUser\":2,\"performances\":[";
+        for (String body : new String[]{prefix + "]}", prefix + String.join(",", java.util.Collections.nCopies(11, item)) + "]}"}) {
+            mockMvc.perform(post(path, concertId).with(actor(ownerId, "ORGANIZER"))
+                    .contentType("application/json").content(body)).andExpect(status().isBadRequest());
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id=?", Integer.class, concertId)).isZero();
     }
 
     @Test
@@ -484,6 +563,46 @@ class OrganizerConcertApiTest {
     }
 
     @Test
+    void publicationAndBatchCreationSerializeWithoutPartialSeats() throws Exception {
+        Long layoutId = layoutFor(venueId);
+        addSellableSeat(layoutId);
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        org.springframework.test.context.transaction.TestTransaction.flagForCommit();
+        org.springframework.test.context.transaction.TestTransaction.end();
+        String opens = "2027-02-20T00:00:00Z", closes = "2027-02-25T00:00:00Z";
+        mockMvc.perform(post("/api/organizer/concerts/{id}/performances", concertId).with(actor(ownerId, "ORGANIZER"))
+                .contentType("application/json").content(performanceBody("2027-03-01T00:00:00Z", opens, closes, 3))).andExpect(status().isCreated());
+        String batch = "{\"bookingOpensAt\":\"" + opens + "\",\"maxTicketsPerUser\":3,\"performances\":["
+                + "{\"startsAt\":\"2027-03-02T00:00:00Z\",\"bookingClosesAt\":\"" + closes + "\"},"
+                + "{\"startsAt\":\"2027-03-03T00:00:00Z\",\"bookingClosesAt\":\"" + closes + "\"}]}";
+        var ready = new java.util.concurrent.CountDownLatch(2);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var publication = executor.submit(() -> { ready.countDown(); start.await();
+                return mockMvc.perform(post("/api/organizer/concerts/{id}/publish", concertId).with(actor(ownerId, "ORGANIZER"))).andReturn().getResponse().getStatus(); });
+            var creation = executor.submit(() -> { ready.countDown(); start.await();
+                return mockMvc.perform(post("/api/organizer/concerts/{id}/performances/batch", concertId).with(actor(ownerId, "ORGANIZER"))
+                        .contentType("application/json").content(batch)).andReturn().getResponse().getStatus(); });
+            assertThat(ready.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            assertThat(publication.get(20, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(200);
+            int status = creation.get(20, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(status).isIn(201, 400);
+            int expected = status == 201 ? 3 : 1;
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id=?", Integer.class, concertId)).isEqualTo(expected);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats s JOIN performances p ON p.id=s.performance_id WHERE p.concert_id=?", Integer.class, concertId)).isEqualTo(expected);
+        } finally {
+            start.countDown(); executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            jdbc.update("DELETE s FROM performance_seats s JOIN performances p ON p.id=s.performance_id WHERE p.concert_id=?", concertId);
+            jdbc.update("DELETE FROM performances WHERE concert_id=?", concertId);
+            jdbc.update("DELETE FROM concert_section_prices WHERE concert_id=?", concertId);
+            jdbc.update("DELETE FROM concerts WHERE id=?", concertId);
+        }
+    }
+
+    @Test
     @DisplayName("같은 시작 시각의 단건 회차 등록이 동시에 요청돼도 하나만 생성된다")
     void concurrentSingleCreationsCannotOverlap() throws Exception {
         Long layoutId = layoutFor(venueId);
@@ -511,6 +630,46 @@ class OrganizerConcertApiTest {
             start.countDown(); executor.shutdownNow();
             assertThat(executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
             jdbc.update("DELETE s FROM performance_seats s JOIN performances p ON p.id=s.performance_id WHERE p.concert_id=?", concertId);
+            jdbc.update("DELETE FROM performances WHERE concert_id=?", concertId);
+            jdbc.update("DELETE FROM concert_section_prices WHERE concert_id=?", concertId);
+            jdbc.update("DELETE FROM concerts WHERE id=?", concertId);
+        }
+    }
+
+    @Test
+    @DisplayName("공개된 공연의 회차 수정은 진행 중인 선점을 기다리지 않고 거절된다")
+    void publishedPerformanceUpdateDoesNotWaitForHolds() throws Exception {
+        Long layoutId = layoutFor(venueId);
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        Performance performance = Performance.create(concertId, venueId, layoutId, Instant.parse("2027-03-01T00:00:00Z"),
+                Instant.parse("2027-02-20T00:00:00Z"), Instant.parse("2027-02-25T00:00:00Z"), 2, "SCHEDULED");
+        entityManager.persist(performance);
+        entityManager.flush();
+        jdbc.update("UPDATE concerts SET is_published=TRUE WHERE id=?", concertId);
+        Long performanceId = performance.getId();
+        org.springframework.test.context.transaction.TestTransaction.flagForCommit();
+        org.springframework.test.context.transaction.TestTransaction.end();
+        var locked = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            // 선점 트랜잭션처럼 회차 행에 공유 잠금을 잡고 있는다.
+            var hold = executor.submit(() -> new org.springframework.transaction.support.TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> {
+                        jdbc.queryForObject("SELECT id FROM performances WHERE id=? FOR SHARE", Long.class, performanceId);
+                        locked.countDown();
+                        try { release.await(20, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                    }));
+            assertThat(locked.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            String body = performanceBody("2027-03-02T00:00:00Z", "2027-02-20T00:00:00Z", "2027-02-25T00:00:00Z", 2);
+            var update = executor.submit(() -> mockMvc.perform(put("/api/organizer/performances/{id}", performanceId)
+                    .with(actor(ownerId, "ORGANIZER")).contentType("application/json").content(body)).andReturn().getResponse().getStatus());
+            assertThat(update.get(3, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(400);
+            release.countDown();
+            hold.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        } finally {
+            release.countDown(); executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
             jdbc.update("DELETE FROM performances WHERE concert_id=?", concertId);
             jdbc.update("DELETE FROM concert_section_prices WHERE concert_id=?", concertId);
             jdbc.update("DELETE FROM concerts WHERE id=?", concertId);
