@@ -119,8 +119,8 @@ class DropCancelRefundIntegrationTest {
     void dropDeletedAfterRunStartWaitsForNextRun() throws Exception {
         Long reservation = reserve(buyer);
         Long payment = pay(buyer, reservation);
-        Instant runStart = Instant.now();
-        Thread.sleep(5);
+        // The run started a second before the delete. MySQL rounds to microseconds, so a margin keeps the order.
+        Instant runStart = Instant.now().minusSeconds(1);
         delete(organizer, "ORGANIZER").andExpect(status().isOk());
 
         job.runUntil(runStart, FAR_FUTURE);
