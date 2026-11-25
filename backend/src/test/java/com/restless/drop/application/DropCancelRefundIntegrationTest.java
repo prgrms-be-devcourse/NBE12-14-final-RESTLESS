@@ -8,10 +8,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.jayway.jsonpath.JsonPath;
 import com.restless.TestcontainersConfiguration;
+import com.restless.payment.application.pg.PgCancelCommand;
+import com.restless.payment.application.pg.PgCancelResult;
+import com.restless.payment.application.pg.PgClient;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,7 +31,12 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mockingDetails;
 
 /** 드롭 삭제와 00:30 환불 배치 (#430). 배치는 스케줄러를 끄고 직접 부른다. */
 @SpringBootTest(properties = {"restless.ratelimit.enabled=false", "pg.provider=fake",
@@ -38,6 +51,8 @@ class DropCancelRefundIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;
     @Autowired DropCancelRefundJob job;
+    // Real fake PG; only some tests stub cancel. Spring resets the spy after each test.
+    @MockitoSpyBean PgClient pg;
 
     private Long organizer;
     private Long buyer;
@@ -136,6 +151,100 @@ class DropCancelRefundIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON).content(reservationJson()))
                 .andReturn().getResponse().getStatus();
         assertThat(code).isNotEqualTo(201);
+    }
+
+    @Test
+    @DisplayName("배치 네 개가 동시에 돌아도 PG 취소는 한 번이고 재고는 정확히 한 번 돌아온다")
+    void concurrentJobsSendOneCancel() throws Exception {
+        Long reservation = reserve(buyer);
+        Long payment = pay(buyer, reservation);
+        delete(organizer, "ORGANIZER").andExpect(status().isOk());
+
+        var pool = Executors.newFixedThreadPool(4);
+        var start = new CountDownLatch(1);
+        var runs = new ArrayList<Future<Integer>>();
+        for (int i = 0; i < 4; i++) runs.add(pool.submit(() -> { start.await(); return job.runUntil(FAR_FUTURE); }));
+        start.countDown();
+        for (var run : runs) run.get(60, TimeUnit.SECONDS);
+        pool.shutdown();
+
+        assertThat(cancels(payment)).isEqualTo(1);
+        assertThat(refundCount(payment)).isEqualTo(1);
+        assertThat(orderStatus(reservation)).isEqualTo("REFUNDED");
+        assertThat(stock()).isEqualTo("5/5/0/0");
+        job.runUntil(FAR_FUTURE);
+        assertThat(cancels(payment)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("PG가 최종 거절하면 운영 확인 상태로 두고, 다음 배치는 PG를 다시 부르지 않는다")
+    void rejectedRefundIsNotRetried() throws Exception {
+        Long reservation = reserve(buyer);
+        Long payment = pay(buyer, reservation);
+        delete(organizer, "ORGANIZER").andExpect(status().isOk());
+        doReturn(new PgCancelResult.Rejected("NOT_CANCELABLE", "rejected")).when(pg).cancel(any());
+
+        job.runUntil(FAR_FUTURE);
+        job.runUntil(FAR_FUTURE);
+
+        assertThat(cancels(payment)).isEqualTo(1);
+        assertThat(orderStatus(reservation)).isEqualTo("REFUND_REVIEW");
+        assertThat(reservationStatus(reservation)).isEqualTo("CONFIRMED");
+        assertThat(paymentStatus(payment)).isEqualTo("APPROVED");
+        assertThat(stock()).isEqualTo("5/4/0/1");
+    }
+
+    @Test
+    @DisplayName("PG 취소 결과를 모르면 실패로 보지 않는다. 재고를 그대로 두고 다음 배치도 PG를 다시 부르지 않는다")
+    void unknownRefundIsNotTreatedAsFailure() throws Exception {
+        Long reservation = reserve(buyer);
+        Long payment = pay(buyer, reservation);
+        delete(organizer, "ORGANIZER").andExpect(status().isOk());
+        doReturn(new PgCancelResult.Unknown("timeout", null)).when(pg).cancel(any());
+
+        job.runUntil(FAR_FUTURE);
+        job.runUntil(FAR_FUTURE);
+
+        assertThat(cancels(payment)).isEqualTo(1);
+        assertThat(orderStatus(reservation)).isEqualTo("REFUND_PENDING");
+        assertThat(paymentStatus(payment)).isEqualTo("CANCEL_UNKNOWN");
+        assertThat(stock()).isEqualTo("5/4/0/1");
+    }
+
+    @Test
+    @DisplayName("손님 환불이 이미 진행 중이면 배치는 PG를 부르지 않는다")
+    void customerRefundInProgressBlocksJob() throws Exception {
+        Long reservation = reserve(buyer);
+        Long payment = pay(buyer, reservation);
+        doReturn(new PgCancelResult.Unknown("timeout", null)).when(pg).cancel(any());
+        mvc.perform(as(post("/api/payments/" + payment + "/refunds"), buyer, "USER")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"단순 변심\"}"));
+        delete(organizer, "ORGANIZER").andExpect(status().isOk());
+        long before = cancels(payment);
+
+        job.runUntil(FAR_FUTURE);
+
+        assertThat(cancels(payment)).isEqualTo(before);
+        assertThat(refundCount(payment)).isEqualTo(1);
+    }
+
+    /** PG 취소 호출 수. 공유 DB의 다른 테스트 데이터와 섞이지 않게 이 결제의 키로만 센다. */
+    private long cancels(Long payment) {
+        return mockingDetails(pg).getInvocations().stream()
+                .filter(call -> call.getMethod().getName().equals("cancel"))
+                .filter(call -> ((PgCancelCommand) call.getArgument(0)).paymentKey().equals("pk-" + payment))
+                .count();
+    }
+
+    private String stock() {
+        return jdbc.queryForObject("SELECT CONCAT(SUM(total_quantity),'/',SUM(available_quantity),'/',"
+                + "SUM(reserved_quantity),'/',SUM(sold_quantity)) FROM drop_inventory_buckets WHERE variant_id = ?",
+                String.class, variantId);
+    }
+
+    private String paymentStatus(Long payment) {
+        return jdbc.queryForObject("SELECT status FROM payments WHERE id = ?", String.class, payment);
     }
 
     private org.springframework.test.web.servlet.ResultActions delete(Long actor, String role) throws Exception {
