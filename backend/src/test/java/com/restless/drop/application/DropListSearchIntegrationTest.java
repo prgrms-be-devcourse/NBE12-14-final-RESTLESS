@@ -95,7 +95,7 @@ class DropListSearchIntegrationTest {
     }
 
     private Long published(String title, Instant opensAt, Instant createdAt) {
-        var drop = Drop.draft(concert, title, "설명", "url", opensAt, opensAt.plusSeconds(3600), createdAt);
+        var drop = Drop.draft(concert, 1L, title, "설명", "url", opensAt, opensAt.plusSeconds(3600), createdAt);
         drop.publish();
         return drops.saveAndFlush(drop).getId();
     }

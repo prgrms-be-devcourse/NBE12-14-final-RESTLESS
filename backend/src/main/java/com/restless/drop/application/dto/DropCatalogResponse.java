@@ -9,6 +9,9 @@ public final class DropCatalogResponse {
 
     public record Admin(Long dropId, DropStatus status) {}
     public record Page(List<Item> items) {}
+    public record ManagedPage(List<Managed> items) {}
+    public record Managed(Long dropId, Long concertId, Long organizerId, String title, DropStatus status,
+                          Instant opensAt, Instant closesAt, Instant createdAt) {}
     public record Item(Long dropId, String title, String imageUrl, Instant opensAt, Instant closesAt,
                        String saleStatus) {}
     public record Detail(Long dropId, String title, String description, String imageUrl,

@@ -19,6 +19,8 @@ public class Drop {
     private Long id;
     @Column(name = "concert_id", nullable = false)
     private Long concertId;
+    @Column(name = "organizer_id")
+    private Long organizerId;
     @Column(nullable = false, length = 200)
     private String title;
     @Column(nullable = false, columnDefinition = "TEXT")
@@ -37,8 +39,11 @@ public class Drop {
     @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
+    @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
+    @Column(name = "cancelled_at")
+    private Instant cancelledAt;
 
-    public static Drop draft(Long concertId, String title, String description, String imageUrl,
+    public static Drop draft(Long concertId, Long organizerId, String title, String description, String imageUrl,
                              Instant opensAt, Instant closesAt, Instant now) {
         if (opensAt == null || closesAt == null || !opensAt.isBefore(closesAt)
                 || !closesAt.isAfter(now)) {
@@ -46,6 +51,7 @@ public class Drop {
         }
         Drop drop = new Drop();
         drop.concertId = concertId;
+        drop.organizerId = organizerId;
         drop.title = title;
         drop.description = description;
         drop.imageUrl = imageUrl;
@@ -56,9 +62,28 @@ public class Drop {
         return drop;
     }
 
+    /** 주최자는 본인 드롭만 관리한다. 관리자는 모든 드롭을 관리한다. */
+    public boolean isManageableBy(Long actorId, boolean admin) {
+        return admin || (organizerId != null && organizerId.equals(actorId));
+    }
+
     public void publish() {
         if (status != DropStatus.DRAFT) throw new BusinessException(ErrorCode.DROP_INVALID_STATE);
         status = DropStatus.SCHEDULED;
+    }
+
+    /**
+     * 삭제 (#430). 판매 중이어도 삭제할 수 있다. 판매 가능 상태가 아니게 되어 새 점유와 결제 시작이 막힌다.
+     * 결제 완료 건의 환불은 00:30 배치가 한다.
+     */
+    public void cancel(Instant now) {
+        if (status == DropStatus.CANCELLED) throw new BusinessException(ErrorCode.DROP_INVALID_STATE);
+        status = DropStatus.CANCELLED;
+        cancelledAt = now;
+    }
+
+    public boolean isCancelled() {
+        return status == DropStatus.CANCELLED;
     }
 
     public String saleStatus(Instant now) {

@@ -24,6 +24,13 @@ public interface DropReservationRepository extends JpaRepository<DropReservation
     @Query("select r from DropReservation r where r.id = :id")
     Optional<DropReservation> findByIdForUpdate(Long id);
 
+    /** 삭제된 드롭의 결제 완료 점유. 환불이 끝나면 RESTORED가 되어 빠진다 (#430). */
+    @Query("select r.id from DropReservation r, Drop d where d.id = r.dropId"
+            + " and d.status = com.restless.drop.domain.DropStatus.CANCELLED"
+            + " and r.status = com.restless.drop.domain.DropReservationStatus.CONFIRMED"
+            + " and r.id > :after order by r.id")
+    List<Long> findCancelRefundCandidates(Long after, Pageable page);
+
     @Query("select r.id from DropReservation r where r.status = com.restless.drop.domain.DropReservationStatus.RESERVED "
             + "and r.expiresAt <= :now order by r.expiresAt, r.id")
     List<Long> findExpiryCandidates(Instant now, Pageable page);

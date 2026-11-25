@@ -1,5 +1,7 @@
 package com.restless.drop.application;
 
+import com.restless.drop.domain.Drop;
+
 import com.restless.drop.domain.DropReservation;
 import com.restless.drop.domain.DropReservationStatus;
 import com.restless.drop.infrastructure.DropRepository;
@@ -53,7 +55,9 @@ public class DropPaymentResultHandler implements PaymentResultHandler {
     @Transactional(propagation = Propagation.MANDATORY)
     public ApprovalDecision onApprovalStarting(Long payableId, PaymentAttemptContext attempt) {
         var reservation = reservations.findByIdForUpdate(payableId).orElse(null);
+        // #430: a deleted drop takes no new payment. Approvals already started are refunded by the nightly job.
         if (reservation == null || attempt.approvalStartedAt() == null
+                || drops.findById(reservation.getDropId()).map(Drop::isCancelled).orElse(false)
                 || !reservation.startApproval(attempt.paymentId(), clock.instant())) {
             return reject("starting", "DROP_NOT_PAYABLE");
         }

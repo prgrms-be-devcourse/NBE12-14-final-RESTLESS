@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/domain/`, `backend/src/main/java/com/restless/order/domain/`, `backend/src/main/java/com/restless/payment/domain/`
 >
-> 마지막 확인: 2026-11-24 (#388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 `DropReservation`에 재고 버킷 번호가 생겼다. 상태와 전이는 바뀌지 않았다. 2026-11-20 #285 용어 정리, 2절은 #254에서 구현됐다. 2026-11-19 #253 SKU별 입장 제어 정책 반영. 나머지는 2026-11-14 #92 구현과 대조)
+> 마지막 확인: 2026-11-25 (#430 삭제 전환 추가. #429 Drop에 주최자와 소유자 확인 추가와 대조. 상태 전이와 불변식 영향 없음. 이전: 2026-11-24 (#388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 `DropReservation`에 재고 버킷 번호가 생겼다. 상태와 전이는 바뀌지 않았다. 2026-11-20 #285 용어 정리, 2절은 #254에서 구현됐다. 2026-11-19 #253 SKU별 입장 제어 정책 반영. 나머지는 2026-11-14 #92 구현과 대조)
 
 Order, Payment, Reservation 상태는 따로 저장하고, 조합 간 정합성을 검증한다.
 
@@ -10,12 +10,12 @@ Order, Payment, Reservation 상태는 따로 저장하고, 조합 간 정합성�
 
 ```text
 DRAFT → SCHEDULED → OPEN → CLOSED
-DRAFT / SCHEDULED → CANCELLED
+DRAFT / SCHEDULED / OPEN / CLOSED → CANCELLED   (삭제, #430)
 ```
 
 판매 가능 여부는 게시된 상태(`SCHEDULED` 또는 `OPEN`)와 서버 시각 조건(`opensAt <= now < closesAt`)으로 판정한다. `OPEN` 전환은 판정에 영향이 없고, 판매 가능 상태가 아니면(`CLOSED`, `CANCELLED` 등) 시각과 관계없이 판매하지 않는다 (#92) ([API 계약 D2](../../contracts/api/drop.md), 2026-11-13).
 
-현재 구현된 전환은 게시(`DRAFT → SCHEDULED`) 하나다. `OPEN`, `CLOSED`, `CANCELLED`로 바꾸는 기능은 아직 없다. 응답의 `saleStatus`는 판매 판정과 같은 기준(`Drop.saleStatus`)으로 계산한다. 판매 가능 상태가 아니면 `ENDED`, 그 밖에는 서버 시각으로 정한다 (#92).
+현재 구현된 전환은 게시(`DRAFT → SCHEDULED`)와 삭제(`CANCELLED`가 아닌 상태 → `CANCELLED`, #430)다. 삭제는 판매 중에도 된다. `OPEN`, `CLOSED`로 바꾸는 기능은 아직 없다. 응답의 `saleStatus`는 판매 판정과 같은 기준(`Drop.saleStatus`)으로 계산한다. 판매 가능 상태가 아니면 `ENDED`, 그 밖에는 서버 시각으로 정한다 (#92).
 
 ## 2. 입장 신청 상태 (SKU별, #254 구현)
 

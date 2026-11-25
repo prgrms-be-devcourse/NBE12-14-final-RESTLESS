@@ -3,15 +3,21 @@ package com.restless.drop.application;
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
 import com.restless.concert.application.ConcertQueryService;
+import com.restless.concert.application.OrganizerConcertService;
 import com.restless.drop.application.dto.CreateDropRequest;
 import com.restless.drop.application.dto.DropCatalogResponse.Admin;
+import com.restless.drop.application.dto.DropCatalogResponse.Managed;
+import com.restless.drop.application.dto.DropCatalogResponse.ManagedPage;
 import com.restless.drop.domain.*;
 import com.restless.drop.infrastructure.*;
+import com.restless.member.application.MemberService;
+import com.restless.member.domain.MemberRole;
 import java.time.Clock;
 import java.util.HashSet;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Sort;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,12 +28,31 @@ public class DropAdminService {
     private final DropVariantRepository variants;
     private final DropInventoryRepository inventories;
     private final ConcertQueryService concerts;
+    private final OrganizerConcertService organizerConcerts;
+    private final MemberService members;
     private final DropQueueGateRepository queueGates;
     private final DropInventorySettings inventorySettings;
     private final Clock clock;
 
+    /** 관리자 등록. 주최자가 없는 드롭이 되고 관리자만 관리한다. 권한은 {@code /api/admin/**} 경로가 막는다. */
     @Transactional
     public Admin create(CreateDropRequest request) {
+        validate(request);
+        return register(request, null);
+    }
+
+    /**
+     * 주최자 등록 (#429). 주최자는 본인 공연에만, 관리자는 모든 공연에 등록한다. 드롭 주최자는 공연 주최자다.
+     * 남의 공연과 없는 공연은 모두 404다.
+     */
+    @Transactional
+    public Admin createAsOrganizer(Long actorId, CreateDropRequest request) {
+        validate(request);
+        Long organizerId = organizerConcerts.getManageable(actorId, request.concertId()).organizerId();
+        return register(request, organizerId);
+    }
+
+    private void validate(CreateDropRequest request) {
         var now = clock.instant();
         if (!request.opensAt().isBefore(request.closesAt()) || !request.closesAt().isAfter(now)) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
@@ -38,8 +63,12 @@ public class DropAdminService {
                 throw new BusinessException(ErrorCode.INVALID_REQUEST, "SKU 코드가 중복됩니다.");
             }
         }
+    }
+
+    private Admin register(CreateDropRequest request, Long organizerId) {
+        var now = clock.instant();
         concerts.getDetail(request.concertId());
-        Drop drop = drops.save(Drop.draft(request.concertId(), request.title(), request.description(),
+        Drop drop = drops.save(Drop.draft(request.concertId(), organizerId, request.title(), request.description(),
                 request.imageUrl(), request.opensAt(), request.closesAt(), now));
         for (var sku : request.variants()) {
             DropVariant variant;
@@ -72,5 +101,43 @@ public class DropAdminService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         drop.publish();
         return new Admin(drop.getId(), drop.getStatus());
+    }
+
+    /** 남의 드롭은 없는 드롭과 같은 404다. 다른 주최자의 드롭이 있는지 알려 주지 않는다. */
+    @Transactional
+    public Admin publishAsOrganizer(Long actorId, Long dropId) {
+        boolean admin = isAdmin(actorId);
+        Drop drop = drops.findByIdForUpdate(dropId)
+                .filter(d -> d.isManageableBy(actorId, admin))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        drop.publish();
+        return new Admin(drop.getId(), drop.getStatus());
+    }
+
+    /** 삭제 (#430). 주최자는 본인 드롭, 관리자는 모든 드롭을 삭제한다. 남의 드롭은 404다. */
+    @Transactional
+    public Admin cancelAsOrganizer(Long actorId, Long dropId) {
+        boolean admin = isAdmin(actorId);
+        Drop drop = drops.findByIdForUpdate(dropId)
+                .filter(d -> d.isManageableBy(actorId, admin))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        drop.cancel(clock.instant());
+        return new Admin(drop.getId(), drop.getStatus());
+    }
+
+    /** 주최자는 본인 드롭을, 관리자는 전체 드롭을 등록 최신순으로 본다. 게시 전 드롭도 포함한다. */
+    @Transactional(readOnly = true)
+    public ManagedPage listManaged(Long actorId) {
+        var sort = Sort.by(Sort.Direction.DESC, "createdAt", "id");
+        var result = isAdmin(actorId) ? drops.findAll(sort) : drops.findAllByOrganizerId(actorId, sort);
+        return new ManagedPage(result.stream().map(d -> new Managed(d.getId(), d.getConcertId(), d.getOrganizerId(),
+                d.getTitle(), d.getStatus(), d.getOpensAt(), d.getClosesAt(), d.getCreatedAt())).toList());
+    }
+
+    private boolean isAdmin(Long actorId) {
+        if (actorId == null) throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        MemberRole role = members.getActive(actorId).getRole();
+        if (role != MemberRole.ORGANIZER && role != MemberRole.ADMIN) throw new BusinessException(ErrorCode.FORBIDDEN);
+        return role == MemberRole.ADMIN;
     }
 }

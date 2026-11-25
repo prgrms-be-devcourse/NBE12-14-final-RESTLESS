@@ -15,6 +15,8 @@ public interface DropRepository extends JpaRepository<Drop, Long> {
     @Query("select d from Drop d where d.status in :statuses and lower(d.title) like lower(:pattern) escape '!'")
     List<Drop> searchPublishedTitles(Collection<DropStatus> statuses, String pattern, Sort sort);
 
+    List<Drop> findAllByOrganizerId(Long organizerId, Sort sort);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select d from Drop d where d.id = :id")
     Optional<Drop> findByIdForUpdate(Long id);

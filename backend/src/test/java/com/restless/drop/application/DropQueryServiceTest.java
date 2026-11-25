@@ -23,7 +23,7 @@ class DropQueryServiceTest {
         var start = Instant.parse("2026-11-20T03:00:00Z");
         var clock = Clock.fixed(start, ZoneOffset.UTC);
         var service = new DropQueryService(drops, variants, inventories, clock);
-        var drop = Drop.draft(1L, "상품", "설명", "url", start, start.plusSeconds(60), start);
+        var drop = Drop.draft(1L, 1L, "상품", "설명", "url", start, start.plusSeconds(60), start);
         when(drops.findById(1L)).thenReturn(Optional.of(drop));
         assertThatThrownBy(() -> service.getDetail(1L)).isInstanceOfSatisfying(BusinessException.class,
                 e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND));
