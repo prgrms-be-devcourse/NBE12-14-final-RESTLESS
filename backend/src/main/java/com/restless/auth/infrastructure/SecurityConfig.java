@@ -68,6 +68,8 @@ public class SecurityConfig implements WebMvcConfigurer {
                         .requestMatchers(HttpMethod.GET, PUBLIC_GET_PATHS).permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        // perf 프로필에서만 노출된다 (#448). 덤프에 비밀값이 들어 있으므로 관리자만 받는다.
+                        .requestMatchers("/actuator/heapdump").hasRole("ADMIN")
                         // 주최자 API는 주최자와 관리자만. 본인 것인지는 각 도메인 서비스가 확인한다.
                         .requestMatchers("/api/organizer/**").hasAnyRole("ORGANIZER", "ADMIN")
                         // 경매 등록·수정·삭제는 주최자와 관리자만. 본인 경매인지는 경매 서비스가 확인한다.

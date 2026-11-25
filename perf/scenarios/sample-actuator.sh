@@ -10,7 +10,7 @@ management_url=${1%/}
 output=$2
 watched_pid=${3:-}
 mkdir -p "$(dirname "$output")"
-printf '%s\n' 'timestamp,hikaricp_connections_active,hikaricp_connections_pending,hikaricp_connections_timeout_total,tomcat_threads_busy_threads,tomcat_connections_current_connections,process_cpu_usage,system_cpu_usage,auction_stream_connections,http_server_requests_active_seconds_gcount,jvm_heap_used_bytes,jvm_heap_committed_bytes,jvm_heap_max_bytes,jvm_gc_pause_seconds_sum,jvm_gc_pause_seconds_count,jvm_threads_live_threads,process_files_open_files' > "$output"
+printf '%s\n' 'timestamp,hikaricp_connections_active,hikaricp_connections_pending,hikaricp_connections_timeout_total,tomcat_threads_busy_threads,tomcat_connections_current_connections,process_cpu_usage,system_cpu_usage,auction_stream_connections,http_server_requests_active_seconds_gcount,jvm_heap_used_bytes,jvm_heap_committed_bytes,jvm_heap_max_bytes,jvm_gc_pause_seconds_sum,jvm_gc_pause_seconds_count,jvm_threads_live_threads,process_files_open_files,jvm_nonheap_used_bytes,jvm_buffer_direct_used_bytes,auction_stream_rejected_total,auction_stream_heartbeat_removed_total,auction_bid_precheck_pass_total,auction_bid_precheck_reject_total' > "$output"
 
 metric_value() {
   local body=$1 metric=$2 label=${3:-}
@@ -40,6 +40,14 @@ while :; do
   for metric in jvm_gc_pause_seconds_sum jvm_gc_pause_seconds_count jvm_threads_live_threads process_files_open_files; do
     values+=("$(metric_value "$body" "$metric")")
   done
+  # SSE 연결당 메모리를 힙 밖까지 보려고 둔다 (#448). direct buffer는 소켓 입출력 버퍼가 쓰는 메모리다.
+  values+=("$(metric_value "$body" jvm_memory_used_bytes 'area="nonheap"')")
+  values+=("$(metric_value "$body" jvm_buffer_memory_used_bytes 'id="direct"')")
+  for metric in auction_stream_rejected_total auction_stream_heartbeat_removed_total; do
+    values+=("$(metric_value "$body" "$metric")")
+  done
+  values+=("$(metric_value "$body" auction_bid_precheck_total 'result="pass"')")
+  values+=("$(metric_value "$body" auction_bid_precheck_total 'result="reject"')")
   (IFS=,; printf '%s,%s\n' "$timestamp" "${values[*]}") >> "$output"
   sleep 2
 done

@@ -111,6 +111,11 @@ class BidPrecheckTest {
         return counter == null ? 0 : counter.count();
     }
 
+    double precheck(String result, String reason) {
+        Counter counter = meters.find("auction.bid.precheck").tag("result", result).tag("reason", reason).counter();
+        return counter == null ? 0 : counter.count();
+    }
+
     int bidCount() {
         return f.count("SELECT COUNT(*) FROM auction_bids WHERE auction_id = ?", auctionId);
     }
@@ -295,5 +300,44 @@ class BidPrecheckTest {
         mockMvc.perform(get("/api/auctions/" + auctionId).header(HttpHeaders.AUTHORIZATION, bearer(chulsoo)))
             .andExpect(jsonPath("$.highestBid.amount").value(highestAccepted));
         f.assertInvariants();
+    }
+    @Test void 사전_확인_판단마다_결과와_이유를_센다() throws Exception {
+        double amountOk = precheck("pass", "amount_ok");
+        double tooLow = precheck("reject", "amount_too_low");
+        double highest = precheck("pass", "highest_bidder");
+        double seller = precheck("pass", "seller");
+        double replay = precheck("pass", "replay");
+
+        String key = UUID.randomUUID().toString();
+        bid(chulsoo, auctionId, 52_000, key).andExpect(status().isCreated());
+        bid(younghee, 52_999).andExpect(status().isConflict());
+        bid(chulsoo, 1_000).andExpect(status().isConflict());
+        bid(this.seller, 1_000).andExpect(status().isConflict());
+        bid(younghee, 53_000).andExpect(status().isCreated());
+        bid(chulsoo, auctionId, 52_000, key).andExpect(status().isCreated());
+
+        assertThat(precheck("pass", "amount_ok")).isEqualTo(amountOk + 2);
+        assertThat(precheck("reject", "amount_too_low")).isEqualTo(tooLow + 1);
+        assertThat(precheck("pass", "highest_bidder")).isEqualTo(highest + 1);
+        assertThat(precheck("pass", "seller")).isEqualTo(seller + 1);
+        assertThat(precheck("pass", "replay")).as("가격이 올라 금액 부족 후보지만 같은 키의 재요청이다").isEqualTo(replay + 1);
+    }
+
+    @Test void 진행_중이_아니거나_상태가_없거나_오류면_통과로_세고_이유를_남긴다() throws Exception {
+        double notOpen = precheck("pass", "not_open");
+        double noState = precheck("pass", "no_state");
+        double error = precheck("pass", "error");
+
+        Instant startsAt = clock.instant().plusSeconds(3_600);
+        Long scheduled = f.auction(seller, startsAt, startsAt.plusSeconds(3_600));
+        f.setStatus(scheduled, "SCHEDULED");
+        bid(chulsoo, scheduled, 1_000, UUID.randomUUID().toString()).andExpect(status().isConflict());
+        bid(chulsoo, auctionId + 1_000, 1_000, UUID.randomUUID().toString()).andExpect(status().isNotFound());
+        doThrow(new IllegalStateException("cache load failed")).when(auctions).findById(auctionId);
+        bid(chulsoo, 49_999).andExpect(status().isConflict());
+
+        assertThat(precheck("pass", "not_open")).isEqualTo(notOpen + 1);
+        assertThat(precheck("pass", "no_state")).isEqualTo(noState + 1);
+        assertThat(precheck("pass", "error")).isEqualTo(error + 1);
     }
 }
