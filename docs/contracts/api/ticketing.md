@@ -45,7 +45,13 @@
       "venueId": 10,
       "title": "RESTLESS 공연",
       "status": "SCHEDULED",
-      "createdAt": "2026-11-13T01:00:00Z"
+      "createdAt": "2026-11-13T01:00:00Z",
+      "venueName": "공연장",
+      "venueAddress": "서울",
+      "description": "공연 소개",
+      "periodStartDate": "2027-03-01",
+      "periodEndDate": "2027-03-03",
+      "durationMinutes": 120
     }
   ],
   "page": 0,
@@ -75,7 +81,13 @@
   "venueId": 10,
   "title": "RESTLESS 공연",
   "status": "SCHEDULED",
-  "createdAt": "2026-11-13T01:00:00Z"
+  "createdAt": "2026-11-13T01:00:00Z",
+  "venueName": "공연장",
+  "venueAddress": "서울",
+  "description": "공연 소개",
+  "periodStartDate": "2027-03-01",
+  "periodEndDate": "2027-03-03",
+  "durationMinutes": 120
 }
 ```
 
@@ -100,8 +112,9 @@
 
 - 존재하는 공연에 회차가 없으면 `200 OK`와 빈 배열을 반환한다. 없는 공연은 상세, 목록 모두 `404 NOT_FOUND`다.
 - concertId가 양수가 아니거나 Long으로 변환할 수 없으면 `400 INVALID_REQUEST`다.
-- 시각은 UTC Instant로 반환한다. 공연장 이름, 주소, 소개, 포스터 등은 현재 상세 응답에 포함하지 않는다.
-- 상태값은 저장된 문자열을 반환한다. 예시의 SCHEDULED가 허용 상태 집합을 정의하지 않으며, 게시, 공개 상태별 필터는 정책 확정 후 적용한다.
+- 회차 시각은 UTC Instant로 반환한다. 공연 응답은 공연장 이름·주소, 설명, 기간, 분 단위 소요 시간을 포함한다. 기존 공연이나 미입력 값은 null이며 포스터는 제공하지 않는다.
+- 상태값은 저장된 문자열을 반환한다. 예시의 SCHEDULED가 허용 상태 집합을 정의하지 않는다.
+- 비공개 공연(`is_published = FALSE`)은 고객 공연 목록에서 제외하고, 그 공연과 회차의 상세·회차 목록·좌석·좌석 상태·구매 한도 조회와 선점은 `404 NOT_FOUND`로 처리한다.
 - 회차 목록의 기존 문서 경로 `/api/concerts/{concertId}/sessions`는 내부, API 회차 명칭 통일에 따라 `/performances`로 변경하며 별도 호환 경로는 제공하지 않는다.
 - 서비스 조회 결과 DTO인 ConcertDetail, PerformanceInfo는 concert/application/dto에 둔다. Controller는 엔티티를 노출하지 않고 해당 DTO를 반환한다.
 - 검증 테스트: `ConcertPerformanceMappingTest`
@@ -378,7 +391,6 @@ Java 엔티티, Repository는 Performance/PerformanceRepository, DB 테이블은
 
 공통 결제 조회 `GET /api/payments/{paymentId}`의 최근 환불 요약으로 진행·불명확·완료·거절 상태를 확인한다. 불명확한 결과는 공통 재확인 작업이 처리하며 좌석을 반환하지 않는다. 상세 상태와 잠금 순서는 [티켓팅 Handler 문서](../../domains/ticketing/payment-handler.md#정상-환불-요청-내부-준비-2026-11-22)를 따른다.
 
-
 ## 본인 발급 티켓 목록과 상세
 
 로그인이 필수다. 회원 ID는 `@LoginMember`에서만 받으며 요청의 userId나 티켓번호로 권한을 부여하지 않는다. tickets.reservation_id가 가리키는 예약의 user_id로 DB 조회부터 소유자를 제한한다.
@@ -433,7 +445,6 @@ Java 엔티티, Repository는 Performance/PerformanceRepository, DB 테이블은
 ```
 
 검증 테스트: `TicketQueryApiTest`.
-
 
 ## 주문 상세의 티켓팅 결제 대상 연결
 
