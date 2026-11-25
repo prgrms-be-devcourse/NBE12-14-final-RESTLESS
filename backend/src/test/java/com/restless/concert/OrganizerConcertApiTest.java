@@ -200,6 +200,30 @@ class OrganizerConcertApiTest {
     }
 
     @Test
+    @DisplayName("공연장·배치 변경은 다른 공연장의 배치, 회차가 있는 공연, 공개 공연을 거절한다")
+    void venueLayoutChangeGuards() throws Exception {
+        Long layoutId = layoutFor(venueId), newLayout = layoutFor(venueId);
+        Venue other = Venue.create("Other", "Busan", "Asia/Seoul", "ACTIVE", Instant.now());
+        entityManager.persist(other);
+        Long foreignLayout = layoutFor(other.getId());
+        Long withPerformance = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        Long published = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        String path = "/api/organizer/concerts/{id}/venue-layout", body = "{\"venueId\":" + venueId + ",\"layoutId\":";
+        mockMvc.perform(put(path, withPerformance).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                .content(body + foreignLayout + "}")).andExpect(status().isNotFound());
+        entityManager.persist(Performance.create(withPerformance, venueId, layoutId, Instant.parse("2027-03-01T00:00:00Z"),
+                Instant.parse("2027-02-01T00:00:00Z"), Instant.parse("2027-02-28T00:00:00Z"), 2, "SCHEDULED"));
+        entityManager.flush();
+        jdbc.update("UPDATE concerts SET is_published=TRUE WHERE id=?", published);
+        entityManager.clear();
+        for (Long id : java.util.List.of(withPerformance, published)) {
+            mockMvc.perform(put(path, id).with(actor(adminId, "ADMIN")).contentType("application/json")
+                    .content(body + newLayout + "}")).andExpect(status().isBadRequest());
+            assertThat(jdbc.queryForObject("SELECT layout_id FROM concerts WHERE id=?", Long.class, id)).isEqualTo(layoutId);
+        }
+    }
+
+    @Test
     @DisplayName("공연장·배치를 실제로 바꾸면 공통 가격을 지우고 같은 값 재제출은 유지한다")
     void venueLayoutChangeClearsPrices() throws Exception {
         Long oldLayout = layoutFor(venueId);
