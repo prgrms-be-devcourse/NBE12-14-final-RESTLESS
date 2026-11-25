@@ -22,6 +22,9 @@ import com.restless.concert.domain.Venue;
 import com.restless.concert.domain.VenueLayout;
 import com.restless.concert.domain.VenueSeat;
 import com.restless.concert.domain.VenueSection;
+import com.restless.concert.application.OrganizerPerformanceService;
+import com.restless.concert.application.OrganizerConcertService;
+import com.restless.concert.infrastructure.PerformanceRepository;
 import com.restless.member.domain.Member;
 import com.restless.ticketing.domain.TicketReservationStatus;
 import com.restless.ticketing.domain.TicketSeat;
@@ -80,6 +83,9 @@ class TicketReservationServiceTest {
     private PlatformTransactionManager transactionManager;
     @Autowired
     private MockMvc mockMvc;
+    @Autowired private OrganizerPerformanceService organizerPerformances;
+    @Autowired private OrganizerConcertService organizerConcerts;
+    @MockitoSpyBean private PerformanceRepository performanceRepository;
 
     // 만료 시점은 DB fixture로 제어하고 실제 만료 서비스를 직접 호출한다.
     @MockitoBean
@@ -174,6 +180,56 @@ class TicketReservationServiceTest {
                 Integer.class, fixture.performanceId())).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT SUM(reserved_count) FROM ticket_purchase_limits WHERE performance_id = ?",
                 Integer.class, fixture.performanceId())).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("선점 이력은 취소되어도 공연 기간과 회차 일정 수정을 막는다")
+    void releasedHoldHistoryBlocksScheduleEdits() {
+        var reservation = reserve(fixture.firstUserId(), "history", List.of(seat(0)));
+        service.cancel(fixture.firstUserId(), reservation.reservationId());
+        jdbc.update("UPDATE users SET role='ORGANIZER' WHERE id=?", fixture.firstUserId());
+        jdbc.update("UPDATE concerts SET is_published=FALSE, published_at=NULL WHERE venue_id=?", fixture.venueId());
+        jdbc.update("UPDATE concerts SET period_start_date='2026-01-01', period_end_date='2030-12-31', duration_minutes=120 WHERE venue_id=?", fixture.venueId());
+        jdbc.update("UPDATE performances SET starts_at=DATE_ADD(starts_at, INTERVAL 1 DAY) WHERE id=?", fixture.otherPerformanceId());
+        jdbc.update("UPDATE performances SET booking_opens_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR), booking_closes_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 2 HOUR) WHERE id IN (?, ?)", fixture.performanceId(), fixture.otherPerformanceId());
+        Instant startsAt = jdbc.queryForObject("SELECT starts_at FROM performances WHERE id=?", LocalDateTime.class, fixture.performanceId()).toInstant(ZoneOffset.UTC);
+        Instant opensAt = jdbc.queryForObject("SELECT booking_opens_at FROM performances WHERE id=?", LocalDateTime.class, fixture.performanceId()).toInstant(ZoneOffset.UTC);
+        Instant closesAt = jdbc.queryForObject("SELECT booking_closes_at FROM performances WHERE id=?", LocalDateTime.class, fixture.performanceId()).toInstant(ZoneOffset.UTC);
+        assertThatThrownBy(() -> organizerPerformances.update(fixture.firstUserId(), fixture.performanceId(), startsAt, opensAt, closesAt, 2))
+                .isInstanceOfSatisfying(BusinessException.class, ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.TICKET_SCHEDULE_CHANGE_CLOSED));
+        Long concertId = jdbc.queryForObject("SELECT concert_id FROM performances WHERE id=?", Long.class, fixture.performanceId());
+        assertThatThrownBy(() -> organizerConcerts.update(fixture.firstUserId(), concertId, "공연", null,
+                java.time.LocalDate.of(2026, 1, 1), java.time.LocalDate.of(2030, 12, 31), 121))
+                .isInstanceOfSatisfying(BusinessException.class, ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.TICKET_SCHEDULE_CHANGE_CLOSED));
+    }
+
+    @Test
+    @DisplayName("회차 변경 잠금을 기다린 선점은 커밋된 예매 시각을 다시 읽는다")
+    void reservationReadsScheduleAfterConcurrentUpdate() throws Exception {
+        var reached = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            reached.countDown();
+            return mockingDetails(invocation.getMock()).getMockCreationSettings().getDefaultAnswer().answer(invocation);
+        })
+                .when(performanceRepository).findSharedById(fixture.performanceId());
+        var definition = new org.springframework.transaction.support.DefaultTransactionDefinition();
+        var blocker = transactionManager.getTransaction(definition);
+        var pool = Executors.newSingleThreadExecutor();
+        boolean completed = false;
+        try {
+            jdbc.update("UPDATE performances SET booking_opens_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR), booking_closes_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 2 HOUR) WHERE id=?", fixture.performanceId());
+            var result = pool.submit(() -> reserve(fixture.firstUserId(), "concurrent-schedule", List.of(seat(0))));
+            assertThat(reached.await(10, TimeUnit.SECONDS)).isTrue();
+            transactionManager.commit(blocker);
+            completed = true;
+            assertThatThrownBy(() -> result.get(15, TimeUnit.SECONDS)).hasCauseInstanceOf(BusinessException.class)
+                    .satisfies(ex -> assertThat(((BusinessException) ex.getCause()).getErrorCode()).isEqualTo(ErrorCode.BOOKING_NOT_OPEN));
+            assertThat(count("ticket_reservations")).isZero();
+        } finally {
+            if (!completed) transactionManager.rollback(blocker);
+            pool.shutdownNow();
+            assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
     }
 
     @Test

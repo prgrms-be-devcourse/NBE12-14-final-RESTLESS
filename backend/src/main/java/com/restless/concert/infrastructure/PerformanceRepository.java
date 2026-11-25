@@ -18,6 +18,17 @@ public interface PerformanceRepository extends JpaRepository<Performance, Long> 
     @Query("select p.maxTicketsPerUser from Performance p where p.id = :id")
     Optional<Integer> findMaxTicketsPerUser(@Param("id") Long id);
 
+    @Query("select p.concertId from Performance p where p.id = :id")
+    Optional<Long> findConcertId(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Performance p where p.id = :id")
+    Optional<Performance> findLockedById(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("select p from Performance p where p.id = :id")
+    Optional<Performance> findSharedById(@Param("id") Long id);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from Performance p where p.concertId = :concertId order by p.id")
     List<Performance> findAllLockedByConcertId(@Param("concertId") Long concertId);

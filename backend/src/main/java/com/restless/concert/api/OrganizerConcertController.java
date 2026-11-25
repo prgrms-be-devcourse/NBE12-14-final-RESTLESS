@@ -2,15 +2,18 @@ package com.restless.concert.api;
 
 import com.restless.auth.LoginMember;
 import com.restless.concert.application.OrganizerConcertService;
+import com.restless.concert.application.OrganizerPerformanceService;
 import com.restless.concert.application.OrganizerLayoutService;
 import com.restless.concert.application.dto.OrganizerConcertInfo;
 import com.restless.concert.application.dto.OrganizerLayoutInfo;
+import com.restless.concert.application.dto.PerformanceInfo;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -29,6 +32,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 @RequiredArgsConstructor
 public class OrganizerConcertController {
     private final OrganizerConcertService concerts;
+    private final OrganizerPerformanceService performances;
     private final OrganizerLayoutService layouts;
 
     @GetMapping
@@ -47,6 +51,11 @@ public class OrganizerConcertController {
     @GetMapping("/{concertId}")
     public OrganizerConcertInfo get(@LoginMember Long userId, @PathVariable Long concertId) {
         return concerts.getManageable(userId, concertId);
+    }
+
+    @PostMapping("/{concertId}/publish")
+    public OrganizerConcertInfo publish(@LoginMember Long userId, @PathVariable Long concertId) {
+        return concerts.publish(userId, concertId);
     }
 
     @PutMapping("/{concertId}")
@@ -71,11 +80,23 @@ public class OrganizerConcertController {
         return layouts.list(userId, concertId);
     }
 
+    @PostMapping("/{concertId}/performances")
+    @ResponseStatus(HttpStatus.CREATED)
+    public PerformanceInfo createPerformance(@LoginMember Long userId, @PathVariable Long concertId,
+                                              @Valid @RequestBody CreatePerformanceRequest request) {
+        return performances.create(userId, concertId, request.startsAt(),
+                request.bookingOpensAt(), request.bookingClosesAt(), request.maxTicketsPerUser());
+    }
+
     public record CreateConcertRequest(@NotNull @Positive Long venueId, @NotNull @Positive Long layoutId,
                                        @NotBlank @Size(max = 200) String title,
                                        @Size(max = 5000) String description,
                                        LocalDate periodStartDate, LocalDate periodEndDate,
                                        @Positive Integer durationMinutes) { }
+
+    public record CreatePerformanceRequest(@NotNull Instant startsAt,
+                                           @NotNull Instant bookingOpensAt, @NotNull Instant bookingClosesAt,
+                                           @NotNull @Positive Integer maxTicketsPerUser) { }
 
     public record UpdateConcertRequest(@NotBlank @Size(max = 200) String title,
                                        @Size(max = 5000) String description, LocalDate periodStartDate,

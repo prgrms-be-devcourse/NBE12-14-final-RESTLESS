@@ -45,6 +45,7 @@ public class OrganizerConcertService {
     private final VenueLayoutRepository layouts;
     private final LayoutSeatRepository layoutSeats;
     private final ConcertSectionPriceRepository sectionPrices;
+    private final PerformanceSeatReadiness seatReadiness;
 
     @Transactional(readOnly = true)
     public OrganizerConcertPage listMine(Long actorId, int page, int size) {
@@ -64,6 +65,56 @@ public class OrganizerConcertService {
 
     public record OrganizerConcertPage(List<OrganizerConcertInfo> content, int page, int size,
                                        long totalElements, int totalPages) { }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public OrganizerConcertInfo publish(Long actorId, Long concertId) {
+        MemberRole role = requireOrganizer(actorId);
+        if (concertId == null || concertId <= 0) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        Concert concert = concerts.findLockedById(concertId)
+                .filter(c -> role == MemberRole.ADMIN || c.getSellerId().equals(actorId))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        Venue venue = venues.findById(concert.getVenueId()).orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REQUEST));
+        if (concert.isPublished()) return toInfo(concert, venue);
+        if (concert.getTitle() == null || concert.getTitle().isBlank() || concert.getLayoutId() == null
+                || concert.getPeriodStartDate() == null || concert.getPeriodEndDate() == null
+                || concert.getPeriodStartDate().isAfter(concert.getPeriodEndDate())
+                || concert.getDurationMinutes() == null || concert.getDurationMinutes() <= 0
+                || layouts.findById(concert.getLayoutId()).filter(l -> l.getVenueId().equals(concert.getVenueId())).isEmpty()) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "공연의 필수 설정이 완료되지 않았습니다.");
+        }
+        var layoutSeatsForSale = layoutSeats.findAllById_LayoutId(concert.getLayoutId()).stream()
+                .filter(LayoutSeat::isSellable)
+                .map(seat -> new com.restless.concert.application.dto.SeatSetupLayout.Seat(seat.getId().getVenueSeatId(), seat.getSectionLabel())).toList();
+        var prices = sectionPrices.findAllByConcertIdOrderBySectionLabelAsc(concertId).stream()
+                .map(price -> new PerformanceSeatCreator.Price(price.getSectionLabel(), price.getGrade(), price.getPrice())).toList();
+        var sections = layoutSeatsForSale.stream().map(com.restless.concert.application.dto.SeatSetupLayout.Seat::sectionLabel).collect(Collectors.toSet());
+        var priceSections = prices.stream().map(PerformanceSeatCreator.Price::sectionLabel).collect(Collectors.toSet());
+        if (sections.isEmpty() || !sections.equals(priceSections) || prices.size() != priceSections.size()
+                || prices.stream().anyMatch(price -> price.price() <= 0 || price.grade() == null || price.grade().isBlank())) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "공연의 공통 가격 설정이 완료되지 않았습니다.");
+        }
+        var items = performances.findAllLockedByConcertId(concertId).stream()
+                .sorted(java.util.Comparator.comparing(com.restless.concert.domain.Performance::getStartsAt)).toList();
+        if (items.isEmpty()) throw new BusinessException(ErrorCode.INVALID_REQUEST, "공개할 회차가 없습니다.");
+        for (int i = 0; i < items.size(); i++) {
+            var performance = items.get(i);
+            var date = performance.getStartsAt().atZone(ZoneId.of(venue.getTimezone())).toLocalDate();
+            if (!concert.getVenueId().equals(performance.getVenueId()) || !concert.getLayoutId().equals(performance.getLayoutId())
+                    || date.isBefore(concert.getPeriodStartDate()) || date.isAfter(concert.getPeriodEndDate())
+                    || !performance.getBookingOpensAt().isBefore(performance.getBookingClosesAt())
+                    || performance.getBookingClosesAt().isAfter(performance.getStartsAt()) || performance.getMaxTicketsPerUser() <= 0
+                    || (i > 0 && performance.getStartsAt().isBefore(items.get(i - 1).getStartsAt().plusSeconds(concert.getDurationMinutes().longValue() * 60)))) {
+                throw new BusinessException(ErrorCode.INVALID_REQUEST, "회차의 일정 또는 설정이 올바르지 않습니다.");
+            }
+            seatReadiness.requireReady(performance.getId(), concert.getLayoutId(), layoutSeatsForSale, prices);
+        }
+        var now = jdbc.queryForObject("SELECT UTC_TIMESTAMP(6)", LocalDateTime.class).toInstant(ZoneOffset.UTC);
+        if (items.stream().anyMatch(performance -> !performance.getBookingOpensAt().isAfter(now))) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "모든 회차의 예매 시작 시각이 미래여야 합니다.");
+        }
+        concert.publish(now);
+        return toInfo(concert, venue);
+    }
 
     @Transactional
     public OrganizerConcertInfo create(Long actorId, Long venueId, Long layoutId, String title, String description,

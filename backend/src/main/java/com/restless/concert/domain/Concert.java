@@ -96,6 +96,14 @@ public class Concert {
         this.layoutId = Objects.requireNonNull(layoutId);
     }
 
+    /** 공개 준비 검증과 잠금은 application 서비스가 담당한다. */
+    public void publish(Instant now) {
+        if (!published) {
+            publishedAt = Objects.requireNonNull(now);
+            published = true;
+        }
+    }
+
     private void requireDraft() {
         if (published) throw new IllegalStateException("공개된 공연의 공통 설정은 변경할 수 없습니다.");
     }

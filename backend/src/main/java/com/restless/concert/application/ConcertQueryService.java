@@ -122,6 +122,15 @@ public class ConcertQueryService {
         return bookingPerformance(performance);
     }
 
+    /** 선점 트랜잭션이 끝날 때까지 회차 설정 변경을 막는다. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public BookingPerformance getBookingPerformanceForReservation(Long performanceId) {
+        Performance performance = performanceRepository.findSharedById(performanceId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다."));
+        if (!concertRepository.isPerformancePublished(performanceId).orElse(false)) throw new BusinessException(ErrorCode.NOT_FOUND);
+        return bookingPerformance(performance);
+    }
+
     private BookingPerformance bookingPerformance(Performance performance) {
         Set<Long> sellableSeatIds = layoutSeatRepository.findAllById_LayoutId(performance.getLayoutId()).stream()
                 .filter(LayoutSeat::isSellable)
