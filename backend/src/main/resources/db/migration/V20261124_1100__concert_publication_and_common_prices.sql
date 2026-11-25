@@ -1,4 +1,4 @@
--- Align with the pending V20261124_1000 details migration before adding publication fields.
+-- 공연 상세(소개·기간·소요 시간), 공개 표식, 공통 배치와 공통 구역 가격을 추가한다.
 ALTER TABLE concerts
     ADD COLUMN description VARCHAR(5000) NULL,
     ADD COLUMN period_start_date DATE NULL,
