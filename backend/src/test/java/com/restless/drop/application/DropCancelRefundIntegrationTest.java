@@ -91,13 +91,13 @@ class DropCancelRefundIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT cancelled_at FROM drops WHERE id = ?", Timestamp.class, dropId)).isNotNull();
 
         // The DB is shared with other tests, so only this purchase is checked, not the job total.
-        assertThat(job.runUntil(FAR_FUTURE)).isPositive();
+        assertThat(job.runUntil(FAR_FUTURE, FAR_FUTURE)).isPositive();
 
         assertThat(orderStatus(reservation)).isEqualTo("REFUNDED");
         assertThat(reservationStatus(reservation)).isEqualTo("RESTORED");
         assertThat(refundCount(payment)).isEqualTo(1);
 
-        job.runUntil(FAR_FUTURE);
+        job.runUntil(FAR_FUTURE, FAR_FUTURE);
         assertThat(refundCount(payment)).as("환불된 점유는 다시 고르지 않는다").isEqualTo(1);
     }
 
@@ -108,10 +108,27 @@ class DropCancelRefundIntegrationTest {
         Long payment = pay(buyer, reservation);
         delete(organizer, "ORGANIZER").andExpect(status().isOk());
 
-        assertThat(job.runUntil(Instant.now().minusSeconds(1))).isZero();
+        assertThat(job.runUntil(FAR_FUTURE, Instant.now().minusSeconds(1))).isZero();
 
         assertThat(orderStatus(reservation)).isEqualTo("PAID");
         assertThat(refundCount(payment)).isZero();
+    }
+
+    @Test
+    @DisplayName("배치가 시작된 뒤 삭제된 드롭은 그날 처리하지 않고 다음 실행에서 환불한다 (#435)")
+    void dropDeletedAfterRunStartWaitsForNextRun() throws Exception {
+        Long reservation = reserve(buyer);
+        Long payment = pay(buyer, reservation);
+        Instant runStart = Instant.now();
+        Thread.sleep(5);
+        delete(organizer, "ORGANIZER").andExpect(status().isOk());
+
+        job.runUntil(runStart, FAR_FUTURE);
+        assertThat(orderStatus(reservation)).as("07:59에 삭제한 것과 같다. 다음 날로 넘긴다").isEqualTo("PAID");
+        assertThat(refundCount(payment)).isZero();
+
+        job.runUntil(Instant.now(), FAR_FUTURE);
+        assertThat(orderStatus(reservation)).isEqualTo("REFUNDED");
     }
 
     @Test
@@ -163,7 +180,7 @@ class DropCancelRefundIntegrationTest {
         var pool = Executors.newFixedThreadPool(4);
         var start = new CountDownLatch(1);
         var runs = new ArrayList<Future<Integer>>();
-        for (int i = 0; i < 4; i++) runs.add(pool.submit(() -> { start.await(); return job.runUntil(FAR_FUTURE); }));
+        for (int i = 0; i < 4; i++) runs.add(pool.submit(() -> { start.await(); return job.runUntil(FAR_FUTURE, FAR_FUTURE); }));
         start.countDown();
         for (var run : runs) run.get(60, TimeUnit.SECONDS);
         pool.shutdown();
@@ -172,7 +189,7 @@ class DropCancelRefundIntegrationTest {
         assertThat(refundCount(payment)).isEqualTo(1);
         assertThat(orderStatus(reservation)).isEqualTo("REFUNDED");
         assertThat(stock()).isEqualTo("5/5/0/0");
-        job.runUntil(FAR_FUTURE);
+        job.runUntil(FAR_FUTURE, FAR_FUTURE);
         assertThat(cancels(payment)).isEqualTo(1);
     }
 
@@ -184,8 +201,8 @@ class DropCancelRefundIntegrationTest {
         delete(organizer, "ORGANIZER").andExpect(status().isOk());
         doReturn(new PgCancelResult.Rejected("NOT_CANCELABLE", "rejected")).when(pg).cancel(any());
 
-        job.runUntil(FAR_FUTURE);
-        job.runUntil(FAR_FUTURE);
+        job.runUntil(FAR_FUTURE, FAR_FUTURE);
+        job.runUntil(FAR_FUTURE, FAR_FUTURE);
 
         assertThat(cancels(payment)).isEqualTo(1);
         assertThat(orderStatus(reservation)).isEqualTo("REFUND_REVIEW");
@@ -202,8 +219,8 @@ class DropCancelRefundIntegrationTest {
         delete(organizer, "ORGANIZER").andExpect(status().isOk());
         doReturn(new PgCancelResult.Unknown("timeout", null)).when(pg).cancel(any());
 
-        job.runUntil(FAR_FUTURE);
-        job.runUntil(FAR_FUTURE);
+        job.runUntil(FAR_FUTURE, FAR_FUTURE);
+        job.runUntil(FAR_FUTURE, FAR_FUTURE);
 
         assertThat(cancels(payment)).isEqualTo(1);
         assertThat(orderStatus(reservation)).isEqualTo("REFUND_PENDING");
@@ -223,7 +240,7 @@ class DropCancelRefundIntegrationTest {
         delete(organizer, "ORGANIZER").andExpect(status().isOk());
         long before = cancels(payment);
 
-        job.runUntil(FAR_FUTURE);
+        job.runUntil(FAR_FUTURE, FAR_FUTURE);
 
         assertThat(cancels(payment)).isEqualTo(before);
         assertThat(refundCount(payment)).isEqualTo(1);
