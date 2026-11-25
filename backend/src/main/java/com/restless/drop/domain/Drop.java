@@ -19,6 +19,8 @@ public class Drop {
     private Long id;
     @Column(name = "concert_id", nullable = false)
     private Long concertId;
+    @Column(name = "organizer_id")
+    private Long organizerId;
     @Column(nullable = false, length = 200)
     private String title;
     @Column(nullable = false, columnDefinition = "TEXT")
@@ -38,7 +40,7 @@ public class Drop {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
-    public static Drop draft(Long concertId, String title, String description, String imageUrl,
+    public static Drop draft(Long concertId, Long organizerId, String title, String description, String imageUrl,
                              Instant opensAt, Instant closesAt, Instant now) {
         if (opensAt == null || closesAt == null || !opensAt.isBefore(closesAt)
                 || !closesAt.isAfter(now)) {
@@ -46,6 +48,7 @@ public class Drop {
         }
         Drop drop = new Drop();
         drop.concertId = concertId;
+        drop.organizerId = organizerId;
         drop.title = title;
         drop.description = description;
         drop.imageUrl = imageUrl;
@@ -54,6 +57,11 @@ public class Drop {
         drop.status = DropStatus.DRAFT;
         drop.createdAt = now;
         return drop;
+    }
+
+    /** 주최자는 본인 드롭만 관리한다. 관리자는 모든 드롭을 관리한다. */
+    public boolean isManageableBy(Long actorId, boolean admin) {
+        return admin || (organizerId != null && organizerId.equals(actorId));
     }
 
     public void publish() {

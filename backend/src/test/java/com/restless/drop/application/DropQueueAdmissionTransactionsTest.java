@@ -29,7 +29,7 @@ class DropQueueAdmissionTransactionsTest {
         var variant = mock(DropVariant.class);
         when(variant.getDropId()).thenReturn(2L);
         when(variants.findById(1L)).thenReturn(Optional.of(variant));
-        var drop = Drop.draft(1L, "item", "description", "url", now.minusSeconds(60), now.plusSeconds(600), now);
+        var drop = Drop.draft(1L, 1L, "item", "description", "url", now.minusSeconds(60), now.plusSeconds(600), now);
         drop.publish();
         when(drops.findById(2L)).thenReturn(Optional.of(drop));
     }
@@ -80,7 +80,7 @@ class DropQueueAdmissionTransactionsTest {
         var variant = mock(DropVariant.class);
         when(variant.getDropId()).thenReturn(2L);
         when(variants.findById(1L)).thenReturn(Optional.of(variant));
-        var drop = Drop.draft(1L, "item", "description", "url", now.minusSeconds(60), now.plusSeconds(600), now);
+        var drop = Drop.draft(1L, 1L, "item", "description", "url", now.minusSeconds(60), now.plusSeconds(600), now);
         drop.publish();
         when(drops.findById(2L)).thenReturn(Optional.of(drop));
         var stale = DropQueueEntry.waiting(2L, 10L, 1L, now.minusSeconds(31));

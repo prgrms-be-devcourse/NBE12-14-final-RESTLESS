@@ -12,7 +12,7 @@ class DropCatalogTest {
     private final Instant closes = opens.plusSeconds(3600);
 
     private Drop draft() {
-        return Drop.draft(1L, "상품", "설명", "https://example.com/a.png", opens, closes, opens.minusSeconds(1));
+        return Drop.draft(1L, 1L, "상품", "설명", "https://example.com/a.png", opens, closes, opens.minusSeconds(1));
     }
 
     @Test
@@ -43,12 +43,12 @@ class DropCatalogTest {
     @Test
     void registrationRequiresFutureCloseButAllowsPastStart() {
         for (Instant close : new Instant[] {opens.minusNanos(1), opens}) {
-            assertThatThrownBy(() -> Drop.draft(1L, "상품", "설명", "url",
+            assertThatThrownBy(() -> Drop.draft(1L, 1L, "상품", "설명", "url",
                     opens.minusSeconds(60), close, opens))
                     .isInstanceOfSatisfying(BusinessException.class,
                             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
         }
-        assertThat(Drop.draft(1L, "상품", "설명", "url", opens.minusSeconds(60),
+        assertThat(Drop.draft(1L, 1L, "상품", "설명", "url", opens.minusSeconds(60),
                 opens.plusNanos(1), opens).getStatus()).isEqualTo(DropStatus.DRAFT);
     }
 
@@ -68,7 +68,7 @@ class DropCatalogTest {
 
     @Test
     void equalPeriodEndpointsAreInvalid() {
-        assertThatThrownBy(() -> Drop.draft(1L, "상품", "설명", "url", opens, opens, opens))
+        assertThatThrownBy(() -> Drop.draft(1L, 1L, "상품", "설명", "url", opens, opens, opens))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
     }

@@ -33,7 +33,7 @@ class DropReservationTransactionsTest {
         var clock = mock(Clock.class);
         var opens = Instant.EPOCH;
         var closes = opens.plusSeconds(60);
-        var drop = Drop.draft(1L, "상품", "설명", "url", opens, closes, opens);
+        var drop = Drop.draft(1L, 1L, "상품", "설명", "url", opens, closes, opens);
         drop.publish();
         var variant = mock(DropVariant.class);
         when(variant.getId()).thenReturn(3L);
@@ -78,7 +78,7 @@ class DropReservationTransactionsTest {
         var clock = mock(Clock.class);
         var opens = Instant.EPOCH;
         var closes = opens.plusSeconds(600);
-        var drop = Drop.draft(1L, "상품", "설명", "url", opens, closes, opens);
+        var drop = Drop.draft(1L, 1L, "상품", "설명", "url", opens, closes, opens);
         drop.publish();
         var variant = mock(DropVariant.class);
         when(variant.getId()).thenReturn(3L);
