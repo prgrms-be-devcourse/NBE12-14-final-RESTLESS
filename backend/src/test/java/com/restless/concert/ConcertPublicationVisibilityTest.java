@@ -101,6 +101,10 @@ class ConcertPublicationVisibilityTest {
         try {
             assertHidden(customer);
         } finally {
+            // 차단이 깨져 선점이 생겨도 정리가 실패하지 않아야 원래 단언 실패가 드러난다.
+            jdbc.update("UPDATE performance_seats SET current_hold_id=NULL, status='AVAILABLE' WHERE performance_id=?", performanceId);
+            jdbc.update("DELETE FROM seat_holds WHERE performance_id=?", performanceId);
+            jdbc.update("DELETE FROM ticket_reservations WHERE performance_id=?", performanceId);
             jdbc.update("DELETE FROM ticket_purchase_limits WHERE performance_id=?", performanceId);
             jdbc.update("DELETE FROM performance_seats WHERE performance_id=?", performanceId);
             jdbc.update("DELETE FROM performances WHERE id=?", performanceId);
