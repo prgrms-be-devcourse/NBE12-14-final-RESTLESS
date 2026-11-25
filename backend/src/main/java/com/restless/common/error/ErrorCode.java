@@ -39,6 +39,7 @@ public enum ErrorCode {
     RESERVATION_CANNOT_CHECKOUT(HttpStatus.CONFLICT, "결제를 시작할 수 없는 예약입니다."),
     RESERVATION_CANNOT_CANCEL(HttpStatus.CONFLICT, "결제 전 선점 예약만 취소할 수 있습니다."),
     SEAT_LOCK_TIMEOUT(HttpStatus.CONFLICT, "좌석 처리 경합이 발생했습니다. 같은 요청 키로 재시도해 주세요."),
+    TICKET_SCHEDULE_CHANGE_CLOSED(HttpStatus.CONFLICT, "예매가 시작되었거나 선점 이력이 있어 일정을 변경할 수 없습니다."),
 
     // 경매, 크레딧
     AUCTION_NOT_FOUND(HttpStatus.NOT_FOUND, "경매를 찾을 수 없습니다."),

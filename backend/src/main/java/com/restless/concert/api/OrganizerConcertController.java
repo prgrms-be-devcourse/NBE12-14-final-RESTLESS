@@ -1,0 +1,83 @@
+package com.restless.concert.api;
+
+import com.restless.auth.LoginMember;
+import com.restless.concert.application.OrganizerConcertService;
+import com.restless.concert.application.OrganizerLayoutService;
+import com.restless.concert.application.dto.OrganizerConcertInfo;
+import com.restless.concert.application.dto.OrganizerLayoutInfo;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
+import java.time.LocalDate;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PutMapping;
+
+@RestController
+@RequestMapping("/api/organizer/concerts")
+@RequiredArgsConstructor
+public class OrganizerConcertController {
+    private final OrganizerConcertService concerts;
+    private final OrganizerLayoutService layouts;
+
+    @GetMapping
+    public OrganizerConcertService.OrganizerConcertPage listMine(@LoginMember Long userId,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return concerts.listMine(userId, page, size);
+    }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public OrganizerConcertInfo create(@LoginMember Long userId, @Valid @RequestBody CreateConcertRequest request) {
+        return concerts.create(userId, request.venueId(), request.layoutId(), request.title(), request.description(),
+                request.periodStartDate(), request.periodEndDate(), request.durationMinutes());
+    }
+
+    @GetMapping("/{concertId}")
+    public OrganizerConcertInfo get(@LoginMember Long userId, @PathVariable Long concertId) {
+        return concerts.getManageable(userId, concertId);
+    }
+
+    @PutMapping("/{concertId}")
+    public OrganizerConcertInfo update(@LoginMember Long userId, @PathVariable Long concertId,
+                                       @Valid @RequestBody UpdateConcertRequest request) {
+        return concerts.update(userId, concertId, request.title(), request.description(), request.periodStartDate(),
+                request.periodEndDate(), request.durationMinutes());
+    }
+
+    @PutMapping("/{concertId}/section-prices")
+    public List<OrganizerConcertService.SectionPriceInfo> configurePrices(@LoginMember Long userId,
+            @PathVariable Long concertId, @Valid @RequestBody SectionPricesRequest request) {
+        return concerts.configurePrices(userId, concertId, request.sections().stream()
+                .map(section -> new OrganizerConcertService.SectionPriceInput(section.sectionLabel(), section.grade(), section.price())).toList());
+    }
+    public record SectionPricesRequest(@jakarta.validation.constraints.NotEmpty List<@Valid SectionPriceRequest> sections) { }
+    public record SectionPriceRequest(@NotBlank @Size(max=50) String sectionLabel, @NotBlank @Size(max=20) String grade,
+                                     @NotNull @Positive Long price) { }
+
+    @GetMapping("/{concertId}/layouts")
+    public List<OrganizerLayoutInfo> getLayouts(@LoginMember Long userId, @PathVariable Long concertId) {
+        return layouts.list(userId, concertId);
+    }
+
+    public record CreateConcertRequest(@NotNull @Positive Long venueId, @NotNull @Positive Long layoutId,
+                                       @NotBlank @Size(max = 200) String title,
+                                       @Size(max = 5000) String description,
+                                       LocalDate periodStartDate, LocalDate periodEndDate,
+                                       @Positive Integer durationMinutes) { }
+
+    public record UpdateConcertRequest(@NotBlank @Size(max = 200) String title,
+                                       @Size(max = 5000) String description, LocalDate periodStartDate,
+                                       LocalDate periodEndDate, @Positive Integer durationMinutes) { }
+}
