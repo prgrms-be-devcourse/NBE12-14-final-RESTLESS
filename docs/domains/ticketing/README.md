@@ -4,8 +4,8 @@
 
 | 문서 | 내용 |
 |---|---|
-| [organizer-implementation.md](organizer-implementation.md) | MVP 스키마·API·트랜잭션 설계 초안 및 로컬 사전 확인 |
-| [organizer-policy.md](organizer-policy.md) | 주최자 공연 준비·공개 정책과 후속 결정 사항 |
+| [organizer-implementation.md](organizer-implementation.md) | 주최자 기능의 현재 구현, 개정 정책과의 차이, 예정 스키마와 운영 데이터 확인 |
+| [organizer-policy.md](organizer-policy.md) | 주최자 공연 준비·공개·비공개·취소·삭제와 고객 환불 정책 |
 | [data-dictionary.md](data-dictionary.md) | 공연장·공연·티켓팅 13개 테이블의 모든 컬럼 의미와 예시 |
 | [design.md](design.md) | 담당자 설계 원본과 MySQL 정합성 보정 |
 | [seat-ownership.md](seat-ownership.md) | 확정된 MySQL 좌석 소유권·잠금·반환 설계 |
