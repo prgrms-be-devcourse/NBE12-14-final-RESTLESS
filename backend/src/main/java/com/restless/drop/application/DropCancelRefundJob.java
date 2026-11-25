@@ -18,7 +18,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * 삭제된 드롭의 결제 완료 건 환불 (#430). 매일 00:30(KST)에 돌고 08:00(KST)이 되면 멈춘다.
- * 남은 건은 다음 날 이어서 한다.
+ * 남은 건은 다음 날 이어서 한다. 실행을 시작한 시각 이후에 삭제된 드롭은 다음 날 처리한다 (#435).
+ * 회원이 직접 요청한 환불은 이 작업과 상관없이 즉시 처리된다.
  *
  * <p>손님 환불과 같은 {@link PaymentRefundService} 경로를 쓴다. 멱등 키는 점유마다 고정이라
  * 배치가 다시 돌거나 서버 두 대가 같이 돌아도 PG 취소는 한 번만 나간다. 결과를 모르는 환불은
@@ -39,17 +40,22 @@ public class DropCancelRefundJob {
     private final MeterRegistry meters;
 
     public void runOnce() {
-        runUntil(clock.instant().atZone(ZONE).toLocalDate().atTime(WINDOW_END).atZone(ZONE).toInstant());
+        Instant start = clock.instant();
+        runUntil(start, start.atZone(ZONE).toLocalDate().atTime(WINDOW_END).atZone(ZONE).toInstant());
     }
 
-    /** @return 환불을 요청한 점유 수 */
-    public int runUntil(Instant deadline) {
+    /**
+     * @param cutoff 이 시각 전에 삭제된 드롭만 처리한다
+     * @param deadline 이 시각이 되면 멈춘다
+     * @return 환불을 요청한 점유 수
+     */
+    public int runUntil(Instant cutoff, Instant deadline) {
         int requested = 0;
         long after = 0;
         while (true) {
             java.util.List<Long> page;
             try {
-                page = reservations.findCancelRefundCandidates(after, PageRequest.of(0, PAGE));
+                page = reservations.findCancelRefundCandidates(cutoff, after, PageRequest.of(0, PAGE));
             } catch (RuntimeException failure) {
                 failure(null, failure);
                 return requested;
