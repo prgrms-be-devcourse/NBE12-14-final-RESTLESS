@@ -67,6 +67,27 @@ public class OrganizerConcertService {
                                        long totalElements, int totalPages) { }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void delete(Long actorId, Long concertId) {
+        MemberRole role = requireOrganizer(actorId);
+        if (concertId == null || concertId <= 0) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        Concert concert = concerts.findLockedById(concertId)
+                .filter(c -> role == MemberRole.ADMIN || c.getSellerId().equals(actorId))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        if (concert.isPublished() || concert.getPublishedAt() != null
+                || !performances.findAllByConcertIdOrderByStartsAtAsc(concertId).isEmpty())
+            throw new BusinessException(ErrorCode.CONCERT_DELETE_CONFLICT);
+        sectionPrices.deleteAll(sectionPrices.findAllByConcertIdOrderBySectionLabelAsc(concertId));
+        sectionPrices.flush();
+        // 드롭·경매 참조는 각 테이블의 concerts FK가 막는다. 커밋 전 참조도 FK 공유 잠금 때문에 기다린 뒤 거절된다.
+        try {
+            concerts.delete(concert);
+            concerts.flush();
+        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+            throw new BusinessException(ErrorCode.CONCERT_DELETE_CONFLICT);
+        }
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public OrganizerConcertInfo changeVenueAndLayout(Long actorId, Long concertId, Long venueId, Long layoutId) {
         MemberRole role = requireOrganizer(actorId);
         if (concertId == null || concertId <= 0 || venueId == null || venueId <= 0 || layoutId == null || layoutId <= 0)

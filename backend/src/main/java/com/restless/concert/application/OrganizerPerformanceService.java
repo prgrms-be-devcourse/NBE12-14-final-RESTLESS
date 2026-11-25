@@ -68,6 +68,28 @@ public class OrganizerPerformanceService {
     public record BatchPerformance(Instant startsAt, Instant bookingClosesAt) { }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void delete(Long actorId, Long performanceId) {
+        if (actorId == null || actorId <= 0) throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        MemberRole role = members.getActive(actorId).getRole();
+        if (role != MemberRole.ORGANIZER && role != MemberRole.ADMIN) throw new BusinessException(ErrorCode.FORBIDDEN);
+        if (performanceId == null || performanceId <= 0) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        Long concertId = performances.findConcertId(performanceId).orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        Concert concert = concerts.findLockedById(concertId)
+                .filter(c -> role == MemberRole.ADMIN || c.getSellerId().equals(actorId))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        Performance performance = performances.findLockedById(performanceId).orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        if (concert.isPublished() || concert.getPublishedAt() != null || history.hasSeatHold(performanceId))
+            throw new BusinessException(ErrorCode.CONCERT_DELETE_CONFLICT);
+        history.deleteUnreservedSeats(performanceId);
+        try {
+            performances.delete(performance);
+            performances.flush();
+        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+            throw new BusinessException(ErrorCode.CONCERT_DELETE_CONFLICT);
+        }
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<PerformanceInfo> createBatch(Long actorId, Long concertId, Instant opensAt, Integer maximum,
                                              List<BatchPerformance> items) {
         if (items == null || items.isEmpty() || items.size() > 10 || items.stream().anyMatch(java.util.Objects::isNull)) {
