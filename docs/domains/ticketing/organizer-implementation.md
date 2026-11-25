@@ -1,72 +1,113 @@
-# 주최자 MVP 구현 계약 초안
+# 티켓팅 주최자 구현 계약
 
-상태: DRAFT (2026-11-24). 정책은 [주최자 정책](organizer-policy.md)을 따른다. 코드·DB 적용 전 설계이며 구현 완료가 아니다.
+상태: 현재 구현 기록(dev, 2026-11-26)과 [주최자 정책](organizer-policy.md) 2026-11-26 개정에 따른 구현 예정 사항이다. 요청·응답은 [API 계약](../../contracts/api/ticketing.md)을 따른다.
 
-## 로컬 데이터 사전 확인
+## 1. 현재 구현
 
-2026-11-24 restless-mysql-1의 restless DB를 SELECT로 확인했다. 공연 2개, 한 공연의 여러 배치 사용 0건, 0원 판매 좌석 0건이다. duration_minutes 컬럼이 없어 소요 시간 누락 쿼리는 실행 오류로 미확인이다. 이 결과는 로컬 DB에 한정하며 운영 데이터 확인을 대신하지 않는다. 구역별 가격 불일치와 타 도메인 참조 현황은 추가 점검해야 한다.
+### 스키마
 
-## 스키마 적용 순서
+- `V20261124_1100`: `concerts`에 `description`, `period_start_date`, `period_end_date`, `duration_minutes`, `is_published`, `published_at`, `layout_id`(FK)를 추가했다. 기존 공연은 `is_published = TRUE`, `published_at = NULL`로 채웠다. 공통 가격 테이블 `concert_section_prices(concert_id, section_label, grade, price)`를 만들었다. PK는 `(concert_id, section_label)`이고 `price > 0` CHECK와 공연 FK가 있다.
+- `V20261125_1000`: `is_published` DB 기본값을 TRUE로 바꿨다. 주최자 API는 엔티티가 FALSE를 명시해 초안을 만든다. 공개 여부를 지정하지 않은 직접 INSERT(다른 도메인 fixture 등)는 공개로 저장된다.
 
-1. 기존 Flyway 이력과 작업 트리의 V20261124_1000 상세 정보 컬럼 적용 여부를 확인한다. 이미 머지한 migration은 수정하지 않는다.
-2. 새 migration으로 concerts.is_published(FALSE 기본), published_at(NULL 가능), layout_id(NULL 가능)를 추가한다. 기존 공연만 공개 TRUE로 채우고 실제 공개 시각은 NULL 유지한다.
-3. concert_section_prices를 생성한다. PK(concert_id, section_label), grade VARCHAR(20), price BIGINT CHECK(price>0), concerts FK를 사용한다. 구역 이름의 비교 규칙은 기존 layout_seats와 동일하게 유지한다. 서비스에서 선택 배치의 판매 구역 전체를 정확히 검증한다.
-4. 기존 공연의 layout_id는 회차 배치가 하나인 경우만 이관 후보로 삼는다. 회차 없음·배치/가격 불일치·판매 좌석 누락은 자동 가격 복사 없이 검토한다. 기존 회차·좌석·거래 스냅샷은 보존한다.
-5. 신규 공연의 배치 필수·소속 검증은 서비스에서 강제한다. 기존 불일치 때문에 전체 회차에 새 복합 FK를 즉시 강제하지 않는다. 기존 performance_seats의 price>=0 CHECK는 기존 데이터 보존을 위해 유지하고 신규 생성 경로에서 1원 이상을 강제한다.
+### 기능
 
-## 요청·응답
+| 기능 | 구현 |
+|---|---|
+| 공연 초안 생성·관리 조회 | ORGANIZER는 본인, ADMIN은 전체. 주최자 API로 만든 공연은 비공개 초안 |
+| 공통 구역 가격 | 공개 전·회차 없음일 때 배치의 판매 가능 구역 전체를 교체. 삭제를 먼저 flush해 유일 제약 충돌을 피한다 |
+| 공연장·배치 변경 | 공개 이력·회차 없음일 때. 실제로 바뀌면 공통 가격 삭제, 같은 값은 유지 |
+| 회차 등록 | 단건·일괄(1~10개). 공통 배치·가격으로 판매 좌석을 같은 트랜잭션에서 생성. 일괄 검증 오류는 `details.performanceIndex`(0부터) |
+| 회차 수정 | 공개 전, 선점·예약 이력이 없을 때 일정·구매 한도 수정 |
+| 공개 | 공연과 모든 회차를 한 번에 공개. 모든 회차의 예매 시작이 DB 현재 시각보다 미래여야 한다. 재요청은 최초 공개 시각을 보존 |
+| 고객 노출 | 고객 목록·상세·회차·좌석·예약 가능 수량·선점이 공개 여부를 확인. 결제 복구·티켓 조회는 공개 표식으로 막지 않는다 |
+| 회차 삭제 | 공개 이력과 선점·예약 이력이 없을 때 판매 좌석을 지운 뒤 회차를 물리 삭제. 좌석 상태 불일치·FK 위반은 409 `CONCERT_DELETE_CONFLICT` |
+| 공연 삭제 | 공개 이력과 회차가 없을 때 공통 가격과 공연을 물리 삭제. 드롭·경매 참조는 각 테이블의 공연 FK 위반으로 409 |
 
-- 공연 생성: 기존 필드 + 필수 layoutId. 성공 201, 관리 응답에 layoutId, isPublished, publishedAt, pricingConfigured를 추가한다. 기존 고객 응답 필드는 보존한다.
-- 공통 가격 PUT /api/organizer/concerts/{concertId}/section-prices: sections[{sectionLabel,grade,price}] 전체 교체. 회차 없고 미공개인 경우만 허용. 성공 200, 설정한 구역 목록 반환.
-- 개별 회차 생성: startsAt, bookingOpensAt, bookingClosesAt, maxTicketsPerUser. layoutId·가격은 입력받지 않는다. 공연 설정으로 회차·좌석 생성 후 201 반환.
-- 일괄 POST .../performances/batch: bookingOpensAt, maxTicketsPerUser, performances[{startsAt,bookingClosesAt}]. 1~10개. 201 {performances:[회차 정보]}, 전체 롤백. 날짜는 Instant의 ISO-8601 오프셋 포함 형식, 화면에서 공연장 시간대로 표현한다.
-- 공개 POST .../publish: 본문 없음. 성공 200 관리 상세 반환. 이미 공개된 요청은 인증·권한 확인 후 현재 상세를 반환하고 최초 공개 시각을 덮어쓰지 않는다.
-- 초안 삭제 DELETE 공연/회차 경로: 성공 204. 이력·참조가 있으면 409. 권한 없는 타인 대상은 기존 규칙대로 404.
-- 입력 오류는 400 INVALID_REQUEST, 미인증 401, 역할 부족 403, 없는/접근 불가 대상 404. 미공개 위반·가격 미완료·회차 충돌·연결 참조는 409의 구체적 ErrorCode를 구현 시 기존 enum과 맞춰 추가한다.
+### 잠금과 트랜잭션
 
-## 트랜잭션과 경계
+- 공연 준비 변경(가격·배치·회차 생성·공개·삭제)은 공연 행 `PESSIMISTIC_WRITE`로 직렬화한다. 순서는 공연 행 → 회차 ID 오름차순 → 판매 좌석 ID 오름차순이다.
+- 회차 등록은 READ_COMMITTED로 실행한다. 기본 REPEATABLE READ에서는 공연 행 잠금 전에 읽기 스냅샷이 고정돼, 동시에 커밋된 같은 시각 회차를 겹침 검사가 보지 못했다(`concurrentSingleCreationsCannotOverlap`).
+- 선점은 회차 행에 `PESSIMISTIC_READ`(`PerformanceRepository.findSharedById`)를 건다. 공개된 공연의 회차 수정 요청은 회차 행을 잠그지 않고 400으로 거절해 진행 중인 선점을 기다리지 않는다(`publishedPerformanceUpdateDoesNotWaitForHolds`).
+- 커밋 전 드롭 INSERT가 있으면 FK 공유 잠금 때문에 공연 삭제가 기다린 뒤 FK 위반으로 409가 된다(`concertDeletionWaitsForUncommittedDropReference`).
+- 모듈 경계: concert의 application 인터페이스(`ReservationHistory`, `PerformanceSeatCreator`, `PerformanceSeatReadiness`)를 ticketing이 구현한다. ticketing은 공연 repository에 접근하지 않는다(`OwnedModuleBoundaryTest`).
 
-공연 준비 변경은 공연 행 → 회차 ID 오름차순 → 판매 좌석 ID 오름차순으로 잠근다. 생성·가격 변경·배치 변경·공개·삭제는 같은 공연 행을 잠가 순서를 보장한다. 공연 공개 판정은 concert application 계약으로 노출한다. ticketing이 공연 repository에 접근하지 않는다.
+### 테스트 위치
 
-회차 생성과 좌석 생성은 같은 DB 트랜잭션의 동기 application 호출로 처리한다. 이벤트 리스너로 좌석 생성을 넘기지 않는다. 가격 완전성 조회·좌석 생성·이력 확인은 ticketing 계약으로 제공한다. PG 호출을 포함하지 않는다.
+- `com.restless.concert.OrganizerConcertApiTest`: 주최자 API, 동시 회차 등록, 배치 변경, 삭제와 드롭·경매 참조
+- `com.restless.concert.ConcertPublicationVisibilityTest`: 공개 기본값, 고객 노출·선점 차단, 드롭의 공개 공연 확인
+- `com.restless.ticketing.application.TicketReservationHistoryTest`: 회차 삭제 시 판매 좌석 정리
 
-드롭·경매 참조 검사는 각 도메인의 계약과 DB FK로 보호한다. 검사 직후 연결이 생겨 FK가 삭제를 거절하는 경우도 409로 처리하며 타 도메인 삭제를 수행하지 않는다.
+## 2. 2026-11-26 정책 개정과의 차이
 
-## 다음 구현 단위
+| 정책 | 현재 구현 | 해야 할 것 |
+|---|---|---|
+| 예매 오픈은 공연 단위 | 회차마다 `bookingOpensAt` 입력 | 공연 필드 추가, 회차 입력에서 제거, 공연 값 변경 시 모든 회차에 반영 |
+| 예매 마감 기본값 전날 오후 5시 | 회차마다 필수 입력 | 선택 입력으로 바꾸고 공연장 시간대로 기본값 계산 |
+| 첫 공개는 공연 예매 오픈이 미래 | 모든 회차의 예매 시작이 미래 | 공연 값 하나로 판정 |
+| 공개 뒤 회차 추가 | 400 거절 | 시작·마감이 미래면 허용, 추가 회차는 수정 불가 |
+| 비공개 전환·재공개 | 없음 | 공개 이력과 분리한 공개 여부 전환, 비공개 커밋 뒤 선점 거절 |
+| 공개 이력 | `is_published`로 판정 | 별도 컬럼. 비공개로 돌려도 유지 |
+| 주최 측 취소(100% 환불) | 없음 | 예약·티켓 "주최 측 취소" 상태, 전액 환불 배치 |
+| soft delete | 물리 삭제, FK로 드롭·경매 참조 거절. 초안 공연은 회차가 없어야 삭제 | `deleted_at`. 모든 조회·겹침 검사에서 제외. 드롭·경매 FK는 더 이상 삭제를 막지 않는다 |
+| 회차 삭제와 선점 경합 | 공개 이력 없는 회차만 삭제 | 회차 행 `PESSIMISTIC_WRITE` 아래 이력 확인. 선점은 공유 잠금 아래 `deleted_at`과 취소 여부를 확인 |
+| 고객 환불 비율·취소 기한 | 기한·비율 확인 없이 전액 환불(`TicketPaymentService.requestCustomerRefund`) | 취소 기한 이후 거절. 부분 환불 지원 전에는 100% 구간 밖을 거절 |
 
-공개 상태·공통 설정 스키마와 엔티티 → 초안 조회/선점 차단 및 기본 권한 → 공통 가격·공연 편집 → 회차 생성/좌석 원자 생성 및 중복·겹침 → 전체 공개/공개 후 변경 차단 → 조건부 삭제 → 최소 UI 순으로 진행한다. 상세 테스트는 해당 변경 단위에서 기존 focused 테스트를 재사용하고 경쟁·롤백 사례를 검증한다.
+## 3. 예정 스키마 변경
 
-## 구현 기록 (2026-11-24)
+모두 새 마이그레이션으로 추가한다. dev에 병합된 마이그레이션은 고치지 않는다. dev 병합은 자동 배포되므로, 마이그레이션이 있는 PR은 병합 전에 배포 영향을 확인한다.
 
-로컬 Flyway 최신 성공 버전은 20261122.1401이며 V20261124_1000은 미적용이었다. V20261124_1100에는 상세 정보, 공개 표식·시각·공통 layout_id와 concert_section_prices 구조를 포함했다. 기존 DB에는 적용하지 않았다. 기존 공연은 공개 상태를 유지하고 신규 공연은 초안으로 생성한다. 공연 공통 배치와 공통 구역 가격 설정 API를 연결했으며, 회차 생성은 공통 배치·가격을 사용해 회차와 판매 좌석을 한 트랜잭션에서 생성한다. 고객 목록·상세·회차·좌석·예약 가능 수량·선점 경로는 공개 여부를 확인한다. 기존 회차의 배치·가격은 자동 이관하지 않는다.
+| 대상 | 변경 | 기존 데이터 |
+|---|---|---|
+| `concerts.booking_opens_at` | 추가, NULL 가능 | 회차들의 예매 오픈이 모두 같으면 그 값, 다르면 NULL |
+| `concerts` 공개 이력 (예: `first_published_at` 또는 `ever_published`) | 추가 | 기존 공개 공연은 이력 있음. 실제 공개 시각을 모르면 시각을 만들지 않는다 |
+| `concerts.deleted_at`, `performances.deleted_at` | 추가, NULL 가능 | 모두 NULL |
+| `concerts.status`, `performances.status` | CANCELLED 값 사용 | 변경 없음 |
+| 예약·티켓 | "주최 측 취소" 상태와 환불 처리 추적 값. 상태 CHECK 변경 가능성 | 변경 없음 |
+| `performances.booking_opens_at` | 유지. 회차 등록 때 공연 값을 복사해 선점 코드를 바꾸지 않는다 | 변경 없음 |
 
-단건·일괄 회차 등록, 공연장·배치 변경, 초안 고객 접근 차단, 공연 전체 공개와 조건부 삭제를 구현했다. 선택 공개·재공개와 비공개 전환은 후순위다. 기존 공개 공연 중 회차별 배치·가격이 다른 공연은 별도 확인 대상으로 유지한다.
+## 4. 운영 데이터 확인 (마이그레이션 PR 전)
 
-Focused 테스트 통과: `./gradlew test --tests 'com.restless.concert.OrganizerConcertApiTest' --tests 'com.restless.ticketing.TicketSeatQueryApiTest' --tests 'com.restless.ticketing.TicketQueryApiTest'` (해당 시점 24 tests, BUILD SUCCESSFUL). 전체 빌드와 mutation gate는 실행하지 않았다.
+읽기 전용 SELECT다. 결과에 따라 기존 데이터는 자동 보정하지 않고 정책 10절대로 별도 확인한다.
 
-## 정책·경계 점검 (2026-11-24)
+```sql
+-- 한 공연에서 회차 배치가 여러 개
+SELECT concert_id, COUNT(DISTINCT layout_id) AS layouts
+FROM performances GROUP BY concert_id HAVING COUNT(DISTINCT layout_id) > 1;
 
-관리자는 전체 공연의 관리 조회와 단건 회차·공통 가격 작업을 수행한다. 공개 공연의 일정 변경과 회차 추가를 막고, 초안 일정은 선점·예약 이력이 없을 때 미래 예매 시작 시각으로 복구할 수 있다. 회차 시간은 공연 단위 잠금 아래 소요 시간 기준으로 비교하며, 시간 간격은 시작 포함·종료 제외다. 기간·소요 시간 변경은 회차 시작 시간순으로 겹침을 검사한다. 좌석 초기화는 concert의 application 계약을 ticketing이 구현하며 회차 생성과 같은 트랜잭션에 참여한다. 공통 가격 교체는 삭제를 먼저 flush해 유일 제약 충돌을 방지한다.
+-- 한 공연에서 회차 예매 오픈이 여러 개
+SELECT concert_id, COUNT(DISTINCT booking_opens_at) AS opens
+FROM performances GROUP BY concert_id HAVING COUNT(DISTINCT booking_opens_at) > 1;
 
-공연장·배치 변경, 일괄 등록 및 조건부 삭제를 구현했다. 기존 공개 공연의 배치·가격 불일치는 별도 검토가 필요하다.
+-- 같은 공연·등급인데 회차별 가격이 다름
+SELECT p.concert_id, s.grade, COUNT(DISTINCT s.price) AS prices
+FROM performance_seats s JOIN performances p ON p.id = s.performance_id
+GROUP BY p.concert_id, s.grade HAVING COUNT(DISTINCT s.price) > 1;
 
-공연 전체 공개는 공연 행과 회차 행을 잠그고 모든 공통 설정·회차 일정·판매 좌석 일치 여부를 확인한 뒤 DB 현재 시각 기준으로 모든 예매 시작이 미래인지 검사한다. ticketing application 계약이 회차별 판매 좌석과 공연 공통 가격을 비교한다. 공연의 공개 표식 하나로 전체 회차에 동일하게 적용한다. 재요청은 기존 공개 시각을 보존한다.
+-- 0원 판매 좌석
+SELECT COUNT(*) FROM performance_seats WHERE price = 0;
 
-공개 기능 focused 테스트: `./gradlew test --tests 'com.restless.concert.OrganizerConcertApiTest' --tests 'com.restless.ticketing.TicketSeatQueryApiTest'` — 25건 통과. 공개와 회차 추가의 경합을 포함한다. 전체 빌드와 mutation gate는 실행하지 않았다.
+-- 소요 시간이 없는데 회차가 있는 공연
+SELECT c.id FROM concerts c
+WHERE c.duration_minutes IS NULL AND EXISTS (SELECT 1 FROM performances p WHERE p.concert_id = c.id);
 
-정책·경계 점검 후 `./gradlew test --tests 'com.restless.concert.OrganizerConcertApiTest' --tests 'com.restless.ticketing.TicketSeatQueryApiTest' --tests 'com.restless.ticketing.TicketQueryApiTest'`: 27 tests, BUILD SUCCESSFUL.
+-- 비공개 공연 수 (주최자 API로 만든 초안)
+SELECT COUNT(*) FROM concerts WHERE is_published = FALSE;
+```
 
-추가 회귀 검증: `./gradlew test --tests 'com.restless.concert.OrganizerConcertApiTest'` 15건 통과. `./gradlew test --tests 'com.restless.ticketing.application.TicketReservationServiceTest.concurrentUsersCannotOwnTheSameSeat' --tests 'com.restless.ticketing.application.TicketReservationServiceTest.replayPreservesOriginalReservationAndRejectsDifferentContent' --tests 'com.restless.ticketing.application.TicketReservationServiceTest.concurrentSameKeyRequestsReturnOneReservation'` 3건 통과. 전체 빌드와 mutation gate는 실행하지 않았다.
+## 5. 향후 드롭·경매 연결 대비
 
+정책 [8-1절](organizer-policy.md#8-1-티켓-보유자-전용-드롭경매-향후-연결)의 티켓 보유자 전용 드롭·경매 연결은 아직 드롭·경매 쪽에 없다. 쓰이지 않는 계약을 미리 만들지 않고, 티켓팅 구현이 아래를 깨지 않게 한다.
 
-단건 회차 등록은 READ_COMMITTED로 실행한다. 기본 REPEATABLE READ에서는 공연 행 잠금 전에 회원 조회로 읽기 스냅샷이 고정돼, 동시에 커밋된 같은 시각 회차를 겹침 검사에서 보지 못하고 두 회차가 모두 생성됐다(`concurrentSingleCreationsCannotOverlap` 수정 전 실패 [201, 201]).
+- 회차 ID를 안정적으로 유지한다. 티켓이 있는 회차는 물리 삭제하지 않는다(soft delete).
+- 회차의 예매 마감·취소 기한·취소 여부를 concert application 조회로 얻을 수 있게 둔다. 드롭·경매가 시작 시점을 검사할 때 쓴다.
+- 주최 측 취소는 발급 티켓을 취소 상태로 바꾼다. 그러면 보유 매수 조회가 자연히 0이 된다.
+- 보유 매수 계약은 연결 작업 때 ticketing application에 추가한다. 기준은 (회원, 회차)별 발급 상태이며 취소되지 않은 티켓 수이고, 사용된 티켓도 센다.
+- 회차 취소를 드롭·경매에 알리는 일은 후속 작업이므로 AFTER_COMMIT 이벤트 후보로 둔다. 핵심 상태(티켓·예약 취소)는 이벤트에 맡기지 않고 취소 트랜잭션에서 커밋한다.
 
-V20261125_1000은 `concerts.is_published` 기본값을 TRUE로 바꾼다. 주최자 API 생성은 엔티티가 FALSE를 명시하므로 계속 초안이다. 공개 여부를 지정하지 않은 직접 INSERT는 공개로 저장된다(`directlyInsertedConcertDefaultsToPublished`). 기존 V20261124_1100은 수정하지 않았다.
+## 6. 구현 단위 제안
 
-PR 분할(2026-11-25): 정책 문서(#413) → 공개 표식·고객 노출 차단 → 공연 초안·공통 가격 → 회차·판매 좌석·전체 공개(#401) 순으로 쌓았다. 정리 사항: 빈 `OrganizerSeatPricingController`와 호출되지 않던 회차별 가격 설정 `OrganizerSeatPricingService`(관련 `OrganizerPerformanceService.lockOwnedSeatLayout`·`ensureSeatPricingAllowed`, `TicketSeat.changePricing`, `TICKET_PRICING_*` 오류 코드와 이를 직접 호출하던 테스트 3개 포함) 삭제, 쓰이지 않는 `countBySellerIdAndPublishedTrue`와 `LayoutSeatRepository`의 application DTO import 삭제, DB 기본값 공개 전환으로 불필요해진 드롭·공통 테스트 fixture의 공개 표식 복원. `TicketCheckoutServiceTest`의 정리 쿼리는 같은 공연장의 모든 회차로 넓힌 것이며(가격 테스트가 새 회차를 만듦) 기존 정리 대상을 모두 포함한다.
-
-## 일괄 등록, 공연장·배치 변경, 조건부 삭제
-
-회차 일괄 등록은 공연 행 잠금과 하나의 READ_COMMITTED 트랜잭션에서 회차 1~10개와 판매 좌석을 만든다. 단건 등록 메서드를 내부 호출하며 하나라도 실패하면 전체를 롤백하고, 검증 오류에 `details.performanceIndex`(0부터)를 담는다. 초안의 공연장·배치를 실제로 바꾸면 공통 가격을 삭제하고, 같은 값 재제출은 가격을 유지한다. 공개된 공연의 회차 수정은 회차 행을 잠그지 않고 400으로 거절해 진행 중인 선점을 기다리지 않는다(`publishedPerformanceUpdateDoesNotWaitForHolds`).
-
-회차 삭제는 공개 이력과 선점·예약 이력(취소·만료 포함)이 없을 때 판매 좌석을 먼저 지운 뒤 회차를 지운다. 좌석 상태 불일치와 FK 위반은 409 `CONCERT_DELETE_CONFLICT`다. 공연 삭제는 공개 이력과 회차가 없을 때 공통 가격과 공연을 지운다. 드롭·경매 참조는 각 테이블의 공연 FK로 막고 드롭·경매 코드는 바꾸지 않는다(2026-11-25 결정). 커밋 전 드롭 INSERT가 있으면 FK 공유 잠금 때문에 공연 행 잠금에서 기다린 뒤 FK 위반으로 409가 된다(`concertDeletionWaitsForUncommittedDropReference`).
+1. **예매 시간 공연 단위화와 공개 이력:** `concerts.booking_opens_at`·공개 이력 마이그레이션, 회차 입력 변경, 예매 마감 기본값, 첫 공개 판정.
+2. **공개 뒤 회차 추가와 비공개·재공개:** 추가 회차 검증·수정 차단, 비공개 전환·재공개 API, 비공개 커밋 뒤 선점 거절 동시성 테스트.
+3. **soft delete:** `deleted_at` 마이그레이션, 조회·겹침·드롭 공개 확인에서 제외, 회차 삭제와 선점 경합 테스트.
+4. **주최 측 취소와 전액 환불 배치:** 예약·티켓 상태, 배치, 불명확 결제 처리. 좌석 소유권·결제 불변식에 걸리므로 별도 PR로 한다.
+5. **고객 환불 기한·비율:** 취소 기한과 100% 구간 확인. 부분 환불은 결제 담당자 정책에 따른다.
