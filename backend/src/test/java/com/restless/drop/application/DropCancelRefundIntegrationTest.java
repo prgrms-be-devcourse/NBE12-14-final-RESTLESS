@@ -14,6 +14,8 @@ import com.restless.payment.application.pg.PgClient;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -46,6 +48,7 @@ import static org.mockito.Mockito.mockingDetails;
 @Import(TestcontainersConfiguration.class)
 @DisplayName("드롭 삭제와 새벽 환불 (#430)")
 class DropCancelRefundIntegrationTest {
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final Instant FAR_FUTURE = Instant.parse("2999-01-01T00:00:00Z");
 
     @Autowired MockMvc mvc;
@@ -69,7 +72,9 @@ class DropCancelRefundIntegrationTest {
                 {"concertId":%d,"title":"삭제 드롭","description":"설명","imageUrl":"https://example.com/a.png",
                  "opensAt":"%s","closesAt":"%s",
                  "variants":[{"skuCode":"M","optionName":"M","priceAmount":39000,"totalQuantity":5}]}"""
-                .formatted(concert, now.minus(Duration.ofMinutes(1)), now.plus(Duration.ofHours(2)));
+                // The organizer open time must be on the hour between 08 and 22 KST (#438). Yesterday 08:00 is already on sale.
+                .formatted(concert, LocalDate.now(KST).minusDays(1).atTime(8, 0).atZone(KST).toInstant(),
+                        now.plus(Duration.ofHours(2)));
         String created = mvc.perform(as(post("/api/organizer/drops"), organizer, "ORGANIZER")
                         .contentType(MediaType.APPLICATION_JSON).content(json))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();

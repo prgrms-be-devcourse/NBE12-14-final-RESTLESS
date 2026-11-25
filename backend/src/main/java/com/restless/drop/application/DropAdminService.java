@@ -13,6 +13,8 @@ import com.restless.drop.infrastructure.*;
 import com.restless.member.application.MemberService;
 import com.restless.member.domain.MemberRole;
 import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.HashSet;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class DropAdminService {
+    static final ZoneId ORGANIZER_ZONE = ZoneId.of("Asia/Seoul");
+    static final int FIRST_OPEN_HOUR = 8;
+    static final int LAST_OPEN_HOUR = 22;
+
     private final DropRepository drops;
     private final DropVariantRepository variants;
     private final DropInventoryRepository inventories;
@@ -48,8 +54,21 @@ public class DropAdminService {
     @Transactional
     public Admin createAsOrganizer(Long actorId, CreateDropRequest request) {
         validate(request);
+        requireOrganizerOpenHour(request.opensAt());
         Long organizerId = organizerConcerts.getManageable(actorId, request.concertId()).organizerId();
         return register(request, organizerId);
+    }
+
+    /**
+     * 주최자 오픈 시각은 KST 정각, 08:00부터 22:00까지만 받는다 (#438). 트래픽이 몰리는 시각을 운영이 예측할 수 있게 한다.
+     * 관리자 등록에는 적용하지 않는다.
+     */
+    static void requireOrganizerOpenHour(Instant opensAt) {
+        var local = opensAt.atZone(ORGANIZER_ZONE);
+        boolean onTheHour = local.getMinute() == 0 && local.getSecond() == 0 && local.getNano() == 0;
+        if (!onTheHour || local.getHour() < FIRST_OPEN_HOUR || local.getHour() > LAST_OPEN_HOUR) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "오픈 시각은 08시부터 22시까지 정각만 고를 수 있습니다.");
+        }
     }
 
     private void validate(CreateDropRequest request) {

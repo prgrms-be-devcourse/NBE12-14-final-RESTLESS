@@ -60,4 +60,20 @@ class DropAdminServiceTest {
                 e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
         verifyNoInteractions(inventories);
     }
+
+    @Test
+    void organizerOpenHourAcceptsOnlyWholeHoursFrom8To22Kst() {
+        var kst = java.time.ZoneId.of("Asia/Seoul");
+        var day = java.time.LocalDate.of(2040, 1, 1);
+        for (var ok : List.of(java.time.LocalTime.of(8, 0), java.time.LocalTime.of(15, 0), java.time.LocalTime.of(22, 0))) {
+            assertThatCode(() -> DropAdminService.requireOrganizerOpenHour(day.atTime(ok).atZone(kst).toInstant()))
+                    .doesNotThrowAnyException();
+        }
+        for (var bad : List.of(java.time.LocalTime.of(7, 0), java.time.LocalTime.of(23, 0), java.time.LocalTime.of(0, 0),
+                java.time.LocalTime.of(21, 59), java.time.LocalTime.of(22, 0, 1), java.time.LocalTime.of(8, 0, 0, 1000))) {
+            assertThatThrownBy(() -> DropAdminService.requireOrganizerOpenHour(day.atTime(bad).atZone(kst).toInstant()))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+        }
+    }
 }
