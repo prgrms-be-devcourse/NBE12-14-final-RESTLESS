@@ -13,6 +13,8 @@ import org.springframework.data.repository.query.Param;
 
 public interface TicketReservationRepository extends JpaRepository<TicketReservation, Long> {
 
+    boolean existsByPerformanceId(Long performanceId);
+
     Optional<TicketReservation> findByIdAndUserId(Long id, Long userId);
 
     Optional<TicketReservation> findByOrderId(Long orderId);

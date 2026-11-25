@@ -75,4 +75,36 @@ public class Concert {
     public static Concert create(Long venueId, Long sellerId, String title, String status, Instant now) {
         return new Concert(venueId, sellerId, title, status, now);
     }
+
+    public static Concert createDraft(Long venueId, Long sellerId, String title, String status, Instant now,
+                                      String description, LocalDate periodStartDate, LocalDate periodEndDate,
+                                      Integer durationMinutes, Long layoutId) {
+        Concert concert = new Concert(venueId, sellerId, title, status, now);
+        concert.published = false;
+        concert.description = description;
+        concert.periodStartDate = periodStartDate;
+        concert.periodEndDate = periodEndDate;
+        concert.durationMinutes = durationMinutes;
+        concert.layoutId = layoutId;
+        return concert;
+    }
+
+    /** 초안의 공연장·공통 배치. 소속·회차 유무는 application 서비스에서 검증한다. */
+    public void changeVenueAndLayout(Long venueId, Long layoutId) {
+        requireDraft();
+        this.venueId = Objects.requireNonNull(venueId);
+        this.layoutId = Objects.requireNonNull(layoutId);
+    }
+
+    private void requireDraft() {
+        if (published) throw new IllegalStateException("공개된 공연의 공통 설정은 변경할 수 없습니다.");
+    }
+
+    public void changeDetails(String title, String description, LocalDate start, LocalDate end, Integer duration) {
+        this.title = title;
+        this.description = description;
+        this.periodStartDate = start;
+        this.periodEndDate = end;
+        this.durationMinutes = duration;
+    }
 }
