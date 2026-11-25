@@ -59,7 +59,7 @@ class DropPaymentLifecycleIntegrationTest {
         var name = UUID.randomUUID().toString();
         jdbc.update("INSERT INTO venues (name, address, timezone, status, created_at) VALUES (?, '서울', 'Asia/Seoul', 'ACTIVE', ?)", name, timestamp);
         var venue = jdbc.queryForObject("SELECT id FROM venues WHERE name = ?", Long.class, name);
-        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at, is_published) VALUES (?, ?, ?, 'SCHEDULED', ?, TRUE)", venue, user, name, timestamp);
+        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at) VALUES (?, ?, ?, 'SCHEDULED', ?)", venue, user, name, timestamp);
         var concert = jdbc.queryForObject("SELECT id FROM concerts WHERE title = ?", Long.class, name);
         drop = admin.create(new CreateDropRequest(concert, "상품".repeat(100), "설명", "url", now.minusSeconds(60), now.plusSeconds(3600),
                 List.of(new CreateDropRequest.Variant("SKU", "M", 39000L, 3)))).dropId();

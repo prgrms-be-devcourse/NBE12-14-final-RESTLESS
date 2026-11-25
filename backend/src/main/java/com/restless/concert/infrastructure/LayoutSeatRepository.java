@@ -4,7 +4,6 @@ import com.restless.concert.application.dto.SeatPosition;
 import com.restless.concert.domain.LayoutSeat;
 import com.restless.concert.domain.LayoutSeatId;
 import java.util.List;
-import com.restless.concert.application.dto.SeatSetupLayout;
 import java.util.Collection;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;

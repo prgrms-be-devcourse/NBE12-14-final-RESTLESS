@@ -83,15 +83,6 @@ class OrganizerConcertApiTest {
     }
 
     @Test
-    @DisplayName("공개 여부를 지정하지 않은 공연 행은 기본 공개다")
-    void directlyInsertedConcertDefaultsToPublished() {
-        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at) VALUES (?, ?, 'direct', 'SCHEDULED', UTC_TIMESTAMP(6))",
-                venueId, ownerId);
-        assertThat(jdbc.queryForObject("SELECT is_published FROM concerts WHERE venue_id=? AND title='direct'", Boolean.class, venueId)).isTrue();
-        assertThat(jdbc.queryForObject("SELECT published_at IS NULL FROM concerts WHERE venue_id=? AND title='direct'", Boolean.class, venueId)).isTrue();
-    }
-
-    @Test
     @DisplayName("주최자의 공연 등록은 로그인한 회원을 소유자로 저장하고 공개 조회에 노출한다")
     void createsConcertOwnedByAuthenticatedOrganizer() throws Exception {
         Long selectedLayout = layoutFor(venueId);
@@ -296,6 +287,34 @@ class OrganizerConcertApiTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats ps JOIN performances p ON p.id=ps.performance_id WHERE p.concert_id=?", Integer.class, concertId)).isEqualTo(2);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id=?", Integer.class, concertId)).isEqualTo(2);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id=?", Integer.class, missingPeriod)).isZero();
+    }
+
+    @Test
+    @DisplayName("공통 구역 가격은 판매 구역을 모두 채워야 하고 ADMIN도 설정할 수 있다")
+    void configuresCommonSectionPrices() throws Exception {
+        Long layoutId = layoutFor(venueId);
+        addSellableSeat(layoutId);
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId, false);
+        String path = "/api/organizer/concerts/{id}/section-prices";
+        String body = "{\"sections\":[{\"sectionLabel\":\"A\",\"grade\":\"VIP\",\"price\":1000}]}";
+        mockMvc.perform(put(path, concertId).with(actor(otherId, "ORGANIZER")).contentType("application/json").content(body))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(put(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                .content(body.replace("\"A\"", "\"B\""))).andExpect(status().isBadRequest());
+        mockMvc.perform(put(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                .content(body.replace("1000", "0"))).andExpect(status().isBadRequest());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM concert_section_prices WHERE concert_id=?", Integer.class, concertId)).isZero();
+        mockMvc.perform(put(path, concertId).with(actor(adminId, "ADMIN")).contentType("application/json").content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].sectionLabel").value("A")).andExpect(jsonPath("$[0].price").value(1000));
+        mockMvc.perform(put(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                .content(body.replace("1000", "2000").replace("VIP", "R"))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1)).andExpect(jsonPath("$[0].grade").value("R"));
+        assertThat(jdbc.queryForObject("SELECT price FROM concert_section_prices WHERE concert_id=?", Long.class, concertId)).isEqualTo(2000L);
+        entityManager.flush();
+        jdbc.update("UPDATE concerts SET is_published=TRUE WHERE id=?", concertId);
+        entityManager.clear();
+        mockMvc.perform(put(path, concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json").content(body))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

@@ -311,7 +311,7 @@ class DropInventoryBucketConcurrencyIntegrationTest {
         Long owner = newUsers(1).getFirst();
         jdbc.update("INSERT INTO venues (name, address, timezone, status, created_at) VALUES (?, '서울', 'Asia/Seoul', 'ACTIVE', ?)", name, stamp);
         var venue = jdbc.queryForObject("SELECT id FROM venues WHERE name = ?", Long.class, name);
-        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at, is_published) VALUES (?, ?, ?, 'SCHEDULED', ?, TRUE)",
+        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at) VALUES (?, ?, ?, 'SCHEDULED', ?)",
                 venue, owner, name, stamp);
         var concert = jdbc.queryForObject("SELECT id FROM concerts WHERE title = ?", Long.class, name);
         var skus = new ArrayList<CreateDropRequest.Variant>();
