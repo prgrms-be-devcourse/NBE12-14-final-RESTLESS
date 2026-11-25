@@ -83,7 +83,7 @@ class OrganizerConcertApiTest {
     }
 
     @Test
-    @DisplayName("주최자의 공연 등록은 로그인한 회원을 소유자로 저장하고 공개 조회에 노출한다")
+    @DisplayName("주최자의 공연 등록은 로그인한 회원을 소유자로 저장하고 공개 전에는 고객 조회에 노출하지 않는다")
     void createsConcertOwnedByAuthenticatedOrganizer() throws Exception {
         Long selectedLayout = layoutFor(venueId);
         String body = "{\"venueId\":" + venueId + ",\"layoutId\":" + selectedLayout + ",\"title\":\"봄 공연\",\"sellerId\":" + otherId
