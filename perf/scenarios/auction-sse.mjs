@@ -331,7 +331,7 @@ async function measureDrain() {
     if (value !== null && value <= (metrics.baselineServerMetric ?? 0)) { drainedAfterSeconds = Number(t.toFixed(1)); break; }
     await delay(1000);
   }
-  metrics.drain = { clientsDropped: connections.filter((c) => c?.status === 200).length, drainedAfterSeconds, timeline };
+  metrics.drain = { startedAt: new Date(Date.now() - (performance.now() - startedAt)).toISOString(), clientsDropped: connections.filter((c) => c?.status === 200).length, drainedAfterSeconds, timeline };
   metrics.serverMetricAfterClose = timeline.at(-1)?.gauge ?? null;
   console.log(`drain: ${metrics.drain.clientsDropped} clients dropped, gauge back to baseline after ${drainedAfterSeconds ?? `>${DRAIN_WAIT_SECONDS}`}s`);
 }
@@ -441,7 +441,9 @@ async function main() {
   for (const requested of STEPS) {
     if (stopping) break;
     const stageStart = performance.now();
-    const step = { connections: requested, attempted: requested, added: requested - previous, success: 0, rejectedAtLimit: 0, failed: 0,
+    // Wall-clock UTC so the 2s actuator samples (heap, direct buffer) can be matched to each step.
+    const step = { startedAt: new Date().toISOString(), connectedAt: null, endedAt: null,
+      connections: requested, attempted: requested, added: requested - previous, success: 0, rejectedAtLimit: 0, failed: 0,
       disconnected: 0, priceChanged: 0, openConnections: 0, deliveryDelayMs: { p50: null, p95: null, max: null },
       statusErrors: {}, serverMetric: null };
     for (let index = previous; index < requested; index++) {
@@ -453,6 +455,7 @@ async function main() {
     while (connections.slice(0, requested).filter((c) => c?.firstEventAt || (c && !c.active && c.error)).length < requested
       && performance.now() < deadline && !stopping) await delay(100);
     const stageConnections = connections.slice(0, requested);
+    step.connectedAt = new Date().toISOString();
     step.success = stageConnections.filter((c) => c?.status === 200 && c.firstEventAt !== null).length;
     step.rejectedAtLimit = stageConnections.filter((c) => c?.busy?.code === 'AUCTION_STREAM_BUSY').length;
     step.retryAfter = [...new Set(stageConnections.filter((c) => c?.busy).map((c) => c.busy.retryAfter))];
@@ -466,6 +469,7 @@ async function main() {
     step.serverMetric = await readStreamMetric();
     metrics.activeServerMetric = step.serverMetric;
     if (!MEASURE_BID) {
+      step.endedAt = new Date().toISOString();
       results.push(step);
       console.log(`step ${requested}: attempted=${step.attempted}, success=${step.success}, rejectedAtLimit=${step.rejectedAtLimit}, failed=${step.failed}, active=${step.openConnections}, streamMetric=${step.serverMetric ?? '-'}`);
       previous = requested;
@@ -526,6 +530,7 @@ async function main() {
     step.openConnections = stageConnections.filter((c) => c?.active).length;
     step.serverMetric = await readStreamMetric();
     metrics.activeServerMetric = step.serverMetric;
+    step.endedAt = new Date().toISOString();
     results.push(step);
     console.log(`step ${requested}: attempted=${step.attempted}, success=${step.success}, rejectedAtLimit=${step.rejectedAtLimit}, failed=${step.failed}, active=${step.openConnections}, streamMetric=${step.serverMetric ?? '-'}, changed=${step.priceChanged}, delay_p95=${step.deliveryDelayMs.p95 ?? '-'}`);
     previous = requested;
@@ -540,7 +545,7 @@ async function holdAndSnapshot() {
   while (!stopping && performance.now() - startedAt < HOLD_SECONDS * 1000) {
     await delay(Math.min(SNAPSHOT_SECONDS * 1000, HOLD_SECONDS * 1000 - (performance.now() - startedAt)));
     const ok = connections.filter((c) => c?.status === 200);
-    const snapshot = { t: Math.round((performance.now() - startedAt) / 1000), active: ok.filter((c) => c.active).length,
+    const snapshot = { at: new Date().toISOString(), t: Math.round((performance.now() - startedAt) / 1000), active: ok.filter((c) => c.active).length,
       disconnected: ok.filter((c) => c.disconnected).length, serverMetric: await readStreamMetric(),
       heartbeatsP50: percentile(ok.map((c) => c.heartbeats), 0.5), eventsP50: percentile(ok.map((c) => c.events), 0.5) };
     metrics.soakSnapshots.push(snapshot);
