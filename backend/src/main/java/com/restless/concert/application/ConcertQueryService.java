@@ -7,9 +7,11 @@ import com.restless.concert.application.dto.*;
 import com.restless.concert.domain.Concert;
 import com.restless.concert.domain.LayoutSeat;
 import com.restless.concert.domain.Performance;
+import com.restless.concert.domain.Venue;
 import com.restless.concert.infrastructure.ConcertRepository;
 import com.restless.concert.infrastructure.LayoutSeatRepository;
 import com.restless.concert.infrastructure.PerformanceRepository;
+import com.restless.concert.infrastructure.VenueRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -17,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -27,6 +30,7 @@ public class ConcertQueryService {
     private final PerformanceRepository performanceRepository;
     private final LayoutSeatRepository layoutSeatRepository;
     private final ConcertRepository concertRepository;
+    private final VenueRepository venueRepository;
     private final SeatQueryMetrics seatQueryMetrics;
 
     /** 페이지에 포함된 회차·물리 좌석만 일괄 조회한다. 다른 도메인에 Repository를 노출하지 않는다. */
@@ -43,26 +47,33 @@ public class ConcertQueryService {
         if (page < 0 || size < 1 || size > 100) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "page는 0 이상, size는 1에서 100 사이여야 합니다.");
         }
-        var concerts = concertRepository.findAll(PageRequest.of(page, size,
+        var concerts = concertRepository.findAllByPublishedTrue(PageRequest.of(page, size,
                 Sort.by(Sort.Direction.DESC, "createdAt", "id")));
-        return new ConcertPage(concerts.stream().map(this::toDetail).toList(), concerts.getNumber(), concerts.getSize(),
+        var venueIds = concerts.stream().map(Concert::getVenueId).collect(Collectors.toSet());
+        Map<Long, Venue> venues = venueRepository.findAllById(venueIds).stream()
+                .collect(Collectors.toMap(Venue::getId, venue -> venue));
+        return new ConcertPage(concerts.stream().map(concert -> toDetail(concert, venues.get(concert.getVenueId()))).toList(), concerts.getNumber(), concerts.getSize(),
                 concerts.getTotalElements(), concerts.getTotalPages());
     }
 
     @Transactional(readOnly = true)
     public ConcertDetail getDetail(Long concertId) {
-        Concert concert = getConcert(concertId);
-        return toDetail(concert);
+        Concert concert = getPublicConcert(concertId);
+        Venue venue = venueRepository.findById(concert.getVenueId())
+                .orElseThrow(() -> new IllegalStateException("공연장이 없습니다."));
+        return toDetail(concert, venue);
     }
 
-    private ConcertDetail toDetail(Concert concert) {
+    private ConcertDetail toDetail(Concert concert, Venue venue) {
+        if (venue == null) throw new IllegalStateException("공연장이 없습니다.");
         return new ConcertDetail(concert.getId(), concert.getVenueId(), concert.getTitle(), concert.getStatus(),
-                concert.getCreatedAt());
+                concert.getCreatedAt(), venue.getName(), venue.getAddress(), concert.getDescription(),
+                concert.getPeriodStartDate(), concert.getPeriodEndDate(), concert.getDurationMinutes());
     }
 
     @Transactional(readOnly = true)
     public List<PerformanceInfo> getPerformances(Long concertId) {
-        getConcert(concertId);
+        getPublicConcert(concertId);
         return performanceRepository.findAllByConcertIdOrderByStartsAtAsc(concertId).stream()
                 .map(performance -> new PerformanceInfo(performance.getId(), performance.getConcertId(),
                         performance.getVenueId(), performance.getLayoutId(), performance.getStartsAt(),
@@ -71,17 +82,15 @@ public class ConcertQueryService {
                 .toList();
     }
 
-    private Concert getConcert(Long concertId) {
-        if (concertId == null || concertId <= 0) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST);
-        }
-        return concertRepository.findById(concertId)
+    private Concert getPublicConcert(Long concertId) {
+        if (concertId == null || concertId <= 0) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        return concertRepository.findByIdAndPublishedTrue(concertId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연을 찾을 수 없습니다."));
     }
 
     @Transactional(readOnly = true)
     public void requirePerformance(Long performanceId) {
-        if (!performanceRepository.existsById(performanceId)) {
+        if (!performanceRepository.existsById(performanceId) || !concertRepository.isPerformancePublished(performanceId).orElse(false)) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다.");
         }
     }
@@ -90,6 +99,7 @@ public class ConcertQueryService {
     public PerformanceLayout getPerformanceLayout(Long performanceId) {
         Performance performance = seatQueryMetrics.measure("performance", () -> performanceRepository.findById(performanceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다.")));
+        if (!concertRepository.isPerformancePublished(performanceId).orElse(false)) throw new BusinessException(ErrorCode.NOT_FOUND);
         List<SeatPosition> seats = seatQueryMetrics.measure("layout_seats",
                 () -> layoutSeatRepository.findPositionsByLayoutId(performance.getLayoutId()));
         return new PerformanceLayout(performance.getLayoutId(), seats);
@@ -98,6 +108,7 @@ public class ConcertQueryService {
     /** 구매 가능 정보 조회에는 좌석 배치 없이 회차당 한도만 제공한다. */
     @Transactional(readOnly = true)
     public int getMaxTicketsPerUser(Long performanceId) {
+        if (!concertRepository.isPerformancePublished(performanceId).orElse(false)) throw new BusinessException(ErrorCode.NOT_FOUND);
         return performanceRepository.findMaxTicketsPerUser(performanceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다."));
     }
@@ -107,11 +118,24 @@ public class ConcertQueryService {
     public BookingPerformance getBookingPerformance(Long performanceId) {
         Performance performance = performanceRepository.findById(performanceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다."));
+        if (!concertRepository.isPerformancePublished(performanceId).orElse(false)) throw new BusinessException(ErrorCode.NOT_FOUND);
+        return bookingPerformance(performance);
+    }
+
+    private BookingPerformance bookingPerformance(Performance performance) {
         Set<Long> sellableSeatIds = layoutSeatRepository.findAllById_LayoutId(performance.getLayoutId()).stream()
                 .filter(LayoutSeat::isSellable)
                 .map(seat -> seat.getId().getVenueSeatId())
                 .collect(Collectors.toUnmodifiableSet());
         return new BookingPerformance(performance.getLayoutId(), performance.getBookingOpensAt(),
                 performance.getBookingClosesAt(), performance.getMaxTicketsPerUser(), sellableSeatIds);
+    }
+
+    /** 고객 좌석 조회 전에 회차가 공개 공연에 속하는지 확인한다. 초안·없는 회차는 404다. */
+    @Transactional(readOnly = true)
+    public void requirePublishedPerformance(Long performanceId) {
+        if (!performanceRepository.existsById(performanceId)
+                || !concertRepository.isPerformancePublished(performanceId).orElse(false))
+            throw new BusinessException(ErrorCode.NOT_FOUND);
     }
 }

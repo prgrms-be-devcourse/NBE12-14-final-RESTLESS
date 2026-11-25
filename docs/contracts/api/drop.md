@@ -43,7 +43,7 @@
 - `opensAt`이 과거여도 등록할 수 있다 (게시하면 바로 판매 시작). 등록 직후 상태는 항상 `DRAFT`다.
 - 각 SKU의 재고는 `total = available = totalQuantity`, `reserved = 0`, `sold = 0`으로 시작한다. 서버는 이 재고를 `min(설정 K, totalQuantity)`개의 재고 버킷으로 나눠 저장한다. SKU 수량은 버킷 합이다 ([ADR-0005](../../decisions/0005-drop-inventory-buckets.md)).
 - 검증 400 `INVALID_REQUEST`: 필수값, `opensAt < closesAt`, `closesAt > 서버 시각`(이미 끝난 판매 기간 금지. 시작 시각은 지나도 됨), SKU 1개 이상, `skuCode` 중복 없음, `priceAmount >= 1`(0원 주문은 결제 준비가 `FREE_ORDER`로 거절하므로 등록에서 막는다, #92), `totalQuantity >= 1`.
-- 없는 `concertId` 404 `NOT_FOUND`. 로그인 안 함 401, ADMIN 아님 403.
+- 없는 `concertId`이거나 비공개(공개 전) 공연이면 404 `NOT_FOUND`. 드롭은 공개된 공연에만 연결한다([주최자 정책](../../domains/ticketing/organizer-policy.md)). 로그인 안 함 401, ADMIN 아님 403.
 
 ### `POST /api/admin/drops/{dropId}/publish` (ADMIN)
 

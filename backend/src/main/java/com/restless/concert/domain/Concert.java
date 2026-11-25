@@ -7,6 +7,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Objects;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -36,6 +37,28 @@ public class Concert {
     @Column(nullable = false, length = 20)
     private String status;
 
+    @Column(name = "is_published", nullable = false)
+    private boolean published;
+
+    @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
+    @Column(name = "published_at")
+    private Instant publishedAt;
+
+    @Column(name = "layout_id")
+    private Long layoutId;
+
+    @Column(length = 5000)
+    private String description;
+
+    @Column(name = "period_start_date")
+    private LocalDate periodStartDate;
+
+    @Column(name = "period_end_date")
+    private LocalDate periodEndDate;
+
+    @Column(name = "duration_minutes")
+    private Integer durationMinutes;
+
     @JdbcTypeCode(SqlTypes.TIMESTAMP_UTC)
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -46,6 +69,7 @@ public class Concert {
         this.title = Objects.requireNonNull(title);
         this.status = Objects.requireNonNull(status);
         this.createdAt = Objects.requireNonNull(now);
+        this.published = true;
     }
 
     public static Concert create(Long venueId, Long sellerId, String title, String status, Instant now) {
