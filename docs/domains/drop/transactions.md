@@ -17,7 +17,7 @@ TX2~TX5의 드롭 쪽 단계는 결제 모듈이 같은 트랜잭션에서 호�
 | 단계 | 요청 | 트랜잭션 | 재고 |
 |---|---|---|---|
 | `결제하기` = 입장 신청 | `POST /api/drops/{dropId}/queue/entries` | D4 진입 트랜잭션 | 바뀌지 않는다 |
-| 대기 상태 조회 | `GET /api/drops/{dropId}/queue/me` | 읽기. 10초를 넘긴 WAITING만 heartbeat UPDATE | 바뀌지 않는다 |
+| 대기 상태 조회 | `GET /api/drops/{dropId}/queue/me` | 읽기. 마지막 기록에서 `restless.drop.queue.heartbeat-interval`(기본 10초)을 넘긴 WAITING만 heartbeat UPDATE | 바뀌지 않는다 |
 | 입장 허가 | 요청 없음. Spring Scheduler의 `dropQueueAdmissionJob` | D4 입장과 종료 트랜잭션 | 바뀌지 않는다 |
 | 재고 점유 + 주문 생성 (화면이 자동 요청) | `POST /api/drops/{dropId}/reservations` | TX1 | available -1, reserved +1 |
 | 결제 준비 | `POST /api/payments` | 결제 모듈 트랜잭션, 드롭은 `load`만 | 바뀌지 않는다 |

@@ -125,7 +125,7 @@
   - 409 `DROP_ACTIVE_PURCHASE_EXISTS`: 같은 회원이 같은 드롭에서 진행 중인 거래가 있음 (INV-05)
   - 403 `DROP_ADMISSION_REQUIRED`: 입장 제어 사용 시 유효한 입장 허가 없음 (D4, INV-06). 종료된 입장 허가, 요청 `variantId`와 다른 SKU의 입장 허가도 같은 오류로 거절한다 (2026-11-19 결정. 정상 화면에서는 생기지 않는 요청을 막는 방어 검사다)
   - 400 `INVALID_REQUEST`: 키·배송지 검증
-- TTL 설정 `restless.drop.reservation.ttl` (기본 5분). 응답의 `expiresAt`이 예약 결제 기한이다. 이 시각 전에 승인 시작이 커밋돼야 하고, 지나면 만료 작업이 재고를 반환한다. 입장 허가 기한(`admittedUntil`)과는 별개다.
+- TTL 설정 `restless.drop.reservation.ttl` (기본 5분). 응답의 `expiresAt`이 예약 결제 기한이다. 승인 시작 트랜잭션이 예약 행을 잠근 뒤 읽은 서버 시각이 이 시각 전이어야 하고, 지나면 만료 작업이 재고를 반환한다. 입장 허가 기한(`admittedUntil`)과는 별개다.
 - 입장 제어 사용 여부 설정 `restless.drop.queue.required` (기본 `true`). `false`면 입장 허가 없이 재고 점유한다. 트래픽 실험 EXP-02(입장 제어 켬/끔 비교)와 D2 수용 테스트가 쓴다.
 
 ### `GET /api/drops/{dropId}/reservations/{reservationId}` (본인)
@@ -220,7 +220,7 @@ SKU의 `available = 0`이면 그 SKU는 **현재 구매 불가**다 (`reserved`�
   - SKU의 `available = 0`이면 그 SKU는 입장시키지 않고 `WAITING`과 미사용 `ADMITTED`를 종료한다 (INV-17). `reserved` 수량은 보지 않는다. 다른 SKU는 영향이 없다.
   - 재고가 반환돼 `available > 0`이 되면 새로 진입한 사용자부터 같은 SKU의 입장 순번대로 입장시킨다. 종료된 입장 순번과 입장 허가는 복구하지 않는다.
 - 기본값: `heartbeat-timeout` 40초, `admit-per-run` 100명, 입장 허가 작업 주기 1초(`restless.drop.queue.scheduler.fixed-delay-ms`).
-- 입장 허가 유효 시간 `restless.drop.queue.admission-ttl` (기본 5분, 입장 허가 시각부터). 응답의 `admittedUntil`이다. 재고 점유 트랜잭션이 이 시각 전에 커밋돼야 하고, 성공하면 CONSUMED. 결제 기한은 재고 점유의 `expiresAt`이 따로 정한다.
+- 입장 허가 유효 시간 `restless.drop.queue.admission-ttl` (기본 5분, 입장 허가 시각부터). 응답의 `admittedUntil`이다. 재고 점유 트랜잭션이 커밋 직전에 읽은 서버 시각이 이 시각 전이어야 하고, 성공하면 CONSUMED. 결제 기한은 재고 점유의 `expiresAt`이 따로 정한다.
 - 입장은 재고를 보장하지 않는다. 입장 후에도 품절이면 409 `DROP_SOLD_OUT`. TX1 조건부 재고 UPDATE가 재고 확보의 최종 검증이다.
 - 입장 허가는 해당 SKU의 재고 점유에만 쓴다. 종료된 입장 허가로는 점유할 수 없다 (403 `DROP_ADMISSION_REQUIRED`).
 - 대기 종료는 이미 성공한 점유를 취소하지 않는다. 결제, 기한, 재결제, 복구는 D3와 policy.md 8절을 그대로 따른다.
