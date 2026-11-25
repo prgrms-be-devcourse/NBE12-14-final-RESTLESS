@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/api/`, `backend/src/main/java/com/restless/drop/application/dto/`, `backend/src/test/java/com/restless/drop/acceptance/`
 >
-> 마지막 확인: 2026-11-24 (#390 대기열 응답의 선택 필드 `pollAfterMs`, 동시 처리 상한 초과 503 `DROP_QUEUE_BUSY`. 기존 필드와 오류 코드는 그대로다. 이전: 2026-11-22 (#330 재고 버킷 분할. D1 등록과 D2 트랜잭션 문장, D2 품절 판정의 뜻을 고쳤다. 요청, 응답, 오류 코드는 그대로다. 2026-11-20 #285 상태 표기 갱신, 대기열 경로의 429를 #278 `application.yml`, `QueueRateLimitIntegrationTest`와 대조. 2026-11-19 #253 SKU별 입장 제어 정책의 계약 반영. D4는 #254 SKU별 입장 제어 구현과 대조했다. 나머지는 2026-11-14 기준: #92 등록 검증과 판매 상태, #41 탈퇴 제한, #97 탈퇴 동의, #105 검색과 정렬, #109 주문 상세 결제 대상)
+> 마지막 확인: 2026-11-25 (#423 진입 503의 `Retry-After` 기본값 3초에서 5초. 필드와 오류 코드는 그대로다). 이전: 2026-11-24 (#390 대기열 응답의 선택 필드 `pollAfterMs`, 동시 처리 상한 초과 503 `DROP_QUEUE_BUSY`. 기존 필드와 오류 코드는 그대로다. 이전: 2026-11-22 (#330 재고 버킷 분할. D1 등록과 D2 트랜잭션 문장, D2 품절 판정의 뜻을 고쳤다. 요청, 응답, 오류 코드는 그대로다. 2026-11-20 #285 상태 표기 갱신, 대기열 경로의 429를 #278 `application.yml`, `QueueRateLimitIntegrationTest`와 대조. 2026-11-19 #253 SKU별 입장 제어 정책의 계약 반영. D4는 #254 SKU별 입장 제어 구현과 대조했다. 나머지는 2026-11-14 기준: #92 등록 검증과 판매 상태, #41 탈퇴 제한, #97 탈퇴 동의, #105 검색과 정렬, #109 주문 상세 결제 대상)
 
 - 상태: v1 IMPLEMENTED (2026-11-13 합의). 수용 테스트(`backend/src/test/java/com/restless/drop/acceptance/`)가 이 계약을 기준으로 판정한다.
 - Base URL: `/api` ([ADR-0002](../../decisions/0002-common-conventions.md)). 오류는 공통 형식 `{code, message, details, traceId, timestamp}` ([common.md](common.md)).
@@ -177,7 +177,7 @@ SKU의 `available = 0`이면 그 SKU는 **현재 구매 불가**다 (`reserved`�
 - 응답: 503 `DROP_QUEUE_BUSY`와 `Retry-After`(초) 헤더. 오류 본문은 공통 형식이다.
 - 대상은 `POST .../queue/entries`와 `GET`, `HEAD .../queue/me`뿐이다. 재고 점유(TX1), 결제 준비와 승인, 결제 확정은 거절하지 않는다. 사용자별 요청 횟수 제한(429)은 그대로이고 먼저 적용한다.
 - 진입과 조회는 서로 다른 상한을 쓴다. 기본값은 `restless.drop.queue.concurrency.entry-max` 8, `status-max` 30이다. Hikari 풀 20과 Tomcat 스레드 200을 근거로 했고, 풀을 줄이면 같이 줄인다. 상한 값은 재측정으로 다시 정한다.
-- `Retry-After`는 진입 3초(`entry-retry-after-seconds`), 조회 1초(`status-retry-after-seconds`)가 기본이다. 진입은 사용자별 제한이 10초에 5회라서, 계약대로 3초 뒤 재시도하는 클라이언트가 429를 받지 않게 3초로 했다. 재시도 간격 x 제한 횟수가 제한 창보다 짧으면 기동이 실패한다.
+- `Retry-After`는 진입 5초(`entry-retry-after-seconds`), 조회 1초(`status-retry-after-seconds`)가 기본이다. 진입은 2026-11-25에 3초에서 5초로 늘렸다 (#423). 같은 조건 부하 측정에서 진입 오류가 1,694건에서 13건으로 줄었다. 진입은 사용자별 제한이 10초에 5회이고, 5초 x 5회는 25초라 계약대로 재시도하는 클라이언트가 429를 받지 않는다. 재시도 간격 x 제한 횟수가 제한 창보다 짧으면 기동이 실패한다.
 - 503은 서버 상태를 바꾸지 않는다. 진입은 행을 만들지 않고 조회는 heartbeat를 갱신하지 않는다. 같은 요청을 다시 보내도 안전하다.
 - 클라이언트는 `Retry-After` 뒤에 다시 보낸다. 한꺼번에 몰리지 않게 지터를 더한다. 이 응답은 대기를 잃는 오류가 아니다. 이탈 판정 시간 안에 조회가 한 번도 닿지 않으면 대기가 닫힐 수 있다.
 - 메트릭 `drop.queue.busy`(태그 `kind`는 entry, status)가 거절 수를 센다.

@@ -9,9 +9,11 @@
 // 워밍업은 핫 드롭 재고와 참여 계정을 쓰지 않고, 요약의 판매 결과에서 빠진다.
 import { sleep } from 'k6';
 import exec from 'k6/execution';
+import { Counter } from 'k6/metrics';
 import {
   DROP_ID, VARIANT_IDS, TOTAL_STOCK, manifest, loadUsers, baseThresholds, summaryTrendStats, checkTarget,
   reserve, variantFor, skipped, summarize, tracked, windowTag, durationMs, emptyThresholds, latencyLine, pct, ROW_OFFSET, HOT, RETRY, RETRY_MAX,
+  RETRY_MAX_MS, isRetryable,
 } from './lib/drop-reservation.js';
 import {
   enterQueue, pollQueue, nextWaitSeconds, pay, recordFirstResponse, recordQueueWait, recordMember, PAY_TIMEOUT,
@@ -20,6 +22,9 @@ import {
 const QUEUE = __ENV.QUEUE || 'off';
 if (!['off', 'on'].includes(QUEUE)) throw new Error(`QUEUE must be off or on: ${QUEUE}`);
 const PAY = __ENV.PAY !== '0';
+// 진입이 응답 없이 끝난 회원(시간 초과, 연결 오류, 5xx)을 상태 조회로 확인한 결과.
+// found: 서버에 진입이 있었다. reentered: 404라 다시 진입했다. gave_up: 상한이나 관측 종료까지 확인하지 못했다.
+const enterUnknown = new Counter('drop_queue_enter_unknown');
 
 // 참여자 = 총재고 x 경쟁률. 대표 판매는 1,000 x 10, 축소는 500 x 10(PEAK_RATE=500), 200 x 10(PEAK_RATE=200).
 const RATIO = Number(__ENV.RATIO || manifest.contention_ratio);
@@ -72,6 +77,7 @@ const subMetrics = [
   `drop_queue_enter{result:sold_out,${SALE}}`,
   `drop_queue_busy{api:enter,${SALE}}`, `drop_queue_busy{api:poll,${SALE}}`,
   `drop_queue_busy_latency{api:enter,${SALE}}`, `drop_queue_busy_latency{api:poll,${SALE}}`,
+  ...['found', 'reentered', 'gave_up'].map((r) => `drop_queue_enter_unknown{result:${r},${SALE}}`),
   `drop_first_response{${SALE}}`, `drop_queue_wait{${SALE}}`, `iteration_started{${SALE}}`, `iteration_finished{${SALE}}`,
   ...['reserve', 'prepare', 'confirm'].flatMap((api) => [
     `drop_retry_attempts{api:${api},${SALE}}`, `drop_retry_recovered{api:${api},${SALE}}`, `drop_retry_exhausted{api:${api},${SALE}}`, `drop_retry_answered{api:${api},${SALE}}`,
@@ -169,11 +175,37 @@ function member(user, n, deadline, tag, target) {
     // 503 거절은 첫 응답 지연에 넣지 않는다. 아래 busy 지연으로만 본다.
     if (entered.status !== 'BUSY') recordFirstResponse(entered.res);
     // 서버가 503 DROP_QUEUE_BUSY로 일찍 거절하면 오류가 아니라 Retry-After 뒤 다시 진입한다.
-    while (entered.status === 'BUSY') {
-      const wait = nextWaitSeconds(entered, POLL_S);
-      if (Date.now() + wait * 1000 > deadline) return recordMember('unfinished', startedMs);
-      sleep(wait);
-      entered = enterQueue(user, variantId, tag(), target.dropId);
+    // 진입이 응답 없이 끝나면 서버에 진입이 커밋됐을 수 있다. 실제 화면처럼 상태 조회로 확인하고, 404면 다시 진입한다.
+    // 확인하지 않고 끝내면 서버에 남은 진입이 입장 허가를 받아 재고를 허가 기한 동안 잡는다 (10회차, #421).
+    let unknownSince = null;
+    for (;;) {
+      while (entered.status === 'BUSY') {
+        const wait = nextWaitSeconds(entered, POLL_S);
+        if (Date.now() + wait * 1000 > deadline) return recordMember('unfinished', startedMs);
+        sleep(wait);
+        entered = enterQueue(user, variantId, tag(), target.dropId);
+      }
+      if (entered.status !== 'ERROR' || !RETRY || !isRetryable(entered.res)) break;
+      if (unknownSince === null) unknownSince = Date.now();
+      const limitMs = Math.min(deadline, unknownSince + RETRY_MAX_MS);
+      let probe = { status: 'ERROR' };
+      while (probe.status === 'ERROR' || probe.status === 'BUSY') {
+        const wait = nextWaitSeconds(probe, POLL_S);
+        if (Date.now() + wait * 1000 > limitMs) {
+          enterUnknown.add(1, { result: 'gave_up', ...tag() });
+          return recordMember('error', startedMs);
+        }
+        sleep(wait);
+        probe = pollQueue(user, variantId, tag(), target.dropId);
+      }
+      if (probe.status === 'CLOSED') {
+        enterUnknown.add(1, { result: 'reentered', ...tag() });
+        entered = enterQueue(user, variantId, tag(), target.dropId);
+        continue;
+      }
+      enterUnknown.add(1, { result: 'found', ...tag() });
+      entered = probe;
+      break;
     }
     // 그 SKU가 이미 현재 구매 불가면 진입부터 거절된다. 점유의 품절과 같은 결과로 센다.
     if (entered.status === 'SOLD_OUT') return recordMember('sold_out', startedMs);
@@ -223,6 +255,9 @@ export function handleSummary(data) {
         + `unavailable ${m(`drop_queue_poll{result:unavailable,${SALE}}`).count || 0}; enter rejected sold out ${m(`drop_queue_enter{result:sold_out,${SALE}}`).count || 0}`,
       `  queue busy (503 DROP_QUEUE_BUSY, retried after Retry-After): enter ${m(`drop_queue_busy{api:enter,${SALE}}`).count || 0}, `
         + `poll ${m(`drop_queue_busy{api:poll,${SALE}}`).count || 0}`,
+      `  enter without response, checked by poll: found ${m(`drop_queue_enter_unknown{result:found,${SALE}}`).count || 0}, `
+        + `reentered after 404 ${m(`drop_queue_enter_unknown{result:reentered,${SALE}}`).count || 0}, `
+        + `gave up ${m(`drop_queue_enter_unknown{result:gave_up,${SALE}}`).count || 0}`,
       latencyLine('busy enter (503 only)', m(`drop_queue_busy_latency{api:enter,${SALE}}`)),
       latencyLine('busy poll (503 only)', m(`drop_queue_busy_latency{api:poll,${SALE}}`)),
     ] : []),
