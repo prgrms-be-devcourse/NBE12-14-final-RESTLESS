@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/api/`, `backend/src/main/java/com/restless/drop/application/dto/`, `backend/src/test/java/com/restless/drop/acceptance/`
 >
-> 마지막 확인: 2026-11-25 (#438 주최자 오픈 시각 제한. #423 진입 503의 `Retry-After` 기본값 3초에서 5초. 필드와 오류 코드는 그대로다). 이전: 2026-11-24 (#390 대기열 응답의 선택 필드 `pollAfterMs`, 동시 처리 상한 초과 503 `DROP_QUEUE_BUSY`. 기존 필드와 오류 코드는 그대로다. 이전: 2026-11-22 (#330 재고 버킷 분할. D1 등록과 D2 트랜잭션 문장, D2 품절 판정의 뜻을 고쳤다. 요청, 응답, 오류 코드는 그대로다. 2026-11-20 #285 상태 표기 갱신, 대기열 경로의 429를 #278 `application.yml`, `QueueRateLimitIntegrationTest`와 대조. 2026-11-19 #253 SKU별 입장 제어 정책의 계약 반영. D4는 #254 SKU별 입장 제어 구현과 대조했다. 나머지는 2026-11-14 기준: #92 등록 검증과 판매 상태, #41 탈퇴 제한, #97 탈퇴 동의, #105 검색과 정렬, #109 주문 상세 결제 대상)
+> 마지막 확인: 2026-11-25 (#446 호출 순서에 경로와 결제 준비, 승인 요청 구분 추가. 입장 허가 기한과 예약 결제 기한 구분. D2 트랜잭션 문장을 TX1 코드 순서와 맞춤. 요청, 응답, 오류 코드는 그대로다. #438 주최자 오픈 시각 제한. #423 진입 503의 `Retry-After` 기본값 3초에서 5초. 필드와 오류 코드는 그대로다). 이전: 2026-11-24 (#390 대기열 응답의 선택 필드 `pollAfterMs`, 동시 처리 상한 초과 503 `DROP_QUEUE_BUSY`. 기존 필드와 오류 코드는 그대로다. 이전: 2026-11-22 (#330 재고 버킷 분할. D1 등록과 D2 트랜잭션 문장, D2 품절 판정의 뜻을 고쳤다. 요청, 응답, 오류 코드는 그대로다. 2026-11-20 #285 상태 표기 갱신, 대기열 경로의 429를 #278 `application.yml`, `QueueRateLimitIntegrationTest`와 대조. 2026-11-19 #253 SKU별 입장 제어 정책의 계약 반영. D4는 #254 SKU별 입장 제어 구현과 대조했다. 나머지는 2026-11-14 기준: #92 등록 검증과 판매 상태, #41 탈퇴 제한, #97 탈퇴 동의, #105 검색과 정렬, #109 주문 상세 결제 대상)
 
 - 상태: v1 IMPLEMENTED (2026-11-13 합의). 수용 테스트(`backend/src/test/java/com/restless/drop/acceptance/`)가 이 계약을 기준으로 판정한다.
 - Base URL: `/api` ([ADR-0002](../../decisions/0002-common-conventions.md)). 오류는 공통 형식 `{code, message, details, traceId, timestamp}` ([common.md](common.md)).
@@ -19,7 +19,11 @@
 | D4 입장 제어 | SKU별 입장 신청, 내 입장 상태 |
 | 탈퇴 제한 (#41) | 회원 탈퇴(`POST /api/me/withdraw`)를 막는 드롭 조건 |
 
-호출 순서: 상품 상세(SKU, 배송지 확인) → **구매하기 = 선택한 SKU의 입장 신청** → 대기 상태 반복 조회 → 입장 허가 → 재고 점유 + 주문 생성(화면이 자동 요청) → `POST /api/payments` → 토스 결제창 → `POST /api/payments/confirm` → 결과 조회
+호출 순서: 상품 상세(SKU, 배송지 확인) → **결제하기 = 선택한 SKU의 입장 신청** (`POST .../queue/entries`) → 대기 상태 반복 조회 (`GET .../queue/me`) → 입장 허가 (서버 작업) → 재고 점유 + 주문 생성 (`POST .../reservations`, 화면이 자동 요청) → 결제 준비 (`POST /api/payments`, 화면이 이어서 요청) → 상세 화면의 토스 결제창에서 결제수단 선택과 인증 → 승인 요청 (`POST /api/payments/confirm`, 승인 시작 커밋 뒤 PG 승인) → 결과 조회
+
+- 사용자가 누르는 버튼은 `결제하기` 하나다. 배송지와 재고 점유의 `Idempotency-Key`는 입장 신청 전에 화면이 만들어 보관하고, 입장 허가 뒤 그대로 보낸다.
+- 결제 준비는 결제 시도(`READY`)만 만든다. 예약, 주문, 재고는 승인 요청의 승인 시작부터 바뀐다 ([transactions.md](../../domains/drop/transactions.md) 구매 흐름과 트랜잭션).
+- 기한은 둘이다. 입장 허가 기한 `admittedUntil`(D4)은 재고 점유 요청까지, 예약 결제 기한 `expiresAt`(D2)은 승인 시작까지의 기한이다. 서로 더해지지 않는다.
 
 ## D1. 상품 등록·조회
 
@@ -108,7 +112,7 @@
 
 - 수량 필드는 없다. 주문 하나 = SKU 한 종류, 수량 1 (INV-04).
 - 판매 가능 = 게시됨(`SCHEDULED` 또는 `OPEN`)이고 `opensAt <= 서버 시각 < closesAt`. `OPEN` 전환은 판정에 영향이 없다. `CLOSED`·`CANCELLED`는 시각과 관계없이 판매하지 않는다 (#92).
-- 하나의 트랜잭션: 판매 기간과 상태 확인 → 구매 슬롯 점유(INV-05) → 공통 주문(PENDING_PAYMENT, 금액 = 서버 가격, 배송지 스냅샷) 생성 → 재고 점유(RESERVED, 기한 = 지금 + TTL) 저장 → 그 SKU의 재고 버킷 하나에서 조건부 차감(`available - 1`, `reserved + 1`). 재고 점유가 주문을 NOT NULL FK로 가리켜서 주문을 먼저 만든다. 재고 차감은 재고 락을 짧게 쥐려고 마지막에 하고, 재고가 없거나 락 대기 중 판매가 끝나면 앞의 쓰기가 모두 롤백된다 (#322). 서버는 잠기지 않은 버킷을 고르고, 점유가 가져간 버킷을 기록한다 (#330).
+- 하나의 트랜잭션: 같은 키의 기존 결과 확인(INV-07) → 판매 기간과 상태 확인 → 구매 슬롯 잠금과 활성 거래 확인(INV-05) → 입장 제어 사용 시 그 SKU의 유효한 입장 허가 확인(INV-06) → 공통 주문(PENDING_PAYMENT, 금액 = 서버 가격, 배송지 스냅샷) 생성 → 재고 점유(RESERVED, 기한 = 지금 + TTL) 저장 → 입장 허가 소비(CONSUMED)와 구매 슬롯 점유 → 그 SKU의 재고 버킷 하나에서 조건부 차감(`available - 1`, `reserved + 1`). 재고 점유가 주문을 NOT NULL FK로 가리켜서 주문을 먼저 만든다. 재고 차감은 재고 락을 짧게 쥐려고 마지막에 하고, 재고가 없거나 락 대기 중 판매가 끝나면 앞의 쓰기가 모두 롤백된다 (#322). 서버는 잠기지 않은 버킷을 고르고, 점유가 가져간 버킷을 기록한다 (#330).
 - 201
 ```json
 { "reservationId": 5, "orderId": 7, "status": "RESERVED", "amount": 39000, "expiresAt": "..." }
@@ -121,7 +125,7 @@
   - 409 `DROP_ACTIVE_PURCHASE_EXISTS`: 같은 회원이 같은 드롭에서 진행 중인 거래가 있음 (INV-05)
   - 403 `DROP_ADMISSION_REQUIRED`: 입장 제어 사용 시 유효한 입장 허가 없음 (D4, INV-06). 종료된 입장 허가, 요청 `variantId`와 다른 SKU의 입장 허가도 같은 오류로 거절한다 (2026-11-19 결정. 정상 화면에서는 생기지 않는 요청을 막는 방어 검사다)
   - 400 `INVALID_REQUEST`: 키·배송지 검증
-- TTL 설정 `restless.drop.reservation.ttl` (기본 5분).
+- TTL 설정 `restless.drop.reservation.ttl` (기본 5분). 응답의 `expiresAt`이 예약 결제 기한이다. 이 시각 전에 승인 시작이 커밋돼야 하고, 지나면 만료 작업이 재고를 반환한다. 입장 허가 기한(`admittedUntil`)과는 별개다.
 - 입장 제어 사용 여부 설정 `restless.drop.queue.required` (기본 `true`). `false`면 입장 허가 없이 재고 점유한다. 트래픽 실험 EXP-02(입장 제어 켬/끔 비교)와 D2 수용 테스트가 쓴다.
 
 ### `GET /api/drops/{dropId}/reservations/{reservationId}` (본인)
@@ -130,7 +134,8 @@
 
 ## D3. 결제 연결
 
-- 결제 준비: `POST /api/payments` `{ "payableType": "DROP", "payableId": <reservationId> }` ([common.md](common.md)).
+- 결제 준비: `POST /api/payments` `{ "payableType": "DROP", "payableId": <reservationId> }` ([payment.md](payment.md#결제-준비)). 재고 점유가 RESERVED일 때만 된다. 결제 시도 `READY`를 만들 뿐 재고 점유, 주문, 재고를 바꾸지 않고 PG를 부르지 않는다.
+- 승인 요청: 토스 인증 뒤 `POST /api/payments/confirm` ([payment.md](payment.md#결제-승인)). 승인 시작(재고 점유 CONFIRMING, 주문 PAYMENT_CONFIRMING, 결제 PROCESSING)을 먼저 커밋하고 트랜잭션 밖에서 토스 승인 API를 부른다. 서버 시각이 재고 점유의 `expiresAt`과 같거나 지났으면 승인 시작을 거절한다. 기한 뒤면 결제 모듈이 `PAYMENT_WINDOW_EXPIRED`로, 정확히 같은 시각이면 드롭이 409 `PAYMENT_NOT_PAYABLE`(`details.reason = "DROP_NOT_PAYABLE"`)로 거절한다. 두 경우 모두 PG를 부르지 않고 결제 시도는 FAILED, 재고 점유는 RESERVED로 남아 만료 작업이 반환한다. 화면은 둘을 같은 결제 기한 경과로 안내한다.
 - 주문 상세 `GET /api/orders/{orderId}`의 `payable`과 `payableExpiresAt`은 드롭이 알려 준다. 결제 대상은 그 주문의 재고 점유이고, 기한은 점유 만료 시각이다 (`DropOrderPayableResolver`, #109).
 - 드롭 `PaymentResultHandler`는 [transactions.md](../../domains/drop/transactions.md) TX2~TX5와 [policy.md](../../domains/drop/policy.md) 8·10절을 따른다 (재결제 허용, 환불 종류별 재고 처리). 환불 요청은 받아들인다(전액 환불 지원).
 - 결제창에 보이는 주문명은 드롭 제목이다. 100자를 넘으면 100자로 자른다. 금액은 주문 스냅샷 금액이다.
@@ -215,7 +220,7 @@ SKU의 `available = 0`이면 그 SKU는 **현재 구매 불가**다 (`reserved`�
   - SKU의 `available = 0`이면 그 SKU는 입장시키지 않고 `WAITING`과 미사용 `ADMITTED`를 종료한다 (INV-17). `reserved` 수량은 보지 않는다. 다른 SKU는 영향이 없다.
   - 재고가 반환돼 `available > 0`이 되면 새로 진입한 사용자부터 같은 SKU의 입장 순번대로 입장시킨다. 종료된 입장 순번과 입장 허가는 복구하지 않는다.
 - 기본값: `heartbeat-timeout` 40초, `admit-per-run` 100명, 입장 허가 작업 주기 1초(`restless.drop.queue.scheduler.fixed-delay-ms`).
-- 입장 허가 유효 시간 `restless.drop.queue.admission-ttl` (기본 5분). 재고 점유에 성공하면 CONSUMED.
+- 입장 허가 유효 시간 `restless.drop.queue.admission-ttl` (기본 5분, 입장 허가 시각부터). 응답의 `admittedUntil`이다. 재고 점유 트랜잭션이 이 시각 전에 커밋돼야 하고, 성공하면 CONSUMED. 결제 기한은 재고 점유의 `expiresAt`이 따로 정한다.
 - 입장은 재고를 보장하지 않는다. 입장 후에도 품절이면 409 `DROP_SOLD_OUT`. TX1 조건부 재고 UPDATE가 재고 확보의 최종 검증이다.
 - 입장 허가는 해당 SKU의 재고 점유에만 쓴다. 종료된 입장 허가로는 점유할 수 없다 (403 `DROP_ADMISSION_REQUIRED`).
 - 대기 종료는 이미 성공한 점유를 취소하지 않는다. 결제, 기한, 재결제, 복구는 D3와 policy.md 8절을 그대로 따른다.

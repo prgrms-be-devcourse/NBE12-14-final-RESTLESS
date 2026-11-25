@@ -2,13 +2,27 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/application/`
 >
-> 마지막 확인: 2026-11-25 (#435 TX5-c 삭제 기준 시각 추가. #430 TX2 삭제 거절과 TX5-c 새벽 환불 추가. #429 주최자 등록과 게시 추가. 관리자 등록과 같은 트랜잭션 하나이고, 게시는 드롭 행 잠금 뒤 소유자를 확인한다. 이전: 2026-11-24 (#390 D4 상태 조회와 진입에 동시 처리 상한과 `pollAfterMs` 추가, 트랜잭션 경계는 그대로. #388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 재고 버킷 분할: TX1 5번, 계측 표, 정산 대상 버킷, 입장 허가 작업의 재고 합 읽기. 2026-11-21 #325 완료 단계 타이머 추가. #322 TX1 순서 변경: 재고 UPDATE를 마지막으로. 2026-11-20 #285 TX3 롤백 뒤 상태를 `DropApprovalRollbackRecoveryIntegrationTest`, 장애 처리 문서와 대조. 용어 정리. 2026-11-19 #254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
+> 마지막 확인: 2026-11-25 (#446 구매 흐름과 트랜잭션 대응 표 추가, 결제 준비를 TX2와 나눠 적음. `DropReservationTransactions`, `DropPaymentResultHandler`, `PaymentTransactions.begin`과 대조, 경계는 그대로. #435 TX5-c 삭제 기준 시각 추가. #430 TX2 삭제 거절과 TX5-c 새벽 환불 추가. #429 주최자 등록과 게시 추가. 관리자 등록과 같은 트랜잭션 하나이고, 게시는 드롭 행 잠금 뒤 소유자를 확인한다. 이전: 2026-11-24 (#390 D4 상태 조회와 진입에 동시 처리 상한과 `pollAfterMs` 추가, 트랜잭션 경계는 그대로. #388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 재고 버킷 분할: TX1 5번, 계측 표, 정산 대상 버킷, 입장 허가 작업의 재고 합 읽기. 2026-11-21 #325 완료 단계 타이머 추가. #322 TX1 순서 변경: 재고 UPDATE를 마지막으로. 2026-11-20 #285 TX3 롤백 뒤 상태를 `DropApprovalRollbackRecoveryIntegrationTest`, 장애 처리 문서와 대조. 용어 정리. 2026-11-19 #254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
 
 PG 호출 중에는 DB 트랜잭션을 열어 두지 않는다.
 
 재고 수량의 증감(`reserved -1, sold +1` 같은 표기)은 모두 재고 점유가 기록한 버킷(`drop_reservations.bucket_no`) 한 행에 적용한다. 바뀐 행이 정확히 1이 아니면 예외로 전체를 롤백한다 (INV-03, INV-11, #330).
 
 TX2~TX5의 드롭 쪽 단계는 결제 모듈이 같은 트랜잭션에서 호출하는 `PaymentResultHandler` 드롭 구현 안에서 수행한다 ([ADR-0003](../../decisions/0003-payment-module-boundary.md)).
+
+## 구매 흐름과 트랜잭션
+
+[policy.md 4절](policy.md#4-구매-흐름-decided)의 단계가 어느 요청과 트랜잭션에 해당하는지 정리한다.
+
+| 단계 | 요청 | 트랜잭션 | 재고 |
+|---|---|---|---|
+| `결제하기` = 입장 신청 | `POST /api/drops/{dropId}/queue/entries` | D4 진입 트랜잭션 | 바뀌지 않는다 |
+| 대기 상태 조회 | `GET /api/drops/{dropId}/queue/me` | 읽기. 10초를 넘긴 WAITING만 heartbeat UPDATE | 바뀌지 않는다 |
+| 입장 허가 | 요청 없음. Spring Scheduler의 `dropQueueAdmissionJob` | D4 입장과 종료 트랜잭션 | 바뀌지 않는다 |
+| 재고 점유 + 주문 생성 (화면이 자동 요청) | `POST /api/drops/{dropId}/reservations` | TX1 | available -1, reserved +1 |
+| 결제 준비 | `POST /api/payments` | 결제 모듈 트랜잭션, 드롭은 `load`만 | 바뀌지 않는다 |
+| 토스 결제창 인증 | 브라우저와 토스 사이. 서버 요청 없음 | 없음 | 바뀌지 않는다 |
+| 승인 요청 | `POST /api/payments/confirm` | TX2 커밋 → 트랜잭션 밖 PG 승인 → 결과 트랜잭션(TX3, TX2-b, TX4-a 중 하나) | TX3면 reserved -1, sold +1 |
 
 ## TX1. 재고 점유 + 주문 생성
 
@@ -53,20 +67,27 @@ Notion 원본은 재고 예약이 1번이다. #322 전에는 슬롯 확인 직�
 
 `lock.held`에서 `lock.completion`을 빼면 락을 얻은 뒤 커밋 전까지의 시간이다. 5-3 왕복이 들어가므로 #330 전 값과 구간이 다르다. 전후 비교는 같은 날 K=1 실행과 한다. `drop.inventory.lock.held`는 앱에서 잰다. DB가 잠금을 쥔 시간에 응답과 커밋 왕복이 더해진다. 품절은 버킷 락을 얻지 않아 이 타이머에 들어가지 않는다.
 
+## 결제 준비 (TX2 전)
+
+TX1 뒤 화면이 `POST /api/payments`로 결제를 준비한다. 결제 모듈 트랜잭션에서 드롭 `load`가 예약 행을 잠그고, RESERVED일 때만 결제 대상(금액, 주문명, 기한)을 돌려준다. 결제 모듈은 결제 시도를 `READY`로 만든다.
+
+- 예약, 주문, 재고, 구매 슬롯은 바뀌지 않는다. 승인 시작이 아니다.
+- PG를 부르지 않는다. 토스 결제창은 그다음 브라우저가 연다.
+- 결제 시도의 기한(`expiresAt`)은 예약 결제 기한(`expires_at`)이다.
+
 ## TX2. PG 승인 시작
 
-짧은 MySQL 트랜잭션에서:
+토스 결제창 인증 뒤 화면이 `POST /api/payments/confirm`을 보내면 결제 모듈이 연다. 짧은 MySQL 트랜잭션에서:
 
+0. 결제 모듈이 결제 행을 잠그고 `READY`와 금액을 확인한다. 결제 행을 먼저, 예약 행을 나중에 잠근다 ([ADR-0003](../../decisions/0003-payment-module-boundary.md))
 1. 예약 상태와 만료 검증 (예약 행을 잠근 뒤 읽은 현재 시각으로 판정). 드롭이 삭제(`CANCELLED`)됐으면 거절한다 (#430)
 2. RESERVED → CONFIRMING, 예약에 이 시도의 `paymentId` 기록 (`current_payment_id`)
 3. Order → PAYMENT_CONFIRMING
 4. Payment 승인 시도 상태 기록 (READY → PROCESSING, `approval_started_at`)
-5. 예약이 RESERVED가 아니거나 기한이 지났으면 아무것도 바꾸지 않고 `DROP_NOT_PAYABLE`로 거절한다
+5. 예약이 RESERVED가 아니거나 기한이 지났으면(기한과 같은 시각 포함) 예약과 주문을 바꾸지 않고 `DROP_NOT_PAYABLE`로 거절한다. 결제 모듈은 시도를 `FAILED`(`APPROVAL_REJECTED`)로 닫고 PG를 부르지 않는다. 응답은 409 `PAYMENT_NOT_PAYABLE`이다. 결제 모듈 자체의 기한 검사는 기한 뒤만 거절하므로 정확히 같은 시각은 여기서 걸린다 (`DropPaymentLifecycleIntegrationTest.approvalAtExactDeadlineIsRejectedEvenIfAttemptTimestampIsEarlier`)
 6. Commit
 
-그다음 트랜잭션 밖에서 PG 승인 API를 호출한다.
-
-결제 준비 단계의 `load`도 예약 행을 잠그고, RESERVED일 때만 결제 대상(금액, 주문명, 기한)을 돌려준다.
+그다음 트랜잭션 밖에서 PG 승인 API를 호출한다. 결과는 새 트랜잭션에서 TX3, TX2-b, TX4-a 중 하나로 반영한다.
 
 재결제도 같은 흐름이다. 새 `payments` 행이 생기고 `current_payment_id`가 새 시도로 바뀐다.
 
