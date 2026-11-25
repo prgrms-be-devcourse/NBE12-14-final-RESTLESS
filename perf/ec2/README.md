@@ -52,7 +52,7 @@ perf/ec2/perf-ec2.sh seed <scale> && perf/ec2/perf-ec2.sh serve-tokens
 ```
 
 9. 끝나면 perf.env에서 실험용으로 바꾼 값을 되돌린다. 콘솔에서 CPU 크레딧을 표준으로 되돌리고 `CPUCreditBalance` 끝값을 적는다.
-   [perf 전용 기간](../README.md#perf-전용-기간-2026-11-18--2026-11-30)에는 `finish`를 실행하지 않는다. 기간이 끝나는 날에만 아래로 배포 컨테이너를 되돌린다. 3분 안에 다시 뜬다.
+   [perf 전용 기간](../README.md#perf-전용-기간)에는 `finish`를 실행하지 않는다. 기간이 끝나는 날에만 아래로 배포 컨테이너를 되돌린다. 3분 안에 다시 뜬다.
 
 ```bash
 perf/ec2/perf-ec2.sh finish
