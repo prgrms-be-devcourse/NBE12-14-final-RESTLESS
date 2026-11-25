@@ -292,6 +292,36 @@ class OrganizerConcertApiTest {
     }
 
     @Test
+    @DisplayName("만료된 선점 이력만 있어도, 공개된 공연이어도 회차·공연을 삭제하지 않는다")
+    void holdHistoryAndPublicationBlockDeletion() throws Exception {
+        Long layoutId = layoutFor(venueId);
+        addSellableSeat(layoutId);
+        Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        var created = mockMvc.perform(post("/api/organizer/concerts/{id}/performances", concertId).with(actor(ownerId, "ORGANIZER")).contentType("application/json")
+                .content(performanceBody("2027-03-01T00:00:00Z", "2027-02-20T00:00:00Z", "2027-02-25T00:00:00Z", 2))).andExpect(status().isCreated()).andReturn();
+        long performanceId = ((Number) com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.performanceId")).longValue();
+        Long seatId = jdbc.queryForObject("SELECT id FROM performance_seats WHERE performance_id=?", Long.class, performanceId);
+        jdbc.update("INSERT INTO ticket_reservations (user_id,performance_id,request_key,status,hold_expires_at,created_at) VALUES (?,?,?,'EXPIRED',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))", customerId, performanceId, UUID.randomUUID().toString());
+        Long reservationId = jdbc.queryForObject("SELECT id FROM ticket_reservations WHERE performance_id=?", Long.class, performanceId);
+        jdbc.update("INSERT INTO seat_holds (reservation_id,performance_id,performance_seat_id,price_amount,expires_at,status,created_at,released_at) VALUES (?,?,?,100,UTC_TIMESTAMP(6),'EXPIRED',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))", reservationId, performanceId, seatId);
+        var deletePerformance = org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/organizer/performances/{id}", performanceId);
+        mockMvc.perform(deletePerformance.with(actor(adminId, "ADMIN"))).andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=?", Integer.class, performanceId)).isEqualTo(1);
+        Long published = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
+        entityManager.flush();
+        jdbc.update("UPDATE concerts SET is_published=TRUE WHERE id=?", published);
+        entityManager.clear();
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/organizer/concerts/{id}", published)
+                .with(actor(adminId, "ADMIN"))).andExpect(status().isConflict());
+        Performance publishedPerformance = Performance.create(published, venueId, layoutId, Instant.parse("2027-03-02T00:00:00Z"),
+                Instant.parse("2027-02-01T00:00:00Z"), Instant.parse("2027-02-28T00:00:00Z"), 2, "SCHEDULED");
+        entityManager.persist(publishedPerformance);
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/organizer/performances/{id}", publishedPerformance.getId())
+                .with(actor(adminId, "ADMIN"))).andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performances WHERE concert_id=?", Integer.class, published)).isEqualTo(1);
+    }
+
+    @Test
     void deletedAndExpiredReservationHistoryBlocksPerformanceDeletion() throws Exception {
         Long layoutId = layoutFor(venueId);
         Long concertId = concertWithPeriod(LocalDate.of(2027, 3, 1), LocalDate.of(2027, 3, 3), layoutId);
