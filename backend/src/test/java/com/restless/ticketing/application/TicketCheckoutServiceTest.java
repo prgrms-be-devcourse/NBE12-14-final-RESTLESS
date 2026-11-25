@@ -92,7 +92,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 @AutoConfigureMockMvc
 class TicketCheckoutServiceTest {
     @Autowired TicketCheckoutService checkout;
-    @Autowired OrganizerSeatPricingService seatPricing;
     @MockitoSpyBean TicketPaymentService paymentService;
     @Autowired TicketPaymentResultHandler handler;
     @Autowired TicketOrderPayableResolver orderPayables;
@@ -1076,13 +1075,8 @@ class TicketCheckoutServiceTest {
                                        PaymentAttemptContext attempt) { }
 
     @Nested
-    @DisplayName("회차 구역별 좌석 가격 설정")
-    class OrganizerSeatPricing {
-        private List<OrganizerSeatPricingService.SectionPrice> prices(long a, long b) {
-            return List.of(new OrganizerSeatPricingService.SectionPrice("A", "VIP", a),
-                    new OrganizerSeatPricingService.SectionPrice("B", "R", b));
-        }
-
+    @DisplayName("공통 구역 가격과 회차 판매 좌석")
+    class CommonSectionPricing {
         private void prepareLayout() {
             jdbc.update("UPDATE users SET role='ORGANIZER' WHERE id=?", fixture.firstUserId());
             jdbc.update("UPDATE users SET role='ORGANIZER' WHERE id=?", fixture.secondUserId());
@@ -1133,55 +1127,6 @@ class TicketCheckoutServiceTest {
             jdbc.update("UPDATE performances SET booking_opens_at=DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) WHERE id=?", performanceId);
             var reservation = service.reserve(fixture.firstUserId(), UUID.randomUUID().toString(), performanceId, ids);
             assertThat(checkout(reservation).totalAmount()).isEqualTo(270000L);
-        }
-
-        @Test
-        @DisplayName("가격 누락·중복과 설정 중 실패는 좌석을 일부만 생성하지 않는다")
-        void invalidInputAndRollbackLeaveNoSeats() {
-            prepareLayout();
-            assertThatThrownBy(() -> seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), List.of(prices(1, 2).getFirst())))
-                    .isInstanceOfSatisfying(BusinessException.class, ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
-            assertThatThrownBy(() -> seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), List.of(prices(1, 2).getFirst(), prices(1, 2).getFirst())))
-                    .isInstanceOfSatisfying(BusinessException.class, ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
-            TransactionTemplate tx = new TransactionTemplate(transactionManager);
-            tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
-            assertThatThrownBy(() -> tx.execute(status -> {
-                seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), prices(1, 2));
-                throw new InjectedFailure();
-            })).isInstanceOf(InjectedFailure.class);
-            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=?", Integer.class, fixture.performanceId())).isZero();
-        }
-
-        @Test
-        @DisplayName("동시 동일 가격 설정은 좌석을 한 번만 생성한다")
-        void concurrentSetupDoesNotDuplicateSeats() throws Exception {
-            prepareLayout();
-            var ready = new CountDownLatch(2);
-            var start = new CountDownLatch(1);
-            var pool = Executors.newFixedThreadPool(2);
-            try {
-                Callable<Boolean> action = () -> { ready.countDown(); await(start); return seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), prices(1, 2)).changed(); };
-                var first = pool.submit(action); var second = pool.submit(action);
-                assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue(); start.countDown();
-                assertThat(List.of(first.get(15, TimeUnit.SECONDS), second.get(15, TimeUnit.SECONDS))).containsExactlyInAnyOrder(true, false);
-                assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE performance_id=?", Integer.class, fixture.performanceId())).isEqualTo(2);
-            } finally { start.countDown(); pool.shutdownNow(); assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue(); }
-        }
-
-        @Test
-        @DisplayName("예매 시작 이후 또는 선점 이력이 있으면 기존 가격을 변경하지 않는다")
-        void rejectsChangesAfterOpenAndWithHoldHistory() {
-            prepareLayout();
-            seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), prices(1, 2));
-            jdbc.update("UPDATE performances SET booking_opens_at=DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 HOUR), booking_closes_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) WHERE id=?", fixture.performanceId());
-            assertThatThrownBy(() -> seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), prices(3, 4)))
-                    .isInstanceOfSatisfying(BusinessException.class, ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.TICKET_PRICING_CLOSED));
-            Long seatId = jdbc.queryForObject("SELECT MIN(id) FROM performance_seats WHERE performance_id=?", Long.class, fixture.performanceId());
-            service.reserve(fixture.firstUserId(), UUID.randomUUID().toString(), fixture.performanceId(), List.of(seatId));
-            jdbc.update("UPDATE performances SET booking_opens_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR), booking_closes_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 2 HOUR) WHERE id=?", fixture.performanceId());
-            assertThatThrownBy(() -> seatPricing.configure(fixture.firstUserId(), fixture.performanceId(), prices(3, 4)))
-                    .isInstanceOfSatisfying(BusinessException.class, ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.TICKET_PRICING_CLOSED));
-            assertThat(jdbc.queryForList("SELECT price FROM performance_seats WHERE performance_id=? ORDER BY id", Long.class, fixture.performanceId())).containsExactly(1L, 2L);
         }
     }
 

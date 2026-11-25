@@ -25,7 +25,6 @@ import com.restless.concert.domain.LayoutSeat;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -160,29 +159,5 @@ public class OrganizerPerformanceService {
                 .filter(item -> !item.getId().equals(excludedId))
                 .anyMatch(item -> startsAt.isBefore(item.getStartsAt().plusSeconds(seconds)) && item.getStartsAt().isBefore(endsAt));
         if (overlaps) throw new BusinessException(ErrorCode.INVALID_REQUEST, "공연 회차 시간이 겹칩니다.");
-    }
-
-    /** 호출자의 트랜잭션에서 회차를 잠가 가격 설정과 재설정을 직렬화한다. */
-    @Transactional(propagation = Propagation.MANDATORY)
-    public com.restless.concert.application.dto.SeatSetupLayout lockOwnedSeatLayout(Long actorId, Long performanceId) {
-        if (actorId == null || actorId <= 0) throw new BusinessException(ErrorCode.UNAUTHORIZED);
-        MemberRole role = members.getActive(actorId).getRole();
-        if (role != MemberRole.ORGANIZER && role != MemberRole.ADMIN) throw new BusinessException(ErrorCode.FORBIDDEN);
-        if (performanceId == null || performanceId <= 0) throw new BusinessException(ErrorCode.INVALID_REQUEST);
-        Performance performance = performances.findLockedById(performanceId).orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        Concert concert = concerts.findById(performance.getConcertId()).filter(c -> role == MemberRole.ADMIN || c.getSellerId().equals(actorId))
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        if (!concert.getVenueId().equals(performance.getVenueId())) throw new IllegalStateException("공연과 회차의 공연장이 일치하지 않습니다.");
-        var seats = sellableSeatsForLayout(performance.getLayoutId());
-        return new com.restless.concert.application.dto.SeatSetupLayout(performance.getId(), performance.getLayoutId(), performance.getBookingOpensAt(), seats);
-    }
-
-    @Transactional(propagation = Propagation.MANDATORY)
-    public void ensureSeatPricingAllowed(Long actorId, Long performanceId) {
-        var layout = lockOwnedSeatLayout(actorId, performanceId);
-        Instant now = jdbc.queryForObject("SELECT UTC_TIMESTAMP(6)", LocalDateTime.class).toInstant(ZoneOffset.UTC);
-        if (!now.isBefore(layout.bookingOpensAt()) || history.hasSeatHold(performanceId)) {
-            throw new BusinessException(ErrorCode.TICKET_PRICING_CLOSED);
-        }
     }
 }

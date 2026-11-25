@@ -1,10 +1,8 @@
 package com.restless.concert.application.dto;
 
-import java.time.Instant;
-import java.util.List;
+/** 배치의 판매 가능 좌석 표현. 회차 좌석 생성과 준비 확인이 공유한다. */
+public final class SeatSetupLayout {
+    private SeatSetupLayout() { }
 
-/** 회차 잠금 아래 읽은 판매 가능 배치 좌석. */
-public record SeatSetupLayout(Long performanceId, Long layoutId, Instant bookingOpensAt, List<Seat> seats) {
-    public SeatSetupLayout { seats = List.copyOf(seats); }
     public record Seat(Long venueSeatId, String sectionLabel) { }
 }
