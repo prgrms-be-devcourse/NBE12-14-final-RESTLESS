@@ -9,6 +9,7 @@ import com.restless.concert.application.dto.OrganizerLayoutInfo;
 import com.restless.concert.application.dto.PerformanceInfo;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
@@ -86,7 +87,7 @@ public class OrganizerConcertController {
         return concerts.configurePrices(userId, concertId, request.sections().stream()
                 .map(section -> new OrganizerConcertService.SectionPriceInput(section.sectionLabel(), section.grade(), section.price())).toList());
     }
-    public record SectionPricesRequest(@jakarta.validation.constraints.NotEmpty List<@Valid SectionPriceRequest> sections) { }
+    public record SectionPricesRequest(@NotEmpty List<@Valid SectionPriceRequest> sections) { }
     public record SectionPriceRequest(@NotBlank @Size(max=50) String sectionLabel, @NotBlank @Size(max=20) String grade,
                                      @NotNull @Positive Long price) { }
 
@@ -113,7 +114,7 @@ public class OrganizerConcertController {
     }
 
     public record BatchPerformanceRequest(@NotNull Instant bookingOpensAt, @NotNull @Positive Integer maxTicketsPerUser,
-            @jakarta.validation.constraints.NotEmpty @Size(max = 10) List<@NotNull @Valid BatchPerformanceItem> performances) { }
+            @NotEmpty @Size(max = 10) List<@NotNull @Valid BatchPerformanceItem> performances) { }
     public record BatchPerformanceItem(@NotNull Instant startsAt, @NotNull Instant bookingClosesAt) { }
     public record BatchPerformanceResponse(List<PerformanceInfo> performances) { }
 

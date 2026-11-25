@@ -29,6 +29,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Objects;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Isolation;
 
@@ -82,7 +83,7 @@ public class OrganizerConcertService {
         try {
             concerts.delete(concert);
             concerts.flush();
-        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+        } catch (DataIntegrityViolationException ex) {
             throw new BusinessException(ErrorCode.CONCERT_DELETE_CONFLICT);
         }
     }
