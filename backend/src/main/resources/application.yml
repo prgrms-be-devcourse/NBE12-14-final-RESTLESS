@@ -66,7 +66,7 @@ restless:
         entry-max: 8
         status-max: 30
         # 진입 Retry-After x 진입 요청 횟수 제한(10초당 5회)이 제한 창 이상이어야 한다. 어기면 기동이 실패한다.
-        entry-retry-after-seconds: 3
+        entry-retry-after-seconds: 5
         status-retry-after-seconds: 1
       scheduler:
         enabled: true

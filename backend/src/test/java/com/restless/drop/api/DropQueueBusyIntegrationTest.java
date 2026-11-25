@@ -112,7 +112,7 @@ class DropQueueBusyIntegrationTest {
     @DisplayName("진입 허용치가 모두 차 있으면 즉시 503 DROP_QUEUE_BUSY와 Retry-After를 주고, 행을 만들지 않는다")
     void entryAboveLimitIsRejected() throws Exception {
         exhaust(Kind.ENTRY);
-        enter().andExpect(status().isServiceUnavailable()).andExpect(header().string("Retry-After", "3"))
+        enter().andExpect(status().isServiceUnavailable()).andExpect(header().string("Retry-After", "5"))
                 .andExpect(jsonPath("$.code").value("DROP_QUEUE_BUSY")).andExpect(jsonPath("$.traceId").exists());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_entries WHERE drop_id=?", Long.class, drop)).isZero();
 

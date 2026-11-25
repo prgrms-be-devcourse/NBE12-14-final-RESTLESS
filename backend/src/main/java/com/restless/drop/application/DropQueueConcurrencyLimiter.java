@@ -24,7 +24,7 @@ public class DropQueueConcurrencyLimiter {
     public DropQueueConcurrencyLimiter(
             @Value("${restless.drop.queue.concurrency.entry-max:8}") int entryMax,
             @Value("${restless.drop.queue.concurrency.status-max:30}") int statusMax,
-            @Value("${restless.drop.queue.concurrency.entry-retry-after-seconds:3}") int entryRetryAfterSeconds,
+            @Value("${restless.drop.queue.concurrency.entry-retry-after-seconds:5}") int entryRetryAfterSeconds,
             @Value("${restless.drop.queue.concurrency.status-retry-after-seconds:1}") int statusRetryAfterSeconds,
             RateLimitProperties rateLimits, MeterRegistry registry) {
         if (entryMax < 1 || statusMax < 1 || entryRetryAfterSeconds < 1 || statusRetryAfterSeconds < 1)
