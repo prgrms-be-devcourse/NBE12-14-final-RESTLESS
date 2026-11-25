@@ -26,6 +26,8 @@ metrics_file="${base}-metrics.csv"
 log_file="${base}.log"
 summary_file="${base}.json"
 html_file="${base}.html"
+prom_before="${base}-prom-before.txt"
+prom_after="${base}-prom-after.txt"
 sampler_pid=''
 load_pid=''
 cleanup() {
@@ -43,6 +45,8 @@ export BASE_URL=http://perf-local:8080
 export MANAGEMENT_URL=http://perf-local:8081
 export PERF_APP_HOST=perf-local
 export PERF_ALLOWED_APP_HOSTS=perf-local
+# 실행 전후 전체 지표. 사전 확인 이유별 수처럼 샘플 열에 없는 값은 두 파일의 차이로 본다.
+curl --silent --fail --max-time 5 "http://$server_ip_url:8081/actuator/prometheus" > "$prom_before" || echo 'prometheus snapshot before run failed' >&2
 "$script_dir/sample-actuator.sh" "http://$server_ip_url:8081" "$metrics_file" &
 sampler_pid=$!
 sleep 1
@@ -67,4 +71,5 @@ else
   load_pid=''
   cat "$log_file"
 fi
+curl --silent --fail --max-time 5 "http://$server_ip_url:8081/actuator/prometheus" > "$prom_after" || echo 'prometheus snapshot after run failed' >&2
 exit "$status"

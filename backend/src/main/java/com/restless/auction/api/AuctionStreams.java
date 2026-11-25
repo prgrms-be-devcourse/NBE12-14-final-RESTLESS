@@ -6,6 +6,7 @@ import com.restless.auction.application.AuctionQueryService.AuctionSnapshot;
 import com.restless.auction.domain.AuctionStatus;
 import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import tools.jackson.databind.json.JsonMapper;
 import jakarta.annotation.PreDestroy;
@@ -19,6 +20,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,6 +39,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  *   <li>전용 스레드가 일정 간격(기본 0.2초)마다 바뀐 경매의 상태를 한 번 조회해 그 경매의 연결 전체에 보낸다.
  *       그 사이 입찰이 여러 번 있어도 최신 상태 하나만 간다.</li>
  *   <li>종료(CLOSED) 상태를 보낸 뒤에는 연결을 닫는다. 더 바뀔 일이 없다.</li>
+ *   <li>서버 전체 연결 수에 상한을 둔다 (#244). 넘으면 새 연결만 {@code AUCTION_STREAM_BUSY}로 거절한다.
+ *       연결마다 힙을 쓰므로, 상한이 없으면 관전자가 몰릴 때 앱 전체가 메모리 부족으로 멈춘다.</li>
+ *   <li>같은 스레드가 일정 간격(기본 15초)마다 모든 연결에 주석을 보낸다 (#447). 서버는 써 봐야 떠난 클라이언트를 알 수 있으므로,
+ *       입찰이 없는 경매에서도 떠난 연결을 정리한다.</li>
  * </ul>
  *
  * <p>읽기 전용이다. 연결이 끊기거나 전송이 실패해도 입찰과 낙찰에는 영향이 없다 (INV-AU-09).
@@ -53,23 +60,43 @@ public class AuctionStreams {
     private final MeterRegistry meters;
     private final JsonMapper json;
     private final long timeoutMs;
+    private final int maxConnections;
+    private final int retryAfterSeconds;
     private final Map<Long, Set<SseEmitter>> subscribers = new ConcurrentHashMap<>();
+    /** 등록된 연결 수와 등록 중인 자리. 상한 확인과 자리 확보를 한 번에 하려고 맵과 따로 센다. */
+    private final AtomicInteger total = new AtomicInteger();
+    private final Counter rejected;
+    private final Counter heartbeatRemoved;
     private final Set<Long> changed = ConcurrentHashMap.newKeySet();
     private final ScheduledExecutorService flusher;
 
     public AuctionStreams(AuctionQueryService queries, MeterRegistry meters, JsonMapper json,
                           @Value("${restless.auction.stream.flush-interval-ms:200}") long flushIntervalMs,
-                          @Value("${restless.auction.stream.timeout-ms:1800000}") long timeoutMs) {
+                          @Value("${restless.auction.stream.timeout-ms:1800000}") long timeoutMs,
+                          @Value("${restless.auction.stream.max-connections:6000}") int maxConnections,
+                          @Value("${restless.auction.stream.retry-after-seconds:5}") int retryAfterSeconds,
+                          @Value("${restless.auction.stream.heartbeat-interval-ms:15000}") long heartbeatIntervalMs) {
+        if (maxConnections < 1 || retryAfterSeconds < 1 || heartbeatIntervalMs < 1) {
+            throw new IllegalStateException("restless.auction.stream.max-connections, retry-after-seconds, "
+                    + "heartbeat-interval-ms must be positive");
+        }
         this.queries = queries;
         this.meters = meters;
         this.json = json;
         this.timeoutMs = timeoutMs;
+        this.maxConnections = maxConnections;
+        this.retryAfterSeconds = retryAfterSeconds;
         meters.gauge("auction.stream.connections", subscribers,
                 map -> map.values().stream().mapToInt(Set::size).sum());
+        // 측정 전부터 0으로 보이도록 미리 등록한다.
+        this.rejected = meters.counter("auction.stream.rejected");
+        this.heartbeatRemoved = meters.counter("auction.stream.heartbeat.removed");
         // 다른 스케줄러(경매 종료, 미완료 결제 재확인 작업)와 스레드를 나누지 않아야 0.2초 간격이 밀리지 않는다.
         this.flusher = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofPlatform().name("auction-stream-flush").daemon().factory());
         flusher.scheduleWithFixedDelay(this::flushSafely, flushIntervalMs, flushIntervalMs, TimeUnit.MILLISECONDS);
+        // 전송과 같은 스레드에서 보내므로 한 연결에 두 스레드가 동시에 쓰지 않는다.
+        flusher.scheduleWithFixedDelay(this::heartbeatSafely, heartbeatIntervalMs, heartbeatIntervalMs, TimeUnit.MILLISECONDS);
     }
 
     @PreDestroy
@@ -77,13 +104,22 @@ public class AuctionStreams {
         flusher.shutdownNow();
         subscribers.values().forEach(set -> set.forEach(SseEmitter::complete));
         subscribers.clear();
+        total.set(0);
     }
 
     /**
      * 연결을 등록하고 현재 상태를 한 번 보낸다. 등록을 먼저 해야 조회와 등록 사이의 변경을 놓치지 않는다.
      * 그 변경은 다음 전송에 다시 가고, 클라이언트는 같은 revision을 무시한다.
+     *
+     * <p>상한에 닿았으면 연결을 만들지 않고 {@code AUCTION_STREAM_BUSY}를 던진다. 재시도 간격은 {@link #retryAfterSeconds()}.
      */
     public SseEmitter subscribe(Long auctionId) {
+        // 확인과 확보를 한 번에 해야 동시에 들어온 요청이 함께 상한을 넘지 않는다.
+        if (total.incrementAndGet() > maxConnections) {
+            total.decrementAndGet();
+            rejected.increment();
+            throw new BusinessException(ErrorCode.AUCTION_STREAM_BUSY);
+        }
         SseEmitter emitter = new SseEmitter(timeoutMs);
         emitter.onCompletion(() -> remove(auctionId, emitter));
         emitter.onTimeout(() -> {
@@ -91,6 +127,7 @@ public class AuctionStreams {
             emitter.complete();
         });
         emitter.onError(e -> remove(auctionId, emitter));
+        // 확보한 자리는 여기서부터 remove()가 돌려준다.
         add(auctionId, emitter);
 
         Optional<AuctionSnapshot> snapshot = queries.snapshot(auctionId);
@@ -134,6 +171,44 @@ public class AuctionStreams {
         return set == null ? 0 : set.size();
     }
 
+    /** 상한과 비교하는 서버 전체 연결 수. */
+    public int totalConnections() {
+        return total.get();
+    }
+
+    /** 상한에 닿아 거절할 때 응답의 Retry-After(초). */
+    public int retryAfterSeconds() {
+        return retryAfterSeconds;
+    }
+
+    /**
+     * 모든 연결에 내용 없는 주석({@code :heartbeat})을 보낸다. 전용 스레드가 부르고, 테스트에서는 직접 부른다.
+     *
+     * <p>클라이언트가 탭을 닫으면 운영체제끼리는 연결 종료를 주고받지만 이 객체에는 알림이 오지 않는다.
+     * 그 연결에 써야 실패로 알 수 있다. 종료 직후의 첫 쓰기는 성공할 수 있어 보통 한두 번째 heartbeat에서 정리된다.
+     * 주석은 클라이언트의 메시지 처리에 들어가지 않는다.
+     */
+    public void heartbeat() {
+        int removed = 0;
+        for (Map.Entry<Long, Set<SseEmitter>> entry : subscribers.entrySet()) {
+            for (SseEmitter emitter : List.copyOf(entry.getValue())) {
+                try {
+                    emitter.send(SseEmitter.event().comment("heartbeat"));
+                } catch (IOException | IllegalStateException e) {
+                    // 클라이언트가 이미 떠났다. 응답 정리는 컨테이너가 오류 콜백으로 마친다.
+                    if (remove(entry.getKey(), emitter)) {
+                        removed++;
+                    }
+                }
+            }
+        }
+        if (removed > 0) {
+            // 떠난 연결은 정상 상황이라 연결마다 남기지 않고 한 번에 남긴다.
+            log.info("Auction stream heartbeat removed {} closed connections", removed);
+            heartbeatRemoved.increment(removed);
+        }
+    }
+
     private void flush(Long auctionId) {
         Set<SseEmitter> set = subscribers.get(auctionId);
         if (set == null || set.isEmpty()) {
@@ -142,8 +217,11 @@ public class AuctionStreams {
         Optional<AuctionSnapshot> snapshot = queries.snapshot(auctionId);
         if (snapshot.isEmpty()) {
             // 시작 전 경매가 삭제됐다. 보낼 상태가 없으므로 연결을 닫는다.
-            List.copyOf(set).forEach(SseEmitter::complete);
-            subscribers.remove(auctionId);
+            // 자리를 바로 돌려주려고 목록에서 먼저 뺀다. 완료 콜백은 나중에 오고 그때는 아무것도 하지 않는다.
+            for (SseEmitter emitter : List.copyOf(set)) {
+                remove(auctionId, emitter);
+                emitter.complete();
+            }
             return;
         }
         send(auctionId, List.copyOf(set), snapshot.get());
@@ -181,6 +259,15 @@ public class AuctionStreams {
         }
     }
 
+    private void heartbeatSafely() {
+        try {
+            heartbeat();
+        } catch (Throwable t) {
+            log.error("Auction stream heartbeat loop failed", t);
+            meters.counter("auction.stream.failure", "stage", "heartbeat").increment();
+        }
+    }
+
     private void add(Long auctionId, SseEmitter emitter) {
         subscribers.compute(auctionId, (id, set) -> {
             Set<SseEmitter> target = set == null ? ConcurrentHashMap.newKeySet() : set;
@@ -189,10 +276,20 @@ public class AuctionStreams {
         });
     }
 
-    private void remove(Long auctionId, SseEmitter emitter) {
+    /**
+     * 목록에서 빼고 자리를 돌려준다. 한 연결에 완료·오류·전송 실패가 겹쳐 여러 번 불려도 자리는 한 번만 돌려준다.
+     *
+     * @return 이번 호출이 실제로 뺐으면 true
+     */
+    private boolean remove(Long auctionId, SseEmitter emitter) {
+        AtomicBoolean removed = new AtomicBoolean();
         subscribers.computeIfPresent(auctionId, (id, set) -> {
-            set.remove(emitter);
+            removed.set(set.remove(emitter));
             return set.isEmpty() ? null : set;
         });
+        if (removed.get()) {
+            total.decrementAndGet();
+        }
+        return removed.get();
     }
 }
