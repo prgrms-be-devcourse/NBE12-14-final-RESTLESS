@@ -574,8 +574,8 @@ Java 엔티티, Repository는 Performance/PerformanceRepository, DB 테이블은
 
 ### 주최자 초안 일괄 등록, 공연장·배치 변경과 삭제
 
-- `POST /api/organizer/concerts/{concertId}/performances/batch`: 공통 `bookingOpensAt`, `maxTicketsPerUser`, 회차별 `performances[{startsAt,bookingClosesAt}]`을 받는다. 1~10개이며 201 응답은 `{performances:[...]}`이다. 회차와 좌석은 한 트랜잭션으로 처리하며 하나라도 실패하면 전체 취소한다. 회차 검증 오류의 `details.performanceIndex`는 요청 배열의 0부터 시작하는 순서다.
-- `PUT /api/organizer/concerts/{concertId}/venue-layout`: `venueId`, `layoutId`를 받는다. 공개 이력과 회차가 없는 경우 변경할 수 있으며 실제 변경 시 공통 가격을 삭제한다. 동일 설정의 재요청은 가격을 유지한다.
+- `POST /api/organizer/concerts/{concertId}/performances/batch`: 공통 `bookingOpensAt`, `maxTicketsPerUser`, 회차별 `performances[{startsAt,bookingClosesAt}]`을 받는다. 1~10개이며 201 응답은 `{performances:[...]}`이다. 회차와 좌석은 한 트랜잭션으로 처리하며 하나라도 실패하면 전체 취소한다. 회차 검증 오류의 `details.performanceIndex`는 요청 배열의 0부터 시작하는 순서다. 공개된 공연에 대한 요청은 400 `INVALID_REQUEST`다.
+- `PUT /api/organizer/concerts/{concertId}/venue-layout`: `venueId`, `layoutId`를 받는다. 공개 이력과 회차가 없는 경우 변경할 수 있으며 실제 변경 시 공통 가격을 삭제한다. 동일 설정의 재요청은 가격을 유지한다. 공개 이력이 있거나 회차가 있는 공연을 다른 공연장·배치로 바꾸는 요청은 400 `INVALID_REQUEST`, 없는 공연장이나 그 공연장에 속하지 않은 배치는 404 `NOT_FOUND`다.
 - `DELETE /api/organizer/performances/{performanceId}`: 공개 이력과 선점·예약 이력이 없는 회차 및 판매 좌석을 삭제한다. 성공 시 204다. 공개 이력, 선점·예약 이력(취소·만료 포함), 사용 가능 상태가 아닌 판매 좌석, FK 참조가 있으면 409 `CONCERT_DELETE_CONFLICT`다.
 - `DELETE /api/organizer/concerts/{concertId}`: 공개 이력, 회차 및 드롭·경매 참조가 없는 초안을 삭제한다. 성공 시 204다. 삭제 불가 조건은 409 `CONCERT_DELETE_CONFLICT`다. 드롭·경매 참조는 사전 조회 없이 `drops`·`auctions`의 공연 FK 위반으로 판정하므로, 거절 사유가 드롭인지 경매인지는 응답에 담지 않는다.
 - ADMIN도 같은 조건을 따르며 다른 주최자의 접근은 404다. 일괄 등록, 공연장·배치 변경, 삭제는 공연 행 잠금 아래에서 처리하고, 참조 FK가 삭제와 드롭·경매 연결 경합을 막는다.
