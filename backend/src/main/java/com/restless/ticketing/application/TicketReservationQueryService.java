@@ -45,7 +45,12 @@ public class TicketReservationQueryService {
         var limit = purchaseLimits.findFirstByUserIdAndPerformanceId(userId, performanceId);
         int confirmed = limit.map(com.restless.ticketing.domain.TicketPurchaseLimit::getConfirmedCount).orElse(0);
         int reserved = limit.map(com.restless.ticketing.domain.TicketPurchaseLimit::getReservedCount).orElse(0);
-        var active = getActive(userId).stream().filter(r -> r.performanceId().equals(performanceId)).findFirst().orElse(null);
+        var active = ticketReservationRepository
+                .findFirstByUserIdAndPerformanceIdAndStatusInOrderByCreatedAtDescIdDesc(userId, performanceId, ACTIVE_STATUSES)
+                .map(reservation -> toDetail(reservation,
+                        seatHoldRepository.findAllByReservationIdOrderByPerformanceSeatIdAsc(reservation.getId()),
+                        databaseNow()))
+                .orElse(null);
         return new TicketBookingAvailability(maximum, confirmed, reserved,
                 Math.max(0, maximum - confirmed - reserved), active);
     }
