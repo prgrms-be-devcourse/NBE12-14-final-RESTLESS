@@ -22,6 +22,9 @@ public interface TicketReservationRepository extends JpaRepository<TicketReserva
     List<TicketReservation> findAllByUserIdAndStatusInOrderByCreatedAtDescIdDesc(
             Long userId, Collection<TicketReservationStatus> statuses);
 
+    Optional<TicketReservation> findFirstByUserIdAndPerformanceIdAndStatusInOrderByCreatedAtDescIdDesc(
+            Long userId, Long performanceId, Collection<TicketReservationStatus> statuses);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<TicketReservation> findByUserIdAndRequestKey(Long userId, String requestKey);
 
