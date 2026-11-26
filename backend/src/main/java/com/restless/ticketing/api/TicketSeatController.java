@@ -6,7 +6,6 @@ import com.restless.ticketing.application.TicketSeatQueryService;
 import com.restless.ticketing.application.TicketReservationQueryService;
 import com.restless.ticketing.application.dto.TicketBookingAvailability;
 import com.restless.auth.LoginMember;
-import com.restless.concert.application.ConcertQueryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,7 +21,6 @@ public class TicketSeatController {
 
     private final TicketSeatQueryService ticketSeatQueryService;
     private final TicketReservationQueryService reservationQueries;
-    private final ConcertQueryService concertQueries;
 
     @GetMapping("/{performanceId}/booking-availability")
     public TicketBookingAvailability availability(@LoginMember Long userId, @PathVariable Long performanceId) {
@@ -31,7 +29,7 @@ public class TicketSeatController {
 
     @GetMapping("/{performanceId}/seats")
     public List<TicketSeatInfo> getSeats(@PathVariable("performanceId") Long performanceId) {
-        concertQueries.requirePublishedPerformance(performanceId);
+        // 회차 존재·공개 확인은 getSeats 트랜잭션 안에서 한다. 별도 트랜잭션은 DB 커넥션을 한 번 더 잡는다.
         return ticketSeatQueryService.getSeats(performanceId);
     }
 

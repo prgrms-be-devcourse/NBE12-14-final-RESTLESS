@@ -198,6 +198,26 @@ class TicketSeatQueryApiTest {
     }
 
     @Test
+    @DisplayName("공개되지 않은 공연의 회차는 좌석이 있어도 404 NOT_FOUND를 반환한다")
+    void rejectsPerformanceOfUnpublishedConcert() throws Exception {
+        Concert draft = Concert.createDraft(venueId, userId, "Draft", "SCHEDULED", NOW,
+                null, null, null, null, layoutId, null);
+        entityManager.persist(draft);
+        Performance performance = Performance.create(draft.getId(), venueId, layoutId,
+                NOW.plusSeconds(14400), NOW.plusSeconds(3600), NOW.plusSeconds(10800), 4, "SCHEDULED");
+        entityManager.persist(performance);
+        Long physicalId = persistPhysicalSeat("1");
+        includeInLayout(layoutId, physicalId, "A", "10.25");
+        persistTicketSeat(performance.getId(), layoutId, physicalId, "VIP", 1000);
+        entityManager.flush();
+        entityManager.clear();
+
+        mockMvc.perform(get(PATH, performance.getId()).with(jwt()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
     @DisplayName("숫자로 변환할 수 없는 회차 ID는 400 INVALID_REQUEST를 반환한다")
     void rejectsNonNumericPerformanceId() throws Exception {
         mockMvc.perform(get(PATH, "invalid").with(jwt()))
