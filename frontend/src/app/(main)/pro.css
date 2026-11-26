@@ -1,0 +1,654 @@
+/* 전체 화면을 더 차분하고 또렷하게 만드는 마감 층. 다른 스타일보다 뒤에 불러온다.
+   컴포넌트 스타일보다 늦게 불릴 보장이 없어서 모든 선택자 앞에 .u040을 붙여 우선순위를 올린다.
+   원칙: 색은 줄이고 대비는 올린다. 그라디언트 글자와 통통 튀는 움직임을 쓰지 않는다. */
+
+/* ── 글자 ─────────────────────────────── */
+.u040 .u040-head h1 {
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--ux-ink);
+  filter: none;
+  animation: none;
+  font-size: clamp(22px, 2.4vw, 28px);
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
+.u040-head small {
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+}
+/* 큰 제목: 그라디언트를 걷고 한 가지 색으로 */
+.u040 .fq-stick-title,
+.u040 .fq-dl-word:last-child,
+.u040 .fq-orbit-end h3,
+.u040 .fq-cd-reveal em,
+.u040 .fq-spot-clock,
+.u040 .fq-board-price {
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: currentColor;
+  color: inherit;
+}
+.u040 .fq-dl-word:last-child {
+  color: #ff5a6e;
+}
+.u040 .fq-cd-reveal em {
+  color: var(--ux-ink-3);
+}
+.u040 .fq-orbit-title,
+.u040 .fq-stick-title,
+.u040 .fq-dl-headline,
+.u040 .fq-orbit-focus h3,
+.u040 .fq-orbit-end h3,
+.u040 .fq-dbox-copy h2,
+.u040 .fq-dbox-end h3 {
+  font-weight: 800;
+  letter-spacing: -0.045em;
+}
+/* 제목이 바뀔 때의 색 어긋남 효과는 뺀다 */
+.u040 .fq-orbit-title::before,
+.u040 .fq-orbit-title::after {
+  display: none;
+}
+
+/* ── 버튼, 칩, 카드 ───────────────────── */
+.u040 .fq-btn {
+  border-radius: 12px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.u040 .fq-btn:hover {
+  transform: translateY(-1px);
+}
+.u040 .fq-btn.is-grad,
+:root:not([data-theme="dark"]) .fq-btn.is-grad {
+  color: var(--ux-page);
+}
+.u040 .fq-chip {
+  border-radius: 7px;
+  font-weight: 700;
+}
+.u040 .fq-card {
+  border-radius: 18px;
+}
+.u040 .fq-tabs-pill {
+  box-shadow: none;
+}
+.u040 .fq-tabs button[aria-selected="true"] {
+  color: var(--ux-page);
+}
+.u040 .fq-orbit-focus-cta,
+.u040 .fq-stick-buy,
+.u040 .fq-dl-next-cta,
+.u040 .fq-show-cta,
+.u040 .fq-skip,
+.u040 .fq-orbit-end a,
+.u040 .fq-dbox-end a {
+  border-radius: 12px;
+}
+.u040 .fq-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ux-ink-3);
+}
+/* 완료, 실패, 대기 표시: 이모지 대신 얇은 고리 안의 기호 */
+.u040 .fq-done-ico {
+  display: inline-grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  font-size: 22px;
+  font-weight: 700;
+  animation: none;
+}
+.u040 .fq-done.is-ok .fq-done-ico {
+  color: var(--ux-mint);
+}
+.u040 .fq-done.is-bad .fq-done-ico {
+  color: var(--ux-danger);
+}
+.u040 .fq-done.is-wait .fq-done-ico {
+  color: var(--ux-warn);
+}
+
+/* ── 포스터: 풍선 같은 도형 대신 어두운 스튜디오 조명 ── */
+.u040 .fq-poster {
+  border-radius: 14px;
+  background:
+    radial-gradient(90% 70% at 22% 0%, color-mix(in srgb, var(--p1) 85%, transparent), transparent 62%),
+    radial-gradient(70% 60% at 100% 100%, color-mix(in srgb, var(--p3) 55%, transparent), transparent 65%),
+    linear-gradient(180deg, color-mix(in srgb, var(--p2) 22%, #0a0a10), #07070b);
+}
+/* 도형 무늬를 빼고 비스듬한 빛줄기 하나만 남긴다 */
+.u040 .fq-poster.is-rings .fq-poster-fx,
+.u040 .fq-poster.is-rays .fq-poster-fx,
+.u040 .fq-poster.is-orbs .fq-poster-fx,
+.u040 .fq-poster.is-grid .fq-poster-fx {
+  background: linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.16) 50%, transparent 62%);
+  mix-blend-mode: screen;
+  transform: none;
+}
+.u040 a:hover .fq-poster-fx,
+.u040 .fq-poster:hover .fq-poster-fx,
+.u040 .fq-poster.is-grid:hover .fq-poster-fx,
+.u040 a:hover .fq-poster.is-grid .fq-poster-fx {
+  transform: translateX(12%);
+}
+/* 필름 입자와 가장자리 어둠 */
+.u040 .fq-poster:not(.is-photo)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E"),
+    radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.55));
+  mix-blend-mode: overlay;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  pointer-events: none;
+}
+.u040 .fq-poster-word {
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.35);
+  font-size: clamp(20px, 2.4vw, 30px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  text-transform: uppercase;
+  text-shadow: none;
+}
+.u040 .fq-poster-kicker {
+  left: 16px;
+  top: 16px;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.8);
+}
+.u040 .fq-orbit-art .fq-poster-word {
+  font-size: 12cqw;
+}
+
+/* ── 무대와 유리 카드: 테두리를 가늘고 또렷하게 ── */
+.u040 .fq-orbit-card {
+  border-radius: 18px;
+  border-color: rgba(255, 255, 255, 0.16);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02) 50%, rgba(255, 255, 255, 0.05));
+}
+.u040 .fq-orbit-art {
+  border-radius: 12px;
+}
+.u040 .fq-orbit-stage,
+.u040 .fq-stick-stage,
+.u040 .fq-dl-stage,
+.u040 .fq-dl-curtain-stage,
+.u040 .fq-show-stage,
+.u040 .fq-cd-hero-stage,
+.u040 .fq-dbox-stage,
+.u040 .fq-cd-visual {
+  border-radius: 20px;
+}
+.u040 .fq-dl-curtain-body {
+  border-radius: 20px 20px 0 0;
+}
+.u040 .fq-orbit-menu button.is-on i,
+.u040 .fq-orbit-go,
+.u040 .fq-stick-part span {
+  color: #f4f0e8;
+}
+.u040 .fq-orbit-menu button.is-on em {
+  background: #f4f0e8;
+}
+.u040 .fq-dl-seal i {
+  background: #f4f0e8;
+  box-shadow: none;
+}
+.u040 .fq-hud-bar i,
+.u040 .fq-stick-colors button.is-on {
+  box-shadow: none;
+}
+
+/* ── 주 버튼: 반짝이는 로고 그라디언트 대신 한 가지 색 ── */
+.u040 .u040-main .fq-btn.is-grad {
+  background: var(--ux-ink);
+  color: var(--ux-page);
+  box-shadow: none;
+  animation: none;
+}
+.u040 .u040-main .fq-btn.is-hot {
+  background: #e5324a;
+  color: #fff;
+  box-shadow: none;
+  animation: none;
+}
+.u040 .u040-main .fq-btn:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 1px var(--fq-glass-btn-line), 0 10px 24px -14px rgba(0, 0, 0, 0.6);
+}
+.u040 .u040-main a.fq-card:hover {
+  box-shadow: inset 0 0 0 1px var(--ux-line-2), 0 24px 50px -30px rgba(0, 0, 0, 0.8);
+}
+.u040 .u040-main .fq-chip {
+  border-radius: 7px;
+}
+
+/* ── 마이페이지: 두 단으로 정돈 ─────────── */
+.u040 .fq-me {
+  max-width: 1120px;
+}
+.u040 .fq-me-hero {
+  gap: 16px;
+  margin-bottom: 28px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--ux-line-2);
+}
+.u040 .fq-me-hero h2 {
+  margin: 6px 0 2px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.u040 .fq-me-hero p {
+  font-size: 14px;
+}
+.u040 .fq-me-avatar {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--ux-line-2);
+  background: var(--ux-surface);
+  box-shadow: none;
+  animation: none;
+  font-style: normal;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--ux-ink);
+}
+.u040 .fq-me-grid {
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 1fr);
+  align-items: start;
+  gap: 20px;
+}
+.u040 .fq-me-main,
+.u040 .fq-me-side {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.u040 .fq-me-side {
+  position: sticky;
+  top: 20px;
+}
+.u040 .fq-me .fq-card.is-pad {
+  padding: 24px;
+}
+.u040 .fq-me .fq-eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+.u040 .fq-me .fq-list {
+  margin-top: 16px;
+}
+.u040 .fq-me .fq-list li {
+  border-radius: 12px;
+}
+.u040 .fq-me .fq-list li.fq-muted {
+  padding: 18px 0 6px;
+  font-size: 14px;
+}
+.u040 .fq-wallet {
+  background: var(--ux-surface);
+}
+.u040 .fq-wallet-amt {
+  margin: 14px 0 16px;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: currentColor;
+  color: var(--ux-ink);
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.u040 .fq-wallet-bar {
+  height: 4px;
+}
+.u040 .fq-me-form .fq-form {
+  margin-top: 16px;
+}
+.u040 .fq-me-save {
+  justify-self: end;
+  min-width: 140px;
+}
+/* 회원 탈퇴는 접어 두고, 눌렀을 때만 펼친다 */
+.u040 .fq-danger-zone summary {
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+  list-style: none;
+}
+.u040 .fq-danger-zone summary::-webkit-details-marker {
+  display: none;
+}
+.u040 .fq-danger-zone summary small {
+  font-size: 13px;
+  line-height: 1.5;
+}
+@media (max-width: 900px) {
+  .u040 .fq-me-grid {
+    grid-template-columns: 1fr;
+  }
+  .u040 .fq-me-side {
+    position: static;
+  }
+}
+
+/* ── 홀로그램 박과 카드 기울기 ───────────
+   포토카드의 홀로그램처럼, 마우스가 지나가는 자리에만 무지갯빛이 돈다. 평소에는 보이지 않는다. */
+.u040 .fq-poster-holo {
+  --mx: 0.5;
+  --my: 0.5;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.9) 0 1px, transparent 1.5px) 0 0 / 23px 29px,
+    radial-gradient(circle at 70% 60%, rgba(255, 255, 255, 0.8) 0 1px, transparent 1.5px) 0 0 / 31px 19px,
+    repeating-linear-gradient(
+      112deg,
+      #ff6fd8 0%,
+      #6ff7ff 9%,
+      #fff36f 18%,
+      #6fff9d 27%,
+      #6f8dff 36%,
+      #ff6fd8 45%
+    );
+  background-size: 23px 29px, 31px 19px, 280% 280%;
+  background-position: 0 0, 0 0, calc(var(--mx) * 100%) calc(var(--my) * 100%);
+  mix-blend-mode: color-dodge;
+  -webkit-mask-image: radial-gradient(circle at calc(var(--mx) * 100%) calc(var(--my) * 100%), #000 0%, rgba(0, 0, 0, 0.35) 34%, transparent 62%);
+  mask-image: radial-gradient(circle at calc(var(--mx) * 100%) calc(var(--my) * 100%), #000 0%, rgba(0, 0, 0, 0.35) 34%, transparent 62%);
+  transition: opacity 0.45s var(--ux-ease);
+}
+.u040 .fq-poster {
+  --mx: 0.5;
+  --my: 0.5;
+}
+.u040 a:hover .fq-poster-holo,
+.u040 .fq-poster:hover .fq-poster-holo {
+  opacity: 0.42;
+}
+/* 목록 카드: 마우스 쪽으로 살짝 기운다 */
+.u040 .u040-main a.fq-ccard {
+  --rx: 0;
+  --ry: 0;
+  transform: perspective(900px) rotateX(calc(var(--ry) * -5deg)) rotateY(calc(var(--rx) * 6deg));
+  transition: transform 0.5s var(--ux-ease), box-shadow 0.35s;
+}
+.u040 .u040-main a.fq-ccard:hover {
+  transform: perspective(900px) rotateX(calc(var(--ry) * -5deg)) rotateY(calc(var(--rx) * 6deg)) translateY(-4px);
+  transition-duration: 0.12s, 0.35s;
+}
+.u040 .fq-dl-card .fq-dl-art {
+  --rx: 0;
+  --ry: 0;
+}
+.u040 .fq-dl-card:hover .fq-dl-art,
+.u040 .fq-dl-card:focus-visible .fq-dl-art {
+  transform: perspective(900px) rotateX(calc(var(--ry) * -6deg)) rotateY(calc(var(--rx) * 8deg)) translateY(-6px);
+  transition-duration: 0.12s;
+}
+
+/* 탭의 선택 알약: 로고 그라디언트 대신 한 가지 색 */
+.u040 .u040-main .fq-tabs-pill {
+  background: var(--ux-ink);
+}
+.u040 .u040-main .fq-tabs button[aria-selected="true"] {
+  color: var(--ux-page);
+}
+.u040 .u040-main .fq-tabs button[aria-selected="true"] small {
+  background: color-mix(in srgb, var(--ux-page) 14%, transparent);
+}
+
+/* ── 결제 완료 영수증 ─────────────────── */
+.u040 .fq-receipt-wrap {
+  display: grid;
+  gap: 12px;
+  max-width: 440px;
+  margin: 0 auto;
+}
+.u040 .fq-receipt {
+  position: relative;
+  padding: 30px 28px 44px;
+  color: #17161c;
+  background:
+    repeating-linear-gradient(0deg, rgba(23, 22, 28, 0.025) 0 1px, transparent 1px 4px),
+    linear-gradient(180deg, #f7f3ea, #eee9dc);
+  border-radius: 14px 14px 0 0;
+  /* 아래쪽을 톱니처럼 찢긴 모양으로 자른다 */
+  -webkit-mask: linear-gradient(#000 0 0) top / 100% calc(100% - 10px) no-repeat, conic-gradient(from -45deg at 50% 100%, transparent 25%, #000 0) bottom / 16px 10px repeat-x;
+  mask: linear-gradient(#000 0 0) top / 100% calc(100% - 10px) no-repeat, conic-gradient(from -45deg at 50% 100%, transparent 25%, #000 0) bottom / 16px 10px repeat-x;
+  filter: drop-shadow(0 30px 40px rgba(0, 0, 0, 0.5));
+  animation: fq-receipt-in 0.9s var(--ux-ease) both;
+}
+@keyframes fq-receipt-in {
+  from {
+    opacity: 0;
+    transform: translateY(-24px);
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0 0 -40px 0);
+  }
+}
+.u040 .fq-receipt header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 16px;
+  border-bottom: 1px dashed rgba(23, 22, 28, 0.3);
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(23, 22, 28, 0.6);
+}
+.u040 .fq-receipt-stamp {
+  padding: 5px 10px;
+  border: 2px solid #0f8a63;
+  border-radius: 6px;
+  color: #0f8a63;
+  font-style: normal;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  transform: rotate(-7deg);
+  animation: fq-receipt-stamp 0.5s 0.7s var(--ux-ease) both;
+}
+@keyframes fq-receipt-stamp {
+  from {
+    opacity: 0;
+    transform: rotate(-7deg) scale(1.8);
+  }
+}
+.u040 .fq-receipt h3 {
+  margin: 20px 0 6px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.u040 .fq-receipt-item {
+  margin: 0 0 18px;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: rgba(23, 22, 28, 0.72);
+}
+.u040 .fq-receipt dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 16px 0;
+  border-top: 1px dashed rgba(23, 22, 28, 0.3);
+  border-bottom: 1px dashed rgba(23, 22, 28, 0.3);
+}
+.u040 .fq-receipt dl > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 14px;
+}
+/* 항목과 값 사이를 점선으로 잇는다 */
+.u040 .fq-receipt dt {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 10px;
+  color: rgba(23, 22, 28, 0.62);
+}
+.u040 .fq-receipt dt::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1px dotted rgba(23, 22, 28, 0.35);
+  transform: translateY(-3px);
+}
+.u040 .fq-receipt dd {
+  margin: 0;
+  font-weight: 700;
+}
+.u040 .fq-receipt dl > div.is-total {
+  margin-top: 6px;
+  font-size: 15px;
+}
+.u040 .fq-receipt .is-total dd {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.u040 .fq-receipt-note {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: rgba(23, 22, 28, 0.55);
+}
+@media (prefers-reduced-motion: reduce) {
+  .u040 .fq-receipt,
+  .u040 .fq-receipt-stamp {
+    animation: none;
+  }
+}
+
+/* ── 주 버튼 위를 한 번 쓸고 지나가는 빛 ── */
+.u040 .u040-main .fq-btn.is-grad,
+.u040 .u040-main .fq-btn.is-hot {
+  overflow: hidden;
+  isolation: isolate;
+}
+.u040 .u040-main .fq-btn.is-grad::after,
+.u040 .u040-main .fq-btn.is-hot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.55) 50%, transparent 65%);
+  transform: translateX(-120%);
+  pointer-events: none;
+}
+.u040 .u040-main .fq-btn.is-grad::after {
+  background: linear-gradient(105deg, transparent 35%, color-mix(in srgb, var(--ux-page) 22%, transparent) 50%, transparent 65%);
+}
+.u040 .u040-main .fq-btn.is-grad:hover:not(:disabled)::after,
+.u040 .u040-main .fq-btn.is-hot:hover:not(:disabled)::after {
+  transform: translateX(120%);
+  transition: transform 0.7s var(--ux-ease);
+}
+
+/* ── 제목과 소개 글: 화면에 들어올 때 아래에서 올라온다 ──
+   스크롤에 맞춘 움직임을 지원하는 브라우저에서만 쓴다. 그 밖에서는 그냥 보인다. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .u040 .fq-section-h h2,
+    .u040 .fq-lead,
+    .u040 .fq-spec h2,
+    .u040 .fq-spec dl > div,
+    .u040 .fq-cd-perfs h2,
+    .u040 .fq-dl-archive h2,
+    .u040 .fq-au-row,
+    .u040 .fq-foot-top,
+    .u040 .fq-foot-word {
+      animation: fq-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 55%;
+    }
+  }
+}
+@keyframes fq-rise {
+  from {
+    opacity: 0;
+    transform: translateY(26px);
+  }
+}
+
+/* 목록 안의 빈 상태 카드는 줄 전체 폭 가운데에 둔다 */
+.u040 .fq-au-rows .fq-empty {
+  width: 100%;
+  justify-self: center;
+  list-style: none;
+}
+.u040 .fq-empty .fq-lineart {
+  margin-bottom: 6px;
+}
+
+/* 마이페이지 주문 줄: 줄 전체가 상세로 가는 링크 */
+.u040 .fq-me .fq-list li.fq-list-link {
+  padding: 0;
+  background: none;
+}
+.u040 .fq-list-link a {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--ux-surface-2);
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.u040 .fq-list-link a > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.u040 .fq-list-link a:hover,
+.u040 .fq-list-link a:focus-visible {
+  background: var(--ux-surface-3);
+  box-shadow: inset 0 0 0 1px var(--ux-line-2);
+  outline: none;
+}
+.u040 .fq-list-go {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--ux-ink-3);
+  transition: transform 0.3s var(--ux-ease), color 0.2s;
+}
+.u040 .fq-list-link a:hover .fq-list-go {
+  transform: translateX(3px);
+  color: var(--ux-ink);
+}

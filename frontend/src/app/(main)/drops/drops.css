@@ -1,0 +1,524 @@
+/* 드롭 목록. 위에서 내려오는 물결 커튼과 스크롤로 넘기는 가로 진열대 */
+
+/* ── 1장. 커튼 ───────────────────────── */
+.fq-dl-curtain {
+  --p: 0;
+  --down: clamp(0, var(--p) / 0.45, 1);
+  --up: clamp(0, (var(--p) - 0.62) / 0.38, 1);
+  position: relative;
+  z-index: 2;
+  height: 220vh;
+  /* 커튼이 걷히는 동안 아래 목록이 그 자리로 올라오도록 무대 높이만큼 겹친다 */
+  margin-bottom: calc(-100vh + 28px);
+  pointer-events: none;
+}
+.fq-dl-curtain-cloth {
+  pointer-events: auto;
+}
+.fq-dl-curtain-stage {
+  position: sticky;
+  top: 14px;
+  height: calc(100vh - 28px);
+  min-height: 540px;
+  overflow: hidden;
+  border-radius: 28px;
+}
+.fq-dl-curtain-cloth {
+  position: absolute;
+  inset: 0 0 auto;
+  height: calc(46% + var(--down) * 54%);
+  display: flex;
+  flex-direction: column;
+  color: #f4f0e8;
+  transform: translateY(calc(var(--up) * -112%));
+  animation: fq-dl-drop 1s var(--ux-ease) both;
+}
+.fq-dl-curtain-body {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: clamp(34px, 6vw, 72px) clamp(22px, 4vw, 56px) clamp(26px, 4vw, 44px);
+  border-radius: 28px 28px 0 0;
+  background:
+    radial-gradient(60% 90% at 80% 0%, rgba(255, 122, 147, 0.22), transparent 70%),
+    radial-gradient(50% 90% at 10% 0%, rgba(123, 97, 255, 0.3), transparent 70%),
+    #120d24;
+  overflow: hidden;
+}
+/* 천의 주름 */
+.fq-dl-curtain-body::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.035) 0 28px, rgba(0, 0, 0, 0.12) 28px 56px);
+  pointer-events: none;
+}
+.fq-dl-curtain-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ux-ink-3);
+  opacity: calc(1 - var(--down) * 2);
+}
+.fq-dl-tabs {
+  position: relative;
+  z-index: 1;
+  scroll-margin-top: 20px;
+}
+/* 커튼 아래 가장자리: 반원을 이어 붙인 물결 */
+.fq-dl-scallop {
+  --s: 56px;
+  flex: none;
+  height: calc(var(--s) / 2);
+  background: radial-gradient(circle at 50% 0, #120d24 calc(var(--s) / 2 - 0.5px), transparent calc(var(--s) / 2)) 0 0 / var(--s) 100% repeat-x;
+  transform-origin: 50% 0;
+  animation: fq-dl-sway 6s ease-in-out infinite;
+  filter: drop-shadow(0 12px 18px rgba(18, 13, 36, 0.35));
+}
+@keyframes fq-dl-drop {
+  from {
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0 0 -60px 0);
+  }
+}
+@keyframes fq-dl-sway {
+  50% {
+    transform: scaleY(1.25);
+  }
+}
+.fq-dl-headline {
+  position: relative;
+  transform: scale(calc(1 + var(--down) * 0.1));
+  transform-origin: 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.18em 0.32em;
+  font-size: clamp(42px, 6.2vw, 96px);
+  font-weight: 950;
+  line-height: 0.9;
+  letter-spacing: -0.05em;
+}
+.fq-dl-word {
+  display: inline-block;
+  animation: fq-dl-rise 0.9s 0.25s var(--ux-ease) both;
+}
+.fq-dl-word:last-child {
+  animation-delay: 0.4s;
+  background: linear-gradient(120deg, #ff9aae, #d38bff 50%, #b7a4ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+@keyframes fq-dl-rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.4em);
+    filter: blur(10px);
+  }
+}
+.fq-dl-seal {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 0.92em;
+  height: 0.92em;
+  animation: fq-dl-rise 0.9s 0.32s var(--ux-ease) both;
+}
+.fq-dl-seal svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  animation: fq-dl-spin 14s linear infinite;
+}
+.fq-dl-seal text {
+  font-family: var(--fq-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  fill: rgba(244, 240, 232, 0.8);
+}
+.fq-dl-seal i {
+  display: grid;
+  place-items: center;
+  width: 46%;
+  height: 46%;
+  border-radius: 50%;
+  font-style: normal;
+  font-size: 0.24em;
+  font-weight: 950;
+  letter-spacing: 0;
+  color: #120d24;
+  background: linear-gradient(140deg, #ffd36e, #ff9aae);
+  box-shadow: 0 0 30px rgba(255, 154, 174, 0.45);
+}
+@keyframes fq-dl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.fq-dl-lead {
+  position: relative;
+  margin: calc(22px + var(--down) * 40px) 0 0;
+  max-width: 46ch;
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgba(244, 240, 232, 0.72);
+}
+.fq-dl-lead b {
+  color: #ff9aae;
+}
+
+/* ── 2장. 진열대 ─────────────────────── */
+.fq-dl-rail {
+  position: relative;
+  margin-top: 22px;
+}
+.fq-dl-stage {
+  position: sticky;
+  top: 14px;
+  height: calc(100vh - 28px);
+  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  perspective: 1600px;
+  border-radius: 28px;
+  background: #07060f;
+  isolation: isolate;
+}
+/* 가운데 카드 색으로 물드는 무대 */
+.fq-dl-wash {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(55% 65% at 50% 45%, color-mix(in srgb, var(--c1) 45%, transparent), transparent 70%),
+    radial-gradient(40% 50% at 90% 100%, color-mix(in srgb, var(--c2) 35%, transparent), transparent 70%);
+  transition: background 0.8s var(--ux-ease);
+}
+/* 뒤로 흐르는 큰 상품 이름 */
+.fq-dl-bigword {
+  position: absolute;
+  z-index: -1;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  overflow: hidden;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: fq-dl-word-in 0.8s var(--ux-ease) both;
+}
+.fq-dl-bigword span {
+  display: inline-block;
+  font-size: clamp(120px, 20vw, 300px);
+  font-weight: 950;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  color: transparent;
+  -webkit-text-stroke: 1.5px rgba(244, 240, 232, 0.12);
+  animation: fq-dl-flow 30s linear infinite;
+}
+@keyframes fq-dl-flow {
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes fq-dl-word-in {
+  from {
+    opacity: 0;
+  }
+}
+.fq-dl-track {
+  --card: clamp(280px, 30vw, 420px);
+  display: flex;
+  gap: clamp(28px, 5vw, 80px);
+  width: max-content;
+  padding: 0 calc(50% - var(--card) / 2);
+  will-change: transform;
+}
+.fq-dl-card {
+  --d: 0;
+  --a: max(var(--d), calc(var(--d) * -1));
+  position: relative;
+  flex: none;
+  width: var(--card);
+  display: grid;
+  gap: 16px;
+  color: #f4f0e8;
+  text-decoration: none;
+  transform: rotateY(calc(var(--d) * -28deg)) rotateZ(calc(var(--a) * var(--tilt) * 6deg)) scale(calc(1 - var(--a) * 0.16)) translateY(calc(var(--a) * 30px));
+  opacity: calc(1 - var(--a) * 0.45);
+  transition: filter 0.4s var(--ux-ease);
+}
+.fq-dl-no {
+  position: absolute;
+  z-index: -1;
+  top: -0.42em;
+  left: -0.18em;
+  font-size: clamp(120px, 14vw, 210px);
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: -0.06em;
+  color: transparent;
+  -webkit-text-stroke: 1.5px rgba(244, 240, 232, 0.22);
+  transform: translateX(calc(var(--d) * 80px));
+}
+.fq-dl-art {
+  position: relative;
+  border-radius: 24px;
+  box-shadow: 0 30px 60px -24px var(--ux-shadow-strong);
+  transition: transform 0.6s var(--ux-spring);
+}
+.fq-dl-art .fq-poster {
+  border-radius: 24px;
+}
+.fq-dl-card:hover .fq-dl-art,
+.fq-dl-card:focus-visible .fq-dl-art {
+  transform: translateY(-8px) rotate(calc(var(--tilt) * -1.5deg));
+}
+.fq-dl-card:focus-visible {
+  outline: none;
+}
+.fq-dl-card:focus-visible .fq-dl-art {
+  outline: 3px solid var(--ux-accent);
+  outline-offset: 4px;
+}
+.fq-dl-info {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 0 4px;
+}
+.fq-dl-info h3 {
+  margin: 0;
+  font-size: clamp(17px, 1.5vw, 21px);
+  font-weight: 850;
+  line-height: 1.3;
+  letter-spacing: -0.03em;
+}
+.fq-dl-when {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 14px;
+  color: rgba(244, 240, 232, 0.7);
+}
+.fq-dl-when b {
+  font-size: 17px;
+  font-weight: 850;
+  color: #f4f0e8;
+}
+.fq-dl-when small {
+  color: rgba(244, 240, 232, 0.5);
+}
+.fq-dl-card.is-on_sale .fq-dl-when b {
+  color: #ff9aae;
+}
+.fq-dl-card.is-ended .fq-dl-art {
+  filter: grayscale(0.85) brightness(0.8);
+}
+/* ── 3장. 다음 드롭 ───────────────────── */
+.fq-dl-kicker {
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: var(--ux-ink-3);
+}
+.fq-dl-next {
+  --p: 0;
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  margin: 100px 0;
+  padding: clamp(60px, 10vw, 140px) 20px;
+  border-radius: 28px;
+  overflow: hidden;
+  text-align: center;
+  color: #f4f0e8;
+  background:
+    radial-gradient(60% 70% at 50% 40%, color-mix(in srgb, var(--c1) 50%, transparent), transparent 70%),
+    radial-gradient(40% 60% at 100% 100%, color-mix(in srgb, var(--c2) 40%, transparent), transparent 70%),
+    #07060f;
+  opacity: clamp(0, var(--p) * 2, 1);
+  transform: scale(calc(0.94 + clamp(0, var(--p) * 2, 1) * 0.06));
+}
+.fq-dl-next .fq-dl-kicker {
+  color: rgba(244, 240, 232, 0.7);
+}
+.fq-dl-next h2 {
+  margin: 0;
+  font-size: clamp(36px, 5vw, 64px);
+  font-weight: 950;
+  letter-spacing: -0.05em;
+}
+.fq-dl-clock {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: clamp(56px, 12vw, 190px);
+  font-weight: 950;
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+.fq-dl-clock span.is-digit {
+  display: inline-block;
+  min-width: 0.6em;
+  animation: fq-dl-tick 0.5s var(--ux-ease) both;
+}
+@keyframes fq-dl-tick {
+  from {
+    opacity: 0;
+    transform: translateY(-0.25em);
+    filter: blur(6px);
+  }
+}
+.fq-dl-next p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgba(244, 240, 232, 0.75);
+}
+.fq-dl-next-cta {
+  margin-top: 10px;
+  padding: 12px 24px;
+  border-radius: 999px;
+  background: #f4f0e8;
+  color: #0b0c12;
+  font-weight: 850;
+  text-decoration: none;
+  transition: transform 0.35s var(--ux-spring);
+}
+.fq-dl-next-cta:hover {
+  transform: translateY(-2px);
+}
+
+/* ── 4장. 지난 드롭 ───────────────────── */
+.fq-dl-archive {
+  --p: 0;
+  margin: 0 0 60px;
+}
+.fq-dl-archive h2 {
+  margin: 8px 0 22px;
+  font-size: clamp(26px, 3vw, 36px);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+.fq-dl-archive-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 18px;
+}
+.fq-dl-archive-card {
+  display: grid;
+  gap: 8px;
+  color: var(--ux-ink);
+  text-decoration: none;
+  opacity: clamp(0, var(--p) * 2.2 - 0.3, 1);
+  transform: translateY(calc((1 - clamp(0, var(--p) * 2.2 - 0.3, 1)) * 30px));
+}
+.fq-dl-archive-card .fq-poster {
+  filter: grayscale(1) brightness(0.8);
+  transition: filter 0.5s var(--ux-ease);
+}
+.fq-dl-archive-card:hover .fq-poster {
+  filter: grayscale(0.2);
+}
+.fq-dl-archive-card b {
+  font-size: 15px;
+  font-weight: 800;
+}
+.fq-dl-archive-card small {
+  font-size: 12.5px;
+  color: var(--ux-ink-3);
+}
+
+/* ── 좁은 화면: 손으로 넘기는 가로 목록 ── */
+@media (max-width: 760px) {
+  .fq-dl-stage {
+    position: relative;
+    top: 0;
+    height: auto;
+    min-height: 0;
+    padding: 40px 0 70px;
+  }
+  .fq-dl-track {
+    --card: 66vw;
+    width: auto;
+    padding: 0 17vw;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    margin: 0 -16px;
+  }
+  .fq-dl-track::-webkit-scrollbar {
+    display: none;
+  }
+  .fq-dl-card {
+    scroll-snap-align: center;
+  }
+  .fq-dl-curtain {
+    height: 190vh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fq-dl-curtain-cloth,
+  .fq-dl-bigword span,
+  .fq-dl-word,
+  .fq-dl-seal,
+  .fq-dl-seal svg,
+  .fq-dl-scallop {
+    animation: none;
+  }
+}
+@media (max-width: 760px) {
+  .fq-dl-curtain-stage {
+    top: 8px;
+    height: calc(100dvh - 120px);
+    min-height: 0;
+  }
+  .fq-dl-curtain {
+    margin-bottom: calc(-100dvh + 120px);
+  }
+}
+
+/* ── 연출을 끈 상태: 넓은 화면에서도 손으로 넘기는 가로 목록. 하이드레이션 전에는 html[data-intro]를 따른다 ── */
+.fq-dl-rail.is-flat .fq-dl-stage,
+html[data-intro="off"] .fq-dl-rail .fq-dl-stage {
+  position: relative;
+  top: 0;
+  height: auto;
+  min-height: 0;
+  padding: 48px 0 56px;
+}
+.fq-dl-rail.is-flat .fq-dl-track,
+html[data-intro="off"] .fq-dl-rail .fq-dl-track {
+  width: auto;
+  padding: 0 calc(50% - var(--card) / 2);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+.fq-dl-rail.is-flat .fq-dl-track::-webkit-scrollbar,
+html[data-intro="off"] .fq-dl-rail .fq-dl-track::-webkit-scrollbar {
+  display: none;
+}
+.fq-dl-rail.is-flat .fq-dl-card,
+html[data-intro="off"] .fq-dl-rail .fq-dl-card {
+  scroll-snap-align: center;
+}

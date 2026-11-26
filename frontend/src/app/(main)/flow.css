@@ -1,0 +1,270 @@
+/* ── 추첨 결과 · 공통 결제 · 주문 내역 · 폼 검증에서 함께 쓰는 조각 ── */
+
+.fq-chip.is-info {
+  background: color-mix(in srgb, var(--ux-accent-2) 14%, transparent);
+  color: var(--ux-accent-2);
+}
+
+/* 필드 아래 오류 문구 */
+.fq-err {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--ux-danger);
+  animation: fq-err-in 0.3s var(--ux-ease);
+}
+.fq-input[aria-invalid="true"] {
+  box-shadow: inset 0 0 0 2px var(--ux-danger);
+}
+.fq-hint {
+  margin: -2px 0 0;
+  font-size: 12px;
+  color: var(--ux-ink-3);
+}
+@keyframes fq-err-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+/* 데모 상태 미리보기 띠 (백엔드 없이 상태별 화면을 확인) */
+
+/* 큰 카운트다운 상자 */
+.fq-clock {
+  display: grid;
+  gap: 4px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--ux-hot) 9%, var(--ux-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ux-hot) 30%, transparent);
+}
+.fq-clock-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--ux-ink-2);
+}
+.fq-clock b {
+  font-size: clamp(30px, 4vw, 40px);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  color: var(--ux-hot);
+}
+.fq-clock.is-calm {
+  background: var(--ux-surface);
+  box-shadow: inset 0 0 0 1px var(--ux-line);
+}
+.fq-clock.is-calm b {
+  color: var(--ux-ink);
+}
+
+/* 게릴라 오픈 "곧 공개" */
+.fq-secret {
+  color: var(--ux-hot);
+  font-weight: 800;
+}
+
+/* 추첨 결과 카드 */
+.fq-result {
+  max-width: 620px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  text-align: center;
+  animation: fq-pop-in 0.6s var(--ux-spring);
+}
+.fq-result h2 {
+  margin: 0;
+  font-size: clamp(24px, 3.2vw, 34px);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  line-height: 1.25;
+}
+.fq-result p {
+  margin: 0;
+}
+.fq-result.is-win {
+  box-shadow: 0 0 0 2px var(--ux-hot), 0 30px 80px -40px var(--ux-hot);
+}
+.fq-result .fq-clock {
+  text-align: center;
+}
+.fq-result .fq-clock b {
+  font-size: clamp(40px, 6vw, 56px);
+}
+.fq-rank {
+  color: var(--ux-hot);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 결제: 서버가 정한 금액은 바꿀 수 없다 */
+.fq-amount-lock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: var(--ux-surface-2);
+  box-shadow: inset 0 0 0 1px var(--ux-line);
+  text-align: left;
+}
+.fq-amount-lock small {
+  display: block;
+  font-size: 12px;
+  color: var(--ux-ink-3);
+}
+.fq-amount-lock b {
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+}
+.fq-pay {
+  max-width: 560px;
+  margin: 0 auto;
+}
+.fq-pay .fq-done {
+  gap: 14px;
+}
+.fq-pay-alt {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.fq-done.is-ok .fq-done-ico,
+.fq-done.is-bad .fq-done-ico,
+.fq-done.is-wait .fq-done-ico {
+  animation: none;
+}
+.fq-done.is-wait .fq-done-ico {
+  animation: fq-spin 2.4s linear infinite;
+}
+@keyframes fq-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 주문·참여 내역 */
+.fq-orders {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fq-order {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 20px 18px 24px;
+  overflow: hidden;
+  animation: fq-pop-in 0.5s var(--ux-spring) both;
+}
+.fq-order::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--tone, var(--ux-line-2));
+}
+.fq-order[data-status="PENDING_PAYMENT"] {
+  --tone: var(--ux-hot);
+}
+.fq-order[data-status="PAYMENT_REVIEW"] {
+  --tone: var(--ux-warn);
+}
+.fq-order[data-status="PAID"] {
+  --tone: var(--ux-mint);
+}
+.fq-order[data-status="REFUNDED"] {
+  --tone: var(--ux-accent-2);
+}
+.fq-order[data-status="EXPIRED"],
+.fq-order[data-status="CANCELLED"] {
+  opacity: 0.78;
+}
+.fq-order-b {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 320px;
+}
+.fq-order-b h3 {
+  margin: 0;
+  font-size: 16.5px;
+  font-weight: 850;
+  letter-spacing: -0.03em;
+}
+.fq-order-b small {
+  font-size: 12.5px;
+  color: var(--ux-ink-3);
+}
+.fq-order-r {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.fq-order-r .fq-num {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+/* 회원 탈퇴 */
+.fq-danger-zone {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ux-danger) 28%, transparent);
+}
+.fq-agree {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--ux-surface-2);
+  font-size: 13.5px;
+  line-height: 1.55;
+  cursor: pointer;
+}
+.fq-agree input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--ux-danger);
+}
+.fq-btn.is-danger {
+  background: color-mix(in srgb, var(--ux-danger) 16%, transparent);
+  color: var(--ux-danger);
+}
+.fq-btn.is-danger:hover:not(:disabled) {
+  background: var(--ux-danger);
+  color: #fff;
+}
+
+/* 공연 허브: 공연 하나에 묶인 팬미팅·드롭·경매 */
+.fq-hub {
+  margin-top: clamp(28px, 4vw, 48px);
+}
+.fq-hub .fq-grid {
+  margin-top: 16px;
+}
+
+@media (max-width: 640px) {
+  .fq-pay-alt {
+    grid-template-columns: 1fr;
+  }
+  .fq-order-r {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

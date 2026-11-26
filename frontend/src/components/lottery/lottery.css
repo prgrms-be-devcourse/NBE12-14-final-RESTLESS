@@ -1,0 +1,82 @@
+/* 팬미팅 추첨 흐름 연출 */
+.fq-lot {
+  position: relative;
+  height: 620vh;
+}
+.fq-lot-stage {
+  position: sticky;
+  top: 14px;
+  height: calc(100vh - 28px);
+  min-height: 560px;
+  overflow: hidden;
+  border-radius: 20px;
+  color: #f4f0e8;
+  background:
+    radial-gradient(60% 60% at 50% 44%, rgba(255, 122, 147, 0.16), transparent 70%),
+    radial-gradient(40% 50% at 100% 0%, rgba(123, 97, 255, 0.16), transparent 70%),
+    #05060f;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  isolation: isolate;
+}
+.fq-lot-stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.fq-lot-copy {
+  position: absolute;
+  z-index: 3;
+  left: clamp(22px, 4vw, 56px);
+  bottom: clamp(80px, 12vh, 120px);
+  max-width: min(440px, 80%);
+}
+.fq-lot-copy span {
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: rgba(244, 240, 232, 0.55);
+}
+.fq-lot-copy h2 {
+  margin: 12px 0 10px;
+  font-size: clamp(40px, 5vw, 76px);
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.045em;
+  animation: fq-lot-in 0.6s var(--ux-ease) both;
+}
+.fq-lot-copy p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgba(244, 240, 232, 0.74);
+  animation: fq-lot-in 0.6s 0.06s var(--ux-ease) both;
+}
+@keyframes fq-lot-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(6px);
+  }
+}
+@media (max-width: 760px) {
+  .fq-lot {
+    height: 460vh;
+  }
+  .fq-lot-stage {
+    top: 8px;
+    height: calc(100dvh - 120px);
+    min-height: 500px;
+  }
+  .fq-lot-copy {
+    top: 24px;
+    bottom: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fq-lot-copy h2,
+  .fq-lot-copy p {
+    animation: none;
+  }
+}

@@ -1,0 +1,505 @@
+/* 홈 첫 화면 궤도. 테마와 관계없이 어두운 무대로 그린다. */
+.fq-orbit {
+  --card-w: clamp(210px, 21vw, 290px);
+  --card-h: calc(var(--card-w) * 1.36);
+  --radius: calc(var(--card-w) * 1.02);
+  position: relative;
+  height: 1700vh;
+  margin-top: 4px;
+}
+.fq-orbit-stage {
+  position: sticky;
+  top: 14px;
+  height: calc(100vh - 28px);
+  min-height: 560px;
+  overflow: hidden;
+  border-radius: 28px;
+  color: #f4f0e8;
+  background:
+    radial-gradient(60% 70% at 64% 50%, rgba(123, 97, 255, 0.28), transparent 70%),
+    radial-gradient(40% 50% at 90% 10%, rgba(255, 122, 147, 0.16), transparent 70%),
+    radial-gradient(50% 60% at 10% 100%, rgba(31, 184, 154, 0.14), transparent 70%),
+    #05060f;
+  box-shadow:
+    0 30px 80px -30px rgba(10, 8, 40, 0.7),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  isolation: isolate;
+}
+.fq-orbit-dust {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* ── 왼쪽 글 ─────────────────────────── */
+.fq-orbit-copy {
+  position: absolute;
+  z-index: 3;
+  left: clamp(22px, 4vw, 56px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: min(380px, 40%);
+  opacity: calc(clamp(0, 1 - var(--zoom, 0) * 1.6, 1) * (1 - var(--end, 0)));
+}
+.fq-orbit-nav {
+  opacity: var(--appear, 0);
+  transition: opacity 0.3s;
+}
+.fq-orbit-eyebrow,
+.fq-orbit-ask {
+  display: block;
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(244, 240, 232, 0.55);
+}
+.fq-orbit-title {
+  position: relative;
+  margin: 14px 0 10px;
+  font-size: clamp(38px, 5.2vw, 76px);
+  font-weight: 950;
+  line-height: 0.92;
+  letter-spacing: -0.05em;
+  text-transform: uppercase;
+  animation: fq-orbit-in 0.7s var(--ux-ease) both;
+}
+/* 제목이 바뀔 때 색이 어긋난 잔상이 잠깐 흔들린다 */
+.fq-orbit-title::before,
+.fq-orbit-title::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  animation: fq-orbit-glitch 0.9s steps(2, end) both;
+}
+.fq-orbit-title::before {
+  color: #ff5a8a;
+  transform: translate(-3px, 0);
+}
+.fq-orbit-title::after {
+  color: #5ad1ff;
+  transform: translate(3px, 0);
+  animation-delay: 0.06s;
+}
+@keyframes fq-orbit-in {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(14px);
+  }
+}
+@keyframes fq-orbit-glitch {
+  0% {
+    opacity: 0.9;
+    clip-path: inset(10% 0 60% 0);
+  }
+  25% {
+    clip-path: inset(55% 0 20% 0);
+  }
+  50% {
+    clip-path: inset(30% 0 45% 0);
+  }
+  75% {
+    opacity: 0.5;
+    clip-path: inset(70% 0 5% 0);
+  }
+  100% {
+    opacity: 0;
+    clip-path: inset(0 0 100% 0);
+  }
+}
+.fq-orbit-lead {
+  margin: 0 0 28px;
+  max-width: 30ch;
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgba(244, 240, 232, 0.74);
+  animation: fq-orbit-in 0.7s 0.08s var(--ux-ease) both;
+}
+.fq-orbit-menu {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.fq-orbit-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 0;
+  border: 0;
+  background: none;
+  color: rgba(244, 240, 232, 0.5);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.3s var(--ux-ease), transform 0.4s var(--ux-spring);
+}
+.fq-orbit-menu button i {
+  font-family: var(--fq-mono);
+  font-style: normal;
+  transition: transform 0.4s var(--ux-spring);
+}
+.fq-orbit-menu button em {
+  margin-left: auto;
+  min-width: 26px;
+  padding: 1px 8px;
+  border-radius: 99px;
+  font-style: normal;
+  font-size: 11px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.08);
+}
+.fq-orbit-menu button:hover,
+.fq-orbit-menu button.is-on {
+  color: #f4f0e8;
+}
+.fq-orbit-menu button.is-on i {
+  transform: translateX(6px);
+  color: #b7a4ff;
+}
+.fq-orbit-menu button.is-on em {
+  background: #b7a4ff;
+  color: #0b0c12;
+}
+.fq-orbit-menu button:focus-visible {
+  outline: 2px solid #b7a4ff;
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+
+/* ── 가운데 궤도 ─────────────────────── */
+.fq-orbit-view {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: 38%;
+  right: 0;
+  display: grid;
+  place-items: center;
+  perspective: 1400px;
+  perspective-origin: 50% 40%;
+}
+.fq-orbit-ring {
+  position: relative;
+  width: var(--card-w);
+  height: var(--card-h);
+  transform-style: preserve-3d;
+}
+.fq-orbit-card {
+  --face: 1;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  border-radius: 24px;
+  color: #f4f0e8;
+  text-decoration: none;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 45%, rgba(255, 255, 255, 0.09));
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow:
+    0 30px 60px -20px rgba(0, 0, 0, 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  opacity: calc(0.22 + var(--face) * 0.78);
+  filter: brightness(calc(0.55 + var(--face) * 0.45));
+  transition: border-color 0.3s var(--ux-ease);
+}
+/* 앞면 유리에 비치는 빛 */
+.fq-orbit-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.18) 45%, transparent 60%);
+  opacity: var(--face);
+}
+.fq-orbit-card:hover,
+.fq-orbit-card:focus-visible {
+  border-color: rgba(183, 164, 255, 0.8);
+  outline: none;
+}
+.fq-orbit-art {
+  flex: 1;
+  min-height: 0;
+  border-radius: 16px;
+  container-type: inline-size;
+}
+.fq-orbit-art .fq-poster-word {
+  font-size: 17cqw;
+  word-break: keep-all;
+}
+.fq-orbit-card-b {
+  display: grid;
+  gap: 6px;
+  padding: 14px 6px 6px;
+}
+.fq-orbit-count {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(244, 240, 232, 0.7);
+}
+.fq-orbit-count b {
+  font-size: 26px;
+  font-weight: 950;
+  letter-spacing: -0.04em;
+  color: #fff;
+}
+.fq-orbit-card-b strong {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.fq-orbit-go {
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #b7a4ff;
+}
+
+/* ── 좁은 화면: 글은 위, 궤도는 아래 ───── */
+@media (max-width: 900px) {
+  .fq-orbit {
+    --card-w: clamp(180px, 50vw, 240px);
+    --card-h: calc(var(--card-w) * 1.5);
+    --radius: calc(var(--card-w) * 0.95);
+  }
+  .fq-orbit-copy {
+    top: 26px;
+    transform: none;
+    width: auto;
+    right: 22px;
+  }
+  .fq-orbit-title {
+    font-size: clamp(32px, 9vw, 52px);
+  }
+  .fq-orbit-lead {
+    margin-bottom: 0;
+  }
+  .fq-orbit-ask,
+  .fq-orbit-menu {
+    display: none;
+  }
+  .fq-orbit-view {
+    left: 0;
+    top: 34%;
+  }
+}
+@media (max-width: 760px) {
+  .fq-orbit-stage {
+    top: 8px;
+    height: calc(100dvh - 120px);
+    min-height: 520px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fq-orbit-title,
+  .fq-orbit-lead {
+    animation: none;
+  }
+  .fq-orbit-title::before,
+  .fq-orbit-title::after {
+    display: none;
+  }
+}
+
+/* ── 장 연출 추가 요소 ───────────────── */
+@media (max-width: 760px) {
+  .fq-orbit {
+    height: 1100vh;
+  }
+}
+/* 카드를 크게 볼 때 무대에 번지는 그 서비스의 색 */
+.fq-orbit-world {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: var(--zoom, 0);
+  background:
+    radial-gradient(70% 80% at 65% 50%, color-mix(in srgb, var(--world, #7b61ff) 55%, transparent), transparent 70%),
+    radial-gradient(50% 60% at 0% 100%, color-mix(in srgb, var(--world, #7b61ff) 30%, transparent), transparent 70%);
+  transition: background 0.6s;
+  pointer-events: none;
+}
+.fq-orbit-focus {
+  position: absolute;
+  z-index: 4;
+  left: clamp(22px, 4vw, 56px);
+  top: 50%;
+  width: min(360px, 34%);
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  opacity: clamp(0, (var(--zoom, 0) - 0.45) * 3, 1);
+  transform: translateY(calc(-50% + (1 - clamp(0, (var(--zoom, 0) - 0.45) * 3, 1)) * 30px));
+  pointer-events: none;
+}
+.fq-orbit-focus h3 {
+  margin: 0;
+  font-size: clamp(30px, 3.4vw, 46px);
+  font-weight: 950;
+  letter-spacing: -0.05em;
+  line-height: 1.05;
+}
+.fq-orbit-focus-count {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.fq-orbit-focus-count .fq-odo,
+.fq-orbit-focus-count b {
+  font-size: clamp(72px, 9vw, 128px);
+  font-weight: 950;
+  letter-spacing: -0.05em;
+  line-height: 0.9;
+}
+.fq-orbit-focus-count > span {
+  font-size: 15px;
+  font-weight: 800;
+  color: rgba(244, 240, 232, 0.75);
+}
+.fq-orbit-focus p {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: rgba(244, 240, 232, 0.88);
+}
+.fq-orbit-focus-cta {
+  margin-top: 6px;
+  padding: 11px 20px;
+  border-radius: 999px;
+  background: #f4f0e8;
+  color: #0b0c12;
+  font-size: 14px;
+  font-weight: 850;
+  text-decoration: none;
+  pointer-events: auto;
+  transition: transform 0.35s var(--ux-spring);
+}
+.fq-orbit-focus-cta:hover {
+  transform: translateY(-2px);
+}
+/* 마무리 3D 장면 */
+.fq-orbit-finale {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+/* 상자가 닫힌 뒤의 마지막 화면 */
+.fq-orbit-end {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  right: 0;
+  bottom: clamp(64px, 9vh, 96px);
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  padding: 0 20px;
+  opacity: var(--end, 0);
+  transform: translateY(calc((1 - var(--end, 0)) * 26px));
+  pointer-events: none;
+}
+.fq-orbit-end.is-on {
+  pointer-events: auto;
+}
+.fq-orbit-end h3 {
+  margin: 0;
+  font-size: clamp(30px, 4.6vw, 68px);
+  font-weight: 950;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  text-align: center;
+  background: linear-gradient(100deg, #b7a4ff, #7db4ff 40%, #a5f2d3 72%, #ff9aae);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.fq-orbit-end nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.fq-orbit-end a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--world) 60%, rgba(255, 255, 255, 0.2));
+  background: color-mix(in srgb, var(--world) 16%, rgba(255, 255, 255, 0.04));
+  color: #f4f0e8;
+  font-size: 14px;
+  font-weight: 800;
+  text-decoration: none;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  transition: transform 0.35s var(--ux-spring), background 0.25s;
+}
+.fq-orbit-end a i {
+  font-style: normal;
+  transition: transform 0.35s var(--ux-spring);
+}
+.fq-orbit-end a:hover,
+.fq-orbit-end a:focus-visible {
+  transform: translateY(-3px);
+  background: color-mix(in srgb, var(--world) 38%, rgba(255, 255, 255, 0.04));
+  outline: none;
+}
+.fq-orbit-end a:hover i {
+  transform: translateX(3px);
+}
+@media (max-width: 900px) {
+  .fq-orbit-focus {
+    top: 22px;
+    right: 22px;
+    width: auto;
+    transform: none;
+    gap: 6px;
+  }
+  .fq-orbit-focus h3 {
+    font-size: 26px;
+  }
+  .fq-orbit-focus-count .fq-odo,
+  .fq-orbit-focus-count b {
+    font-size: 54px;
+  }
+  .fq-orbit-focus p {
+    display: none;
+  }
+  .fq-orbit-end {
+    bottom: 70px;
+  }
+}

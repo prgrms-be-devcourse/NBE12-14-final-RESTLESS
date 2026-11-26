@@ -44,7 +44,7 @@ docker compose --profile dev up -d   # MySQL 먼저 띄우기
 cd frontend
 cp .env.example .env.local
 npm install
-npm run dev                  # /api 요청은 localhost:8080으로 프록시
+npm run dev                  # http://localhost:3000, /api 요청은 Next 서버가 localhost:8080으로 전달
 ```
 
 `.env.local`은 커밋하지 않는다. 토스 테스트 키 같은 값은 팀 채널로 공유한다.

@@ -1,0 +1,297 @@
+/* 경매 목록 앞의 긴 스크롤 연출. 어두운 카지노 테이블 위에서 장이 바뀐다 */
+.fq-show {
+  --p: 0;
+  --fall: 0;
+  --bounce: 0;
+  --letters: 0;
+  --wheel: 0deg;
+  --wheelOn: 0;
+  --lot: 0;
+  --rule: 0;
+  --ring: 1;
+  --au-red: #e3263a;
+  --au-gold: #e9c27a;
+  --au-serif: "Bodoni 72", Didot, "Playfair Display", Georgia, "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", sans-serif;
+  position: relative;
+}
+.fq-show-stage {
+  position: sticky;
+  top: 14px;
+  height: calc(100vh - 28px);
+  min-height: 560px;
+  overflow: hidden;
+  border-radius: 28px;
+  color: #f6efe1;
+  background:
+    radial-gradient(55% 70% at 50% 55%, rgba(227, 38, 58, 0.28), transparent 70%),
+    radial-gradient(40% 60% at 0% 100%, rgba(233, 194, 122, 0.12), transparent 70%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 2px, transparent 2px 6px),
+    #0c0708;
+  box-shadow: inset 0 0 0 1px rgba(233, 194, 122, 0.16);
+}
+.fq-show-stage::after {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(233, 194, 122, 0.2);
+  pointer-events: none;
+}
+.fq-show-kicker {
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: var(--au-gold);
+}
+
+/* ── 1장. 칩과 제목 ───────────────────── */
+.fq-show-open {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 18px;
+  text-align: center;
+  opacity: calc(1 - var(--wheelOn) - var(--lot) - var(--rule));
+}
+.fq-show-title {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: 0;
+  font-family: var(--au-serif);
+  font-size: clamp(48px, 9vw, 140px);
+  font-weight: 700;
+  line-height: 0.9;
+  color: var(--au-red);
+  text-shadow: 0 0 40px rgba(227, 38, 58, 0.35);
+}
+/* 글자마다 조금씩 늦게 위에서 떨어진다 */
+.fq-show-title {
+  gap: 0 0.25em;
+}
+.fq-show-word {
+  display: inline-flex;
+  white-space: nowrap;
+}
+.fq-show-word > span {
+  --k: clamp(0, var(--letters) * 2.2 - var(--i) * 0.08, 1);
+  display: inline-block;
+  opacity: var(--k);
+  transform: translateY(calc((1 - var(--k)) * -1.2em)) rotate(calc((1 - var(--k)) * -18deg));
+}
+.fq-show-word.is-last {
+  font-style: italic;
+  color: #f6efe1;
+  text-shadow: none;
+}
+.fq-show-sub {
+  max-width: 40ch;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgba(246, 239, 225, 0.7);
+  opacity: var(--letters);
+}
+.fq-show-chip {
+  transform: translateY(calc((1 - var(--fall)) * -70vh - var(--bounce) * 40px)) rotate(calc((1 - var(--fall)) * 220deg));
+}
+
+/* ── 2장. 룰렛 ────────────────────────── */
+.fq-show-wheel {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 18px;
+  opacity: var(--wheelOn);
+  transform: scale(calc(0.85 + var(--wheelOn) * 0.15));
+  pointer-events: none;
+}
+.fq-show-wheel svg {
+  width: min(70vh, 80vw);
+  filter: drop-shadow(0 30px 60px rgba(0, 0, 0, 0.6));
+}
+.fq-show-wheel-spin {
+  transform: rotate(var(--wheel));
+}
+.fq-show-wheel path.is-red {
+  fill: #9c1424;
+}
+.fq-show-wheel path.is-black {
+  fill: #15110f;
+}
+.fq-show-wheel path {
+  stroke: var(--au-gold);
+  stroke-width: 0.6;
+}
+.fq-show-wheel g.is-live path {
+  fill: #1f6f5c;
+}
+.fq-show-wheel text {
+  font-family: var(--fq-mono);
+  font-size: 7px;
+  font-weight: 800;
+  fill: #f6efe1;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+.fq-show-wheel-hub {
+  fill: #2a1c12;
+  stroke: var(--au-gold);
+  stroke-width: 2;
+}
+.fq-show-wheel-cap {
+  fill: var(--au-gold);
+}
+.fq-show-pointer {
+  position: relative;
+  z-index: 2;
+  width: 0;
+  height: 0;
+  margin-bottom: -30px;
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  border-top: 26px solid var(--au-gold);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.6));
+}
+.fq-show-wheel-cap-text {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(246, 239, 225, 0.6);
+}
+
+/* ── 3장. 경매 한 장씩 ────────────────── */
+.fq-show-lot {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  padding: 0 24px;
+  text-align: center;
+  opacity: var(--lot);
+  transform: translateY(calc((1 - var(--lot)) * 30px));
+  pointer-events: none;
+}
+.fq-show-lot h3 {
+  max-width: 22ch;
+  margin: 0;
+  font-family: var(--au-serif);
+  font-size: clamp(30px, 4vw, 56px);
+  font-weight: 700;
+  line-height: 1.1;
+}
+.fq-show-price {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.fq-show-price b {
+  font-size: clamp(64px, 11vw, 168px);
+  font-weight: 950;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  color: var(--au-red);
+  text-shadow: 0 0 50px rgba(227, 38, 58, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+.fq-show-price small {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--au-gold);
+}
+.fq-show-lot p {
+  max-width: 44ch;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgba(246, 239, 225, 0.75);
+}
+.fq-show-cta {
+  margin-top: 6px;
+  padding: 12px 24px;
+  border-radius: 999px;
+  background: #f6efe1;
+  color: #0c0708;
+  font-weight: 850;
+  text-decoration: none;
+  pointer-events: auto;
+}
+
+/* ── 4장. 연장 규칙 ───────────────────── */
+.fq-show-rule {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  padding: 0 24px;
+  text-align: center;
+  opacity: var(--rule);
+  pointer-events: none;
+}
+.fq-show-rule svg {
+  grid-area: 1 / 1;
+  width: clamp(220px, 30vw, 340px);
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 5;
+  transform: rotate(-90deg);
+}
+.fq-show-rule svg .is-run {
+  stroke: var(--au-red);
+  stroke-linecap: round;
+  stroke-dasharray: 327;
+  stroke-dashoffset: calc(327 * (1 - var(--ring)));
+}
+.fq-show-rule > b {
+  grid-area: 1 / 1;
+  font-size: clamp(48px, 6vw, 80px);
+  font-weight: 950;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.fq-show-rule-flash {
+  grid-area: 1 / 1;
+  align-self: end;
+  margin-bottom: -50px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--au-red);
+  font-size: 14px;
+  font-weight: 850;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 0.3s, transform 0.4s var(--ux-spring);
+}
+.fq-show.is-bid .fq-show-rule-flash {
+  opacity: 1;
+  transform: none;
+}
+.fq-show.is-bid .fq-show-rule svg .is-run {
+  stroke: var(--au-gold);
+}
+.fq-show-rule p {
+  max-width: 36ch;
+  margin: 40px 0 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgba(246, 239, 225, 0.75);
+}
+
+@media (max-width: 760px) {
+  .fq-show-chip .fq-chip3d {
+    --size: 170px !important;
+  }
+  .fq-show-stage {
+    top: 8px;
+    height: calc(100dvh - 120px);
+    min-height: 500px;
+  }
+}

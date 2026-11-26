@@ -1,0 +1,28 @@
+.fq-ccard {
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  overflow: hidden;
+}
+.fq-ccard-b {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 14px 8px 8px;
+}
+.fq-ccard h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.35;
+}
+.fq-ccard p {
+  margin: 0;
+  font-size: 13.5px;
+}
+.fq-chip.is-urgent {
+  background: var(--ux-hot);
+  color: #fff;
+}

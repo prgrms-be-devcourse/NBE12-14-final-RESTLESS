@@ -1,0 +1,412 @@
+.fq-steps {
+  display: flex;
+  gap: 6px;
+  margin: 22px 0 16px;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ux-ink-3);
+}
+.fq-steps li {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--ux-surface-2);
+  transition: background-color 0.3s, color 0.3s;
+}
+.fq-steps i {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ux-surface-3);
+  font-style: normal;
+  font-size: 12px;
+}
+.fq-steps li.is-now {
+  background: var(--ux-accent-soft);
+  color: var(--ux-accent);
+}
+.fq-steps li.is-now i {
+  background: var(--ux-accent);
+  color: var(--ux-accent-ink);
+}
+.fq-steps li.is-done {
+  color: var(--ux-mint);
+}
+.fq-steps li.is-done i {
+  background: var(--ux-mint);
+  color: #fff;
+}
+@media (max-width: 560px) {
+  .fq-steps {
+    flex-direction: column;
+  }
+}
+
+.fq-queue {
+  position: relative;
+  padding: 28px 24px;
+  border-radius: 24px;
+  overflow: hidden;
+  background: var(--fq-deep);
+  color: #f4f0e8;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  text-align: center;
+}
+.fq-queue::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  background: conic-gradient(from 0deg, transparent, rgba(183, 164, 255, 0.35), transparent 30%);
+  animation: fq-spin 3.2s linear infinite;
+}
+.fq-queue > * {
+  position: relative;
+}
+.fq-queue .fq-eyebrow {
+  color: color-mix(in srgb, #f4f0e8 55%, transparent);
+}
+.fq-queue-num {
+  display: block;
+  margin: 8px 0 18px;
+  font-size: clamp(56px, 9vw, 92px);
+  font-weight: 950;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  background: linear-gradient(120deg, #e6dcff, #b7a4ff 30%, #7db4ff 60%, #a5f2d3);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: fq-tick 0.35s var(--ux-spring);
+}
+.fq-queue-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #f4f0e8 14%, transparent);
+  overflow: hidden;
+}
+.fq-queue-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #b7a4ff, #7db4ff, #a5f2d3);
+  transition: width 0.4s var(--ux-ease);
+}
+.fq-queue .fq-muted {
+  margin: 14px 0 0;
+  color: color-mix(in srgb, #f4f0e8 60%, transparent);
+  font-size: 13.5px;
+}
+@keyframes fq-tick {
+  from {
+    transform: translateY(-10px) scale(1.06);
+    opacity: 0.4;
+  }
+}
+
+.fq-order {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: fq-pop-in 0.6s var(--ux-spring);
+}
+.fq-variants {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+.fq-variant {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--ux-surface-2);
+  box-shadow: inset 0 0 0 1px var(--ux-line);
+  text-align: left;
+  transition: transform 0.35s var(--ux-spring), box-shadow 0.2s, background-color 0.2s;
+}
+.fq-variant b {
+  font-size: 14.5px;
+}
+.fq-variant span {
+  font-size: 12.5px;
+  color: var(--ux-ink-3);
+}
+.fq-variant:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+.fq-variant.is-on {
+  background: var(--ux-accent-soft);
+  box-shadow: inset 0 0 0 2px var(--ux-accent);
+}
+.fq-variant:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
+/* ── 가격, 판매 기간 선 ───────────────── */
+.fq-price {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 14px 0 0;
+}
+.fq-price b {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.fq-price span {
+  font-size: 14px;
+  color: var(--ux-ink-3);
+}
+.fq-tl {
+  margin: 18px 0 4px;
+  padding: 18px 0 0;
+  border-top: 1px solid var(--ux-line-2);
+}
+.fq-tl-line {
+  --p: 0;
+  position: relative;
+  height: 2px;
+  margin: 6px 6px 16px;
+  background: var(--ux-line-2);
+}
+/* 지나온 구간 */
+.fq-tl-line i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--p) * 100%);
+  background: var(--ux-ink);
+}
+/* 양 끝 점과 지금 위치 */
+.fq-tl-line::before,
+.fq-tl-line::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ux-ink-3);
+}
+.fq-tl-line::before {
+  left: -4px;
+  background: var(--ux-ink);
+}
+.fq-tl-line::after {
+  right: -4px;
+}
+.fq-tl-line b {
+  position: absolute;
+  top: -6px;
+  left: calc(var(--p) * 100% - 7px);
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--ux-hot);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ux-hot) 22%, transparent);
+}
+.fq-tl.is-live .fq-tl-line b {
+  animation: fq-tl-pulse 2s ease-out infinite;
+}
+.fq-tl.is-before .fq-tl-line b,
+.fq-tl.is-after .fq-tl-line b {
+  background: var(--ux-ink-3);
+  box-shadow: none;
+}
+.fq-tl.is-after .fq-tl-line::after {
+  background: var(--ux-ink);
+}
+@keyframes fq-tl-pulse {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ux-hot) 55%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+.fq-tl dl {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  margin: 0;
+}
+.fq-tl dl > div:last-child {
+  text-align: right;
+}
+.fq-tl-now {
+  text-align: center;
+}
+.fq-tl dt {
+  font-size: 12px;
+  color: var(--ux-ink-3);
+}
+.fq-tl dd {
+  margin: 2px 0 0;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.fq-tl-now dd {
+  font-size: 17px;
+  font-weight: 800;
+}
+.fq-tl.is-live .fq-tl-now dd {
+  color: var(--ux-hot);
+}
+
+/* ── 대기열 계기판 ────────────────────── */
+.fq-queue::before {
+  display: none;
+}
+.fq-gauge {
+  position: relative;
+  width: min(320px, 100%);
+  margin: 0 auto;
+}
+.fq-gauge svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+.fq-gauge line {
+  stroke: rgba(244, 240, 232, 0.22);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  transition: stroke 0.3s;
+}
+.fq-gauge line.is-major {
+  stroke-width: 1.8;
+}
+.fq-gauge line.is-on {
+  stroke: rgba(244, 240, 232, 0.9);
+}
+.fq-gauge-track,
+.fq-gauge-fill {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.fq-gauge-track {
+  stroke: rgba(244, 240, 232, 0.14);
+}
+.fq-gauge-fill {
+  stroke: #f4f0e8;
+  transition: stroke-dashoffset 0.4s var(--ux-ease);
+}
+.fq-gauge-head {
+  fill: var(--ux-hot);
+  filter: drop-shadow(0 0 6px var(--ux-hot));
+}
+.fq-gauge-c {
+  position: absolute;
+  inset: 34% 0 auto;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+.fq-gauge-c span {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: rgba(244, 240, 232, 0.6);
+}
+.fq-gauge-c b {
+  font-size: clamp(44px, 7vw, 64px);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  animation: fq-tick 0.35s var(--ux-ease);
+}
+
+/* ── 사양표 ───────────────────────────── */
+.fq-spec {
+  margin: 72px 0 0;
+  padding-top: 28px;
+  border-top: 1px solid var(--ux-line-2);
+}
+.fq-spec header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.fq-spec header span {
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: var(--ux-ink-3);
+}
+.fq-spec h2 {
+  margin: 0;
+  font-size: clamp(24px, 2.6vw, 32px);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+.fq-spec dl {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+}
+.fq-spec dl > div {
+  padding: 26px 24px 26px 0;
+  border-bottom: 1px solid var(--ux-line-2);
+}
+.fq-spec dl > div:not(:nth-child(3n + 1)) {
+  padding-left: 24px;
+  border-left: 1px solid var(--ux-line-2);
+}
+.fq-spec dt {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ux-ink-3);
+}
+.fq-spec dd {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 10px 0 8px;
+}
+.fq-spec dd b {
+  font-size: clamp(40px, 5vw, 68px);
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+.fq-spec dd i {
+  font-style: normal;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ux-ink-2);
+}
+.fq-spec p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--ux-ink-2);
+}
+@media (max-width: 760px) {
+  .fq-spec dl {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .fq-spec dl > div:not(:nth-child(3n + 1)) {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .fq-spec dl > div:nth-child(even) {
+    padding-left: 18px;
+    border-left: 1px solid var(--ux-line-2);
+  }
+}

@@ -1,0 +1,661 @@
+/* 공연 상세. 영화처럼 열리는 첫 화면, 고정 화면 설명 카드, 굴러가는 숫자, 큰 글 드러내기, 티켓 모양 회차 */
+.fq-cd {
+  --cd-serif: "Bodoni 72", Didot, "Playfair Display", Georgia, "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", sans-serif;
+}
+.fq-cd-kicker {
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: var(--ux-ink-3);
+}
+
+/* ── 1. 첫 화면 ───────────────────────── */
+.fq-cd-hero {
+  --zoom: 0;
+  --late: 0;
+  --copy: 1;
+  position: relative;
+  height: 560vh;
+  margin-top: 10px;
+}
+.fq-cd-hero-stage {
+  position: sticky;
+  top: 14px;
+  height: calc(100vh - 28px);
+  min-height: 540px;
+  border-radius: 28px;
+  overflow: hidden;
+  color: #f6efe1;
+  background: #04030a;
+  isolation: isolate;
+}
+.fq-cd-hero-scene {
+  position: absolute;
+  inset: 0;
+  transform: scale(calc(1 + var(--zoom) * 0.4)) translateY(calc(var(--zoom) * -4%));
+  transform-origin: 50% 60%;
+}
+.fq-cd-hero-scene canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+/* 영화 화면비 띠: 스크롤하면 위아래 검은 띠가 걷힌다 */
+.fq-cd-hero-stage::before,
+.fq-cd-hero-stage::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: calc((1 - var(--zoom)) * 9%);
+  min-height: 0;
+  background: #000;
+  pointer-events: none;
+}
+.fq-cd-hero-stage::before {
+  top: 0;
+}
+.fq-cd-hero-stage::after {
+  bottom: 0;
+}
+.fq-cd-hero-copy {
+  position: absolute;
+  z-index: 3;
+  left: clamp(22px, 5vw, 72px);
+  right: clamp(22px, 5vw, 72px);
+  bottom: clamp(40px, 12vh, 120px);
+  display: grid;
+  gap: 14px;
+  opacity: var(--copy);
+  transform: translateY(calc((1 - var(--copy)) * -80px));
+}
+.fq-cd-hero-copy .fq-cd-kicker {
+  color: rgba(246, 239, 225, 0.7);
+}
+.fq-cd-name {
+  margin: 0;
+  font-family: var(--cd-serif);
+  font-size: clamp(64px, 12vw, 190px);
+  font-weight: 700;
+  line-height: 0.85;
+  letter-spacing: -0.02em;
+  text-shadow: 0 10px 60px rgba(0, 0, 0, 0.5);
+  animation: fq-cd-in 1.2s var(--ux-ease) both;
+}
+.fq-cd-sub {
+  margin: 0;
+  max-width: 34ch;
+  font-size: clamp(16px, 1.6vw, 22px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: rgba(246, 239, 225, 0.85);
+  animation: fq-cd-in 1.2s 0.15s var(--ux-ease) both;
+}
+.fq-cd-first {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(246, 239, 225, 0.7);
+}
+@keyframes fq-cd-in {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+    filter: blur(12px);
+  }
+}
+/* 첫 화면 뒤쪽: 제목이 사라진 자리에 첫 공연 날짜가 떠오른다 */
+.fq-cd-hero-late {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: 30%;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+  opacity: var(--late);
+  transform: translate(-50%, calc((1 - var(--late)) * 30px));
+}
+.fq-cd-hero-late .fq-cd-kicker {
+  color: rgba(246, 239, 225, 0.75);
+}
+.fq-cd-hero-late b {
+  font-family: var(--cd-serif);
+  font-size: clamp(60px, 11vw, 170px);
+  font-weight: 700;
+  line-height: 0.9;
+  text-shadow: 0 0 60px rgba(183, 164, 255, 0.6);
+}
+.fq-cd-hero-late small {
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(246, 239, 225, 0.8);
+}
+.fq-cd-hint {
+  position: absolute;
+  z-index: 3;
+  right: 28px;
+  bottom: 28px;
+  font-family: var(--fq-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  color: rgba(246, 239, 225, 0.5);
+  writing-mode: vertical-rl;
+  opacity: var(--copy);
+}
+
+/* ── 2. 고정 화면 설명 카드 ───────────── */
+.fq-cd-feat {
+  --s: 0;
+  position: relative;
+  height: 480vh;
+}
+.fq-cd-feat-stage {
+  position: sticky;
+  top: 14px;
+  height: calc(100vh - 28px);
+  min-height: 540px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 18px;
+}
+.fq-cd-visual {
+  position: relative;
+  border-radius: 28px;
+  overflow: hidden;
+  background:
+    radial-gradient(60% 60% at 50% 40%, rgba(123, 97, 255, 0.28), transparent 70%),
+    #07060f;
+  color: #f6efe1;
+}
+.fq-cd-v {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.94) translateY(20px);
+  transition: opacity 0.6s var(--ux-ease), transform 0.8s var(--ux-ease);
+  pointer-events: none;
+}
+.fq-cd-visual.is-step-0 .fq-cd-v-dates,
+.fq-cd-visual.is-step-1 .fq-cd-v-seats,
+.fq-cd-visual.is-step-2 .fq-cd-v-pay,
+.fq-cd-visual.is-step-3 .fq-cd-v-ticket {
+  opacity: 1;
+  transform: none;
+}
+/* 좌석 단계: 잡은 좌석 쪽으로 배치도가 확대된다 */
+.fq-cd-visual.is-step-1 .fq-cd-v-seats {
+  transform: scale(calc(1 + var(--s) * 1.2));
+  transform-origin: 50% 46%;
+  transition: opacity 0.6s var(--ux-ease);
+}
+/* 회차 달력 */
+.fq-cd-v-dates {
+  grid-auto-flow: column;
+  gap: 14px;
+  place-content: center;
+}
+.fq-cd-v-dates span {
+  display: grid;
+  place-items: center;
+  width: clamp(70px, 9vw, 110px);
+  aspect-ratio: 3 / 4;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.fq-cd-v-dates b {
+  font-family: var(--cd-serif);
+  font-size: clamp(34px, 4vw, 54px);
+  line-height: 1;
+}
+.fq-cd-v-dates small {
+  font-size: 12px;
+  color: rgba(246, 239, 225, 0.6);
+}
+.fq-cd-v-dates span.is-on {
+  background: linear-gradient(160deg, #b7a4ff, #7db4ff);
+  color: #0b0c12;
+  box-shadow: 0 20px 50px -10px rgba(183, 164, 255, 0.6);
+  transform: translateY(-10px);
+}
+.fq-cd-v-dates span.is-on small {
+  color: rgba(11, 12, 18, 0.7);
+}
+/* 좌석 배치 */
+.fq-cd-v-seats {
+  grid-template-columns: repeat(12, 1fr);
+  gap: 8px;
+  place-content: center;
+  padding: 18% 14% 12%;
+}
+.fq-cd-v-seats i {
+  width: clamp(14px, 1.8vw, 24px);
+  aspect-ratio: 1;
+  border-radius: 6px 6px 3px 3px;
+  background: rgba(255, 255, 255, 0.16);
+}
+.fq-cd-v-seats i.is-taken {
+  background: rgba(255, 255, 255, 0.05);
+}
+.fq-cd-v-seats i.is-mine {
+  background: #ff9aae;
+  box-shadow: 0 0 18px #ff9aae;
+}
+.fq-cd-visual.is-step-1 .fq-cd-v-seats i.is-mine {
+  animation: fq-cd-pick 0.6s calc(0.4s + (var(--i) - 41) * 0.15s) var(--ux-spring) both;
+}
+@keyframes fq-cd-pick {
+  from {
+    transform: scale(0.4);
+    background: rgba(255, 255, 255, 0.16);
+    box-shadow: none;
+  }
+}
+.fq-cd-v-stagebar {
+  position: absolute;
+  top: 9%;
+  left: 22%;
+  right: 22%;
+  padding: 8px 0;
+  border-radius: 0 0 40px 40px;
+  background: linear-gradient(90deg, #b7a4ff, #7db4ff);
+  color: #0b0c12;
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  text-align: center;
+}
+/* 결제 확정 */
+.fq-cd-v-pay {
+  grid-template-rows: auto auto;
+  align-content: center;
+}
+.fq-cd-v-pay svg {
+  grid-area: 1 / 1;
+  width: clamp(180px, 22vw, 260px);
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 6;
+  transform: rotate(-90deg);
+}
+.fq-cd-v-pay svg .is-run {
+  stroke: #a5f2d3;
+  stroke-linecap: round;
+  stroke-dasharray: 327;
+  stroke-dashoffset: calc(327 * var(--s));
+}
+.fq-cd-v-pay b {
+  grid-area: 1 / 1;
+  align-self: center;
+  justify-self: center;
+  font-size: clamp(34px, 4vw, 54px);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+/* 티켓 단계: 출력구에서 티켓이 밀려 나온다 */
+.fq-cd-v-ticket {
+  align-content: start;
+  padding-top: 18%;
+}
+.fq-cd-v-slot {
+  width: min(360px, 70%);
+  height: 14px;
+  border-radius: 8px;
+  background: #000;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.12), 0 0 30px rgba(165, 242, 211, 0.3);
+}
+.fq-cd-v-ticket-clip {
+  width: min(320px, 62%);
+  margin-top: -6px;
+  overflow: hidden;
+  padding-bottom: 30px;
+}
+.fq-cd-v-ticket-paper {
+  display: grid;
+  gap: 8px;
+  padding: 26px 24px 30px;
+  border-radius: 0 0 16px 16px;
+  background: linear-gradient(180deg, #f6efe1, #e9e2d3);
+  color: #0b0c12;
+  box-shadow: 0 30px 50px -20px rgba(0, 0, 0, 0.7);
+  transform: translateY(calc((var(--s) - 1) * 100%));
+  -webkit-mask: radial-gradient(circle 8px at 0 70%, transparent 98%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle 8px at 100% 70%, transparent 98%, #000) right / 51% 100% no-repeat;
+  mask: radial-gradient(circle 8px at 0 70%, transparent 98%, #000) left / 51% 100% no-repeat,
+    radial-gradient(circle 8px at 100% 70%, transparent 98%, #000) right / 51% 100% no-repeat;
+}
+.fq-cd-v-ticket-paper .fq-cd-kicker {
+  color: rgba(11, 12, 18, 0.55);
+}
+.fq-cd-v-ticket-paper b {
+  font-family: var(--cd-serif);
+  font-size: clamp(30px, 3.4vw, 44px);
+  line-height: 1;
+}
+.fq-cd-v-ticket-paper small {
+  font-size: 13px;
+  font-weight: 700;
+}
+.fq-cd-v-ticket-paper i {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 2px dashed rgba(11, 12, 18, 0.2);
+  font-style: normal;
+  font-family: var(--fq-mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+.fq-cd-v-pay small {
+  margin-top: 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #a5f2d3;
+  text-align: center;
+}
+
+.fq-cd-steps {
+  display: grid;
+  align-content: center;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fq-cd-steps li {
+  padding: 22px 24px;
+  border-radius: 22px;
+  background: var(--ux-surface);
+  box-shadow: 0 0 0 1px var(--ux-line);
+  opacity: 0.4;
+  transform: translateX(20px) scale(0.97);
+  transition: opacity 0.5s var(--ux-ease), transform 0.7s var(--ux-spring), box-shadow 0.4s;
+}
+.fq-cd-steps li.is-done {
+  opacity: 0.55;
+  transform: none;
+}
+.fq-cd-steps li.is-on {
+  opacity: 1;
+  transform: none;
+  box-shadow: 0 0 0 2px var(--ux-accent), 0 24px 50px -24px var(--ux-shadow-strong);
+}
+.fq-cd-steps span {
+  font-family: var(--fq-mono);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  color: var(--ux-accent);
+}
+.fq-cd-steps h3 {
+  margin: 6px 0 6px;
+  font-size: clamp(20px, 2vw, 26px);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+.fq-cd-steps p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ux-ink-2);
+}
+
+/* ── 3. 숫자 ──────────────────────────── */
+.fq-cd-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 80px 0;
+  border-top: 1px solid var(--ux-line-2);
+  border-bottom: 1px solid var(--ux-line-2);
+}
+.fq-cd-stat {
+  display: grid;
+  gap: 10px;
+  padding: 30px clamp(14px, 2vw, 28px);
+}
+.fq-cd-stat + .fq-cd-stat {
+  border-left: 1px solid var(--ux-line-2);
+}
+.fq-cd-stat small {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ux-ink-3);
+}
+.fq-cd-stat b,
+.fq-cd-stat .fq-odo {
+  font-family: var(--cd-serif);
+  font-size: clamp(34px, 4.4vw, 64px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.fq-cd-stat .fq-odo-unit {
+  font-family: inherit;
+  color: var(--ux-ink-3);
+}
+
+/* ── 4. 큰 글 드러내기 ────────────────── */
+.fq-cd-reveal {
+  --p: 0;
+  margin: 40px 0 100px;
+}
+.fq-cd-reveal p {
+  display: grid;
+  margin: 0;
+  font-family: var(--cd-serif);
+  font-size: clamp(48px, 9vw, 140px);
+  font-weight: 700;
+  line-height: 0.92;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+.fq-cd-reveal span {
+  display: block;
+  clip-path: inset(0 calc(100% - clamp(0%, (var(--p) * 1.8 - var(--d, 0)) * 100%, 100%)) 0 0);
+  color: var(--ux-ink);
+}
+.fq-cd-reveal span:nth-child(2) {
+  --d: 0.25;
+  padding-left: 1.2em;
+}
+.fq-cd-reveal span:nth-child(3) {
+  --d: 0.5;
+}
+.fq-cd-reveal em {
+  font-style: italic;
+  background: var(--ux-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ── 5. 티켓 모양 회차 ────────────────── */
+.fq-cd-perfs {
+  scroll-margin-top: 20px;
+}
+.fq-cd-perfs h2 {
+  margin: 8px 0 20px;
+  font-size: clamp(26px, 3vw, 36px);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+.fq-cd-tickets {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fq-cd-ticket {
+  --notch: 14px;
+  position: relative;
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 104px;
+  border-radius: 20px;
+  background: var(--ux-surface);
+  box-shadow: 0 0 0 1px var(--ux-line);
+  /* 티켓 절취선 양 끝의 반원 홈 */
+  -webkit-mask: radial-gradient(circle var(--notch) at 110px 0, transparent 98%, #000) top / 100% 51% no-repeat,
+    radial-gradient(circle var(--notch) at 110px 100%, transparent 98%, #000) bottom / 100% 51% no-repeat;
+  mask: radial-gradient(circle var(--notch) at 110px 0, transparent 98%, #000) top / 100% 51% no-repeat,
+    radial-gradient(circle var(--notch) at 110px 100%, transparent 98%, #000) bottom / 100% 51% no-repeat;
+  animation: fq-cd-in 0.7s var(--ux-ease) both;
+  transition: transform 0.45s var(--ux-spring);
+}
+.fq-cd-ticket:hover {
+  transform: translateY(-3px);
+}
+.fq-cd-ticket.is-closed {
+  opacity: 0.55;
+}
+.fq-cd-ticket-date {
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  border-right: 2px dashed var(--ux-line-2);
+}
+.fq-cd-ticket-date b {
+  font-family: var(--cd-serif);
+  font-size: 44px;
+  line-height: 1;
+}
+.fq-cd-ticket-date span {
+  font-size: 12px;
+  color: var(--ux-ink-3);
+}
+.fq-cd-ticket-info {
+  display: grid;
+  gap: 4px;
+  padding: 0 22px;
+}
+.fq-cd-ticket-info strong {
+  font-size: 17px;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+}
+.fq-cd-ticket-info span {
+  font-size: 13px;
+  color: var(--ux-ink-3);
+}
+.fq-cd-ticket-cta {
+  padding-right: 22px;
+}
+
+/* ── 좁은 화면 ────────────────────────── */
+@media (max-width: 900px) {
+  .fq-cd-feat {
+    height: 420vh;
+  }
+  .fq-cd-hero {
+    height: 440vh;
+  }
+  .fq-cd-feat-stage {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .fq-cd-steps {
+    position: relative;
+    min-height: 170px;
+  }
+  .fq-cd-steps li {
+    position: absolute;
+    inset: 0 0 auto;
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  .fq-cd-steps li.is-done {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+  .fq-cd-steps li.is-on {
+    opacity: 1;
+    transform: none;
+  }
+  .fq-cd-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .fq-cd-stat:nth-child(3) {
+    border-left: 0;
+  }
+  .fq-cd-stat:nth-child(n + 3) {
+    border-top: 1px solid var(--ux-line-2);
+  }
+  .fq-cd-ticket {
+    grid-template-columns: 84px minmax(0, 1fr);
+    -webkit-mask: none;
+    mask: none;
+  }
+  .fq-cd-ticket-cta {
+    grid-column: 1 / -1;
+    padding: 0 16px 16px;
+  }
+  .fq-cd-ticket-cta .fq-btn {
+    width: 100%;
+  }
+}
+@media (max-width: 760px) {
+  .fq-cd-hero-stage,
+  .fq-cd-feat-stage {
+    top: 8px;
+    height: calc(100dvh - 120px);
+    min-height: 500px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fq-cd-name,
+  .fq-cd-sub,
+  .fq-cd-ticket {
+    animation: none;
+  }
+  .fq-cd-hero-scene {
+    transform: none;
+  }
+  .fq-cd-v-ticket-paper {
+    transform: none;
+  }
+}
+
+/* ── 상세 화면의 짧은 머리말 ───────────── */
+.fq-cd-top {
+  position: relative;
+  height: min(62vh, 560px);
+  min-height: 380px;
+  margin-top: 10px;
+  border-radius: 20px;
+  overflow: hidden;
+  color: #f6efe1;
+  background: #04030a;
+}
+.fq-cd-top-scene,
+.fq-cd-top-scene canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.fq-cd-top-copy {
+  position: absolute;
+  left: clamp(22px, 4vw, 56px);
+  right: clamp(22px, 4vw, 56px);
+  bottom: clamp(24px, 5vh, 48px);
+  display: grid;
+  gap: 12px;
+}
+.fq-cd-top .fq-cd-name {
+  font-size: clamp(48px, 8vw, 120px);
+}
+.fq-cd-top .fq-cd-kicker {
+  color: rgba(246, 239, 225, 0.7);
+}
+.fq-cd .fq-cd-stats {
+  margin: 48px 0;
+}

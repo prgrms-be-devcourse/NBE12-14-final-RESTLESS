@@ -1,0 +1,106 @@
+/* #312 — 원본 56px/96px 비율을 --fs 기준으로 늘렸다.
+   벌어지는 폭(--o)은 원본의 1px(56px 글자 기준) = 1/56em 으로 바꿔 같은 비율로 키운다. */
+.u312 {
+  --fs: clamp(48px, 9.5vw, 128px);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 100%;
+  color: #f4f0e8;
+}
+.u312-it {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: calc(var(--fs) * 1.72);
+  border: 0;
+  padding: 0;
+  background: none;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  --o: 0;
+}
+.u312-it + .u312-it {
+  border-top: 1px solid rgba(244, 240, 232, 0.14);
+}
+.u312-h {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: var(--fs);
+  margin-top: calc(var(--fs) / -2);
+  font-size: var(--fs);
+  line-height: var(--fs);
+  font-weight: 900;
+  letter-spacing: -0.05em;
+  white-space: nowrap;
+  transition: transform 0.5s cubic-bezier(0.3, 1.3, 0.4, 1);
+}
+.u312-h.t {
+  clip-path: inset(0 0 50% 0);
+  transform: translateY(calc(var(--o) * -0.01786em));
+}
+.u312-h.b {
+  clip-path: inset(50% 0 0 0);
+  transform: translateY(calc(var(--o) * 0.01786em));
+}
+/* 원본처럼 두 번째 줄만 강조색. 축제 느낌을 위해 그라데이션 글자로 */
+.u312-it:hover .u312-h,
+.u312-it:focus-visible .u312-h {
+  background: linear-gradient(120deg, #b7a4ff, #7db4ff 45%, #ff9aae);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.u312-d {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: calc(var(--fs) * 0.393);
+  margin-top: calc(var(--fs) * -0.196);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: clamp(13px, 1.5vw, 19px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: rgba(244, 240, 232, 0.8);
+  opacity: calc(var(--o) / 18);
+  transform: scaleY(calc(0.3 + var(--o) / 26));
+  transition: transform 0.5s cubic-bezier(0.3, 1.3, 0.4, 1), opacity 0.3s;
+}
+.u312-d::before {
+  content: "";
+  width: 28px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #b7a4ff, #7db4ff);
+}
+.u312-n {
+  position: absolute;
+  right: 0;
+  top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: rgba(244, 240, 232, 0.4);
+}
+.u312-n em {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ff5a6e;
+  color: #fff;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.u312-it:focus-visible {
+  outline: 2px solid #b7a4ff;
+  outline-offset: -2px;
+  border-radius: 12px;
+}

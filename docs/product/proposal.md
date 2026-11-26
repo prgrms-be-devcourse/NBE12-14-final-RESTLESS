@@ -10,7 +10,7 @@
 
 | 항목 | 기획서 | 현재 저장소 | 근거 |
 |---|---|---|---|
-| 프론트엔드 프레임워크 | Next.js, TypeScript | Vite 7 + React 19 + TypeScript | `frontend/package.json`, `frontend/vite.config.ts` |
+| 프론트엔드 프레임워크 | Next.js, TypeScript | 차이 없음. Vite 뼈대를 Next.js 16 + React 19 + TypeScript 앱으로 교체했다 (2026-11-26, #470) | `frontend/package.json`, `frontend/next.config.ts` |
 | 프론트엔드 배포 | EC2에서 Next.js를 Docker로 실행 | S3 + CloudFront 정적 배포 (PROPOSED) | [architecture/overview.md](../architecture/overview.md) 1·3절 |
 | 구매 대기열 저장소 | Redis 기반 대기열·입장 제어 | MySQL로 결정·구현 (#70), Redis는 비교 실험 후 (EXPERIMENTAL) | [architecture/overview.md](../architecture/overview.md), [open-questions.md](open-questions.md) |
 | 경매 실시간 전달 | SSE | 차이 없음. 경매 정책, 계약, 아키텍처 개요 모두 SSE이고 구현했다 (2026-11-20 확인) | [auction/policy.md](../domains/auction/policy.md), [contracts/api/auction.md](../contracts/api/auction.md) |

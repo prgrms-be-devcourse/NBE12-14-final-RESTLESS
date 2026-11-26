@@ -16,9 +16,8 @@ backend/build/
 
 # Frontend (Node)
 frontend/node_modules/
-frontend/dist/
+frontend/.next/
 frontend/coverage/
-/frontend-test/
 *.tsbuildinfo
 
 # Env and secrets

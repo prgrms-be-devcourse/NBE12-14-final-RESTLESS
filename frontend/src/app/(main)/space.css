@@ -1,0 +1,170 @@
+/* ─────────────────────────────────────────────────────────────
+   입장 화면(인트로) 기준으로 맞춘 본 화면 UI.
+   - 라벨: 넓은 자간의 모노 글꼴 (ARTIST × FAN · LIVE SPACE 처럼)
+   - 강조: FANQ 로고와 같은 파스텔 그라데이션, 천천히 흐르는 빛
+   - 버튼: 얇은 테두리의 유리 알약 ("길게 눌러 워프" 버튼처럼)
+   .u040(본 화면 루트) 아래로만 적용한다.
+   ───────────────────────────────────────────────────────────── */
+@keyframes fq-shine {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* 배경 별빛은 한 겹 어둡게 깔아 글이 먼저 읽히게 */
+.u040-sky canvas {
+  opacity: 0.75;
+}
+.u040-sky::after {
+  opacity: 0.6;
+}
+
+/* 머리말: 인트로 kicker + 로고 그라데이션 제목 */
+.u040 .u040-head small {
+  font: 700 11.5px/1 var(--fq-mono);
+  letter-spacing: 0.28em;
+  color: var(--ux-ink-3);
+}
+.u040 .u040-head h1 {
+  margin-top: 10px;
+  background: var(--fq-logo);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 0 24px rgba(150, 140, 255, 0.35));
+  animation: fq-shine 8s linear infinite;
+  padding-bottom: 4px;
+}
+
+/* 섹션 제목 */
+.fq-kicker {
+  display: block;
+  margin-bottom: 8px;
+  font: 700 11.5px/1 var(--fq-mono);
+  letter-spacing: 0.28em;
+  color: var(--ux-ink-3);
+}
+.u040 .fq-section-h h2 {
+  font-size: clamp(22px, 2.4vw, 28px);
+  font-weight: 900;
+}
+.u040 .fq-section-h a,
+.u040 .fq-back,
+.u040 .fq-eyebrow {
+  font-family: var(--fq-mono);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+}
+
+/* 버튼: 유리 알약 / 주 버튼은 로고 그라데이션 */
+.u040 .fq-btn {
+  background: var(--fq-glass-btn);
+  color: var(--ux-ink);
+  box-shadow: inset 0 0 0 1px var(--fq-glass-btn-line);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  font-weight: 800;
+}
+.u040 .fq-btn:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 1px var(--fq-glass-btn-line), 0 0 30px -8px rgba(183, 164, 255, 0.55);
+}
+.u040 .fq-btn.is-grad,
+.u040 .fq-btn.is-hot {
+  background: var(--fq-logo);
+  background-size: 200% 100%;
+  color: var(--fq-logo-ink);
+  box-shadow: 0 0 34px -10px rgba(183, 164, 255, 0.75);
+  animation: fq-shine 6s linear infinite;
+}
+.u040 .fq-btn.is-ghost {
+  background: transparent;
+}
+
+/* 칩: 모노 글꼴의 얇은 테두리 알약 */
+.u040 .fq-chip {
+  font-family: var(--fq-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 32%, transparent);
+}
+.u040 .fq-chip.is-urgent {
+  background: var(--ux-hot);
+  color: #fff;
+  box-shadow: none;
+}
+
+/* 카드: 얇은 빛 테두리 */
+.u040 .fq-card {
+  box-shadow: inset 0 0 0 1px var(--fq-glass-btn-line), 0 30px 60px -40px rgba(0, 0, 0, 0.8);
+}
+.u040 a.fq-card:hover {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ux-accent) 60%, transparent), 0 0 40px -12px rgba(183, 164, 255, 0.5);
+}
+
+/* 홈 숫자 타일: 원색 판 대신 유리 + 그라데이션 숫자 */
+.u040 .fq-stats .fq-stat {
+  background: var(--ux-surface);
+  color: var(--ux-ink);
+  box-shadow: inset 0 0 0 1px var(--fq-glass-btn-line);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.u040 .fq-stats .fq-stat:hover {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ux-accent) 60%, transparent), 0 0 40px -12px rgba(183, 164, 255, 0.5);
+}
+.u040 .fq-stat small {
+  position: absolute;
+  left: 18px;
+  top: 16px;
+  font: 700 10.5px/1 var(--fq-mono);
+  letter-spacing: 0.26em;
+  color: var(--ux-ink-3);
+}
+.u040 .fq-stat b {
+  font-size: 46px;
+  background: var(--fq-logo);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: fq-shine 8s linear infinite;
+}
+.u040 .fq-stat span {
+  color: var(--ux-ink-2);
+}
+.u040 .fq-stat::after {
+  color: var(--ux-ink-3);
+}
+
+/* 큰 숫자·시계·탭·무대는 모두 로고 그라데이션 */
+.u040 .fq-spot-clock,
+.u040 .fq-wallet-amt {
+  background: var(--fq-logo);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: fq-shine 8s linear infinite;
+}
+.u040 .fq-tabs-pill,
+.u040 .fq-stage {
+  background: var(--fq-logo);
+}
+.u040 .fq-tabs button[aria-selected="true"] {
+  color: var(--fq-logo-ink);
+}
+.u040 .fq-stage {
+  color: var(--fq-logo-ink);
+}
+.u040 .fq-perf-date {
+  background: var(--fq-glass-btn);
+  color: var(--ux-ink);
+  box-shadow: inset 0 0 0 1px var(--fq-glass-btn-line);
+}
+.u040 .fq-perf-date span {
+  font-family: var(--fq-mono);
+  color: var(--ux-ink-3);
+}

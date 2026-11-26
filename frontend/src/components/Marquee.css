@@ -1,0 +1,49 @@
+.u394 {
+  position: relative;
+  border-radius: 28px;
+  background: var(--fq-deep);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 30px 60px -36px var(--ux-shadow-strong);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+  overflow: hidden;
+  color: #f4f0e8;
+}
+.u394-st {
+  /* 양 끝이 부드럽게 사라지도록 */
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
+}
+.u394-st {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 26px 0;
+  overflow: hidden;
+}
+.u394-row {
+  display: flex;
+  white-space: nowrap;
+  will-change: transform;
+}
+.u394-row span {
+  flex: none;
+  padding-right: 0.3em;
+  font-size: clamp(38px, 6vw, 72px);
+  line-height: 1.05;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+.u394-row:nth-child(2) span {
+  font-size: clamp(22px, 3.2vw, 38px);
+  font-weight: 800;
+  background: linear-gradient(120deg, #b7a4ff, #7db4ff 50%, #ff9aae);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: -0.03em;
+}
+.u394-row:nth-child(3) span {
+  color: transparent;
+  -webkit-text-stroke: 1.5px rgba(244, 240, 232, 0.55);
+}

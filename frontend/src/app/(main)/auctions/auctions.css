@@ -1,0 +1,279 @@
+/* 경매 목록. 어두운 카지노 테이블 분위기 */
+.fq-au {
+  --au-red: #e3263a;
+  --au-gold: #e9c27a;
+  --au-serif: "Bodoni 72", Didot, "Playfair Display", Georgia, "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", sans-serif;
+}
+
+/* ── 머리말 ───────────────────────────── */
+.fq-au-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 26px;
+  padding: clamp(30px, 5vw, 64px) clamp(22px, 4vw, 64px);
+  border-radius: 28px;
+  overflow: hidden;
+  color: #f6efe1;
+  background:
+    radial-gradient(55% 80% at 82% 50%, rgba(227, 38, 58, 0.32), transparent 70%),
+    radial-gradient(40% 60% at 0% 100%, rgba(233, 194, 122, 0.12), transparent 70%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 2px, transparent 2px 6px),
+    #0c0708;
+  box-shadow: inset 0 0 0 1px rgba(233, 194, 122, 0.16);
+}
+/* 테이블 가장자리의 금색 선 */
+.fq-au-hero::after {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(233, 194, 122, 0.22);
+  pointer-events: none;
+}
+.fq-au-kicker {
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: var(--au-gold);
+}
+.fq-au-display {
+  display: grid;
+  margin: 14px 0 18px;
+  font-family: var(--au-serif);
+  font-size: clamp(54px, 9vw, 132px);
+  font-weight: 700;
+  line-height: 0.88;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: var(--au-red);
+  text-shadow: 0 0 40px rgba(227, 38, 58, 0.35);
+}
+.fq-au-display span {
+  display: block;
+  animation: fq-au-rise 0.9s var(--ux-ease) both;
+}
+.fq-au-display span:last-child {
+  animation-delay: 0.12s;
+}
+.fq-au-display em {
+  font-style: italic;
+  color: #f6efe1;
+  text-shadow: none;
+}
+@keyframes fq-au-rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.3em);
+    filter: blur(10px);
+  }
+}
+.fq-au-hero-copy p {
+  max-width: 40ch;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgba(246, 239, 225, 0.72);
+}
+.fq-au-hero-stats {
+  display: flex;
+  gap: 28px;
+  margin-top: 26px;
+}
+.fq-au-hero-stats span {
+  display: grid;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(246, 239, 225, 0.6);
+}
+.fq-au-hero-stats b {
+  font-family: var(--au-serif);
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--au-gold);
+}
+.fq-au-hero-chip {
+  padding: 0 clamp(0px, 3vw, 40px) 20px 0;
+}
+
+/* ── 목록 줄 ──────────────────────────── */
+.fq-au-rows {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fq-au-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 70px 64px minmax(0, 1fr) 180px 150px 28px;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 22px;
+  border-radius: 20px;
+  color: var(--ux-ink);
+  text-decoration: none;
+  background: var(--ux-surface);
+  box-shadow: 0 0 0 1px var(--ux-line);
+  overflow: hidden;
+  isolation: isolate;
+  animation: fq-au-row-in 0.6s var(--ux-ease) both;
+  transition: transform 0.45s var(--ux-spring), box-shadow 0.3s var(--ux-ease);
+}
+/* 마우스를 올리면 붉은 빛이 왼쪽에서 번진다 */
+.fq-au-row::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(90deg, rgba(227, 38, 58, 0.16), transparent 60%);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform 0.5s var(--ux-ease);
+}
+.fq-au-row:hover,
+.fq-au-row:focus-visible {
+  transform: translateX(6px);
+  box-shadow: 0 0 0 1px rgba(227, 38, 58, 0.5), 0 20px 40px -24px rgba(227, 38, 58, 0.6);
+  outline: none;
+}
+.fq-au-row:hover::before,
+.fq-au-row:focus-visible::before {
+  transform: scaleX(1);
+}
+@keyframes fq-au-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+.fq-au-lot {
+  font-family: var(--au-serif);
+  font-size: 46px;
+  font-weight: 700;
+  line-height: 1;
+  color: transparent;
+  -webkit-text-stroke: 1.2px var(--ux-ink-3);
+}
+.fq-au-row.is-open .fq-au-lot {
+  color: var(--au-red);
+  -webkit-text-stroke: 0;
+}
+.fq-au-row .fq-chip3d {
+  transition: transform 0.6s var(--ux-spring);
+}
+.fq-au-row:hover .fq-chip3d {
+  transform: rotate(-24deg) scale(1.08);
+}
+.fq-au-main {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+  min-width: 0;
+}
+.fq-au-main h3 {
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 850;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.fq-au-main small,
+.fq-au-price small,
+.fq-au-time small {
+  font-size: 12px;
+  color: var(--ux-ink-3);
+}
+.fq-au-price,
+.fq-au-time {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+.fq-au-price b,
+.fq-au-price .fq-odo {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+}
+.fq-au-row.is-open .fq-au-price .fq-odo {
+  color: var(--au-red);
+}
+.fq-au-time b {
+  font-size: 15px;
+  font-weight: 800;
+}
+.fq-au-row.is-urgent .fq-au-time b {
+  color: var(--au-red);
+  animation: fq-beat 1s infinite;
+}
+.fq-au-row.is-closed {
+  opacity: 0.6;
+}
+.fq-au-go {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--ux-ink-3);
+  transition: transform 0.4s var(--ux-spring), color 0.3s;
+}
+.fq-au-row:hover .fq-au-go {
+  transform: translateX(4px);
+  color: var(--au-red);
+}
+
+@media (max-width: 900px) {
+  .fq-au-hero {
+    grid-template-columns: 1fr;
+  }
+  .fq-au-hero-chip {
+    position: absolute;
+    right: -50px;
+    bottom: -40px;
+    opacity: 0.45;
+    transform: scale(0.6);
+    transform-origin: 100% 0;
+    padding: 0;
+  }
+  .fq-au-row {
+    grid-template-columns: 54px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "chip main go"
+      "chip price time";
+    gap: 8px 14px;
+    padding: 14px 16px;
+  }
+  .fq-au-lot {
+    display: none;
+  }
+  .fq-au-row .fq-chip3d {
+    grid-area: chip;
+    --size: 54px !important;
+  }
+  .fq-au-main {
+    grid-area: main;
+  }
+  .fq-au-price {
+    grid-area: price;
+    justify-items: start;
+  }
+  .fq-au-time {
+    grid-area: time;
+  }
+  .fq-au-go {
+    grid-area: go;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fq-au-display span,
+  .fq-au-row {
+    animation: none;
+  }
+}

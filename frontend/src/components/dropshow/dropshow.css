@@ -1,0 +1,222 @@
+/* 한정판 드롭 구매 흐름 연출 */
+.fq-dshow {
+  --clock: 1;
+  --pos: 0;
+  --timer: 0;
+  --stock: 0;
+  --sold: 0;
+  --mine: 0;
+  position: relative;
+  height: 640vh;
+}
+.fq-dshow-stage {
+  position: sticky;
+  top: 14px;
+  height: calc(100vh - 28px);
+  min-height: 560px;
+  overflow: hidden;
+  border-radius: 20px;
+  color: #f4f0e8;
+  background:
+    radial-gradient(55% 60% at 66% 46%, rgba(255, 122, 69, 0.14), transparent 70%),
+    radial-gradient(40% 50% at 0% 100%, rgba(123, 97, 255, 0.14), transparent 70%),
+    #05060f;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  isolation: isolate;
+}
+.fq-dshow-stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+/* 오픈 카운트다운: 화면 가운데 큰 숫자 */
+.fq-dshow-clock {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%) scale(calc(0.9 + var(--clock) * 0.1));
+  font-size: clamp(56px, 10vw, 150px);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  opacity: var(--clock);
+  pointer-events: none;
+}
+/* 오른쪽 위 계기 숫자들. 장마다 하나씩 나타난다 */
+.fq-dshow-pos,
+.fq-dshow-timer,
+.fq-dshow-stock {
+  position: absolute;
+  z-index: 3;
+  right: clamp(22px, 4vw, 56px);
+  top: clamp(56px, 9vh, 90px);
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  pointer-events: none;
+}
+.fq-dshow-pos {
+  opacity: var(--pos);
+}
+.fq-dshow-timer {
+  opacity: var(--timer);
+}
+.fq-dshow-stock {
+  opacity: var(--stock);
+}
+.fq-dshow-pos span,
+.fq-dshow-timer span,
+.fq-dshow-stock span {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: rgba(244, 240, 232, 0.6);
+}
+.fq-dshow-pos b,
+.fq-dshow-timer b,
+.fq-dshow-stock b {
+  font-size: clamp(40px, 5vw, 72px);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.fq-dshow-stock b {
+  color: #ff9aae;
+}
+/* 재고가 다 나가면 찍히는 도장 */
+.fq-dshow-sold {
+  position: absolute;
+  z-index: 4;
+  left: 62%;
+  top: 46%;
+  padding: 8px 18px;
+  border: 3px solid #ff5a6e;
+  border-radius: 10px;
+  color: #ff5a6e;
+  font-style: normal;
+  font-size: clamp(26px, 3.4vw, 46px);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  opacity: var(--sold);
+  transform: translate(-50%, -50%) rotate(-10deg) scale(calc(1.8 - var(--sold) * 0.8));
+  pointer-events: none;
+}
+.fq-dshow-mine {
+  position: absolute;
+  z-index: 3;
+  left: 62%;
+  top: calc(44% + clamp(110px, 16vh, 170px));
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  transform: translateX(-50%) translateY(calc((1 - var(--mine)) * 16px));
+  opacity: var(--mine);
+  text-align: center;
+  pointer-events: none;
+}
+.fq-dshow-mine span {
+  font-size: 13px;
+  color: rgba(244, 240, 232, 0.65);
+}
+.fq-dshow-mine b {
+  font-size: clamp(26px, 3vw, 40px);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+/* 왼쪽 아래 설명 */
+.fq-dshow-copy {
+  position: absolute;
+  z-index: 3;
+  left: clamp(22px, 4vw, 56px);
+  bottom: clamp(80px, 12vh, 120px);
+  max-width: min(400px, 46%);
+}
+.fq-dshow-copy span {
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: rgba(244, 240, 232, 0.55);
+}
+.fq-dshow-copy h2 {
+  margin: 12px 0 10px;
+  font-size: clamp(40px, 5vw, 76px);
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.045em;
+  animation: fq-dshow-in 0.6s var(--ux-ease) both;
+}
+.fq-dshow-copy p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgba(244, 240, 232, 0.74);
+  animation: fq-dshow-in 0.6s 0.06s var(--ux-ease) both;
+}
+.fq-dshow-copy small {
+  display: block;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: rgba(244, 240, 232, 0.4);
+}
+@keyframes fq-dshow-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(6px);
+  }
+}
+@media (max-width: 760px) {
+  .fq-dshow {
+    height: 480vh;
+  }
+  .fq-dshow-stage {
+    top: 8px;
+    height: calc(100dvh - 120px);
+    min-height: 500px;
+  }
+  .fq-dshow-copy {
+    top: 22px;
+    bottom: auto;
+    max-width: none;
+    right: 22px;
+  }
+  .fq-dshow-copy h2 {
+    font-size: 38px;
+  }
+  .fq-dshow-copy p {
+    font-size: 13.5px;
+  }
+  .fq-dshow-pos,
+  .fq-dshow-timer,
+  .fq-dshow-stock {
+    top: auto;
+    bottom: 76px;
+  }
+  .fq-dshow-pos b,
+  .fq-dshow-timer b,
+  .fq-dshow-stock b {
+    font-size: 34px;
+  }
+  .fq-dshow-sold,
+  .fq-dshow-mine {
+    left: 50%;
+  }
+  .fq-dshow-sold {
+    top: 50%;
+  }
+  .fq-dshow-sold {
+    top: 56%;
+  }
+  .fq-dshow-mine {
+    top: calc(50% + 84px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fq-dshow-copy h2,
+  .fq-dshow-copy p {
+    animation: none;
+  }
+}
