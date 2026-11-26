@@ -58,7 +58,7 @@ sudo -u ubuntu git -C /home/ubuntu/restless pull --ff-only
 sudoedit /opt/restless/perf.env          # 필요한 값만 수정
 $R check
 $R stop-app; $R reset-db                 # DB 이름 입력
-$R start sha-<태그> && $R stop-app
+$R start sha-<태그> --no-jfr && $R stop-app
 $R seed <스케일>
 ```
 
@@ -120,10 +120,10 @@ sudo groupdel perf-runners
 - 아무것도 바꾸지 않는다.
 - 언제: perf.env를 고친 직후, 테스트 시작 전.
 
-### `start <태그>`: perf 앱 띄우기
+### `start <태그> [--no-jfr]`: perf 앱 띄우기
 1. `deploy.paused`를 만들어 자동 배포를 멈춘다.
 2. 배포 컨테이너 `restless`와 기존 `restless-perf`를 지운다.
-3. 태그 이미지를 받아 perf.env로 `restless-perf`를 띄운다. 포트는 8080, 8081이다.
+3. 태그 이미지를 받아 perf.env로 `restless-perf`를 띄운다. 포트는 8080, 8081이다. JFR 기본값은 `settings=profile`, `stackdepth=256`이다. `--no-jfr`를 주면 스크립트가 JFR 옵션을 추가하지 않는다.
 4. health가 응답할 때까지 최대 180초 기다린다.
 5. Flyway 결과를 보여 준다. 빈 DB면 이때 스키마가 만들어진다.
 
@@ -131,7 +131,7 @@ sudo groupdel perf-runners
 - perf.env는 컨테이너를 만들 때만 읽힌다. perf.env를 바꿨거나 테스트할 코드가 바뀌어 새 태그가 필요하면 `start`를 다시 한다. 둘 다 그대로면 다시 할 필요가 없다.
 
 ### `stop-app`: perf 앱만 정지
-- `restless-perf`만 멈춘다. 자동 배포는 멈춘 채로 둔다.
+- `restless-perf`를 종료 대기 한도 60초로 멈춘다. 자동 배포는 멈춘 채로 둔다. JFR은 다시 시작하거나 정리하기 전에 [파일을 꺼낸다](../../docs/testing/drop-performance-procedure.md#7-4-jfr-켜기와-꺼내기).
 - 앱을 꺼야 하는 이유는 다음과 같다.
   - `reset-db`: 앱이 커넥션을 잡고 있으면 DB를 지울 수 없다.
   - `seed`: 앱 스케줄러가 시드 데이터를 건드리면 안 된다.
@@ -181,7 +181,7 @@ perf/ec2/perf-ec2.sh check
 # 2. 빈 DB와 스키마
 perf/ec2/perf-ec2.sh stop-app           # 앱이 없다는 에러가 나도 괜찮다
 perf/ec2/perf-ec2.sh reset-db           # perf-restless 입력
-perf/ec2/perf-ec2.sh start sha-<태그> && perf/ec2/perf-ec2.sh stop-app
+perf/ec2/perf-ec2.sh start sha-<태그> --no-jfr && perf/ec2/perf-ec2.sh stop-app
 
 # 3. 시드와 토큰
 perf/ec2/perf-ec2.sh seed <내 도메인 스케일>
