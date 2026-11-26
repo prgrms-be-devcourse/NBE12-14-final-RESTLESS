@@ -16,12 +16,14 @@ EC2 담당자는 `~/restless`에서 `perf/ec2/perf-ec2.sh <명령>`으로 실행
 | 티켓팅 시드와 검증 | `$T seed`, `$T verify <공연ID>` |
 | perf 서버 로그 | `$R logs <시작 UTC> <종료 UTC>` |
 | perf 컨테이너 이미지와 재시작 상태 | `$R status` |
+| perf 컨테이너 TCP listen 큐 넘침 누적값 | `$R tcpstats` |
 | RDS 최대 연결 수와 현재 연결 수 | `$R dbconns` |
 | 서버 안에서 지표 수집 | `$R sample <초> [간격 초]` |
 
 `$R`은 `sudo -u ubuntu /home/ubuntu/restless/perf/ec2/perf-ec2.sh`, `$T`는 `sudo -u ubuntu /home/ubuntu/restless/perf/seed/ticketing.sh`이다. 접속하면 자동으로 잡히므로 직접 입력하지 않는다.
 `perf/seed/ticketing.sh verify 1`은 `$T verify 1`로 쓴다. `$R verify`는 스케일을 받는 다른 검증이다.
 로그 시간은 `YYYY-MM-DDTHH:MM:SSZ` 형식의 UTC로 입력한다. 예: `$R logs 2026-11-25T07:42:20Z 2026-11-25T07:47:00Z`. 해당 기간의 마지막 최대 10,000줄을 출력한다. 예외 메시지에 행 값이나 DB 호스트명이 들어갈 수 있으므로 공유 전 확인한다. `$R status`는 환경변수 없이 이미지, revision, 컨테이너 상태, 종료 코드, 재시작 횟수, OOM 여부와 시작 시각만 출력한다.
+`$R tcpstats`는 컨테이너 네트워크 공간의 `ListenOverflows`, `ListenDrops`, SYN cookie 누적값과 listen 큐 관련 커널 설정만 출력한다. 8080 listen 소켓은 컨테이너 안에 있어 호스트의 `nstat`에는 잡히지 않는다. 측정 직전과 직후에 실행해 차이를 본다. 앱 로그 없이 `connection reset by peer`가 나면 이 값이 늘었는지 먼저 본다.
 
 노트북에서 로그를 파일로 받으려면 전체 경로를 사용한다. `$R`은 비대화형 SSH에서 설정되지 않을 수 있다.
 

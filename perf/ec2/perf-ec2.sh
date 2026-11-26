@@ -15,6 +15,7 @@
 #   perf-ec2.sh sample <초> [간격 초]  서버 안에서 Actuator 지표를 CSV로 표준 출력에 남긴다 (기본 1초 간격)
 #   perf-ec2.sh logs <시작 UTC> <종료 UTC>  perf 컨테이너 로그 조회 (최대 10000줄)
 #   perf-ec2.sh status                perf 컨테이너 이미지와 재시작 상태 조회
+#   perf-ec2.sh tcpstats              perf 컨테이너의 TCP listen 큐 넘침 누적값 (측정 전후 차이를 본다)
 #   perf-ec2.sh reset-db              perf DB를 지우고 다시 만든다 (스케일을 바꿀 때)
 #   perf-ec2.sh finish                restless-perf 삭제, 자동 배포 재개
 set -euo pipefail
@@ -191,6 +192,18 @@ case "$cmd" in
   status)
     [[ $# -eq 0 ]] || die 'usage: status'
     docker inspect --format 'Image={{.Config.Image}} Revision={{index .Config.Labels "org.opencontainers.image.revision"}} Status={{.State.Status}} ExitCode={{.State.ExitCode}} RestartCount={{.RestartCount}} OOMKilled={{.State.OOMKilled}} StartedAt={{.State.StartedAt}}' restless-perf
+    ;;
+  tcpstats)
+    [[ $# -eq 0 ]] || die 'usage: tcpstats'
+    running restless-perf || die 'restless-perf is not running'
+    # 읽기만 한다. 8080 listen 소켓은 컨테이너 네트워크 공간에 있어 호스트의 nstat에는 잡히지 않는다.
+    # 값은 컨테이너 네트워크 공간이 만들어진 뒤의 누적값이다. 측정 전후 차이를 본다.
+    docker exec restless-perf cat /proc/net/netstat | awk '
+      $1 == "TcpExt:" && !seen { for (i = 2; i <= NF; i++) name[i] = $i; seen = 1; next }
+      $1 == "TcpExt:" { for (i = 2; i <= NF; i++) if (name[i] ~ /^(ListenOverflows|ListenDrops|SyncookiesSent|SyncookiesRecv|SyncookiesFailed|TCPReqQFullDrop|TCPReqQFullDoCookies)$/) print name[i], $i }'
+    for key in net/core/somaxconn net/ipv4/tcp_max_syn_backlog net/ipv4/tcp_syncookies net/ipv4/tcp_abort_on_overflow; do
+      echo "${key##*/} $(docker exec restless-perf cat "/proc/sys/$key")"
+    done
     ;;
   reset-db)
     load_env
