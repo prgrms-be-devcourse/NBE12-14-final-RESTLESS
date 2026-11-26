@@ -11,6 +11,7 @@
 #   perf-ec2.sh verify <scale>        정합성 점검
 #   perf-ec2.sh serve-tokens          8080으로 토큰 묶음을 한 번만 내려보낸다 (restless-perf가 멈춰 있어야 한다)
 #   perf-ec2.sh lockstats             InnoDB 행 잠금 대기 누적값 (측정 전후 차이를 본다)
+#   perf-ec2.sh dbconns               RDS 최대 연결 수, 현재 연결 수, 접속한 곳별 연결 수 (서버 여러 대를 띄우기 전에 본다)
 #   perf-ec2.sh logs <시작 UTC> <종료 UTC>  perf 컨테이너 로그 조회 (최대 10000줄)
 #   perf-ec2.sh status                perf 컨테이너 이미지와 재시작 상태 조회
 #   perf-ec2.sh reset-db              perf DB를 지우고 다시 만든다 (스케일을 바꿀 때)
@@ -132,6 +133,15 @@ case "$cmd" in
     load_env
     db_sql "SHOW GLOBAL STATUS WHERE Variable_name IN ('Innodb_row_lock_waits','Innodb_row_lock_time','Innodb_row_lock_time_max','Innodb_row_lock_current_waits','Threads_running','Innodb_deadlocks')" 2>/dev/null \
       || db_sql "SHOW GLOBAL STATUS LIKE 'Innodb_row_lock%'"
+    ;;
+  dbconns)
+    [[ $# -eq 0 ]] || die 'usage: dbconns'
+    load_env
+    # 읽기만 한다. 앱 서버 N대 x 연결 풀(기본 20)이 max_connections 안에 들어가는지 본다.
+    server_sql "SELECT @@max_connections AS max_connections"
+    server_sql "SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected','Max_used_connections','Max_used_connections_time','Connection_errors_max_connections')"
+    # PROCESS 권한이 없으면 이 DB 계정의 연결만 보인다. 전체 수는 위의 Threads_connected를 본다.
+    server_sql "SELECT SUBSTRING_INDEX(HOST, ':', 1) AS client, USER AS db_user, COUNT(*) AS connections FROM information_schema.PROCESSLIST GROUP BY client, db_user ORDER BY connections DESC"
     ;;
   logs)
     [[ $# -eq 2 ]] || die 'usage: logs <start UTC> <end UTC> (YYYY-MM-DDTHH:MM:SSZ)'

@@ -34,11 +34,12 @@ mkdir -p perf/seed/out && curl -fo perf/seed/out/seed-out.tar.gz http://perf-app
 tar -xzf perf/seed/out/seed-out.tar.gz -C perf/seed/out && rm perf/seed/out/seed-out.tar.gz
 ```
 
-5. EC2: 앱을 다시 띄우고 측정 직전 잠금 누적값을 적는다.
+5. EC2: 앱을 다시 띄우고 측정 직전 잠금 누적값을 적는다. 앱 서버를 여러 대 띄우는 측정이면 `dbconns`로 RDS 최대 연결 수가 서버 수 × 연결 풀(20)보다 넉넉한지 먼저 본다.
 
 ```bash
 perf/ec2/perf-ec2.sh start sha-<같은 태그>
 perf/ec2/perf-ec2.sh lockstats
+perf/ec2/perf-ec2.sh dbconns   # 여러 대 측정일 때
 ```
 
 6. 노트북에서 시나리오를 실행한다 ([scenarios](../scenarios/README.md)).

@@ -16,6 +16,7 @@ EC2 담당자는 `~/restless`에서 `perf/ec2/perf-ec2.sh <명령>`으로 실행
 | 티켓팅 시드와 검증 | `$T seed`, `$T verify <공연ID>` |
 | perf 서버 로그 | `$R logs <시작 UTC> <종료 UTC>` |
 | perf 컨테이너 이미지와 재시작 상태 | `$R status` |
+| RDS 최대 연결 수와 현재 연결 수 | `$R dbconns` |
 
 `$R`은 `sudo -u ubuntu /home/ubuntu/restless/perf/ec2/perf-ec2.sh`, `$T`는 `sudo -u ubuntu /home/ubuntu/restless/perf/seed/ticketing.sh`이다. 접속하면 자동으로 잡히므로 직접 입력하지 않는다.
 `perf/seed/ticketing.sh verify 1`은 `$T verify 1`로 쓴다. `$R verify`는 스케일을 받는 다른 검증이다.
@@ -149,6 +150,13 @@ sudo groupdel perf-runners
 - MySQL 전체 행 잠금 통계를 보여 준다. 대기 횟수, 대기 시간 합, 최대 대기 시간, 현재 대기 수가 나온다.
 - RDS가 켜진 뒤로 계속 쌓이는 값이다. 측정 전후 차이만 의미가 있다.
 - 언제: k6 직전과 직후에 한 번씩.
+
+### `dbconns`: RDS 연결 수
+- 읽기만 한다. 세 가지를 보여 준다.
+  - `max_connections`: RDS가 받는 최대 연결 수
+  - `Threads_connected`, `Max_used_connections`(와 그 시각), `Connection_errors_max_connections`: 지금 연결 수, RDS가 켜진 뒤 최대 연결 수, 상한 때문에 거절된 연결 수
+  - 접속한 곳(IP)과 DB 계정별 연결 수. DB 계정에 PROCESS 권한이 없으면 그 계정의 연결만 보인다. 전체 수는 `Threads_connected`로 본다.
+- 언제: 앱 서버를 여러 대 띄우기 전. 앱 서버 수 × 연결 풀 크기(perf 기본 20)에 시드·검증 도구와 다른 사람의 연결을 더해도 `max_connections` 아래여야 한다. 측정 뒤 `Connection_errors_max_connections`가 늘었으면 DB 연결 상한에 걸린 것이다.
 
 ### 함께 쓰는 명령
 
