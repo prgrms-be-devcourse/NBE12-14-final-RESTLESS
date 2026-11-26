@@ -8,6 +8,7 @@ import com.restless.concert.application.dto.PerformanceLayout;
 import com.restless.concert.application.dto.SeatPosition;
 import com.restless.ticketing.application.dto.TicketSeatSnapshot;
 import com.restless.ticketing.infrastructure.TicketSeatRepository;
+import com.restless.ticketing.infrastructure.TicketSeatSnapshotRepository;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -21,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class TicketSeatQueryService {
 
     private final TicketSeatRepository ticketSeatRepository;
+    private final TicketSeatSnapshotRepository ticketSeatSnapshots;
     private final ConcertQueryService concertQueryService;
     private final SeatQueryMetrics seatQueryMetrics;
 
@@ -34,7 +36,7 @@ public class TicketSeatQueryService {
     public List<TicketSeatInfo> getSeats(Long performanceId) {
         PerformanceLayout layout = concertQueryService.getPerformanceLayout(performanceId);
         List<TicketSeatSnapshot> seats = seatQueryMetrics.measure("sale_seats",
-                () -> ticketSeatRepository.findSnapshotsByPerformanceId(performanceId));
+                () -> ticketSeatSnapshots.findByPerformanceId(performanceId));
         return seatQueryMetrics.measure("combine", () -> combineSeats(layout, seats));
     }
 
