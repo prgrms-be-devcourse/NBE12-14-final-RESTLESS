@@ -9,17 +9,25 @@ import {
   resultSold, resultUnsold, resultAmount, resultCloseLag, resultExtension, resultInitialEnd,
   resultFinalEnd, resultFinalizedAt, resultHighestBidAmount, resultMatchesHighest,
   targetAuctionId, phaseStartMetric, serverOffsetMetric, phaseMetric, summaryTrendStats, summarize,
+  AUTH_MODE, loadSeedTokens, requireTokensValidUntil,
 } from './lib/auction.js';
 
 const TARGET = __ENV.TARGET;
 if (!['ending', 'detail', 'list', 'bid'].includes(TARGET)) throw new Error('TARGET must be ending, detail, list, or bid');
 const PHASES = (__ENV.PHASES || '8000,10000').split(',').map((s) => Number(s.trim()));
-if (PHASES.length !== 2 || PHASES.some((n) => !Number.isSafeInteger(n) || n <= 0)
-    || PHASES[0] >= PHASES[1]) throw new Error('PHASES must be two distinct ascending positive integers');
-const VUS = PHASES[1];
+// 판은 하나 또는 둘. 둘이면 앞 판이 작아야 한다 (VU를 큰 판 수만큼 띄우고 앞 판은 그 일부만 쓴다).
+if (PHASES.length < 1 || PHASES.length > 2 || PHASES.some((n) => !Number.isSafeInteger(n) || n <= 0)
+    || (PHASES.length === 2 && PHASES[0] >= PHASES[1])) {
+  throw new Error('PHASES must be one positive integer or two ascending positive integers, e.g. 8000 or 8000,10000');
+}
+const VUS = PHASES[PHASES.length - 1];
 const AUTH_REQUIRED = TARGET === 'ending' || TARGET === 'bid';
+// 시드 토큰이면 로그인하지 않는다. 로그인 시간(1만 명 약 11분)과 로그인 CPU가 측정에 섞이지 않는다.
+const USE_SEED_TOKENS = AUTH_REQUIRED && AUTH_MODE === 'seed';
+const LOGIN_PACED = AUTH_REQUIRED && !USE_SEED_TOKENS;
 const FIRST = Number(__ENV.BIDDER_FIRST_ID || 1), LAST = Number(__ENV.BIDDER_LAST_ALLOWED_ID || 96900);
-const LOGIN_RATE = Number(__ENV.LOGIN_RATE || 15), LOGIN_MARGIN_SECONDS = Number(__ENV.LOGIN_MARGIN_SECONDS || 60);
+// 첫 판 전 여유. 로그인 때는 늦은 로그인을 흡수하고, 시드 토큰 때는 VU 시작을 기다린다.
+const LOGIN_RATE = Number(__ENV.LOGIN_RATE || 15), LOGIN_MARGIN_SECONDS = Number(__ENV.LOGIN_MARGIN_SECONDS || (LOGIN_PACED ? 60 : 30));
 const PHASE_GAP_SECONDS = Number(__ENV.PHASE_GAP_SECONDS || (TARGET === 'ending' ? 240 : 60));
 const AMOUNT_STEPS = Number(__ENV.AMOUNT_STEPS || 100), REQUEST_TIMEOUT_SECONDS = Number(__ENV.REQUEST_TIMEOUT_SECONDS || 60);
 const START_DELAY_SECONDS = Number(__ENV.START_DELAY_SECONDS || 20), AUCTION_DURATION_SECONDS = Number(__ENV.AUCTION_DURATION_SECONDS || 7200);
@@ -34,8 +42,9 @@ if (![FIRST, LAST, LOGIN_RATE, LOGIN_MARGIN_SECONDS, PHASE_GAP_SECONDS, AMOUNT_S
   || !Number.isSafeInteger(10000 + 100 * (AMOUNT_STEPS - 1)) || ENDING_LEAD_MS < 0) {
   throw new Error('invalid run options or bidder range; IDs must stay at or below BIDDER_LAST_ALLOWED_ID (maximum 96900)');
 }
-const loginSecondsEstimate = AUTH_REQUIRED ? Math.ceil(VUS / LOGIN_RATE) : 0;
-const loginStartDelaySeconds = AUTH_REQUIRED ? 10 : 0;
+const loginSecondsEstimate = LOGIN_PACED ? Math.ceil(VUS / LOGIN_RATE) : 0;
+const loginStartDelaySeconds = LOGIN_PACED ? 10 : 0;
+const seedTokens = USE_SEED_TOKENS ? loadSeedTokens(FIRST, VUS) : null;
 const LOGIN_START_DELAY_MS = loginStartDelaySeconds * 1000;
 const PHASE_GAP_MS = PHASE_GAP_SECONDS * 1000;
 const RESULT_POLL_SECONDS = Number(__ENV.RESULT_POLL_SECONDS || 2);
@@ -46,11 +55,17 @@ const requestTimeoutMs = (loginSecondsEstimate + LOGIN_MARGIN_SECONDS + PHASE_GA
 export const options = {
   setupTimeout: '5m', teardownTimeout: `${RESULT_WAIT_SECONDS + 60}s`, summaryTrendStats,
   scenarios: { auction_burst: { executor: 'per-vu-iterations', vus: VUS, iterations: 1, maxDuration: `${Math.ceil(requestTimeoutMs / 1000)}s` } },
-  thresholds: AUTH_REQUIRED ? { auction_login_success: [{ threshold: 'rate>=0.99', abortOnFail: true, delayAbortEval: '1s' }] } : {},
+  thresholds: LOGIN_PACED ? { auction_login_success: [{ threshold: 'rate>=0.99', abortOnFail: true, delayAbortEval: '1s' }] } : {},
 };
 
 export function setup() {
   checkTarget();
+  if (USE_SEED_TOKENS) {
+    // 측정이 끝날 때까지 토큰이 살아 있어야 한다. 경매 수명(ending 판)과 결과 대기까지 넉넉히 잡는다.
+    const runMs = (START_DELAY_SECONDS + 60 + LOGIN_MARGIN_SECONDS + PHASE_GAP_SECONDS * (PHASES.length - 1)
+      + REQUEST_TIMEOUT_SECONDS + RESULT_WAIT_SECONDS + 600) * 1000;
+    requireTokensValidUntil(seedTokens, Date.now() + runMs);
+  }
   let offsetMs = 0;
   let targets = [];
   let serverNowMs = Date.now();
@@ -106,25 +121,26 @@ export function setup() {
 
   // Start paced logins only after all auctions are OPEN. This prevents setup
   // duration from making scheduled login requests bunch up at VU startup.
-  loginStart = AUTH_REQUIRED ? Date.now() + LOGIN_START_DELAY_MS : Date.now();
+  loginStart = LOGIN_PACED ? Date.now() + LOGIN_START_DELAY_MS : Date.now();
   const firstPhaseAt = loginStart + loginSecondsEstimate * 1000 + LOGIN_MARGIN_SECONDS * 1000;
   phaseTimes = PHASES.map((_, index) => firstPhaseAt + index * PHASE_GAP_MS);
-  const loginStartAt = AUTH_REQUIRED ? loginStart : null;
+  const loginStartAt = LOGIN_PACED ? loginStart : null;
   const firstT = phaseTimes[0];
   const data = { target: TARGET, phases: PHASES, vus: VUS, targets, phaseTimes, offsetMs, loginStartAt,
-    firstPhaseAt: firstT, loginRequested: AUTH_REQUIRED ? VUS : 0, loginSecondsEstimate,
+    firstPhaseAt: firstT, loginRequested: LOGIN_PACED ? VUS : 0, loginSecondsEstimate, authMode: AUTH_REQUIRED ? AUTH_MODE : null,
     loginRate: LOGIN_RATE, loginMarginSeconds: LOGIN_MARGIN_SECONDS, phaseGapSeconds: PHASE_GAP_SECONDS,
     loginStartDelaySeconds, organizer: ORGANIZER_EMAIL, setupLoginFailed: !organizerToken && TARGET !== 'list',
     amountSteps: AMOUNT_STEPS, requestTimeoutSeconds: REQUEST_TIMEOUT_SECONDS,
     endingLeadMs: ENDING_LEAD_MS, resultWaitSeconds: RESULT_WAIT_SECONDS };
-  console.log(`target=${TARGET} phases=${PHASES.join(' -> ')} VUs=${VUS} loginEstimate=${loginSecondsEstimate}s offset=${offsetMs.toFixed(1)}ms T=${phaseTimes.map((t) => new Date(t).toISOString()).join(',')} auctions=${targets.map((t) => t.id).join(',') || 'none'}`);
+  console.log(`target=${TARGET} phases=${PHASES.join(' -> ')} VUs=${VUS} auth=${AUTH_REQUIRED ? AUTH_MODE : 'none'} loginEstimate=${loginSecondsEstimate}s offset=${offsetMs.toFixed(1)}ms T=${phaseTimes.map((t) => new Date(t).toISOString()).join(',')} auctions=${targets.map((t) => t.id).join(',') || 'none'}`);
   return data;
 }
 
 export default function (data) {
   const vuIndex = exec.vu.idInTest - 1;
   let token = '';
-  if (AUTH_REQUIRED) {
+  if (USE_SEED_TOKENS) token = seedTokens[vuIndex];
+  else if (AUTH_REQUIRED) {
     const scheduledLoginAt = data.loginStartAt + vuIndex * 1000 / LOGIN_RATE;
     if (Date.now() < scheduledLoginAt) sleep((scheduledLoginAt - Date.now()) / 1000);
     const started = Date.now();
@@ -239,7 +255,8 @@ export function handleSummary(data) {
   const summary = summarize(data, { target: TARGET, phases: PHASES, vus: VUS,
     targets: targetIds,
     bidderFirstId: AUTH_REQUIRED ? FIRST : null, bidderLastId: AUTH_REQUIRED ? FIRST + VUS - 1 : null,
-    loginRequested: AUTH_REQUIRED ? VUS : 0, loginRate: AUTH_REQUIRED ? LOGIN_RATE : null,
+    authMode: AUTH_REQUIRED ? AUTH_MODE : null,
+    loginRequested: LOGIN_PACED ? VUS : 0, loginRate: LOGIN_PACED ? LOGIN_RATE : null,
     loginSecondsEstimate: AUTH_REQUIRED ? loginSecondsEstimate : 0, loginStartDelaySeconds,
     loginMarginSeconds: LOGIN_MARGIN_SECONDS, phaseGapSeconds: PHASE_GAP_SECONDS,
     amountSteps: TARGET === 'bid' || TARGET === 'ending' ? AMOUNT_STEPS : null,

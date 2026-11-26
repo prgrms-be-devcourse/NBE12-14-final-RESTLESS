@@ -15,6 +15,14 @@ python3 -c 'import ipaddress,sys; ipaddress.ip_address(sys.argv[1])' "$PERF_APP_
 script_dir=$(cd "$(dirname "$0")" && pwd)
 repo_root=$(cd "$script_dir/../.." && pwd)
 cd "$repo_root"
+# 입찰자·관전자 토큰 (#483). 기본은 시드 토큰, AUTH_MODE=login이면 로그인한다. 상세·목록(detail, list)은 토큰을 쓰지 않는다.
+export AUTH_MODE="${AUTH_MODE:-seed}"
+export SEED_OUT="${SEED_OUT:-$repo_root/perf/seed/out}"
+case "$AUTH_MODE" in seed|login) ;; *) echo 'AUTH_MODE must be seed or login' >&2; exit 2 ;; esac
+if [[ "$AUTH_MODE" == seed && "$test_name" =~ ^(ending|bid|sse)$ && ! -s "$SEED_OUT/users.csv" ]]; then
+  echo "$SEED_OUT/users.csv not found. Fetch the seed token bundle (docs/domains/auction/load-test.md) or set AUTH_MODE=login" >&2
+  exit 2
+fi
 stamp=$(date '+%Y%m%dT%H%M%S')
 run_name=${2:-"${test_name}-${stamp}"}
 if [[ ! "$run_name" =~ ^[A-Za-z0-9._-]+$ ]]; then echo 'name may contain only letters, digits, dot, underscore and dash' >&2; exit 2; fi
