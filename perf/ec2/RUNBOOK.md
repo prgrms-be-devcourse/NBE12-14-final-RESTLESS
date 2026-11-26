@@ -17,6 +17,7 @@ EC2 담당자는 `~/restless`에서 `perf/ec2/perf-ec2.sh <명령>`으로 실행
 | perf 서버 로그 | `$R logs <시작 UTC> <종료 UTC>` |
 | perf 컨테이너 이미지와 재시작 상태 | `$R status` |
 | RDS 최대 연결 수와 현재 연결 수 | `$R dbconns` |
+| 서버 안에서 지표 수집 | `$R sample <초> [간격 초]` |
 
 `$R`은 `sudo -u ubuntu /home/ubuntu/restless/perf/ec2/perf-ec2.sh`, `$T`는 `sudo -u ubuntu /home/ubuntu/restless/perf/seed/ticketing.sh`이다. 접속하면 자동으로 잡히므로 직접 입력하지 않는다.
 `perf/seed/ticketing.sh verify 1`은 `$T verify 1`로 쓴다. `$R verify`는 스케일을 받는 다른 검증이다.
@@ -159,6 +160,18 @@ sudo groupdel perf-runners
   - `Threads_connected`, `Max_used_connections`(와 그 시각), `Connection_errors_max_connections`: 지금 연결 수, RDS가 켜진 뒤 최대 연결 수, 상한 때문에 거절된 연결 수
   - 접속한 곳(IP)과 DB 계정별 연결 수. DB 계정에 PROCESS 권한이 없으면 그 계정의 연결만 보인다. 전체 수는 `Threads_connected`로 본다.
 - 언제: 앱 서버를 여러 대 띄우기 전. 앱 서버 수 × 연결 풀 크기(perf 기본 20)에 시드·검증 도구와 다른 사람의 연결을 더해도 `max_connections` 아래여야 한다. 측정 뒤 `Connection_errors_max_connections`가 늘었으면 DB 연결 상한에 걸린 것이다.
+
+### `sample <초> [간격 초]`: 서버 안에서 지표 수집
+- 서버 안에서 `127.0.0.1:8081/actuator/prometheus`를 간격(기본 1초, 1~60)마다 읽어 CSV 한 줄씩 표준 출력에 쓴다. 정한 시간(1~7200초)이 지나면 끝난다.
+- 열은 노트북 수집기 [`sample-actuator.sh`](../scenarios/sample-actuator.sh)와 같다. DB 연결 대기, Tomcat 바쁜 스레드, CPU, 힙, GC, SSE 연결 수 등이고 끝에 `hikaricp_connections_acquire_seconds_max`(DB 연결을 얻기까지 가장 오래 기다린 시간)가 있다.
+- 왜: 노트북에서 2초마다 수집하면 요청이 몰리는 몇 초 동안 수집 요청도 밀려 행이 빈다. 서버 안에서 읽으면 그 순간도 남는다. 앱이 응답하지 못한 초는 시각만 있는 빈 행으로 남는다.
+- 노트북에 파일로 받는 예 (측정 시간보다 넉넉히):
+
+```bash
+ssh fanq-perf 'sudo -u ubuntu /home/ubuntu/restless/perf/ec2/perf-ec2.sh sample 1200' > server-metrics.csv &
+```
+
+- `ssh`를 먼저 끊으면 수집도 멈춘다. 앱이 꺼져 있으면 경고를 내고 빈 행을 남긴다.
 
 ### 함께 쓰는 명령
 

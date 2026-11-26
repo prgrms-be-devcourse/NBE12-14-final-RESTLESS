@@ -12,6 +12,7 @@
 #   perf-ec2.sh serve-tokens          8080으로 토큰 묶음을 한 번만 내려보낸다 (restless-perf가 멈춰 있어야 한다)
 #   perf-ec2.sh lockstats             InnoDB 행 잠금 대기 누적값 (측정 전후 차이를 본다)
 #   perf-ec2.sh dbconns               RDS 최대 연결 수, 현재 연결 수, 접속한 곳별 연결 수 (서버 여러 대를 띄우기 전에 본다)
+#   perf-ec2.sh sample <초> [간격 초]  서버 안에서 Actuator 지표를 CSV로 표준 출력에 남긴다 (기본 1초 간격)
 #   perf-ec2.sh logs <시작 UTC> <종료 UTC>  perf 컨테이너 로그 조회 (최대 10000줄)
 #   perf-ec2.sh status                perf 컨테이너 이미지와 재시작 상태 조회
 #   perf-ec2.sh reset-db              perf DB를 지우고 다시 만든다 (스케일을 바꿀 때)
@@ -167,6 +168,18 @@ case "$cmd" in
     server_sql "SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected','Max_used_connections','Max_used_connections_time','Connection_errors_max_connections')"
     # PROCESS 권한이 없으면 이 DB 계정의 연결만 보인다. 전체 수는 위의 Threads_connected를 본다.
     server_sql "SELECT SUBSTRING_INDEX(HOST, ':', 1) AS client, USER AS db_user, COUNT(*) AS connections FROM information_schema.PROCESSLIST GROUP BY client, db_user ORDER BY connections DESC"
+    ;;
+  sample)
+    [[ $# -ge 1 && $# -le 2 ]] || die 'usage: sample <seconds 1-7200> [interval seconds 1-60]'
+    seconds="$1" interval="${2:-1}"
+    [[ "$seconds" =~ ^[1-9][0-9]*$ && "$seconds" -le 7200 ]] || die 'seconds must be an integer from 1 to 7200'
+    [[ "$interval" =~ ^[1-9][0-9]*$ && "$interval" -le 60 ]] || die 'interval must be an integer from 1 to 60'
+    running restless-perf || echo "perf-ec2: restless-perf is not running; rows stay empty until it answers" >&2
+    # 노트북에서 2초마다 수집하면 몰림 순간에 수집 요청도 밀려 행이 빈다. 서버 안에서 직접 읽으면 네트워크를 거치지 않는다.
+    # 시간이 다 되면 timeout이 124로 끝내는데, 정해진 대로 끝난 것이므로 성공으로 본다.
+    status=0
+    SAMPLE_INTERVAL_SECONDS="$interval" timeout "$seconds" "$REPO/perf/scenarios/sample-actuator.sh" http://127.0.0.1:8081 - || status=$?
+    [[ $status -eq 0 || $status -eq 124 ]] || exit "$status"
     ;;
   logs)
     [[ $# -eq 2 ]] || die 'usage: logs <start UTC> <end UTC> (YYYY-MM-DDTHH:MM:SSZ)'
