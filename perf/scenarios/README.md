@@ -200,6 +200,7 @@ k6 run perf/scenarios/drop-reservation-step.js
 
 [목표](../../docs/testing/drop-performance-plan.md), [실행 절차](../../docs/testing/drop-performance-procedure.md), [측정 규약](../../docs/testing/drop-performance-measurement.md)의 측정을 돌린다. 대표 판매 측정은 `drop-sale.js`, 용량 측정은 `drop-reservation-capacity.js`, 대기열 폴링 측정은 `drop-queue-poll.js`다.
 실행 명령은 위 스파이크와 같고 스크립트 이름과 환경 변수만 다르다. 원자료를 남기려면 `k6 run --out json=<결과 폴더>/<이름>.raw.json`을 붙인다.
+드롭 성능을 측정할 때는 macOS 사전 검사를 통과한 뒤 k6를 실행하고, 종료 뒤 `k6.log`의 부하 발생기 판정을 보고서에 넣는다. [부하 발생기 검사와 실행 명령](../../docs/testing/drop-performance-procedure.md#7-2-서버별-지표-수집과-k6)
 
 ### 공통 집계
 
