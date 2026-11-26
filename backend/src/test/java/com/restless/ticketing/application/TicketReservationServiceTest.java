@@ -710,6 +710,49 @@ class TicketReservationServiceTest {
     }
 
     @Test
+    @DisplayName("선점 만료 첫 쪽 조회는 기한이 지난 HELD만 기한·ID 순으로 읽는다")
+    void expiredHoldFirstPageReadsOnlyExpiredHeldInOrder() {
+        Long first = reserve(fixture.firstUserId(), "first-page-first", List.of(seat(0))).reservationId();
+        Long second = reserve(fixture.secondUserId(), "first-page-second", List.of(seat(1))).reservationId();
+        assertThat(reservationRepository.findExpiredHoldIds()).doesNotContain(first, second);
+
+        // 기한이 더 이른 후보가 ID가 커도 앞에 온다.
+        jdbc.update("UPDATE ticket_reservations SET hold_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE id = ?", first);
+        jdbc.update("UPDATE ticket_reservations SET hold_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 MINUTE) WHERE id = ?", second);
+        List<Long> page = reservationRepository.findExpiredHoldIds();
+        assertThat(page).containsSubsequence(second, first);
+        assertThat(page).hasSizeLessThanOrEqualTo(TicketReservationRepository.EXPIRATION_PAGE_SIZE);
+
+        // 반환된 예약은 기한이 지났어도 다시 읽지 않는다.
+        service.expireHold(second);
+        assertThat(reservationStatus(second)).isEqualTo("RELEASED");
+        assertThat(reservationRepository.findExpiredHoldIds()).contains(first).doesNotContain(second);
+    }
+
+    @Test
+    @DisplayName("선점 만료 다음 쪽 조회는 기준 예약 뒤의 후보만 기한·ID 순으로 읽는다")
+    void expiredHoldNextPageStartsAfterCursor() {
+        Long first = reserve(fixture.firstUserId(), "cursor-first", List.of(seat(0))).reservationId();
+        Long second = reserve(fixture.secondUserId(), "cursor-second", List.of(seat(1))).reservationId();
+        // 한 문장의 UTC_TIMESTAMP는 같은 값이라 두 예약의 기한이 같다. 같은 기한에서는 ID로 이어 읽는다.
+        jdbc.update("UPDATE ticket_reservations SET hold_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 MINUTE) WHERE id IN (?, ?)",
+                first, second);
+        assertThat(reservationRepository.findExpiredHoldIdsAfter(first)).contains(second).doesNotContain(first);
+        assertThat(reservationRepository.findExpiredHoldIdsAfter(second)).doesNotContain(first, second);
+
+        // 기한이 더 늦은 후보는 ID가 작아도 뒤에 온다.
+        jdbc.update("UPDATE ticket_reservations SET hold_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE id = ?", first);
+        assertThat(reservationRepository.findExpiredHoldIdsAfter(second)).contains(first).doesNotContain(second);
+        assertThat(reservationRepository.findExpiredHoldIdsAfter(first)).doesNotContain(first, second);
+
+        // 만료 처리된 후보도 커서 기준으로 쓸 수 있고, 만료 전 예약은 읽지 않는다.
+        service.expireHold(second);
+        assertThat(reservationRepository.findExpiredHoldIdsAfter(second)).contains(first);
+        jdbc.update("UPDATE ticket_reservations SET hold_expires_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 MINUTE) WHERE id = ?", first);
+        assertThat(reservationRepository.findExpiredHoldIdsAfter(second)).doesNotContain(first);
+    }
+
+    @Test
     @DisplayName("만료 정리 전 같은 키 재요청은 기존 예약을 반환하고 이후 새 좌석 소유자를 보존한다")
     void replayDirectlyExpiresOriginalAndPreservesNewOwner() {
         var old = reserve(fixture.firstUserId(), "expired-replay", List.of(seat(0), seat(1)));

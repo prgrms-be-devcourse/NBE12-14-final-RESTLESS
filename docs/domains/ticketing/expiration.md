@@ -46,9 +46,9 @@ PG 조회 미존재만으로 최종 실패라고 단정하지 않는다.
 4. 다중 좌석은 모두 함께 반환한다. 중복 만료 실행은 상태를 재검증하여 카운터를 한 번만 감소시킨다.
 
 5초 스케줄러와 요청 시 만료 검증은 같은 반환 규칙을 사용한다.
-결제 전 작업은 DB UTC 시각으로 만료된 HELD를 조회한다. 결제 기한 작업은 PAYMENT_PENDING·payment_result_pending=false·checkout 필드가 있는 예약 중 payment_expires_at <= DB UTC 현재 시각인 ID를 기한·ID 순으로 최대 100건 조회한다. 후보는 잠금 없는 힌트이며, 반환 여부는 TicketPaymentService.expirePayment의 예약별 REQUIRES_NEW/READ_COMMITTED 트랜잭션에서 다시 판정한다.
+결제 전 작업은 DB UTC 시각으로 만료된 HELD를 조회한다. 결제 기한 작업은 PAYMENT_PENDING·payment_result_pending=false·checkout 필드가 있는 예약 중 payment_expires_at <= DB UTC 현재 시각인 ID를 기한·ID 순으로 조회한다. 두 작업 모두 한 번에 100건씩 읽고, 100건이 차면 마지막 예약의 (기한, ID) 다음부터 다음 100건을 이어 읽는다. 100건보다 적게 나오면 그 실행을 끝낸다. 계속 실패해 그대로 남은 예약이 앞의 100건을 채워도 뒤의 예약이 같은 실행에서 처리된다. 기한은 예약 생성(선점)·checkout(결제) 때 한 번만 정해지므로 마지막 예약의 기한을 커서로 쓴다. 후보는 잠금 없는 힌트이며, 반환 여부는 TicketPaymentService.expirePayment의 예약별 REQUIRES_NEW/READ_COMMITTED 트랜잭션에서 다시 판정한다.
 두 작업 모두 처리 종료 후 기본 5초 간격이다. 결제 전 선점은 restless.ticketing.hold-expiration-delay-ms, 결제 기한은 restless.ticketing.payment-expiration-delay-ms로 각각 조정한다.
-선점 만료 실패는 ticketing.hold.expiration.failures, 결제 기한 후보 조회·예약별 실패는 ticketing.payment.expiration.failures와 오류 로그를 남긴다. 개별 실패 후 나머지 예약을 계속 처리하며 롤백된 예약은 다음 실행에서 재시도한다. ID는 로그에만 남기고 메트릭 태그로 쓰지 않는다.
+선점 만료 후보 조회·예약별 실패는 ticketing.hold.expiration.failures, 결제 기한 후보 조회·예약별 실패는 ticketing.payment.expiration.failures와 오류 로그를 남긴다. 개별 실패 후 나머지 예약을 계속 처리하며 롤백된 예약은 다음 실행에서 재시도한다. 다음 쪽 조회가 실패하면 기록하고 그 실행을 끝낸다. 계속 실패하는 예약은 재시도 상한 없이 매 실행 다시 시도되며, 원인 해결은 운영 복구 대상이다. ID는 로그에만 남기고 메트릭 태그로 쓰지 않는다.
 payment_result_pending=true 또는 RECONCILING/CONFIRMED/종료 상태는 결제 기한으로 반환하지 않는다. 결제 관련 필드가 있는 비정상 HELD도 기존 결제 전 반환 검증으로 거절한다.
 기한 도달은 반환 가능한 시점이며 스케줄러 실행 지연으로 실제 정리가 늦을 수 있다.
 불명확 상태 5분 후 운영 전환은 반환 조건이 아니다. 자동 조회와 좌석 보호를 계속한다.

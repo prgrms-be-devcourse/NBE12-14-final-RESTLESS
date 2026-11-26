@@ -1905,6 +1905,31 @@ class TicketCheckoutServiceTest {
             assertReleased(reservation);
         }
 
+        @Test
+        @DisplayName("결제 기한 다음 쪽 조회는 기준 예약 뒤의 미보호 후보만 기한·ID 순으로 읽는다")
+        void expiredPaymentNextPageStartsAfterCursor() {
+            var firstReservation = reserve();
+            checkout(firstReservation);
+            Long first = firstReservation.reservationId();
+            Long second = service.reserve(fixture.secondUserId(), UUID.randomUUID().toString(), fixture.performanceId(),
+                    List.of(fixture.seatIds().get(2))).reservationId();
+            checkout.checkout(fixture.secondUserId(), second);
+            // 한 문장의 UTC_TIMESTAMP는 같은 값이라 두 예약의 기한이 같다. 같은 기한에서는 ID로 이어 읽는다.
+            jdbc.update("UPDATE ticket_reservations SET checkout_started_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 10 MINUTE), payment_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 5 MINUTE) WHERE id IN (?, ?)",
+                    first, second);
+            assertThat(reservations.findExpiredPaymentIdsAfter(first)).contains(second).doesNotContain(first);
+            assertThat(reservations.findExpiredPaymentIdsAfter(second)).doesNotContain(first, second);
+
+            // 기한이 더 늦은 후보는 ID가 작아도 뒤에 온다.
+            jdbc.update("UPDATE ticket_reservations SET payment_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 MINUTE) WHERE id = ?", first);
+            assertThat(reservations.findExpiredPaymentIdsAfter(second)).contains(first).doesNotContain(second);
+            assertThat(reservations.findExpiredPaymentIdsAfter(first)).doesNotContain(first, second);
+
+            // 결과 대기로 보호된 예약은 다음 쪽에도 나오지 않는다.
+            jdbc.update("UPDATE ticket_reservations SET current_payment_id = 9001, approval_started_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 6 MINUTE), payment_result_pending = TRUE WHERE id = ?", first);
+            assertThat(reservations.findExpiredPaymentIdsAfter(second)).doesNotContain(first);
+        }
+
         private void expireCheckoutFixture(Long reservationId) {
             jdbc.update("UPDATE ticket_reservations SET checkout_started_at = DATE_SUB(checkout_started_at, INTERVAL 10 MINUTE), payment_expires_at = DATE_SUB(payment_expires_at, INTERVAL 10 MINUTE), approval_started_at = DATE_SUB(approval_started_at, INTERVAL 10 MINUTE) WHERE id = ?", reservationId);
         }
