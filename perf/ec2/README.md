@@ -21,7 +21,7 @@ EC2 Instance Connect 브라우저 터미널에서 `~/restless` 저장소로 실�
 cd ~/restless && git fetch -q && git checkout <브랜치> && git pull -q
 perf/ec2/perf-ec2.sh check                 # 프로필, DB 이름, 대기열 꺼짐, 가짜 PG 값
 perf/ec2/perf-ec2.sh create-db             # 처음 한 번
-perf/ec2/perf-ec2.sh start sha-<12자리>     # 자동 배포 멈춤, restless 중지, restless-perf 기동, Flyway 결과
+perf/ec2/perf-ec2.sh start sha-<12자리> --no-jfr # 자동 배포 멈춤, restless 중지, restless-perf 기동, Flyway 결과
 perf/ec2/perf-ec2.sh stop-app
 perf/ec2/perf-ec2.sh seed capacity         # 용량 측정은 capacity, 대표 판매는 sale, 스파이크는 base
 perf/ec2/perf-ec2.sh serve-tokens          # 노트북이 받으면 바로 끝난다
@@ -43,11 +43,12 @@ perf/ec2/perf-ec2.sh lockstats
 
 6. 노트북에서 시나리오를 실행한다 ([scenarios](../scenarios/README.md)).
 7. 실행마다 EC2에서 `lockstats`와 `verify <scale>`을 실행한다. 드롭 불변식, 금액, FK 고아 행 검사는 0이어야 한다. `seed baseline` 검사는 부하 뒤에 실패하는 것이 정상이다. 드롭 `sale` 측정 뒤에는 그중 `hot drop untouched` 한 건만 실패해야 하고 그 밖의 실패는 정합성 위반이다.
+   JFR은 `start`에서 기본으로 켜진다. JFR을 켠 회차는 지표 수집과 `verify` 뒤에는 [JFR 수집 절차](../../docs/testing/drop-performance-procedure.md#7-4-jfr-켜기와-꺼내기)대로 종료하고 파일을 꺼낸 뒤 컨테이너를 교체하거나 정리한다.
 8. 계정을 다 썼거나 스케일을 바꿀 때는 DB를 다시 만든다.
 
 ```bash
 perf/ec2/perf-ec2.sh stop-app && perf/ec2/perf-ec2.sh reset-db
-perf/ec2/perf-ec2.sh start sha-<태그> && perf/ec2/perf-ec2.sh stop-app   # Flyway
+perf/ec2/perf-ec2.sh start sha-<태그> --no-jfr && perf/ec2/perf-ec2.sh stop-app   # Flyway
 perf/ec2/perf-ec2.sh seed <scale> && perf/ec2/perf-ec2.sh serve-tokens
 ```
 
