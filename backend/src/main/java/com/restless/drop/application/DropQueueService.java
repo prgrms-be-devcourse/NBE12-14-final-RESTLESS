@@ -19,6 +19,7 @@ public class DropQueueService {
     private final DropRepository drops;
     private final DropVariantRepository variants;
     private final DropInventoryRepository inventories;
+    private final DropSoldOutCache soldOut;
     private final DropQueueEntryRepository entries;
     private final DropPurchaseSlotRepository slots;
     private final DropQueueSettings settings;
@@ -35,7 +36,11 @@ public class DropQueueService {
         if (!onSale(drop, clock.instant())) throw new BusinessException(ErrorCode.DROP_NOT_ON_SALE);
         variants.findById(variantId).filter(v -> v.getDropId().equals(dropId) && v.isActive())
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        if (inventories.available(variantId) == 0) throw new BusinessException(ErrorCode.DROP_SOLD_OUT);
+        if (inventories.available(variantId) == 0) {
+            // 드롭 전체가 품절이면 다음 진입부터 필터가 바로 409로 끝낸다 (#481).
+            soldOut.observeVariantSoldOut(dropId);
+            throw new BusinessException(ErrorCode.DROP_SOLD_OUT);
+        }
         // Serialize concurrent first entries using the existing same-member purchase slot.
         slots.ensureExists(dropId, userId, clock.instant());
         slots.lockById(new DropPurchaseSlot.Id(dropId, userId));

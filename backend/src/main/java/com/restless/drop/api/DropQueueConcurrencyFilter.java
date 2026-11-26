@@ -4,6 +4,7 @@ import com.restless.common.error.ErrorCode;
 import com.restless.common.web.TraceIdFilter;
 import com.restless.drop.application.DropQueueConcurrencyLimiter;
 import com.restless.drop.application.DropQueueConcurrencyLimiter.Kind;
+import com.restless.drop.application.DropSoldOutCache;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -29,6 +30,9 @@ import org.springframework.web.util.UrlPathHelper;
  *
  * <p>인증과 사용자별 요청 횟수 제한(429)보다 먼저 돈다. 그래서 토큰이 없거나 한도를 넘긴 요청도 허용치가
  * 없으면 503이다. 거절은 어떤 상태도 바꾸지 않는다. 허용치는 요청이 어떻게 끝나든 finally에서 돌려준다.
+ *
+ * <p>진입은 허용치를 쓰기 전에 드롭 단위 품절 표시({@link DropSoldOutCache})를 먼저 본다 (#481). 판매 중 SKU가
+ * 모두 품절인 드롭이면 409 DROP_SOLD_OUT으로 끝낸다. 판매 첫 20초에 품절 409가 앱 CPU의 약 27%를 썼다.
  */
 @Component
 @Order(DropQueueConcurrencyFilter.ORDER)
@@ -43,31 +47,45 @@ public class DropQueueConcurrencyFilter extends OncePerRequestFilter {
     private static final UrlPathHelper PATHS = UrlPathHelper.defaultInstance;
 
     private final DropQueueConcurrencyLimiter limiter;
+    private final DropSoldOutCache soldOut;
     private final Clock clock;
-    private final byte[] bodyHead;
+    private final byte[] busyHead;
+    private final byte[] soldOutHead;
 
-    public DropQueueConcurrencyFilter(DropQueueConcurrencyLimiter limiter, Clock clock) {
+    public DropQueueConcurrencyFilter(DropQueueConcurrencyLimiter limiter, DropSoldOutCache soldOut, Clock clock) {
         this.limiter = limiter;
+        this.soldOut = soldOut;
         this.clock = clock;
-        ErrorCode code = ErrorCode.DROP_QUEUE_BUSY;
-        // 공통 오류 형식(docs/contracts/api/README.md 3)과 같은 필드 순서. 바뀌는 값은 traceId와 timestamp뿐이다.
-        this.bodyHead = ("{\"code\":\"" + json(code.getCode()) + "\",\"message\":\"" + json(code.getMessage())
+        this.busyHead = head(ErrorCode.DROP_QUEUE_BUSY);
+        this.soldOutHead = head(ErrorCode.DROP_SOLD_OUT);
+    }
+
+    /** 공통 오류 형식(docs/contracts/api/README.md 3)과 같은 필드 순서. 바뀌는 값은 traceId와 timestamp뿐이다. */
+    private static byte[] head(ErrorCode code) {
+        return ("{\"code\":\"" + json(code.getCode()) + "\",\"message\":\"" + json(code.getMessage())
                 + "\",\"details\":null,\"traceId\":").getBytes(StandardCharsets.UTF_8);
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        Kind kind = select(request);
+        String path = select(request);
+        Kind kind = path == null ? null : kind(request.getMethod(), path);
         if (kind == null) {
             chain.doFilter(request, response);
             return;
         }
+        if (kind == Kind.ENTRY) {
+            Long dropId = dropId(path, ENTRIES);
+            if (dropId != null && soldOut.rejects(dropId)) {
+                observe(request, kind);
+                write(response, ErrorCode.DROP_SOLD_OUT, soldOutHead, null);
+                return;
+            }
+        }
         if (!limiter.tryAcquire(kind)) {
-            // MVC를 지나지 않으므로 HTTP 관측의 uri 태그를 직접 채운다. 비우면 uri=UNKNOWN으로 남는다.
-            ServerHttpObservationFilter.findObservationContext(request)
-                    .ifPresent(context -> context.setPathPattern(kind == Kind.ENTRY ? ENTRIES_PATTERN : ME_PATTERN));
-            reject(response, kind);
+            observe(request, kind);
+            write(response, ErrorCode.DROP_QUEUE_BUSY, busyHead, limiter.retryAfterSeconds(kind));
             return;
         }
         try {
@@ -77,17 +95,33 @@ public class DropQueueConcurrencyFilter extends OncePerRequestFilter {
         }
     }
 
-    private Kind select(HttpServletRequest request) {
+    /** 대상 메서드면 디코딩한 경로, 아니면 null. */
+    private static String select(HttpServletRequest request) {
         String method = request.getMethod();
-        boolean post = "POST".equals(method);
-        boolean read = "GET".equals(method) || "HEAD".equals(method);
-        if (!post && !read) return null;
+        if (!"POST".equals(method) && !"GET".equals(method) && !"HEAD".equals(method)) return null;
         // MVC와 같은 방식으로 context path를 빼고, URL 인코딩과 세미콜론 내용을 푼 경로로만 판정한다.
         // 원본 URI로 먼저 거르면 /api/drop%73/... 처럼 인코딩한 경로가 상한을 건너뛴다 (#477 검증 D1).
-        String path = PATHS.getPathWithinApplication(request);
-        if (post && isQueuePath(path, ENTRIES)) return Kind.ENTRY;
-        if (read && isQueuePath(path, ME)) return Kind.STATUS;
+        return PATHS.getPathWithinApplication(request);
+    }
+
+    private static Kind kind(String method, String path) {
+        if ("POST".equals(method) && isQueuePath(path, ENTRIES)) return Kind.ENTRY;
+        if (("GET".equals(method) || "HEAD".equals(method)) && isQueuePath(path, ME)) return Kind.STATUS;
         return null;
+    }
+
+    /** 경로의 dropId. 숫자가 아니면 null이고, 형식 오류 응답은 컨트롤러가 정한다. */
+    private static Long dropId(String path, String suffix) {
+        String id = path.substring(PREFIX.length(), path.length() - suffix.length());
+        if (id.isEmpty() || id.length() > 18) return null;
+        for (int i = 0; i < id.length(); i++) if (id.charAt(i) < '0' || id.charAt(i) > '9') return null;
+        return Long.valueOf(id);
+    }
+
+    /** MVC를 지나지 않으므로 HTTP 관측의 uri 태그를 직접 채운다. 비우면 uri=UNKNOWN으로 남는다. */
+    private static void observe(HttpServletRequest request, Kind kind) {
+        ServerHttpObservationFilter.findObservationContext(request)
+                .ifPresent(context -> context.setPathPattern(kind == Kind.ENTRY ? ENTRIES_PATTERN : ME_PATTERN));
     }
 
     /** {@code /api/drops/{dropId}/queue/...}. dropId는 빈 값이 아니고 '/'가 없는 한 칸이다. 형식 검사는 컨트롤러가 한다. */
@@ -98,17 +132,17 @@ public class DropQueueConcurrencyFilter extends OncePerRequestFilter {
         return idEnd > idStart && path.indexOf('/', idStart) == idEnd;
     }
 
-    private void reject(HttpServletResponse response, Kind kind) throws IOException {
+    private void write(HttpServletResponse response, ErrorCode code, byte[] head, Integer retryAfter) throws IOException {
         String traceId = TraceIdFilter.current();
         String tail = (traceId == null ? "null" : "\"" + json(traceId) + "\"")
                 + ",\"timestamp\":\"" + clock.instant() + "\"}";
         byte[] tailBytes = tail.getBytes(StandardCharsets.UTF_8);
-        response.setStatus(ErrorCode.DROP_QUEUE_BUSY.getHttpStatus().value());
-        response.setHeader(HttpHeaders.RETRY_AFTER, Integer.toString(limiter.retryAfterSeconds(kind)));
+        response.setStatus(code.getHttpStatus().value());
+        if (retryAfter != null) response.setHeader(HttpHeaders.RETRY_AFTER, Integer.toString(retryAfter));
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.setContentLength(bodyHead.length + tailBytes.length);
+        response.setContentLength(head.length + tailBytes.length);
         var out = response.getOutputStream();
-        out.write(bodyHead);
+        out.write(head);
         out.write(tailBytes);
         out.flush();
     }
