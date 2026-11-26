@@ -96,10 +96,18 @@ public class AuctionQueryCache {
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onChanged(AuctionChangedEvent event) {
+        invalidate(event.auctionId());
+    }
+
+    /**
+     * 이 경매의 상세·사전 확인 캐시를 버린다 (세대 번호를 올린다).
+     * 이 서버의 변경은 {@link #onChanged}가, 다른 서버의 변경은 실시간 전달의 revision 확인이 부른다 (ADR-0007).
+     */
+    public void invalidate(Long auctionId) {
         try {
-            generations.asMap().compute(event.auctionId(), (ignored, generation) -> generation == null ? 1 : generation + 1);
+            generations.asMap().compute(auctionId, (ignored, generation) -> generation == null ? 1 : generation + 1);
         } catch (RuntimeException exception) {
-            log.error("Auction query cache invalidation failed auctionId={}", event.auctionId(), exception);
+            log.error("Auction query cache invalidation failed auctionId={}", auctionId, exception);
             meters.counter("auction.query.cache.failure", "stage", "invalidate").increment();
             throw exception;
         }

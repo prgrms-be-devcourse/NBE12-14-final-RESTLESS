@@ -41,6 +41,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
         "restless.auction.stream.heartbeat-interval-ms=3600000",
         "restless.auction.stream.max-connections=2",
         "restless.auction.stream.retry-after-seconds=5",
+        "restless.auction.stream.revision-poll-interval-ms=0",
 })
 @Import(TestcontainersConfiguration.class)
 class AuctionStreamLimitTest {

@@ -15,6 +15,8 @@ import com.restless.member.application.MemberService;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -76,6 +78,22 @@ public class AuctionQueryService {
                 highest == null ? null : highest.getBidderUserId(),
                 auction.minimumBidAmount(highest == null ? null : highest.getBidAmount()),
                 auction.getStartsAt(), auction.getEndsAt()));
+    }
+
+    /**
+     * 경매별 현재 revision. 커밋된 값만 읽는다. 없는 경매(삭제됨)는 결과에 없다.
+     * 실시간 전달이 다른 서버의 변경을 찾는 데 쓴다 (ADR-0007).
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, Long> revisions(Collection<Long> auctionIds) {
+        Map<Long, Long> revisions = new HashMap<>();
+        if (auctionIds.isEmpty()) {
+            return revisions;
+        }
+        for (AuctionRepository.AuctionRevision row : auctions.findRevisions(auctionIds)) {
+            revisions.put(row.getAuctionId(), row.getRevision());
+        }
+        return revisions;
     }
 
     /**

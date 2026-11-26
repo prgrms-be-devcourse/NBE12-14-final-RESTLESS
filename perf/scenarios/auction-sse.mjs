@@ -26,6 +26,10 @@ const urlIp = (ip) => (ip.includes(':') ? `[${ip}]` : ip);
 const BASE_URL = VIA_ALB ? (ALB_HOST ? `http://${ALB_HOST}` : '') : (APP_IP ? `http://${urlIp(APP_IP)}:8080` : '');
 // SSE 연결 수 게이지를 읽을 관리 포트(8081). ALB는 8081을 넘기지 않으므로 서버별 IP를 PERF_MANAGEMENT_IPS로 받아 더한다.
 // 없으면 게이지는 null로 남고 서버별 CSV(실행기의 SSH 수집)로 본다.
+// AU-9: 측정 입찰만 다른 서버로 보낸다 (서버 하나 직접 지정일 때만). 관전은 PERF_APP_IP 서버, 입찰은 이 서버라서
+// 각 단계의 전달 지연이 곧 서버 간 전달(ADR-0007) 지연이다. 경매 생성, 정리 입찰은 관전 서버로 보낸다.
+const BID_APP_IP = env.PERF_BID_APP_IP || '';
+const BID_BASE_URL = BID_APP_IP ? `http://${urlIp(BID_APP_IP)}:8080` : BASE_URL;
 const MANAGEMENT_IPS = VIA_ALB ? (env.PERF_MANAGEMENT_IPS || '').split(',').map((v) => v.trim()).filter(Boolean) : (APP_IP ? [APP_IP] : []);
 const MANAGEMENT_URLS = MANAGEMENT_IPS.map((ip) => `http://${urlIp(ip)}:8081`);
 const allowed = (env.PERF_ALLOWED_APP_HOSTS || '').split(',').map((v) => v.trim()).filter(Boolean);
@@ -62,6 +66,9 @@ if (![DRAIN_WAIT_SECONDS, SNAPSHOT_SECONDS].every((n) => Number.isSafeInteger(n)
 if (!['direct', 'alb'].includes(PERF_TARGET)) throw new Error('PERF_TARGET must be direct or alb');
 if (!VIA_ALB && (!APP_IP || !isIP(APP_IP))) throw new Error('PERF_APP_IP must be an IP address (target IP is never stored in the repository)');
 if (MANAGEMENT_IPS.some((ip) => !isIP(ip))) throw new Error('PERF_MANAGEMENT_IPS must be comma-separated IP addresses');
+if (BID_APP_IP && (VIA_ALB || !isIP(BID_APP_IP) || BID_APP_IP === APP_IP)) {
+  throw new Error('PERF_BID_APP_IP must be another server IP and is only used with PERF_APP_IP (not the ALB)');
+}
 const hostPattern = VIA_ALB ? /^[a-z0-9][a-z0-9-]*\.[a-z0-9-]+\.elb\.amazonaws\.com$/i : /^perf-[a-z0-9][a-z0-9.-]*$/i;
 if (!hostPattern.test(APP_HOST) || /prod/i.test(APP_HOST) || !allowed.includes(APP_HOST)) {
   throw new Error(`host ${APP_HOST || '(empty PERF_ALB_HOST)'} is not an allowed perf host`);
@@ -338,7 +345,7 @@ async function writeSummary(interrupted = false) {
   const heartbeats = okConnections.map((c) => c.heartbeats);
   const summary = { target: { steps: 'AU-5 SSE', cleanup: 'AU-6 SSE cleanup', soak: 'AU-8 SSE soak', mixed: 'AU-7 SSE mixed' }[MODE],
     mode: MODE, host: VIA_ALB ? 'alb' : APP_HOST, interrupted, conditions: {
-    via: PERF_TARGET, servers: env.PERF_SERVER_COUNT ? Number(env.PERF_SERVER_COUNT) : null, managementServers: MANAGEMENT_URLS.length,
+    via: PERF_TARGET, bidOnOtherServer: Boolean(BID_APP_IP), servers: env.PERF_SERVER_COUNT ? Number(env.PERF_SERVER_COUNT) : null, managementServers: MANAGEMENT_URLS.length,
     steps: STEPS, drainWaitSeconds: DRAIN_WAIT_SECONDS, snapshotSeconds: SNAPSHOT_SECONDS, connectRate: CONNECT_RATE, holdSeconds: HOLD_SECONDS, accounts: ACCOUNTS,
     observerIds: { first: FIRST_ID, last: FIRST_ID + ACCOUNTS - 1 },
     measurementBidderIds: metrics.measurementBidderIds, createdAuctionId: metrics.createdAuctionId,
@@ -542,7 +549,7 @@ async function main() {
     const measurementToken = measurementTokens[results.length % measurementTokens.length];
     let bidResponse;
     try {
-      bidResponse = await request(`${BASE_URL}/api/auctions/${metrics.createdAuctionId}/bids`, {
+      bidResponse = await request(`${BID_BASE_URL}/api/auctions/${metrics.createdAuctionId}/bids`, {
         method: 'POST', headers: { Authorization: `Bearer ${measurementToken}`, 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
         body: JSON.stringify({ amount: opened.minimumBidAmount + opened.minimumIncrementAmount * (results.length + 1) }),
         signal: AbortSignal.timeout(Number(env.REQUEST_TIMEOUT_SECONDS || 60) * 1000),
