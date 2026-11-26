@@ -49,7 +49,7 @@ Postman 또는 HTTP 클라이언트로 아래 순서대로 호출한다. 구매�
 
 ## 반원형 배치 미리보기
 
-프론트는 **`frontend-test/`에서만** 수정하고 실행한다. `frontend/`는 사용하지 않는다. `frontend-test/`에서 `npm run dev` 후 표시된 주소(기본 http://localhost:3000)의 `/performances/{performanceId}?max=4&concert={concertId}`를 연다. 로그인 후 기존 백엔드 API가 반환한 좌석 좌표·구역·열·번호·가격으로 배치를 표시한다. 백엔드 기본 주소는 `next.config.ts`의 http://localhost:8080이다.
+프론트는 `frontend/`에서 수정하고 실행한다. `frontend/`에서 `npm run dev` 후 표시된 주소(기본 http://localhost:3000)의 `/performances/{performanceId}?max=4&concert={concertId}`를 연다. 로그인 후 기존 백엔드 API가 반환한 좌석 좌표·구역·열·번호·가격으로 배치를 표시한다. 백엔드 기본 주소는 `next.config.ts`의 http://localhost:8080이다.
 
 DB 시드는 `backend/scripts/seed/ticketing/layout.json`을 사용하고, 프론트는 DB를 조회하는 API 응답을 사용하므로 별도 하드코딩 좌석 목록을 두지 않는다. 구역별 경계는 API 좌표를 감싸는 외곽선이며 공식 도면의 통로 경계가 아니다. 하단 구역 목록을 클릭하면 해당 구역을 강조·확대하고, 전체 보기로 돌아갈 수 있다. 구역 이동 시 선택 좌석을 유지하며 기존 선점·checkout·결제 흐름을 사용한다. 기존 FANQ 테마 토큰·그라데이션·카드·장바구니를 유지한다.
 

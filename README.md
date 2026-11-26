@@ -165,7 +165,7 @@ flowchart LR
 |---|---|
 | 🍃 백엔드 | Java 21, Spring Boot 4.1, Spring Data JPA, Flyway, Gradle |
 | 🐬 데이터베이스 | MySQL 8 |
-| ⚛️ 프론트엔드 | React, Vite, TypeScript |
+| ⚛️ 프론트엔드 | Next.js, React, TypeScript |
 | 💳 결제 | 토스페이먼츠 테스트 환경 |
 | 🧪 테스트 | JUnit, Testcontainers, ArchUnit, k6 |
 | ☁️ 인프라 | AWS EC2, RDS, Docker, GitHub Actions, GHCR |
