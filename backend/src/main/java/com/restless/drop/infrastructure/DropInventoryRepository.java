@@ -32,6 +32,17 @@ public interface DropInventoryRepository extends JpaRepository<DropInventory, Lo
             """, nativeQuery = true)
     List<Object[]> availableByVariant(Collection<Long> variantIds);
 
+    /**
+     * One row [active SKU count, available sum over the drop's active SKUs], read in one statement without locks.
+     * Used only to decide whether a whole drop is sold out (#481). It never decides a purchase.
+     */
+    @Query(value = """
+            SELECT COUNT(DISTINCT v.id), CAST(COALESCE(SUM(b.available_quantity), 0) AS SIGNED)
+            FROM drop_variants v JOIN drop_inventory_buckets b ON b.variant_id = v.id
+            WHERE v.drop_id = :dropId AND v.is_active = TRUE
+            """, nativeQuery = true)
+    List<Object[]> activeStockOfDrop(Long dropId);
+
     /** TX1 step 5. The head row is never updated after creation, so this read does not wait. */
     @Query(value = "SELECT bucket_count FROM drop_inventories WHERE variant_id = :variantId", nativeQuery = true)
     int bucketCount(Long variantId);

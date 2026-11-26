@@ -2,6 +2,9 @@ package com.restless.drop.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -9,6 +12,12 @@ import com.restless.common.error.ErrorCode;
 import com.restless.common.ratelimit.RateLimitProperties;
 import com.restless.drop.application.DropQueueConcurrencyLimiter;
 import com.restless.drop.application.DropQueueConcurrencyLimiter.Kind;
+import com.restless.drop.application.DropSoldOutCache;
+import com.restless.drop.domain.Drop;
+import com.restless.drop.infrastructure.DropInventoryRepository;
+import com.restless.drop.infrastructure.DropRepository;
+import java.util.Optional;
+import java.util.List;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.servlet.FilterChain;
 import java.time.Clock;
@@ -34,8 +43,21 @@ class DropQueueConcurrencyFilterTest {
     private static final Instant NOW = Instant.parse("2026-11-26T05:00:00Z");
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
     private final DropQueueConcurrencyLimiter limiter = new DropQueueConcurrencyLimiter(1, 1, 3, 1, LIMITS, registry);
+    private final DropInventoryRepository inventories = mock(DropInventoryRepository.class);
+    private final DropRepository drops = mock(DropRepository.class);
+    private final DropSoldOutCache soldOut =
+            new DropSoldOutCache(inventories, drops, Clock.fixed(NOW, ZoneOffset.UTC), registry, Duration.ofSeconds(1));
     private final DropQueueConcurrencyFilter filter =
-            new DropQueueConcurrencyFilter(limiter, Clock.fixed(NOW, ZoneOffset.UTC));
+            new DropQueueConcurrencyFilter(limiter, soldOut, Clock.fixed(NOW, ZoneOffset.UTC));
+
+    private void markSoldOut(long dropId) {
+        Drop drop = mock(Drop.class);
+        when(drop.isOnSale(any())).thenReturn(true);
+        when(drop.getClosesAt()).thenReturn(NOW.plusSeconds(3600));
+        when(drops.findById(dropId)).thenReturn(Optional.of(drop));
+        when(inventories.activeStockOfDrop(dropId)).thenReturn(List.<Object[]>of(new Object[] {3L, 0L}));
+        soldOut.observeVariantSoldOut(dropId);
+    }
 
     private static MockHttpServletRequest request(String method, String uri) {
         return new MockHttpServletRequest(method, uri);
@@ -136,6 +158,54 @@ class DropQueueConcurrencyFilterTest {
         request.setAttribute(ServerHttpObservationFilter.CURRENT_OBSERVATION_CONTEXT_ATTRIBUTE, context);
         filter.doFilter(request, response, new MockFilterChain());
         assertThat(context.getPathPattern()).isEqualTo("/api/drops/{dropId}/queue/entries");
+    }
+
+    @Test
+    @DisplayName("품절 드롭의 진입은 허용치를 쓰지 않고 다음 필터도 부르지 않고 409 DROP_SOLD_OUT을 쓴다 (#481)")
+    void soldOutDropEntryIsRejectedBeforePermit() throws Exception {
+        markSoldOut(1L);
+        var request = request("POST", ENTRIES);
+        var response = new MockHttpServletResponse();
+        var context = new ServerRequestObservationContext(request, response);
+        request.setAttribute(ServerHttpObservationFilter.CURRENT_OBSERVATION_CONTEXT_ATTRIBUTE, context);
+        var chain = new MockFilterChain();
+        filter.doFilter(request, response, chain);
+
+        assertThat(chain.getRequest()).isNull();
+        assertThat(response.getStatus()).isEqualTo(409);
+        assertThat(response.getHeader("Retry-After")).isNull();
+        JsonNode body = JsonMapper.builder().build().readTree(response.getContentAsByteArray());
+        assertThat(body.get("code").asString()).isEqualTo("DROP_SOLD_OUT");
+        assertThat(body.get("message").asString()).isEqualTo(ErrorCode.DROP_SOLD_OUT.getMessage());
+        assertThat(body.get("details").isNull()).isTrue();
+        assertThat(body.get("timestamp").asString()).isEqualTo("2026-11-26T05:00:00Z");
+        assertThat(response.getContentLength()).isEqualTo(response.getContentAsByteArray().length);
+        assertThat(context.getPathPattern()).isEqualTo("/api/drops/{dropId}/queue/entries");
+        assertThat(limiter.available(Kind.ENTRY)).isEqualTo(1);
+        assertThat(registry.counter("drop.queue.soldout.fast").count()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("허용치가 가득 차 있어도 품절 드롭의 진입은 503이 아니라 409다")
+    void soldOutWinsOverBusy() throws Exception {
+        markSoldOut(1L);
+        limiter.tryAcquire(Kind.ENTRY);
+        var response = new MockHttpServletResponse();
+        filter.doFilter(request("POST", "/api/drop%73/1/queue/entries"), response, new MockFilterChain());
+        assertThat(response.getStatus()).isEqualTo(409);
+    }
+
+    @Test
+    @DisplayName("품절 표시는 진입에만 쓰고, 상태 조회와 다른 드롭, 숫자가 아닌 dropId는 기존 경로로 보낸다")
+    void soldOutOnlyAffectsThatDropsEntry() throws Exception {
+        markSoldOut(1L);
+        String[][] cases = {{"GET", ME}, {"HEAD", ME}, {"POST", "/api/drops/2/queue/entries"},
+                {"POST", "/api/drops/abc/queue/entries"}, {"POST", "/api/drops/1/reservations"}};
+        for (String[] c : cases) {
+            var chain = new MockFilterChain();
+            filter.doFilter(request(c[0], c[1]), new MockHttpServletResponse(), chain);
+            assertThat(chain.getRequest()).as(c[0] + " " + c[1]).isNotNull();
+        }
     }
 
     @Test
