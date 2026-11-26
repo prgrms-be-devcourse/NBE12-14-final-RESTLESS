@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/application/`
 >
-> 마지막 확인: 2026-11-26 (#481 진입 품절 표시 추가, 경계 그대로. #477 대기열 동시 처리 상한을 인터셉터에서 Security 앞 필터로 옮김, 트랜잭션 경계는 그대로). 이전: 2026-11-25 (#446 구매 흐름과 트랜잭션 대응 표 추가, 결제 준비를 TX2와 나눠 적음. `DropReservationTransactions`, `DropPaymentResultHandler`, `PaymentTransactions.begin`과 대조, 경계는 그대로. #435 TX5-c 삭제 기준 시각 추가. #430 TX2 삭제 거절과 TX5-c 새벽 환불 추가. #429 주최자 등록과 게시 추가. 관리자 등록과 같은 트랜잭션 하나이고, 게시는 드롭 행 잠금 뒤 소유자를 확인한다. 이전: 2026-11-24 (#390 D4 상태 조회와 진입에 동시 처리 상한과 `pollAfterMs` 추가, 트랜잭션 경계는 그대로. #388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 재고 버킷 분할: TX1 5번, 계측 표, 정산 대상 버킷, 입장 허가 작업의 재고 합 읽기. 2026-11-21 #325 완료 단계 타이머 추가. #322 TX1 순서 변경: 재고 UPDATE를 마지막으로. 2026-11-20 #285 TX3 롤백 뒤 상태를 `DropApprovalRollbackRecoveryIntegrationTest`, 장애 처리 문서와 대조. 용어 정리. 2026-11-19 #254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
+> 마지막 확인: 2026-11-26 (#504 TX3 순서 변경: 재고 UPDATE를 마지막으로, 경계 그대로. #481 진입 품절 표시 추가, 경계 그대로. #477 대기열 동시 처리 상한을 인터셉터에서 Security 앞 필터로 옮김, 트랜잭션 경계는 그대로). 이전: 2026-11-25 (#446 구매 흐름과 트랜잭션 대응 표 추가, 결제 준비를 TX2와 나눠 적음. `DropReservationTransactions`, `DropPaymentResultHandler`, `PaymentTransactions.begin`과 대조, 경계는 그대로. #435 TX5-c 삭제 기준 시각 추가. #430 TX2 삭제 거절과 TX5-c 새벽 환불 추가. #429 주최자 등록과 게시 추가. 관리자 등록과 같은 트랜잭션 하나이고, 게시는 드롭 행 잠금 뒤 소유자를 확인한다. 이전: 2026-11-24 (#390 D4 상태 조회와 진입에 동시 처리 상한과 `pollAfterMs` 추가, 트랜잭션 경계는 그대로. #388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 재고 버킷 분할: TX1 5번, 계측 표, 정산 대상 버킷, 입장 허가 작업의 재고 합 읽기. 2026-11-21 #325 완료 단계 타이머 추가. #322 TX1 순서 변경: 재고 UPDATE를 마지막으로. 2026-11-20 #285 TX3 롤백 뒤 상태를 `DropApprovalRollbackRecoveryIntegrationTest`, 장애 처리 문서와 대조. 용어 정리. 2026-11-19 #254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
 
 PG 호출 중에는 DB 트랜잭션을 열어 두지 않는다.
 
@@ -112,9 +112,9 @@ PG 승인이 확인된 뒤 하나의 트랜잭션에서:
 4. 예약이 CONFIRMING 또는 RECONCILING이 아니면 `DROP_INVALID_STATE`로 거절한다
 5. 승인 금액이 서버 주문 금액과 다르면 예약을 COMPENSATING으로 바꾸고 `DROP_AMOUNT_MISMATCH`로 거절한다 (결제 모듈이 보상 취소, INV-08)
 6. 예약 CONFIRMED
-7. reserved -1, sold +1
-8. 주문 PAID
-9. 구매 슬롯 해제 (같은 사용자가 다시 구매할 수 있게). 슬롯의 `active_reservation_id`가 이 예약일 때만 비운다
+7. 주문 PAID
+8. 구매 슬롯 해제 (같은 사용자가 다시 구매할 수 있게). 슬롯의 `active_reservation_id`가 이 예약일 때만 비운다
+9. reserved -1, sold +1. 버킷 행은 그 버킷의 모든 구매자가 같이 쓰는 행이라 마지막에 바꾸고 커밋까지만 잠근다 (#504, TX1과 같은 순서). 바뀐 행이 1개가 아니면 7, 8번도 함께 롤백한다
 10. Commit
 
 승인 시각(`approvedAt`)이 예약 기한 뒤여도 확정한다. 기한은 TX2에서 판정했다.
