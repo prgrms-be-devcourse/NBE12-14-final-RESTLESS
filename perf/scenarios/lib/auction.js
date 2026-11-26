@@ -6,17 +6,23 @@ import { SharedArray } from 'k6/data';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { fail, sleep } from 'k6';
 
+// 대상은 서버 하나(direct, perf-local 별칭) 또는 ALB(alb). ALB는 8080만 넘기므로 관리 포트(8081)를 쓰지 않는다 (#483).
+export const PERF_TARGET = __ENV.PERF_TARGET || 'direct';
+if (!['direct', 'alb'].includes(PERF_TARGET)) throw new Error('PERF_TARGET must be direct or alb');
+export const VIA_ALB = PERF_TARGET === 'alb';
 export const BASE_URL = (__ENV.BASE_URL || 'http://perf-local:8080').replace(/\/$/, '');
-export const MANAGEMENT_URL = (__ENV.MANAGEMENT_URL || 'http://perf-local:8081').replace(/\/$/, '');
+export const MANAGEMENT_URL = VIA_ALB ? '' : (__ENV.MANAGEMENT_URL || 'http://perf-local:8081').replace(/\/$/, '');
 export const SUMMARY_PATH = __ENV.SUMMARY_PATH || '';
 export const PERF_APP_HOST = __ENV.PERF_APP_HOST || hostOf(BASE_URL);
 export const allowedHosts = (__ENV.PERF_ALLOWED_APP_HOSTS || '').split(',').map((s) => s.trim()).filter(Boolean);
-const hostPattern = /^perf-[a-z0-9][a-z0-9.-]*$/i;
-for (const host of [hostOf(BASE_URL), hostOf(MANAGEMENT_URL), PERF_APP_HOST]) {
+// perf 별칭, 또는 ALB 모드에서만 AWS ALB 주소. 어느 쪽이든 허용 목록에 있어야 하고 prod가 들어가면 안 된다.
+const hostPattern = VIA_ALB ? /^[a-z0-9][a-z0-9-]*\.[a-z0-9-]+\.elb\.amazonaws\.com$/i : /^perf-[a-z0-9][a-z0-9.-]*$/i;
+for (const host of [hostOf(BASE_URL), PERF_APP_HOST, ...(MANAGEMENT_URL ? [hostOf(MANAGEMENT_URL)] : [])]) {
   if (!hostPattern.test(host) || /prod/i.test(host) || !allowedHosts.includes(host)) {
     throw new Error(`host ${host} is not an allowed perf host`);
   }
 }
+if (VIA_ALB && !/^http:\/\/[^/:]+$/.test(BASE_URL)) throw new Error('BASE_URL for the ALB must be http://<ALB host> (port 80)');
 http.setResponseCallback(http.expectedStatuses(200, 201, 400, 401, 403, 404, 409, 422, 429));
 
 export const summaryTrendStats = ['min', 'med', 'avg', 'p(50)', 'p(95)', 'p(99)', 'max'];
@@ -105,6 +111,12 @@ function hostOf(url) {
 }
 
 export function checkTarget() {
+  if (VIA_ALB) {
+    // ALB 뒤 서버의 지표는 실행기가 SSH로 서버마다 받는다. 여기서는 ALB에 닿는지만 본다 (보안 그룹, 정상 대상 0대).
+    const res = http.get(`${BASE_URL}/api/auctions?status=OPEN&page=0&size=1`, { tags: { name: 'setup/alb' }, timeout: '10s' });
+    if (res.status !== 200) fail(`ALB returned HTTP ${res.status} for the auction list; check the security group and healthy targets`);
+    return;
+  }
   const res = http.get(`${MANAGEMENT_URL}/actuator/prometheus`, { tags: { name: 'setup/actuator' }, timeout: '5s' });
   if (res.status !== 200) fail(`management /actuator/prometheus returned HTTP ${res.status}`);
 }
@@ -350,7 +362,10 @@ export function summarize(data, conditions) {
   const errorsByPhase = phases.map((p) => ({ phase: p.phase, errors: p.errors }));
   const allLatency = values('auction_request_duration');
   const allWithin = values('auction_response_within_one_second');
-  const result = { conditions: { ...conditions, baseUrl: BASE_URL, allowedAppHost: PERF_APP_HOST }, phases,
+  const result = { conditions: { ...conditions, via: PERF_TARGET,
+    // ALB 주소는 결과에 남기지 않는다. 서버 수는 실행기가 넘긴 SSH 대상 수다.
+    baseUrl: VIA_ALB ? 'alb' : BASE_URL, allowedAppHost: VIA_ALB ? 'alb' : PERF_APP_HOST,
+    servers: __ENV.PERF_SERVER_COUNT ? Number(__ENV.PERF_SERVER_COUNT) : null }, phases,
     login: { requested: conditions.loginRequested || 0, succeeded: values('auction_login_success').passes || 0,
       seconds: values('auction_login_span_seconds').max ?? null, late: values('auction_login_late').count || 0 },
     totals: { sent: values('auction_request_sent').count || 0, received: values('auction_response_received').count || 0,

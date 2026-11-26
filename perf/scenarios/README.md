@@ -323,7 +323,7 @@ perf/scenarios/prom-collect.sh http://perf-app:8081 .ai-output/perf/<실행>/pro
 
 앱을 `perf` 프로필로 실행하고 `base` 시드를 측정 기간 시작에 한 번 넣습니다. 스크립트가 주최자로 로그인하고 필요한 판마다 새 경매를 만듭니다. 입찰자와 관전자는 기본으로 시드 토큰(`perf/seed/out/users.csv`, `AUTH_MODE=seed`)을 쓰고, `AUTH_MODE=login`이면 `LOGIN_RATE`로 로그인합니다. 토큰 받는 법은 [경매 부하 테스트 계획](../../docs/domains/auction/load-test.md#시드-토큰-받기)에 있습니다. 판마다 DB를 복원할 필요는 없습니다. 생성한 경매는 DB에 남으므로 독립적인 측정 기간을 시작할 때만 새 시드를 준비합니다.
 
-Mac에는 k6 2.4.0(`brew install k6`)과 Node 24가 필요합니다. `PERF_APP_IP`에 대상 주소를 지정하면 실행기가 이를 `perf-local`에 매핑합니다. 실제 IP는 저장소나 결과에 기록하지 않습니다.
+Mac에는 k6 2.4.0(`brew install k6`)과 Node 24가 필요합니다. 서버 하나는 `PERF_APP_IP`에 대상 주소를 지정하면 실행기가 이를 `perf-local`에 매핑합니다. 여러 대는 `PERF_ALB_HOST`에 ALB 주소를, `PERF_SSH_TARGETS`에 서버별 SSH 대상을 줍니다 ([ALB 뒤 여러 서버에서 측정](../../docs/domains/auction/load-test.md#alb-뒤-여러-서버에서-측정)). 실제 IP와 ALB 주소는 저장소나 결과에 기록하지 않습니다.
 
 ```bash
 export PERF_APP_IP=<perf 서버 IP>
@@ -377,14 +377,15 @@ AU-2·AU-3은 현재 공개된 GET이므로 토큰 없이 호출합니다. 401�
 | `HOLD_SECONDS` | `60` | 각 연결 단계 유지 시간 |
 | `CONNECT_WAIT_SECONDS`, `PROPAGATION_WAIT_SECONDS` | `30`, `15` | 첫 이벤트와 입찰 뒤 이벤트 대기 한도 |
 | `POST_RUN_CLOSE_WAIT_SECONDS` | `90` | 마지막 단계 뒤 최종 CLOSED 이벤트 대기 시간. 60초 연장 포함 |
-| `PERF_APP_IP` | 필수 | 환경 변수로만 지정하는 대상 IP |
-| `PERF_APP_HOST`, `PERF_ALLOWED_APP_HOSTS` | `perf-local` | 논리 Host 이름과 허용 목록 |
+| `PERF_APP_IP` 또는 `PERF_ALB_HOST` | 둘 중 하나 필수 | 환경 변수로만 지정하는 대상 IP 또는 ALB 주소 |
+| `PERF_APP_HOST`, `PERF_ALLOWED_APP_HOSTS` | `perf-local` | 논리 Host 이름과 허용 목록. ALB면 실행기가 ALB 주소로 채움 |
+| `PERF_MANAGEMENT_IPS` | 없음 | ALB일 때 SSE 연결 수 게이지를 더할 서버별 관리 포트 IP (쉼표 구분) |
 
 각 단계는 시도·성공(HTTP 200 및 첫 이벤트)·상태별 실패·끊김·활성·변경 이벤트 수신 연결 수와 이벤트 지연 p50/p95/최대를 기록합니다. 최고 입찰자 연속 입찰은 거절되므로 관전자와 별도인 두 측정 계정이 번갈아 입찰합니다. 스크립트는 로그인·연결 계획에 입찰 연장 시간을 더해 경매 수명을 정하고 마지막 CLOSED 이벤트를 기다립니다. 연결이 남으면 클라이언트 연결을 닫고, 서버가 끊긴 emitter를 정리하도록 별도 정리 입찰을 보냅니다. 입찰 응답에는 revision이 없으므로 OPEN revision에 성공한 측정 입찰 수를 더해 기대 revision을 계산합니다.
 
 ### 결과와 해석
 
-`auction-run.sh ending|detail|list|bid|sse [name]`은 `.ai-output/perf/auction/` 아래에 결과를 씁니다. JSON에는 조건, 판별 전송·응답·연결 실패, 상태·오류 코드 수, 지연, 입찰 대조 및 종료/SSE 결과가 들어갑니다. k6 실행은 HTML 대시보드도 만들고, 모든 실행은 로그와 2초 간격 Actuator CSV를 남깁니다.
+`auction-run.sh ending|detail|list|bid|sse [name]`은 `.ai-output/perf/auction/` 아래에 결과를 씁니다. JSON에는 조건, 판별 전송·응답·연결 실패, 상태·오류 코드 수, 지연, 입찰 대조 및 종료/SSE 결과가 들어갑니다. k6 실행은 HTML 대시보드도 만들고, 모든 실행은 로그와 Actuator CSV를 남깁니다. CSV는 노트북에서 2초 간격으로 받거나, `PERF_SSH_TARGETS`가 있으면 서버마다 서버 안에서 1초 간격으로 받습니다 (`-metrics-s1.csv` …).
 
 각 판은 전송·응답·연결 실패·5xx·상태 코드, 지연 p50/p95/p99/최대, T부터 1초 안에 응답한 비율, 마지막 응답 시각, 전송 시각 퍼짐, 응답 시간 나누기(`timingMs`: 연결 차례 대기 `blocked`, TCP 연결 `connecting`, 첫 바이트까지 `waiting`)를 기록합니다. 입찰은 201 응답 수와 서버 수락 수를 대조합니다. 비영(非零) 5xx·연결 실패·입찰 수 차이·낙찰자 불일치·최종 종료 시각 뒤 수락(INV-AU-11)은 눈에 띄게 표시합니다. 원래 마감 뒤 수락은 연장 정책상 정상일 수 있습니다. 별도로 원래 마감 전에 보냈는데 `AUCTION_CLOSED`로 거절된 수를 기록합니다. 지연·처리량 합격선은 두지 않습니다.
 
@@ -392,7 +393,7 @@ CSV는 Hikari 활성·대기·타임아웃, Tomcat busy thread·현재 연결, �
 
 ### 안전과 정합성
 
-앱 호스트는 `perf-`로 시작하고 `PERF_ALLOWED_APP_HOSTS`에 있어야 하며 `prod`를 포함하면 안 됩니다. 실행 전에 관리 endpoint의 `/actuator/prometheus`가 200인지 확인합니다. 비밀번호와 토큰은 로그나 요약에 남기지 않습니다.
+앱 호스트는 `perf-`로 시작하거나(서버 하나) `*.elb.amazonaws.com` ALB 주소여야 하고(`PERF_TARGET=alb`, 실행기가 지정), `PERF_ALLOWED_APP_HOSTS`에 있어야 하며 `prod`를 포함하면 안 됩니다. 실행 전에 서버 하나는 관리 endpoint의 `/actuator/prometheus`가, ALB는 공개 경매 목록이 200인지 확인합니다. 비밀번호와 토큰은 로그나 요약에 남기지 않습니다.
 
 측정 기간이 끝나면 필요에 따라 `perf/ec2/perf-ec2.sh verify base`를 한 번 실행해 불변식을 확인합니다. 부하로 데이터가 바뀌었으므로 seed baseline 일부는 달라질 수 있습니다. 종료된 경매는 revision에서 OPEN 전환 +1, 입찰당 +1, 종료 전환 +1을 반영해 수락 수를 `revision - 2`로 구합니다. 열린 입찰 경매는 `revision - 1`을 씁니다.
 

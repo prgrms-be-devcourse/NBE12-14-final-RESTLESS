@@ -16,11 +16,18 @@ import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 
 const env = process.env;
-const APP_IP = env.PERF_APP_IP;
-const APP_HOST = env.PERF_APP_HOST || 'perf-local';
-const URL_IP = APP_IP?.includes(':') ? `[${APP_IP}]` : APP_IP;
-const BASE_URL = URL_IP ? `http://${URL_IP}:8080` : '';
-const MANAGEMENT_URL = URL_IP ? `http://${URL_IP}:8081` : '';
+// 대상은 서버 하나(direct, PERF_APP_IP) 또는 ALB(alb, PERF_ALB_HOST, HTTP 80) (#483).
+const PERF_TARGET = env.PERF_TARGET || 'direct';
+const VIA_ALB = PERF_TARGET === 'alb';
+const APP_IP = VIA_ALB ? '' : env.PERF_APP_IP;
+const ALB_HOST = VIA_ALB ? (env.PERF_ALB_HOST || '') : '';
+const APP_HOST = VIA_ALB ? ALB_HOST : (env.PERF_APP_HOST || 'perf-local');
+const urlIp = (ip) => (ip.includes(':') ? `[${ip}]` : ip);
+const BASE_URL = VIA_ALB ? (ALB_HOST ? `http://${ALB_HOST}` : '') : (APP_IP ? `http://${urlIp(APP_IP)}:8080` : '');
+// SSE 연결 수 게이지를 읽을 관리 포트(8081). ALB는 8081을 넘기지 않으므로 서버별 IP를 PERF_MANAGEMENT_IPS로 받아 더한다.
+// 없으면 게이지는 null로 남고 서버별 CSV(실행기의 SSH 수집)로 본다.
+const MANAGEMENT_IPS = VIA_ALB ? (env.PERF_MANAGEMENT_IPS || '').split(',').map((v) => v.trim()).filter(Boolean) : (APP_IP ? [APP_IP] : []);
+const MANAGEMENT_URLS = MANAGEMENT_IPS.map((ip) => `http://${urlIp(ip)}:8081`);
 const allowed = (env.PERF_ALLOWED_APP_HOSTS || '').split(',').map((v) => v.trim()).filter(Boolean);
 const SUMMARY_PATH = resolve(env.SUMMARY_PATH || '.ai-output/perf/auction/sse.json');
 const FIRST_ID = Number(env.BIDDER_FIRST_ID || 1);
@@ -52,11 +59,14 @@ if (!['seed', 'login'].includes(AUTH_MODE)) throw new Error('AUTH_MODE must be s
 if (MODE === 'mixed' && !Number.isSafeInteger(EXISTING_AUCTION_ID)) throw new Error('MODE=mixed requires AUCTION_ID');
 if (MODE !== 'mixed' && EXISTING_AUCTION_ID !== null) throw new Error('AUCTION_ID is only used with MODE=mixed');
 if (![DRAIN_WAIT_SECONDS, SNAPSHOT_SECONDS].every((n) => Number.isSafeInteger(n) && n > 0)) throw new Error('invalid DRAIN_WAIT_SECONDS or SNAPSHOT_SECONDS');
-if (!APP_IP || !isIP(APP_IP) || !BASE_URL || !MANAGEMENT_URL) throw new Error('PERF_APP_IP must be an IP address (target IP is never stored in the repository)');
-if (!/^perf-[a-z0-9][a-z0-9.-]*$/i.test(APP_HOST) || /prod/i.test(APP_HOST) || !allowed.includes(APP_HOST)) {
-  throw new Error(`host ${APP_HOST} is not an allowed perf host`);
+if (!['direct', 'alb'].includes(PERF_TARGET)) throw new Error('PERF_TARGET must be direct or alb');
+if (!VIA_ALB && (!APP_IP || !isIP(APP_IP))) throw new Error('PERF_APP_IP must be an IP address (target IP is never stored in the repository)');
+if (MANAGEMENT_IPS.some((ip) => !isIP(ip))) throw new Error('PERF_MANAGEMENT_IPS must be comma-separated IP addresses');
+const hostPattern = VIA_ALB ? /^[a-z0-9][a-z0-9-]*\.[a-z0-9-]+\.elb\.amazonaws\.com$/i : /^perf-[a-z0-9][a-z0-9.-]*$/i;
+if (!hostPattern.test(APP_HOST) || /prod/i.test(APP_HOST) || !allowed.includes(APP_HOST)) {
+  throw new Error(`host ${APP_HOST || '(empty PERF_ALB_HOST)'} is not an allowed perf host`);
 }
-for (const url of [BASE_URL, MANAGEMENT_URL]) {
+for (const url of [BASE_URL, ...MANAGEMENT_URLS]) {
   if (!/^https?:\/\//.test(url) || /prod/i.test(url)) throw new Error('invalid perf service URL');
 }
 if (![ACCOUNTS, LOGIN_RATE, CONNECT_RATE, HOLD_SECONDS, PROPAGATION_WAIT_SECONDS, CONNECT_WAIT_SECONDS, POST_RUN_CLOSE_WAIT_SECONDS]
@@ -66,7 +76,8 @@ if (![ACCOUNTS, LOGIN_RATE, CONNECT_RATE, HOLD_SECONDS, PROPAGATION_WAIT_SECONDS
   throw new Error('invalid account range, rate, or STEPS; bidder IDs must end at or below 96900');
 }
 
-const headers = (extra = {}, port = '8080') => ({ Host: `${APP_HOST}:${port}`, ...extra });
+// 서버 IP로 직접 보낼 때만 Host를 perf 별칭으로 덮어쓴다. ALB로 보낼 때는 ALB 주소가 그대로 Host다.
+const headers = (extra = {}, port = '8080') => (VIA_ALB && port === '8080' ? { ...extra } : { Host: `${VIA_ALB ? 'perf-local' : APP_HOST}:${port}`, ...extra });
 const results = [];
 const connections = [];
 const pendingEvents = new Map();
@@ -141,8 +152,14 @@ async function waitUntilOpen(id, startsAtMs) {
   throw new Error('interrupted while waiting for auction to open');
 }
 async function checkTarget() {
-  const response = await request(`${MANAGEMENT_URL}/actuator/prometheus`, { signal: AbortSignal.timeout(5000) }, '8081');
-  if (response.status !== 200) throw new Error(`management /actuator/prometheus returned HTTP ${response.status}`);
+  if (VIA_ALB) {
+    const response = await request(`${BASE_URL}/api/auctions?status=OPEN&page=0&size=1`, { signal: AbortSignal.timeout(10000) });
+    if (response.status !== 200) throw new Error(`ALB returned HTTP ${response.status} for the auction list; check the security group and healthy targets`);
+  }
+  for (const url of MANAGEMENT_URLS) {
+    const response = await request(`${url}/actuator/prometheus`, { signal: AbortSignal.timeout(5000) }, '8081');
+    if (response.status !== 200) throw new Error(`management /actuator/prometheus returned HTTP ${response.status}`);
+  }
 }
 function delay(ms) { return new Promise((resolveDelay) => setTimeout(resolveDelay, ms)); }
 function safeMetricValue(text, name) {
@@ -155,12 +172,15 @@ function safeMetricValue(text, name) {
   }
   return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
 }
+/** 모든 서버의 값을 더한다. 한 서버라도 못 읽으면 합이 틀리므로 null이다. */
 async function readMetric(name) {
+  if (!MANAGEMENT_URLS.length) return null;
   try {
-    const response = await request(`${MANAGEMENT_URL}/actuator/prometheus`, { signal: AbortSignal.timeout(5000) }, '8081');
-    if (!response.ok) return null;
-    const body = await response.text();
-    return safeMetricValue(body, name);
+    const values = await Promise.all(MANAGEMENT_URLS.map(async (url) => {
+      const response = await request(`${url}/actuator/prometheus`, { signal: AbortSignal.timeout(5000) }, '8081');
+      return response.ok ? safeMetricValue(await response.text(), name) : null;
+    }));
+    return values.some((v) => v === null) ? null : values.reduce((a, b) => a + b, 0);
   } catch { return null; }
 }
 const readStreamMetric = () => readMetric('auction_stream_connections');
@@ -317,7 +337,8 @@ async function writeSummary(interrupted = false) {
   const okConnections = connections.filter((c) => c?.status === 200);
   const heartbeats = okConnections.map((c) => c.heartbeats);
   const summary = { target: { steps: 'AU-5 SSE', cleanup: 'AU-6 SSE cleanup', soak: 'AU-8 SSE soak', mixed: 'AU-7 SSE mixed' }[MODE],
-    mode: MODE, host: APP_HOST, interrupted, conditions: {
+    mode: MODE, host: VIA_ALB ? 'alb' : APP_HOST, interrupted, conditions: {
+    via: PERF_TARGET, servers: env.PERF_SERVER_COUNT ? Number(env.PERF_SERVER_COUNT) : null, managementServers: MANAGEMENT_URLS.length,
     steps: STEPS, drainWaitSeconds: DRAIN_WAIT_SECONDS, snapshotSeconds: SNAPSHOT_SECONDS, connectRate: CONNECT_RATE, holdSeconds: HOLD_SECONDS, accounts: ACCOUNTS,
     observerIds: { first: FIRST_ID, last: FIRST_ID + ACCOUNTS - 1 },
     measurementBidderIds: metrics.measurementBidderIds, createdAuctionId: metrics.createdAuctionId,

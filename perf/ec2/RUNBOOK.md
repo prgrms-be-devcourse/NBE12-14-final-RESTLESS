@@ -18,6 +18,7 @@ EC2 담당자는 `~/restless`에서 `perf/ec2/perf-ec2.sh <명령>`으로 실행
 | perf 컨테이너 이미지와 재시작 상태 | `$R status` |
 | RDS 최대 연결 수와 현재 연결 수 | `$R dbconns` |
 | 서버 안에서 지표 수집 | `$R sample <초> [간격 초]` |
+| 서버 안에서 전체 지표 한 번 | `$R prom` |
 
 `$R`은 `sudo -u ubuntu /home/ubuntu/restless/perf/ec2/perf-ec2.sh`, `$T`는 `sudo -u ubuntu /home/ubuntu/restless/perf/seed/ticketing.sh`이다. 접속하면 자동으로 잡히므로 직접 입력하지 않는다.
 `perf/seed/ticketing.sh verify 1`은 `$T verify 1`로 쓴다. `$R verify`는 스케일을 받는 다른 검증이다.
@@ -172,6 +173,11 @@ ssh fanq-perf 'sudo -u ubuntu /home/ubuntu/restless/perf/ec2/perf-ec2.sh sample 
 ```
 
 - `ssh`를 먼저 끊으면 수집도 멈춘다. 앱이 꺼져 있으면 경고를 내고 빈 행을 남긴다.
+- 경매 실행기(`auction-run.sh`)는 `PERF_SSH_TARGETS`가 있으면 서버마다 이 명령과 `prom`(측정 전후 전체 지표)을 직접 띄운다.
+
+### `prom`: 전체 지표 한 번
+- 서버 안에서 `127.0.0.1:8081/actuator/prometheus` 응답 전체를 표준 출력에 한 번 쓴다. 읽기만 한다.
+- 왜: ALB 뒤 서버는 노트북에서 8081에 닿지 않는다. 측정 전후 두 파일의 차이로 샘플 열에 없는 값을 본다.
 
 ### 함께 쓰는 명령
 

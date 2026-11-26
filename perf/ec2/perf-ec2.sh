@@ -13,6 +13,7 @@
 #   perf-ec2.sh lockstats             InnoDB 행 잠금 대기 누적값 (측정 전후 차이를 본다)
 #   perf-ec2.sh dbconns               RDS 최대 연결 수, 현재 연결 수, 접속한 곳별 연결 수 (서버 여러 대를 띄우기 전에 본다)
 #   perf-ec2.sh sample <초> [간격 초]  서버 안에서 Actuator 지표를 CSV로 표준 출력에 남긴다 (기본 1초 간격)
+#   perf-ec2.sh prom                  서버 안에서 Actuator Prometheus 응답 전체를 표준 출력에 한 번 남긴다 (측정 전후 비교)
 #   perf-ec2.sh logs <시작 UTC> <종료 UTC>  perf 컨테이너 로그 조회 (최대 10000줄)
 #   perf-ec2.sh status                perf 컨테이너 이미지와 재시작 상태 조회
 #   perf-ec2.sh reset-db              perf DB를 지우고 다시 만든다 (스케일을 바꿀 때)
@@ -180,6 +181,11 @@ case "$cmd" in
     status=0
     SAMPLE_INTERVAL_SECONDS="$interval" timeout "$seconds" "$REPO/perf/scenarios/sample-actuator.sh" http://127.0.0.1:8081 - || status=$?
     [[ $status -eq 0 || $status -eq 124 ]] || exit "$status"
+    ;;
+  prom)
+    [[ $# -eq 0 ]] || die 'usage: prom'
+    # 읽기만 한다. ALB 뒤 서버는 노트북에서 8081에 닿지 않으므로 서버마다 SSH로 전후 스냅샷을 받는다.
+    curl --silent --show-error --fail --max-time 5 http://127.0.0.1:8081/actuator/prometheus
     ;;
   logs)
     [[ $# -eq 2 ]] || die 'usage: logs <start UTC> <end UTC> (YYYY-MM-DDTHH:MM:SSZ)'
