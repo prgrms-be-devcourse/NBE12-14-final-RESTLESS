@@ -56,7 +56,7 @@ macOS에서 실행하면 같은 폴더에 `mac-<UTC 날짜시간>.csv`도 자동
 | [auction-burst.js](auction-burst.js) | AU-1~4 | 두 판(기본 8,000건 → 10,000건)을 한 번에 보내는 경매 API 부하 |
 | [auction-sse.mjs](auction-sse.mjs) | AU-5 | SSE 연결 계단, 유지, 가격 변경 전달 지연 |
 | [auction-run.sh](auction-run.sh) | AU-1~5 | 서버 지표 수집과 시나리오 실행, 결과 파일 관리 |
-| [sample-actuator.sh](sample-actuator.sh) | AU-1~5 | Actuator Prometheus 지표를 2초 간격으로 CSV 수집 |
+| [sample-actuator.sh](sample-actuator.sh) | AU-1~8 | Actuator Prometheus 지표를 CSV로 수집 (기본 2초, `SAMPLE_INTERVAL_SECONDS`로 변경). 서버 안 1초 수집은 `perf-ec2.sh sample`이 이 스크립트를 쓴다 |
 | `fanmeeting-*` ([설명](fanmeeting.md)) | 팬미팅 S1, FM-EXP-05 | 오픈·마감 응모 몰림, 추첨, 결과 조회 폭주. `fanmeeting-s1.sh` 하나로 한 회 실행 |
 
 드롭 시나리오는 [lib/drop-reservation.js](lib/drop-reservation.js)의 호스트 안전장치, 요청, 결과 분류, 집계, 요약을 같이 쓴다. 대기열과 결제 요청은 [lib/drop-flow.js](lib/drop-flow.js)에 있다.
