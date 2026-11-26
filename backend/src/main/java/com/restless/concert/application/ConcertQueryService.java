@@ -100,20 +100,18 @@ public class ConcertQueryService {
     /** 고객 좌석 조회용 배치. 없는 회차와 초안 공연의 회차는 404다. */
     @Transactional(readOnly = true)
     public PerformanceLayout getPerformanceLayout(Long performanceId) {
-        Performance performance = seatQueryMetrics.measure("performance", () -> performanceRepository.findById(performanceId)
+        Long layoutId = seatQueryMetrics.measure("performance", () -> performanceRepository.findPublishedLayoutId(performanceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다.")));
-        if (!concertRepository.isPerformancePublished(performanceId).orElse(false)) throw new BusinessException(ErrorCode.NOT_FOUND);
         List<SeatPosition> seats = seatQueryMetrics.measure("layout_seats",
-                () -> layoutSeatPositions.findByLayoutId(performance.getLayoutId()));
-        return new PerformanceLayout(performance.getLayoutId(), seats);
+                () -> layoutSeatPositions.findByLayoutId(layoutId));
+        return new PerformanceLayout(layoutId, seats);
     }
 
     /** 구매 가능 정보 조회에는 좌석 배치 없이 회차당 한도만 제공한다. */
     @Transactional(readOnly = true)
     public int getMaxTicketsPerUser(Long performanceId) {
-        if (!concertRepository.isPerformancePublished(performanceId).orElse(false)) throw new BusinessException(ErrorCode.NOT_FOUND);
-        return performanceRepository.findMaxTicketsPerUser(performanceId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다."));
+        return performanceRepository.findPublishedMaxTicketsPerUser(performanceId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
     /** 선점에 필요한 회차 정책과 판매 가능한 배치 좌석만 제공한다. */
