@@ -138,6 +138,30 @@ class DropSoldOutFilterIntegrationTest {
     }
 
     @Test
+    @DisplayName("품절 표시가 켜진 드롭의 판매가 끝나면 판매 기간 오류를 준다 (#481 검증 D1)")
+    void closedSoldOutDropAnswersNotOnSale() throws Exception {
+        sellOut(variantA);
+        sellOut(variantB);
+        enter(variantA).andExpect(status().isConflict());
+        enter(variantB).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("DROP_SOLD_OUT"));
+        jdbc.update("UPDATE drops SET opens_at = ?, closes_at = ? WHERE id = ?",
+                Timestamp.from(Instant.now().minusSeconds(7200)), Timestamp.from(Instant.now().minusSeconds(1)), drop);
+        Thread.sleep(1_100);
+        enter(variantB).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("DROP_NOT_ON_SALE"));
+    }
+
+    @Test
+    @DisplayName("판매 중이 아닌 SKU의 재고는 드롭 품절 판정에 넣지 않는다")
+    void inactiveVariantStockIsIgnored() throws Exception {
+        sellOut(variantA);
+        jdbc.update("UPDATE drop_variants SET is_active = FALSE WHERE id = ?", variantB);
+        double before = fast();
+        enter(variantA).andExpect(status().isConflict());
+        enter(variantA).andExpect(status().isConflict());
+        assertThat(fast()).as("inactive SKU stock must not keep the drop open").isEqualTo(before + 1);
+    }
+
+    @Test
     @DisplayName("재고가 돌아오면 유효 시간 뒤 다시 읽고 진입을 받는다")
     void restockReleasesAfterTtl() throws Exception {
         sellOut(variantA);

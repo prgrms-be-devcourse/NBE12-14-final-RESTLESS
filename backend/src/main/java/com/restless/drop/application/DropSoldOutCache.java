@@ -1,6 +1,8 @@
 package com.restless.drop.application;
 
+import com.restless.drop.domain.Drop;
 import com.restless.drop.infrastructure.DropInventoryRepository;
+import com.restless.drop.infrastructure.DropRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
@@ -20,25 +22,33 @@ import org.springframework.stereotype.Component;
  *
  * <p>거절만 한다. 재고 점유와 입장 허가는 이 표시를 보지 않으므로 초과 판매(INV-01, 02)와 무관하다. 재고가 돌아온 뒤
  * 새 진입이 409를 받는 시간은 최대 유효 시간 + 재확인 시간이다.
+ *
+ * <p>판매 중인 드롭만 표시한다. 판매 종료 시각은 표시에 같이 두고 요청마다 비교해, 끝나는 순간 기존 경로가
+ * {@code DROP_NOT_ON_SALE}을 주게 한다. 취소는 재확인 때 알게 되므로 취소 뒤 최대 유효 시간 동안 409 품절이 나갈 수 있다.
  */
 @Slf4j
 @Component
 public class DropSoldOutCache {
-    /** soldOut: 마지막 확인 결과. checkedAt: 확인 시각. recheckingSince: 재확인을 맡은 요청이 시작한 시각, 없으면 null. */
-    private record State(boolean soldOut, Instant checkedAt, Instant recheckingSince) { }
+    /**
+     * soldOut: 마지막 확인 결과. checkedAt: 확인 시각. closesAt: 판매 종료 시각, 품절이 아니면 null.
+     * recheckingSince: 재확인을 맡은 요청이 시작한 시각, 없으면 null.
+     */
+    private record State(boolean soldOut, Instant checkedAt, Instant closesAt, Instant recheckingSince) { }
 
     private final ConcurrentHashMap<Long, State> states = new ConcurrentHashMap<>();
     private final DropInventoryRepository inventories;
+    private final DropRepository drops;
     private final Clock clock;
     private final Duration ttl;
     private final Counter fast;
     private final Counter rechecks;
     private final MeterRegistry registry;
 
-    public DropSoldOutCache(DropInventoryRepository inventories, Clock clock, MeterRegistry registry,
-            @Value("${restless.drop.queue.sold-out-cache-ttl:1s}") Duration ttl) {
+    public DropSoldOutCache(DropInventoryRepository inventories, DropRepository drops, Clock clock,
+            MeterRegistry registry, @Value("${restless.drop.queue.sold-out-cache-ttl:1s}") Duration ttl) {
         if (ttl.isNegative()) throw new IllegalArgumentException("sold-out-cache-ttl must not be negative");
         this.inventories = inventories;
+        this.drops = drops;
         this.clock = clock;
         this.ttl = ttl;
         this.registry = registry;
@@ -55,10 +65,15 @@ public class DropSoldOutCache {
         State state = states.get(dropId);
         if (state == null || !state.soldOut()) return false;
         Instant now = clock.instant();
+        if (!now.isBefore(state.closesAt())) {
+            // 판매가 끝났다. 기존 경로가 DROP_NOT_ON_SALE을 준다.
+            states.remove(dropId, state);
+            return false;
+        }
         if (now.isBefore(state.checkedAt().plus(ttl))) return reject();
         if (state.recheckingSince() != null && now.isBefore(state.recheckingSince().plus(ttl))) return reject();
         // 재확인을 맡는다. 다른 요청이 먼저 바꿨으면 그 결과를 따른다.
-        if (!states.replace(dropId, state, new State(true, state.checkedAt(), now))) return rejects(dropId);
+        if (!states.replace(dropId, state, new State(true, state.checkedAt(), state.closesAt(), now))) return rejects(dropId);
         rechecks.increment();
         try {
             if (record(dropId)) return reject();
@@ -79,16 +94,27 @@ public class DropSoldOutCache {
         if (ttl.isZero()) return;
         State state = states.get(dropId);
         if (state != null && clock.instant().isBefore(state.checkedAt().plus(ttl))) return;
-        record(dropId);
+        try {
+            record(dropId);
+        } catch (RuntimeException e) {
+            // 표시를 못 켜도 이 요청의 409는 그대로다. 다음 409가 다시 시도한다.
+            log.warn("Sold-out mark failed for drop {}", dropId, e);
+            registry.counter("drop.queue.soldout.mark.failed").increment();
+        }
     }
 
-    /** DB에서 드롭의 판매 중 SKU 재고 합을 읽어 표시를 갱신하고, 품절이면 true. */
+    /** DB에서 드롭의 판매 상태와 판매 중 SKU 재고 합을 읽어 표시를 갱신하고, 판매 중인 품절이면 true. */
     private boolean record(Long dropId) {
-        Object[] row = inventories.activeStockOfDrop(dropId).get(0);
-        long activeSkus = ((Number) row[0]).longValue();
-        long available = ((Number) row[1]).longValue();
-        boolean soldOut = activeSkus > 0 && available == 0;
-        states.put(dropId, new State(soldOut, clock.instant(), null));
+        Instant now = clock.instant();
+        Drop drop = drops.findById(dropId).filter(d -> d.isOnSale(now)).orElse(null);
+        boolean soldOut = false;
+        if (drop != null) {
+            Object[] row = inventories.activeStockOfDrop(dropId).get(0);
+            long activeSkus = ((Number) row[0]).longValue();
+            long available = ((Number) row[1]).longValue();
+            soldOut = activeSkus > 0 && available == 0;
+        }
+        states.put(dropId, new State(soldOut, now, soldOut ? drop.getClosesAt() : null, null));
         return soldOut;
     }
 

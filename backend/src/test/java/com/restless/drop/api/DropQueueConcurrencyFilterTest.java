@@ -2,6 +2,7 @@ package com.restless.drop.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -12,7 +13,10 @@ import com.restless.common.ratelimit.RateLimitProperties;
 import com.restless.drop.application.DropQueueConcurrencyLimiter;
 import com.restless.drop.application.DropQueueConcurrencyLimiter.Kind;
 import com.restless.drop.application.DropSoldOutCache;
+import com.restless.drop.domain.Drop;
 import com.restless.drop.infrastructure.DropInventoryRepository;
+import com.restless.drop.infrastructure.DropRepository;
+import java.util.Optional;
 import java.util.List;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.servlet.FilterChain;
@@ -40,12 +44,17 @@ class DropQueueConcurrencyFilterTest {
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
     private final DropQueueConcurrencyLimiter limiter = new DropQueueConcurrencyLimiter(1, 1, 3, 1, LIMITS, registry);
     private final DropInventoryRepository inventories = mock(DropInventoryRepository.class);
+    private final DropRepository drops = mock(DropRepository.class);
     private final DropSoldOutCache soldOut =
-            new DropSoldOutCache(inventories, Clock.fixed(NOW, ZoneOffset.UTC), registry, Duration.ofSeconds(1));
+            new DropSoldOutCache(inventories, drops, Clock.fixed(NOW, ZoneOffset.UTC), registry, Duration.ofSeconds(1));
     private final DropQueueConcurrencyFilter filter =
             new DropQueueConcurrencyFilter(limiter, soldOut, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private void markSoldOut(long dropId) {
+        Drop drop = mock(Drop.class);
+        when(drop.isOnSale(any())).thenReturn(true);
+        when(drop.getClosesAt()).thenReturn(NOW.plusSeconds(3600));
+        when(drops.findById(dropId)).thenReturn(Optional.of(drop));
         when(inventories.activeStockOfDrop(dropId)).thenReturn(List.<Object[]>of(new Object[] {3L, 0L}));
         soldOut.observeVariantSoldOut(dropId);
     }

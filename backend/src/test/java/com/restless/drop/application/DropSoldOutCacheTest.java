@@ -1,12 +1,16 @@
 package com.restless.drop.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.restless.drop.domain.Drop;
 import com.restless.drop.infrastructure.DropInventoryRepository;
+import com.restless.drop.infrastructure.DropRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
@@ -14,16 +18,27 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("드롭 단위 품절 표시 (#481)")
 class DropSoldOutCacheTest {
     private static final long DROP = 7L;
+    private static final Instant START = Instant.parse("2026-11-26T05:00:00Z");
     private final DropInventoryRepository inventories = mock(DropInventoryRepository.class);
+    private final DropRepository drops = mock(DropRepository.class);
+    private final Drop drop = mock(Drop.class);
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
-    private final MutableClock clock = new MutableClock(Instant.parse("2026-11-26T05:00:00Z"));
-    private final DropSoldOutCache cache = new DropSoldOutCache(inventories, clock, registry, Duration.ofSeconds(1));
+    private final MutableClock clock = new MutableClock(START);
+    private final DropSoldOutCache cache =
+            new DropSoldOutCache(inventories, drops, clock, registry, Duration.ofSeconds(1));
+
+    {
+        when(drops.findById(DROP)).thenReturn(Optional.of(drop));
+        when(drop.isOnSale(any())).thenAnswer(i -> ((Instant) i.getArgument(0)).isBefore(START.plusSeconds(3600)));
+        when(drop.getClosesAt()).thenReturn(START.plusSeconds(3600));
+    }
 
     private static final class MutableClock extends Clock {
         private Instant now;
@@ -133,9 +148,42 @@ class DropSoldOutCacheTest {
     }
 
     @Test
+    @DisplayName("판매 종료 시각이 지나면 유효 시간 안이어도 거절하지 않아 기존 경로가 판매 기간 오류를 준다 (#481 검증 D1)")
+    void saleEndReleasesImmediately() {
+        stock(3, 0);
+        cache.observeVariantSoldOut(DROP);
+        clock.advance(Duration.ofSeconds(3600));
+        assertThat(cache.rejects(DROP)).isFalse();
+        verify(inventories, times(1)).activeStockOfDrop(DROP);
+    }
+
+    @Test
+    @DisplayName("판매 중이 아닌 드롭은 재고가 0이어도 표시하지 않고, 재확인 때 판매 중이 아니면 표시를 끈다")
+    void notOnSaleDropIsNotMarked() {
+        stock(3, 0);
+        cache.observeVariantSoldOut(DROP);
+        clock.advance(Duration.ofSeconds(1));
+        doReturn(false).when(drop).isOnSale(any());
+        assertThat(cache.rejects(DROP)).isFalse();
+        assertThat(cache.rejects(DROP)).isFalse();
+        when(drops.findById(8L)).thenReturn(Optional.empty());
+        cache.observeVariantSoldOut(8L);
+        assertThat(cache.rejects(8L)).isFalse();
+    }
+
+    @Test
+    @DisplayName("표시를 켜는 읽기가 실패해도 예외를 던지지 않는다. 진입의 409는 그대로 나간다")
+    void markFailureDoesNotThrow() {
+        when(inventories.activeStockOfDrop(DROP)).thenThrow(new IllegalStateException("db down"));
+        cache.observeVariantSoldOut(DROP);
+        assertThat(cache.rejects(DROP)).isFalse();
+        assertThat(registry.counter("drop.queue.soldout.mark.failed").count()).isEqualTo(1.0);
+    }
+
+    @Test
     @DisplayName("유효 시간 0이면 표시를 쓰지 않는다")
     void zeroTtlDisables() {
-        var disabled = new DropSoldOutCache(inventories, clock, registry, Duration.ZERO);
+        var disabled = new DropSoldOutCache(inventories, drops, clock, registry, Duration.ZERO);
         stock(3, 0);
         disabled.observeVariantSoldOut(DROP);
         assertThat(disabled.rejects(DROP)).isFalse();
