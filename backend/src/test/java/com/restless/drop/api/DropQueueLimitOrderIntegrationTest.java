@@ -34,7 +34,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
-/** 사용자별 요청 횟수 제한(429)이 동시 처리 상한(503)보다 먼저 판정되는 순서와 HEAD 처리를 고정한다 (#390). */
+/**
+ * 동시 처리 상한(503)이 인증(401)과 사용자별 요청 횟수 제한(429)보다 먼저 판정되는 순서와 HEAD 처리를 고정한다.
+ * #390에서는 429가 먼저였고, #477에서 거절 비용을 줄이려고 503을 Security 앞으로 옮겼다.
+ */
 @SpringBootTest(properties = {"restless.ratelimit.enabled=true",
         // 실제 시계로 도는 테스트가 창 경계에 걸리지 않도록 창을 길게 둔다. Retry-After는 설정 검증을 맞춘다.
         "restless.ratelimit.queue-entry.window=1m", "restless.ratelimit.queue-status.window=1m",
@@ -44,7 +47,7 @@ import org.springframework.test.web.servlet.ResultActions;
         "restless.drop.queue.scheduler.enabled=false"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
-@DisplayName("요청 횟수 제한이 동시 처리 상한보다 먼저 돈다 (#390)")
+@DisplayName("동시 처리 상한이 인증과 요청 횟수 제한보다 먼저 돈다 (#390, #477)")
 class DropQueueLimitOrderIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;
@@ -100,25 +103,44 @@ class DropQueueLimitOrderIntegrationTest {
     }
 
     @Test
-    @DisplayName("사용자 한도를 넘긴 조회는 허용치가 가득 차도 503이 아니라 429다")
-    void statusRateLimitIsCheckedBeforeConcurrencyLimit() throws Exception {
+    @DisplayName("허용치가 가득 차면 사용자 한도를 넘긴 조회도 429가 아니라 503이다")
+    void concurrencyLimitIsCheckedBeforeStatusRateLimit() throws Exception {
         enter().andExpect(status().isCreated());
         for (int i = 0; i < 5; i++) me(HttpMethod.GET).andExpect(status().isOk());
         exhaust(Kind.STATUS);
-        me(HttpMethod.GET).andExpect(status().isTooManyRequests());
-        // 한도를 넘긴 요청은 허용치도 건드리지 않는다.
-        assertThat(limiter.available(Kind.STATUS)).isZero();
+        me(HttpMethod.GET).andExpect(status().isServiceUnavailable()).andExpect(header().string("Retry-After", "12"));
+        // 허용치가 돌아오면 사용자 한도는 그대로 적용된다. 그 요청도 끝나면 허용치를 돌려준다.
         limiter.release(held.remove(0));
+        me(HttpMethod.GET).andExpect(status().isTooManyRequests());
         assertThat(limiter.available(Kind.STATUS)).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("사용자 한도를 넘긴 진입은 허용치가 가득 차도 503이 아니라 429다")
-    void entryRateLimitIsCheckedBeforeConcurrencyLimit() throws Exception {
+    @DisplayName("허용치가 가득 차면 사용자 한도를 넘긴 진입도 503이고, 503은 사용자 한도를 쓰지 않는다")
+    void concurrencyLimitIsCheckedBeforeEntryRateLimit() throws Exception {
+        exhaust(Kind.ENTRY);
+        for (int i = 0; i < 10; i++) enter().andExpect(status().isServiceUnavailable());
+        held.forEach(limiter::release);
+        held.clear();
+        // 503 열 번은 사용자 한도(5회)에 들어가지 않았다.
         enter().andExpect(status().isCreated());
         for (int i = 0; i < 4; i++) enter().andExpect(status().isOk());
-        exhaust(Kind.ENTRY);
         enter().andExpect(status().isTooManyRequests());
+        exhaust(Kind.ENTRY);
+        enter().andExpect(status().isServiceUnavailable());
+    }
+
+    @Test
+    @DisplayName("토큰 없는 요청은 허용치가 있으면 401이고 허용치를 돌려주며, 허용치가 없으면 503이다")
+    void unauthenticatedRequestOrder() throws Exception {
+        int before = limiter.available(Kind.ENTRY);
+        mvc.perform(post("/api/drops/{dropId}/queue/entries", drop).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"variantId\":" + variant + "}")).andExpect(status().isUnauthorized());
+        assertThat(limiter.available(Kind.ENTRY)).isEqualTo(before);
+        exhaust(Kind.ENTRY);
+        mvc.perform(post("/api/drops/{dropId}/queue/entries", drop).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"variantId\":" + variant + "}")).andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("DROP_QUEUE_BUSY"));
     }
 
     @Test
