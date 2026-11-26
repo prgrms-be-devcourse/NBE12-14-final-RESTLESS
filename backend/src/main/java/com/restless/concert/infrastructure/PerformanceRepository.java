@@ -15,8 +15,15 @@ public interface PerformanceRepository extends JpaRepository<Performance, Long> 
 
     List<Performance> findAllByConcertIdOrderByStartsAtAsc(Long concertId);
 
-    @Query("select p.maxTicketsPerUser from Performance p where p.id = :id")
-    Optional<Integer> findMaxTicketsPerUser(@Param("id") Long id);
+    /** 공개 공연의 회차일 때만 값이 있다. 존재·공개 확인과 값 조회를 쿼리 한 번으로 한다. */
+    @Query("select p.layoutId from Performance p join Concert c on c.id = p.concertId "
+            + "where p.id = :id and c.published = true")
+    Optional<Long> findPublishedLayoutId(@Param("id") Long id);
+
+    /** 공개 공연의 회차일 때만 값이 있다. 존재·공개 확인과 값 조회를 쿼리 한 번으로 한다. */
+    @Query("select p.maxTicketsPerUser from Performance p join Concert c on c.id = p.concertId "
+            + "where p.id = :id and c.published = true")
+    Optional<Integer> findPublishedMaxTicketsPerUser(@Param("id") Long id);
 
     @Query("select p.concertId from Performance p where p.id = :id")
     Optional<Long> findConcertId(@Param("id") Long id);
