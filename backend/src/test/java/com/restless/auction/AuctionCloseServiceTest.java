@@ -26,6 +26,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
+import io.micrometer.core.instrument.MeterRegistry;
 
 /** 시작·종료 서비스를 직접 부른다 (스케줄러는 꺼져 있음). */
 @SpringBootTest(properties = "spring.docker.compose.enabled=false")
@@ -36,6 +38,8 @@ class AuctionCloseServiceTest {
     @Autowired AuctionCloseService closeService;
     @Autowired BidService bidService;
     @Autowired JdbcTemplate jdbc;
+    @Autowired TransactionTemplate tx;
+    @Autowired MeterRegistry meters;
     AuctionFixtures f;
     Long seller;
     Long chulsoo;
@@ -142,6 +146,73 @@ class AuctionCloseServiceTest {
         } catch (BusinessException e) {
             assertThat(e.getErrorCode()).isEqualTo(ErrorCode.AUCTION_CLOSED);
         }
+    }
+
+    /** 다른 트랜잭션(다른 서버의 스케줄러, 입찰)이 경매 행을 잡고 있는 동안을 만든다. */
+    void whileLockedElsewhere(Long auctionId, Runnable action) throws Exception {
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService holder = Executors.newSingleThreadExecutor();
+        Future<?> holding = holder.submit(() -> tx.executeWithoutResult(status -> {
+            jdbc.queryForList("SELECT auction_id FROM auctions WHERE auction_id = ? FOR UPDATE", auctionId);
+            locked.countDown();
+            try {
+                release.await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }));
+        try {
+            assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+            action.run();
+        } finally {
+            release.countDown();
+            holding.get(30, TimeUnit.SECONDS);
+            holder.shutdown();
+        }
+    }
+
+    double skipped(String action) {
+        return meters.counter("auction.scheduler.lock.skipped", "action", action).count();
+    }
+
+    @Test void 다른_트랜잭션이_잡은_경매는_기다리지_않고_건너뛰고_다음에_닫는다() throws Exception {
+        Long auctionId = f.openAuction(seller);
+        bid(chulsoo, auctionId, 50_000);
+        f.expireNow(auctionId);
+        double before = skipped("close");
+
+        whileLockedElsewhere(auctionId, () -> {
+            long started = System.nanoTime();
+            assertThat(closeService.close(auctionId)).isFalse();
+            assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started))
+                .as("잠금을 기다리지 않는다 (InnoDB 잠금 대기 기본 50초)").isLessThan(5_000);
+        });
+        assertThat(f.status(auctionId)).isEqualTo("OPEN");
+        assertThat(skipped("close")).isEqualTo(before + 1);
+
+        assertThat(closeService.close(auctionId)).as("다음 주기에는 닫는다").isTrue();
+        assertThat(f.status(auctionId)).isEqualTo("CLOSED");
+        f.assertInvariants();
+    }
+
+    @Test void 다른_트랜잭션이_잡은_예정_경매는_건너뛰고_다음에_연다() throws Exception {
+        Long auctionId = f.auction(seller, Instant.now().minusSeconds(5), Instant.now().plusSeconds(3600));
+        f.setStatus(auctionId, "SCHEDULED");
+        double before = skipped("open");
+
+        whileLockedElsewhere(auctionId, () -> assertThat(closeService.open(auctionId)).isFalse());
+        assertThat(f.status(auctionId)).isEqualTo("SCHEDULED");
+        assertThat(skipped("open")).isEqualTo(before + 1);
+
+        assertThat(closeService.open(auctionId)).isTrue();
+        assertThat(f.status(auctionId)).isEqualTo("OPEN");
+    }
+
+    @Test void 없는_경매는_건너뛴_수에_넣지_않는다() {
+        double before = skipped("close");
+        assertThat(closeService.close(999_999L)).isFalse();
+        assertThat(skipped("close")).isEqualTo(before);
     }
 
     @Test void 종료를_동시에_여러_번_실행해도_결과와_차감은_한_번이다_INV_AU_02() throws Exception {
