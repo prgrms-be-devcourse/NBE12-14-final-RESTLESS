@@ -29,6 +29,7 @@ frontend/coverage/
 
 # AI agent personal settings and scratch output (Claude Code, Codex, ChatGPT)
 .claude/settings.local.json
+.codex/
 CLAUDE.local.md
 .ai-output/
 # Root agent instructions are personal (each member keeps their own). Subfolder ones stay versioned.
