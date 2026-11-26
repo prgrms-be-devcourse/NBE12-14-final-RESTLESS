@@ -93,3 +93,9 @@ TicketPaymentService.onFailed는 현재 승인 시도의 최종 실패 확인 �
 - 후보 조회 오류와 개별 예약 오류의 메트릭·후속 실행·나머지 예약 처리를 확인한다.
 
 backend에서 `./gradlew test --tests 'com.restless.ticketing.*'` 실행: 132개 통과, 실패·오류·건너뜀 0개. 새 인덱스 Flyway 적용과 JPA validate를 포함한다. 이번 단계에서 전체 백엔드 빌드는 재실행하지 않았다.
+
+## 선점 만료 후보 인덱스 (2026-11-26)
+
+- V20261126_1600은 선점 만료 후보 조회용 (status, hold_expires_at, id) 인덱스만 추가한다. 기존 마이그레이션·업무 제약을 수정하지 않는다.
+- 이 인덱스가 없으면 첫 쪽·다음 쪽 쿼리가 결제 기한 인덱스의 status 앞부분만 써서 HELD 예약 전체를 읽고 다시 정렬했다. 이제 만료된 HELD를 기한·ID 순으로 앞에서부터 최대 100건만 읽는다.
+- ExpirationCandidateQueryPlanTest가 실제 MySQL EXPLAIN으로 두 쿼리가 이 인덱스를 쓰고 filesort가 없음을 확인한다. 로컬 Testcontainers MySQL에서 만료 300건 기준 평균 조회 시간은 HELD 2만 건일 때 약 18ms → 0.4ms, 10만 건일 때 약 105ms → 0.5~0.7ms였다.
