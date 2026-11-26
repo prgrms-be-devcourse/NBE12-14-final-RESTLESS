@@ -15,6 +15,7 @@ import com.restless.concert.infrastructure.VenueRepository;
 import com.restless.member.application.MemberService;
 import com.restless.member.domain.MemberRole;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -74,7 +75,7 @@ public class OrganizerConcertService {
         Concert concert = concerts.findLockedById(concertId)
                 .filter(c -> role == MemberRole.ADMIN || c.getSellerId().equals(actorId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        if (concert.isPublished() || concert.getPublishedAt() != null
+        if (concert.isEverPublished()
                 || !performances.findAllByConcertIdOrderByStartsAtAsc(concertId).isEmpty())
             throw new BusinessException(ErrorCode.CONCERT_DELETE_CONFLICT);
         sectionPrices.deleteAll(sectionPrices.findAllByConcertIdOrderBySectionLabelAsc(concertId));
@@ -101,7 +102,7 @@ public class OrganizerConcertService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         if (Objects.equals(concert.getVenueId(), venueId) && Objects.equals(concert.getLayoutId(), layoutId))
             return toInfo(concert, venue);
-        if (concert.isPublished() || concert.getPublishedAt() != null || !performances.findAllByConcertIdOrderByStartsAtAsc(concertId).isEmpty())
+        if (concert.isEverPublished() || !performances.findAllByConcertIdOrderByStartsAtAsc(concertId).isEmpty())
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "공개 이력과 회차가 없는 공연만 변경할 수 있습니다.");
         sectionPrices.deleteAll(sectionPrices.findAllByConcertIdOrderBySectionLabelAsc(concertId));
         sectionPrices.flush();
@@ -119,6 +120,7 @@ public class OrganizerConcertService {
         Venue venue = venues.findById(concert.getVenueId()).orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REQUEST));
         if (concert.isPublished()) return toInfo(concert, venue);
         if (concert.getTitle() == null || concert.getTitle().isBlank() || concert.getLayoutId() == null
+                || concert.getBookingOpensAt() == null
                 || concert.getPeriodStartDate() == null || concert.getPeriodEndDate() == null
                 || concert.getPeriodStartDate().isAfter(concert.getPeriodEndDate())
                 || concert.getDurationMinutes() == null || concert.getDurationMinutes() <= 0
@@ -151,9 +153,13 @@ public class OrganizerConcertService {
             }
             seatReadiness.requireReady(performance.getId(), concert.getLayoutId(), layoutSeatsForSale, prices);
         }
+        if (items.stream().anyMatch(performance -> !performance.getBookingOpensAt().equals(concert.getBookingOpensAt()))) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "모든 회차가 공연 예매 오픈 시각을 써야 합니다.");
+        }
         var now = jdbc.queryForObject("SELECT UTC_TIMESTAMP(6)", LocalDateTime.class).toInstant(ZoneOffset.UTC);
-        if (items.stream().anyMatch(performance -> !performance.getBookingOpensAt().isAfter(now))) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "모든 회차의 예매 시작 시각이 미래여야 합니다.");
+        // 첫 공개는 공지 없이 판매가 바로 열리지 않도록 예매 오픈이 미래여야 한다.
+        if (!concert.getBookingOpensAt().isAfter(now)) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "공연 예매 오픈 시각이 미래여야 합니다.");
         }
         concert.publish(now);
         return toInfo(concert, venue);
@@ -161,7 +167,8 @@ public class OrganizerConcertService {
 
     @Transactional
     public OrganizerConcertInfo create(Long actorId, Long venueId, Long layoutId, String title, String description,
-                                      LocalDate periodStartDate, LocalDate periodEndDate, Integer durationMinutes) {
+                                      LocalDate periodStartDate, LocalDate periodEndDate, Integer durationMinutes,
+                                      Instant bookingOpensAt) {
         requireOrganizer(actorId);
         if (venueId == null || venueId <= 0 || layoutId == null || layoutId <= 0 || title == null || title.isBlank() || title.length() > 200) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
@@ -176,7 +183,7 @@ public class OrganizerConcertService {
         layouts.findById(layoutId).filter(layout -> layout.getVenueId().equals(venueId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연장의 배치를 찾을 수 없습니다."));
         Concert concert = concerts.save(Concert.createDraft(venueId, actorId, title, "SCHEDULED", clock.instant(),
-                description, periodStartDate, periodEndDate, durationMinutes, layoutId));
+                description, periodStartDate, periodEndDate, durationMinutes, layoutId, bookingOpensAt));
         return toInfo(concert, venue);
     }
 
@@ -207,7 +214,7 @@ public class OrganizerConcertService {
         boolean scheduleChanged = !Objects.equals(start, concert.getPeriodStartDate())
                 || !Objects.equals(end, concert.getPeriodEndDate()) || !Objects.equals(duration, concert.getDurationMinutes());
         if (scheduleChanged) {
-            if (concert.isPublished()) throw new BusinessException(ErrorCode.INVALID_REQUEST, "공개된 공연의 일정은 변경할 수 없습니다.");
+            if (concert.isEverPublished()) throw new BusinessException(ErrorCode.INVALID_REQUEST, "공개된 공연의 일정은 변경할 수 없습니다.");
             var items = performances.findAllLockedByConcertId(concertId);
             if (!items.isEmpty() && duration == null) throw new BusinessException(ErrorCode.INVALID_REQUEST);
             var byStart = items.stream().sorted(java.util.Comparator.comparing(com.restless.concert.domain.Performance::getStartsAt)).toList();
@@ -231,12 +238,41 @@ public class OrganizerConcertService {
     }
 
 
+    /**
+     * 공연 예매 오픈 시각을 바꾸고 모든 회차에 같은 값을 적용한다.
+     * 공개 이력이 생긴 뒤에는 아직 오픈 전일 때 미래 시각으로만 바꿀 수 있다.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public OrganizerConcertInfo changeBookingOpensAt(Long actorId, Long concertId, Instant opensAt) {
+        MemberRole role = requireOrganizer(actorId);
+        if (concertId == null || concertId <= 0 || opensAt == null) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        Concert concert = concerts.findLockedById(concertId).filter(c -> role == MemberRole.ADMIN || c.getSellerId().equals(actorId))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        Venue venue = venues.findById(concert.getVenueId()).orElseThrow(() -> new IllegalStateException("공연장이 없습니다."));
+        if (opensAt.equals(concert.getBookingOpensAt())) return toInfo(concert, venue);
+        var items = performances.findAllLockedByConcertId(concertId);
+        var now = jdbc.queryForObject("SELECT UTC_TIMESTAMP(6)", LocalDateTime.class).toInstant(ZoneOffset.UTC);
+        if (concert.isEverPublished() && (concert.getBookingOpensAt() == null
+                || !now.isBefore(concert.getBookingOpensAt()) || !now.isBefore(opensAt))) {
+            throw new BusinessException(ErrorCode.TICKET_SCHEDULE_CHANGE_CLOSED);
+        }
+        for (var performance : items) {
+            if (history.hasSeatHold(performance.getId())) throw new BusinessException(ErrorCode.TICKET_SCHEDULE_CHANGE_CLOSED);
+            if (!opensAt.isBefore(performance.getBookingClosesAt())) {
+                throw new BusinessException(ErrorCode.INVALID_REQUEST, "예매 오픈은 모든 회차의 예매 마감보다 빨라야 합니다.");
+            }
+        }
+        concert.changeBookingOpensAt(opensAt);
+        items.forEach(performance -> performance.changeBookingOpensAt(opensAt));
+        return toInfo(concert, venue);
+    }
+
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<SectionPriceInfo> configurePrices(Long actorId, Long concertId, List<SectionPriceInput> sections) {
         MemberRole role = requireOrganizer(actorId);
         Concert concert = concerts.findLockedById(concertId).orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         if (role != MemberRole.ADMIN && !concert.getSellerId().equals(actorId)) throw new BusinessException(ErrorCode.NOT_FOUND);
-        if (concert.isPublished()) throw new BusinessException(ErrorCode.INVALID_REQUEST, "공개된 공연의 가격은 바꿀 수 없습니다.");
+        if (concert.isEverPublished()) throw new BusinessException(ErrorCode.INVALID_REQUEST, "공개된 공연의 가격은 바꿀 수 없습니다.");
         if (!performances.findAllByConcertIdOrderByStartsAtAsc(concertId).isEmpty())
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "회차 등록 전 가격을 설정해야 합니다.");
         var expected = layoutSeats.findAllById_LayoutId(concert.getLayoutId()).stream().filter(LayoutSeat::isSellable)
@@ -271,6 +307,7 @@ public class OrganizerConcertService {
         return new OrganizerConcertInfo(concert.getId(), concert.getVenueId(), concert.getLayoutId(), concert.getSellerId(),
                 concert.getTitle(), concert.getStatus(), concert.getCreatedAt(), venue.getName(), venue.getAddress(),
                 concert.getDescription(), concert.getPeriodStartDate(), concert.getPeriodEndDate(), concert.getDurationMinutes(),
-                concert.isPublished(), concert.getPublishedAt(), !sectionPrices.findAllByConcertIdOrderBySectionLabelAsc(concert.getId()).isEmpty());
+                concert.isPublished(), concert.getPublishedAt(), !sectionPrices.findAllByConcertIdOrderBySectionLabelAsc(concert.getId()).isEmpty(),
+                concert.getBookingOpensAt());
     }
 }

@@ -32,11 +32,11 @@ public class OrganizerPerformanceController {
     @PutMapping("/{performanceId}")
     public PerformanceInfo update(@LoginMember Long userId, @PathVariable Long performanceId,
                                   @Valid @RequestBody UpdatePerformanceRequest request) {
-        return performances.update(userId, performanceId, request.startsAt(), request.bookingOpensAt(),
-                request.bookingClosesAt(), request.maxTicketsPerUser());
+        return performances.update(userId, performanceId, request.startsAt(), request.bookingClosesAt(),
+                request.maxTicketsPerUser());
     }
 
-    public record UpdatePerformanceRequest(@NotNull Instant startsAt, @NotNull Instant bookingOpensAt,
-                                           @NotNull Instant bookingClosesAt,
+    /** 예매 오픈은 공연 단위로 바꾼다. 예매 마감을 비우면 회차 시작 전날 17시(공연장 시간대)다. */
+    public record UpdatePerformanceRequest(@NotNull Instant startsAt, Instant bookingClosesAt,
                                            @NotNull @Positive Integer maxTicketsPerUser) { }
 }

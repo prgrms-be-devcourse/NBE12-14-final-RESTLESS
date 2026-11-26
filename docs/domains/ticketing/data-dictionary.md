@@ -128,7 +128,9 @@
 | `period_start_date`, `period_end_date` | 공연 기간 | 공연장 기준 날짜. 둘 다 없거나 함께 입력하며 시작일 ≤ 종료일 |
 | `duration_minutes` | 공연 소요 시간 | 선택 입력, 분 단위 양수 |
 | `is_published` | 공개 여부 | DB 기본값 TRUE. 기존 공연과 공개 여부를 지정하지 않은 INSERT는 공개다. 주최자 API로 만든 공연은 FALSE(비공개 초안)로 시작한다. FALSE이면 고객 조회·선점에서 404로 처리한다 |
-| `published_at` | 최초 공개 시각 | NULL 가능. 주최자가 공개할 때 서버 시각을 한 번 기록하고 재공개 요청에도 유지한다. 정책 전환 전 공연은 실제 공개 시각을 알 수 없어 NULL이다. CHECK: 비공개이면 NULL |
+| `published_at` | 최초 공개 시각 | NULL 가능. 주최자가 공개할 때 서버 시각을 한 번 기록하고 재공개 요청에도 유지한다. 정책 전환 전 공연은 실제 공개 시각을 알 수 없어 NULL이다 |
+| `ever_published` | 공개 이력 | 한 번이라도 공개했는지. 비공개로 돌려도 남는다. DB 기본값 TRUE(기존 공연·직접 INSERT), 주최자 API 초안은 FALSE. CHECK: 공개 중이거나 `published_at`이 있으면 TRUE (V20261126_1000) |
+| `booking_opens_at` | 공연 예매 오픈 시각 | NULL 가능. 모든 회차가 같은 값을 쓰며 회차 등록 때 `performances.booking_opens_at`에 복사한다. 회차별 값이 서로 다른 기존 공연은 NULL (V20261126_1000) |
 | `layout_id` | 공연 공통 배치 ID | NULL 가능. venue_layouts.id. 신규 공연의 모든 회차가 이 배치를 쓴다. 기존 공연은 자동으로 채우지 않는다 |
 | `created_at` | 공연 정보 등록 시각 | 공연 시작 시각과 다름 |
 
@@ -145,7 +147,7 @@
 | `venue_id` | 회차 공연장 ID | 공연·배치와 같은 공연장이어야 함 |
 | `layout_id` | 이 회차가 사용하는 배치 ID | venue_layouts.id. 예매 오픈 이후 변경 금지 |
 | `starts_at` | 공연 시작 시각 | 화면에서는 공연장 시간대로 변환 |
-| `booking_opens_at` | 신규 예매 오픈 시각 | 신규 좌석 선점 시작 기준 |
+| `booking_opens_at` | 신규 예매 오픈 시각 | 신규 좌석 선점 시작 기준. 주최자 API는 공연 값을 복사하고 공연 값 변경 시 함께 바꾼다 |
 | `booking_closes_at` | 신규 예매 마감 시각 | 기존 유효 예약의 별도 결제 기한과 구분 |
 | `max_tickets_per_user` | 회차별 사용자 구매 한도 | 양수. 확정 수량+선점 수량의 상한 |
 | `status` | 회차 관리 상태 | 허용 상태값·전이 정책은 별도 정의 필요 |

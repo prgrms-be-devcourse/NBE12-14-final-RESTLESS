@@ -53,7 +53,7 @@ public class OrganizerConcertController {
     @ResponseStatus(HttpStatus.CREATED)
     public OrganizerConcertInfo create(@LoginMember Long userId, @Valid @RequestBody CreateConcertRequest request) {
         return concerts.create(userId, request.venueId(), request.layoutId(), request.title(), request.description(),
-                request.periodStartDate(), request.periodEndDate(), request.durationMinutes());
+                request.periodStartDate(), request.periodEndDate(), request.durationMinutes(), request.bookingOpensAt());
     }
 
     @GetMapping("/{concertId}")
@@ -81,6 +81,14 @@ public class OrganizerConcertController {
 
     public record VenueLayoutRequest(@NotNull @Positive Long venueId, @NotNull @Positive Long layoutId) { }
 
+    @PutMapping("/{concertId}/booking-opens-at")
+    public OrganizerConcertInfo changeBookingOpensAt(@LoginMember Long userId, @PathVariable Long concertId,
+                                                     @Valid @RequestBody BookingOpensRequest request) {
+        return concerts.changeBookingOpensAt(userId, concertId, request.bookingOpensAt());
+    }
+
+    public record BookingOpensRequest(@NotNull Instant bookingOpensAt) { }
+
     @PutMapping("/{concertId}/section-prices")
     public List<OrganizerConcertService.SectionPriceInfo> configurePrices(@LoginMember Long userId,
             @PathVariable Long concertId, @Valid @RequestBody SectionPricesRequest request) {
@@ -100,32 +108,32 @@ public class OrganizerConcertController {
     @ResponseStatus(HttpStatus.CREATED)
     public PerformanceInfo createPerformance(@LoginMember Long userId, @PathVariable Long concertId,
                                               @Valid @RequestBody CreatePerformanceRequest request) {
-        return performances.create(userId, concertId, request.startsAt(),
-                request.bookingOpensAt(), request.bookingClosesAt(), request.maxTicketsPerUser());
+        return performances.create(userId, concertId, request.startsAt(), request.bookingClosesAt(),
+                request.maxTicketsPerUser());
     }
 
     @PostMapping("/{concertId}/performances/batch")
     @ResponseStatus(HttpStatus.CREATED)
     public BatchPerformanceResponse createPerformances(@LoginMember Long userId, @PathVariable Long concertId,
                                                         @Valid @RequestBody BatchPerformanceRequest request) {
-        return new BatchPerformanceResponse(performances.createBatch(userId, concertId, request.bookingOpensAt(),
+        return new BatchPerformanceResponse(performances.createBatch(userId, concertId,
                 request.maxTicketsPerUser(), request.performances().stream()
                         .map(item -> new OrganizerPerformanceService.BatchPerformance(item.startsAt(), item.bookingClosesAt())).toList()));
     }
 
-    public record BatchPerformanceRequest(@NotNull Instant bookingOpensAt, @NotNull @Positive Integer maxTicketsPerUser,
+    public record BatchPerformanceRequest(@NotNull @Positive Integer maxTicketsPerUser,
             @NotEmpty @Size(max = 10) List<@NotNull @Valid BatchPerformanceItem> performances) { }
-    public record BatchPerformanceItem(@NotNull Instant startsAt, @NotNull Instant bookingClosesAt) { }
+    public record BatchPerformanceItem(@NotNull Instant startsAt, Instant bookingClosesAt) { }
     public record BatchPerformanceResponse(List<PerformanceInfo> performances) { }
 
     public record CreateConcertRequest(@NotNull @Positive Long venueId, @NotNull @Positive Long layoutId,
                                        @NotBlank @Size(max = 200) String title,
                                        @Size(max = 5000) String description,
                                        LocalDate periodStartDate, LocalDate periodEndDate,
-                                       @Positive Integer durationMinutes) { }
+                                       @Positive Integer durationMinutes, Instant bookingOpensAt) { }
 
-    public record CreatePerformanceRequest(@NotNull Instant startsAt,
-                                           @NotNull Instant bookingOpensAt, @NotNull Instant bookingClosesAt,
+    /** 예매 오픈은 공연 값을 쓴다. 예매 마감을 비우면 회차 시작 전날 17시(공연장 시간대)다. */
+    public record CreatePerformanceRequest(@NotNull Instant startsAt, Instant bookingClosesAt,
                                            @NotNull @Positive Integer maxTicketsPerUser) { }
 
     public record UpdateConcertRequest(@NotBlank @Size(max = 200) String title,

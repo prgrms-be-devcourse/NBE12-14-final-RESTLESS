@@ -72,6 +72,10 @@ public class Performance {
                 bookingClosesAt, maxTicketsPerUser, status);
     }
 
+    public void changeBookingOpensAt(Instant opensAt) {
+        this.bookingOpensAt = Objects.requireNonNull(opensAt);
+    }
+
     public void changeSchedule(Instant startsAt, Instant opensAt, Instant closesAt, int maximum) {
         this.startsAt = startsAt;
         this.bookingOpensAt = opensAt;

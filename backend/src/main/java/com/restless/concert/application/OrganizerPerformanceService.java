@@ -82,7 +82,7 @@ public class OrganizerPerformanceService {
                 .filter(c -> role == MemberRole.ADMIN || c.getSellerId().equals(actorId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         Performance performance = performances.findLockedById(performanceId).orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        if (concert.isPublished() || concert.getPublishedAt() != null || history.hasSeatHold(performanceId))
+        if (concert.isEverPublished() || history.hasSeatHold(performanceId))
             throw new BusinessException(ErrorCode.CONCERT_DELETE_CONFLICT);
         history.deleteUnreservedSeats(performanceId);
         try {
@@ -94,8 +94,7 @@ public class OrganizerPerformanceService {
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public List<PerformanceInfo> createBatch(Long actorId, Long concertId, Instant opensAt, Integer maximum,
-                                             List<BatchPerformance> items) {
+    public List<PerformanceInfo> createBatch(Long actorId, Long concertId, Integer maximum, List<BatchPerformance> items) {
         if (items == null || items.isEmpty() || items.size() > 10 || items.stream().anyMatch(Objects::isNull)) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "회차는 1개 이상 10개 이하로 등록해야 합니다.");
         }
@@ -103,7 +102,7 @@ public class OrganizerPerformanceService {
         for (int i = 0; i < items.size(); i++) {
             var item = items.get(i);
             try {
-                result.add(create(actorId, concertId, item.startsAt(), opensAt, item.bookingClosesAt(), maximum));
+                result.add(create(actorId, concertId, item.startsAt(), item.bookingClosesAt(), maximum));
             } catch (BusinessException ex) {
                 if (ex.getErrorCode() != ErrorCode.INVALID_REQUEST) throw ex;
                 throw new BusinessException(ex.getErrorCode(), ex.getMessage(), Map.of("performanceIndex", i));
@@ -117,21 +116,25 @@ public class OrganizerPerformanceService {
                 .map(seat -> new SeatSetupLayout.Seat(seat.getId().getVenueSeatId(), seat.getSectionLabel())).toList();
     }
 
-    /** 잠금 이후 기존 회차를 최신 커밋 기준으로 읽도록 READ_COMMITTED를 사용한다. */
+    /**
+     * 공연 예매 오픈 시각을 회차에 복사해 회차와 판매 좌석을 만든다. 예매 마감을 비우면 전날 17시(공연장 시간대)다.
+     * 잠금 이후 기존 회차를 최신 커밋 기준으로 읽도록 READ_COMMITTED를 사용한다.
+     */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public PerformanceInfo create(Long actorId, Long concertId, Instant startsAt,
-                                  Instant bookingOpensAt, Instant bookingClosesAt, Integer maxTicketsPerUser) {
+    public PerformanceInfo create(Long actorId, Long concertId, Instant startsAt, Instant requestedClosesAt,
+                                  Integer maxTicketsPerUser) {
         if (actorId == null || actorId <= 0) throw new BusinessException(ErrorCode.UNAUTHORIZED);
         MemberRole role = members.getActive(actorId).getRole();
         if (role != MemberRole.ORGANIZER && role != MemberRole.ADMIN) throw new BusinessException(ErrorCode.FORBIDDEN);
-        if (concertId == null || concertId <= 0
-                || startsAt == null || bookingOpensAt == null || bookingClosesAt == null
+        if (concertId == null || concertId <= 0 || startsAt == null
                 || maxTicketsPerUser == null || maxTicketsPerUser <= 0) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
         Concert concert = concerts.findLockedById(concertId).filter(c -> role == MemberRole.ADMIN || c.getSellerId().equals(actorId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        if (concert.isPublished()) throw new BusinessException(ErrorCode.INVALID_REQUEST, "공개된 공연에는 회차를 추가할 수 없습니다.");
+        if (concert.isEverPublished()) throw new BusinessException(ErrorCode.INVALID_REQUEST, "공개된 공연에는 회차를 추가할 수 없습니다.");
+        Instant bookingOpensAt = concert.getBookingOpensAt();
+        if (bookingOpensAt == null) throw new BusinessException(ErrorCode.INVALID_REQUEST, "공연 예매 오픈 시각을 먼저 설정해야 합니다.");
         if (concert.getLayoutId() == null) throw new BusinessException(ErrorCode.INVALID_REQUEST, "공연의 공통 배치를 먼저 선택해야 합니다.");
         var configuredPrices = sectionPrices.findAllByConcertIdOrderBySectionLabelAsc(concertId);
         if (configuredPrices.isEmpty()) throw new BusinessException(ErrorCode.INVALID_REQUEST, "공통 구역별 가격을 먼저 설정해야 합니다.");
@@ -142,7 +145,9 @@ public class OrganizerPerformanceService {
         var layout = layouts.findById(concert.getLayoutId())
                 .filter(candidate -> candidate.getVenueId().equals(concert.getVenueId()))
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연장의 배치를 찾을 수 없습니다."));
-        LocalDate date = startsAt.atZone(ZoneId.of(venue.getTimezone())).toLocalDate();
+        ZoneId zone = ZoneId.of(venue.getTimezone());
+        LocalDate date = startsAt.atZone(zone).toLocalDate();
+        Instant bookingClosesAt = requestedClosesAt != null ? requestedClosesAt : defaultBookingClosesAt(startsAt, zone);
         if (date.isBefore(concert.getPeriodStartDate()) || date.isAfter(concert.getPeriodEndDate())
                 || !bookingOpensAt.isBefore(bookingClosesAt) || bookingClosesAt.isAfter(startsAt)) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "공연 기간 또는 예매 시간이 올바르지 않습니다.");
@@ -160,42 +165,52 @@ public class OrganizerPerformanceService {
                 performance.getBookingClosesAt(), performance.getMaxTicketsPerUser(), performance.getStatus());
     }
 
+    /** 회차 일정·예매 마감·구매 한도를 바꾼다. 예매 오픈은 공연 값을 따르며 여기서 바꾸지 않는다. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public PerformanceInfo update(Long actorId, Long performanceId, Instant startsAt, Instant opensAt,
-                                  Instant closesAt, Integer maximum) {
+    public PerformanceInfo update(Long actorId, Long performanceId, Instant startsAt, Instant requestedClosesAt,
+                                  Integer maximum) {
         if (actorId == null || actorId <= 0) throw new BusinessException(ErrorCode.UNAUTHORIZED);
         MemberRole role = members.getActive(actorId).getRole();
         if (role != MemberRole.ORGANIZER && role != MemberRole.ADMIN) throw new BusinessException(ErrorCode.FORBIDDEN);
-        if (performanceId == null || performanceId <= 0 || startsAt == null || opensAt == null || closesAt == null
-                || maximum == null || maximum <= 0 || !opensAt.isBefore(closesAt) || closesAt.isAfter(startsAt)) {
+        if (performanceId == null || performanceId <= 0 || startsAt == null || maximum == null || maximum <= 0) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
         Long concertId = performances.findConcertId(performanceId).orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         Concert concert = concerts.findLockedById(concertId).filter(c -> role == MemberRole.ADMIN || c.getSellerId().equals(actorId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
-        // 공개된 공연의 회차는 바뀌지 않으므로 잠그지 않는다. 진행 중인 선점이 거절 응답을 기다리지 않게 한다.
-        Performance p = (concert.isPublished() ? performances.findById(performanceId) : performances.findLockedById(performanceId))
+        // 공개 이력이 있는 공연의 회차는 바뀌지 않으므로 잠그지 않는다. 진행 중인 선점이 거절 응답을 기다리지 않게 한다.
+        Performance p = (concert.isEverPublished() ? performances.findById(performanceId) : performances.findLockedById(performanceId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
         Venue venue = venues.findById(concert.getVenueId()).orElseThrow(() -> new IllegalStateException("공연장이 없습니다."));
-        LocalDate date = startsAt.atZone(ZoneId.of(venue.getTimezone())).toLocalDate();
+        ZoneId zone = ZoneId.of(venue.getTimezone());
+        LocalDate date = startsAt.atZone(zone).toLocalDate();
+        Instant closesAt = requestedClosesAt != null ? requestedClosesAt : defaultBookingClosesAt(startsAt, zone);
         if (concert.getPeriodStartDate() == null || concert.getPeriodEndDate() == null
                 || date.isBefore(concert.getPeriodStartDate()) || date.isAfter(concert.getPeriodEndDate())) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "회차가 공연 기간 안에 있어야 합니다.");
         }
-        boolean changed = !p.getStartsAt().equals(startsAt) || !p.getBookingOpensAt().equals(opensAt)
-                || !p.getBookingClosesAt().equals(closesAt) || p.getMaxTicketsPerUser() != maximum;
+        if (!p.getBookingOpensAt().isBefore(closesAt) || closesAt.isAfter(startsAt)) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "예매 시간이 올바르지 않습니다.");
+        }
+        boolean changed = !p.getStartsAt().equals(startsAt) || !p.getBookingClosesAt().equals(closesAt)
+                || p.getMaxTicketsPerUser() != maximum;
         if (changed) {
-            if (concert.isPublished()) throw new BusinessException(ErrorCode.INVALID_REQUEST, "공개된 공연의 회차는 변경할 수 없습니다.");
+            if (concert.isEverPublished()) throw new BusinessException(ErrorCode.INVALID_REQUEST, "공개된 공연의 회차는 변경할 수 없습니다.");
             validateOverlap(concert, startsAt, performanceId);
             Instant now = jdbc.queryForObject("SELECT UTC_TIMESTAMP(6)", LocalDateTime.class).toInstant(ZoneOffset.UTC);
-            if (!now.isBefore(opensAt) || history.hasSeatHold(performanceId)
-                    || (!now.isBefore(p.getBookingOpensAt()) && p.getBookingOpensAt().equals(opensAt))) {
+            // 예매 오픈이 지난 초안은 공연 예매 오픈을 먼저 미래로 바꿔야 회차를 고칠 수 있다.
+            if (!now.isBefore(p.getBookingOpensAt()) || history.hasSeatHold(performanceId)) {
                 throw new BusinessException(ErrorCode.TICKET_SCHEDULE_CHANGE_CLOSED);
             }
-            p.changeSchedule(startsAt, opensAt, closesAt, maximum);
+            p.changeSchedule(startsAt, p.getBookingOpensAt(), closesAt, maximum);
         }
         return new PerformanceInfo(p.getId(), p.getConcertId(), p.getVenueId(), p.getLayoutId(), p.getStartsAt(),
                 p.getBookingOpensAt(), p.getBookingClosesAt(), p.getMaxTicketsPerUser(), p.getStatus());
+    }
+
+    /** 예매 마감 기본값: 회차 시작 전날 17시(공연장 시간대). */
+    static Instant defaultBookingClosesAt(Instant startsAt, ZoneId zone) {
+        return startsAt.atZone(zone).toLocalDate().minusDays(1).atTime(17, 0).atZone(zone).toInstant();
     }
 
     private void validateOverlap(Concert concert, Instant startsAt, Long excludedId) {

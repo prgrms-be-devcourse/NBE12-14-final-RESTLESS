@@ -28,6 +28,7 @@
 | PUT | `/api/organizer/performances/{performanceId}` | 본인 회차 일정·구매 한도 수정 | 구현 |
 | PUT | `/api/organizer/concerts/{concertId}/section-prices` | 공개 전·회차 등록 전 공연 공통 구역 가격 설정 | 구현 |
 | PUT | `/api/organizer/concerts/{concertId}/venue-layout` | 공개 이력·회차 없는 공연의 공연장·배치 변경 | 구현 |
+| PUT | `/api/organizer/concerts/{concertId}/booking-opens-at` | 공연 예매 오픈 시각 변경, 모든 회차에 반영 | 구현 |
 | POST | `/api/organizer/concerts/{concertId}/performances/batch` | 회차 1~10개 일괄 등록 | 구현 |
 | DELETE | `/api/organizer/concerts/{concertId}` | 조건부 공연 초안 삭제 | 구현 |
 | DELETE | `/api/organizer/performances/{performanceId}` | 조건부 회차 삭제 | 구현 |
@@ -48,13 +49,13 @@
 
 ## 주최자 정책과의 관계
 
-[주최자 정책](../../domains/ticketing/organizer-policy.md)(2026-11-26 개정)이 정본이다. 아래 주최자 API 본문은 현재 구현 기록이다. 개정 정책(공연 단위 예매 오픈, 공개 뒤 회차 추가, 비공개·재공개, 주최 측 취소, soft delete, 고객 환불 기한·비율)은 아직 구현 전이며 차이는 [구현 계약](../../domains/ticketing/organizer-implementation.md) 2절에 있다. 구현할 때 이 문서의 해당 API를 함께 고친다.
+[주최자 정책](../../domains/ticketing/organizer-policy.md)(2026-11-26 개정)이 정본이다. 아래 주최자 API 본문은 현재 구현 기록이다. 개정 정책 중 공연 단위 예매 오픈과 예매 마감 기본값은 구현했다(#458). 나머지(공개 뒤 회차 추가, 비공개·재공개, 주최 측 취소, soft delete, 고객 환불 기한·비율)은 아직 구현 전이며 차이는 [구현 계약](../../domains/ticketing/organizer-implementation.md) 2절에 있다. 구현할 때 이 문서의 해당 API를 함께 고친다.
 
 ## 주최자 공연 등록과 관리 조회
 
-`POST /api/organizer/concerts`는 로그인한 ORGANIZER 또는 ADMIN이 공연을 등록한다. 본문은 `venueId`, `layoutId`(각각 양수), `title`(공백만 제외, 최대 200자), 선택 항목 `description`(최대 5,000자), `periodStartDate`, `periodEndDate`, `durationMinutes`다. 기간은 공연장 기준 날짜 `YYYY-MM-DD`로 시작일과 종료일을 함께 입력하며 시작일은 종료일보다 늦을 수 없다. 소요 시간은 분 단위 양수다. 미입력 상세 정보는 null이다. 주최자는 요청의 값이 아니라 인증된 회원으로 지정한다. 등록자는 활성 회원이어야 한다. 공연장은 기존에 등록돼 있어야 하며 이 단계에서 공연장 상태별 등록 정책은 추가하지 않는다. 없는 공연장과 선택한 공연장에 속하지 않은 배치는 404 `NOT_FOUND`다.
+`POST /api/organizer/concerts`는 로그인한 ORGANIZER 또는 ADMIN이 공연을 등록한다. 본문은 `venueId`, `layoutId`(각각 양수), `title`(공백만 제외, 최대 200자), 선택 항목 `description`(최대 5,000자), `periodStartDate`, `periodEndDate`, `durationMinutes`, `bookingOpensAt`(공연 예매 오픈 시각)이다. 기간은 공연장 기준 날짜 `YYYY-MM-DD`로 시작일과 종료일을 함께 입력하며 시작일은 종료일보다 늦을 수 없다. 소요 시간은 분 단위 양수다. 미입력 상세 정보는 null이다. 주최자는 요청의 값이 아니라 인증된 회원으로 지정한다. 등록자는 활성 회원이어야 한다. 공연장은 기존에 등록돼 있어야 하며 이 단계에서 공연장 상태별 등록 정책은 추가하지 않는다. 없는 공연장과 선택한 공연장에 속하지 않은 배치는 404 `NOT_FOUND`다.
 
-성공하면 `201 Created`와 공연 ID, 공연장 ID·이름·주소, 공통 배치 ID(`layoutId`), 주최자 ID, 제목, 상태, 등록 시각, 입력한 상세 정보, 공개 여부(`published`), 최초 공개 시각(`publishedAt`, 공개 전 null), 공통 가격 설정 여부(`pricingConfigured`)를 반환한다. 등록된 공연은 비공개 초안이며 공개 전까지 고객 공연 목록·상세와 예매 경로에서 조회되지 않는다. 공연 등록은 회차나 판매 좌석을 생성하지 않는다.
+성공하면 `201 Created`와 공연 ID, 공연장 ID·이름·주소, 공통 배치 ID(`layoutId`), 주최자 ID, 제목, 상태, 등록 시각, 입력한 상세 정보, 공개 여부(`published`), 최초 공개 시각(`publishedAt`, 공개 전 null), 공통 가격 설정 여부(`pricingConfigured`), 공연 예매 오픈 시각(`bookingOpensAt`, 회차별 값이 다른 기존 공연은 null)을 반환한다. 등록된 공연은 비공개 초안이며 공개 전까지 고객 공연 목록·상세와 예매 경로에서 조회되지 않는다. 공연 등록은 회차나 판매 좌석을 생성하지 않는다.
 
 `GET /api/organizer/concerts/{concertId}`는 같은 응답을 반환한다. ORGANIZER는 본인 공연만 조회할 수 있고 ADMIN은 다른 주최자의 공연도 조회할 수 있다. ORGANIZER의 타인 공연과 없는 공연은 모두 404다. 인증 실패는 401, 역할이 없으면 403, 잘못된 입력은 400, 존재하지 않는 공연장은 404다.
 
@@ -62,16 +63,25 @@
 
 ### 공연과 회차 정보 수정
 
-`PUT /api/organizer/concerts/{concertId}`의 본문은 `title`, `description`, `periodStartDate`, `periodEndDate`, `durationMinutes`다. 전체 교체 방식으로 선택 항목을 생략하거나 null로 보내면 지워진다. 입력 제약과 응답은 공연 등록과 같다. 활성 주최자는 본인 공연을, 관리자는 모든 공연을 수정할 수 있으며, 공연장·소유자·상태는 바꾸지 않는다.
+`PUT /api/organizer/concerts/{concertId}`의 본문은 `title`, `description`, `periodStartDate`, `periodEndDate`, `durationMinutes`다. 전체 교체 방식으로 선택 항목을 생략하거나 null로 보내면 지워진다. 입력 제약과 응답은 공연 등록과 같다. 활성 주최자는 본인 공연을, 관리자는 모든 공연을 수정할 수 있으며, 공연장·소유자·상태·예매 오픈 시각은 바꾸지 않는다.
 
-공연 제목과 소개는 예매 시작 또는 선점 이력과 관계없이 변경할 수 있다. 공연 기간이나 소요 시간을 바꾸려면 공연이 비공개이고 모든 회차가 예매 시작 전이고 선점 이력이 없어야 한다. 새 기간은 공연장 시간대 기준으로 모든 회차 시작일을 포함하고 변경된 소요 시간에 회차가 겹치지 않아야 하며, 회차가 있으면 기간과 소요 시간을 지울 수 없다. 기간·소요 시간을 그대로 보내고 제목·소개만 변경하는 경우에는 이 제한이 적용되지 않는다.
+공연 제목과 소개는 예매 시작 또는 선점 이력과 관계없이 변경할 수 있다. 공연 기간이나 소요 시간을 바꾸려면 공개 이력이 없고 모든 회차가 예매 시작 전이고 선점 이력이 없어야 한다. 새 기간은 공연장 시간대 기준으로 모든 회차 시작일을 포함하고 변경된 소요 시간에 회차가 겹치지 않아야 하며, 회차가 있으면 기간과 소요 시간을 지울 수 없다. 기간·소요 시간을 그대로 보내고 제목·소개만 변경하는 경우에는 이 제한이 적용되지 않는다.
 
 공연 수정의 오류 응답:
-- 400 `INVALID_REQUEST`: 입력 제약 위반, 공개된 공연의 기간·소요 시간 변경, 회차가 있는데 기간·소요 시간을 지우는 요청, 새 기간이 회차 시작일을 포함하지 않거나 새 소요 시간으로 회차가 겹치는 경우.
+- 400 `INVALID_REQUEST`: 입력 제약 위반, 공개 이력이 있는 공연의 기간·소요 시간 변경, 회차가 있는데 기간·소요 시간을 지우는 요청, 새 기간이 회차 시작일을 포함하지 않거나 새 소요 시간으로 회차가 겹치는 경우.
 - 409 `TICKET_SCHEDULE_CHANGE_CLOSED`: 비공개 공연이지만 예매가 시작된 회차나 선점·예약 이력(취소·만료 포함)이 있는 회차가 있어 기간·소요 시간을 바꿀 수 없는 경우.
 - 404: ORGANIZER의 타인 공연과 없는 공연. 401·403은 다른 주최자 API와 같다.
 
-`PUT /api/organizer/performances/{performanceId}`의 본문은 `startsAt`, `bookingOpensAt`, `bookingClosesAt`, `maxTicketsPerUser`이며 네 값을 모두 입력한다. 주최자는 본인 회차, 관리자는 모든 회차를 수정할 수 있다. 공연 기간, 예매 시간 순서와 구매 한도는 회차 등록과 동일하게 검증한다. 공개된 공연의 회차 일정·구매 한도를 바꾸는 요청은 400 `INVALID_REQUEST`다. 이때 회차 행을 잠그지 않으므로 진행 중인 선점을 기다리지 않는다. 초안은 취소·만료를 포함한 선점·예약 이력이 없고 새 예매 시작 시각이 미래인 경우 수정할 수 있으며, 기존 예매 시작이 지났다면 새 예매 시작 시각으로 변경해야 한다. 같은 값의 재요청은 예매 시작 후에도 허용한다. 좌석 배치와 가격은 이 API에서 변경하지 않는다.
+### 공연 예매 오픈 시각 변경
+
+`PUT /api/organizer/concerts/{concertId}/booking-opens-at`의 본문은 `{"bookingOpensAt": "2027-02-20T00:00:00Z"}`다. 공연 값을 바꾸고 같은 트랜잭션에서 모든 회차의 `bookingOpensAt`을 같은 값으로 바꾼다. 응답은 200과 관리 공연 상세다. 같은 값의 재요청은 그대로 200이다.
+
+- 공개 이력이 없는 공연은 언제든 바꿀 수 있다. 예매 오픈이 지난 초안도 이 API로 미래 시각으로 바꿔 다시 준비한다.
+- 공개 이력이 있는 공연은 현재 예매 오픈이 아직 미래이고 새 값도 미래일 때만 바꿀 수 있다. 그 밖에는 409 `TICKET_SCHEDULE_CHANGE_CLOSED`다. 회차별 값이 달라 공연 값이 null인 기존 공연도 409다.
+- 새 값은 모든 회차의 예매 마감보다 빨라야 한다. 아니면 400 `INVALID_REQUEST`다. 선점·예약 이력이 있는 회차가 있으면 409 `TICKET_SCHEDULE_CHANGE_CLOSED`다.
+- 공연 행과 모든 회차 행을 잠근 뒤 처리한다. 404·401·403은 다른 주최자 API와 같다.
+
+`PUT /api/organizer/performances/{performanceId}`의 본문은 `startsAt`, `bookingClosesAt`(선택), `maxTicketsPerUser`다. 예매 오픈은 공연 값을 따르므로 받지 않는다. 예매 마감을 비우면 회차 시작 전날 17:00(공연장 시간대)이다. 주최자는 본인 회차, 관리자는 모든 회차를 수정할 수 있다. 공연 기간, 예매 시간 순서(`예매 오픈 < 예매 마감 ≤ 회차 시작`)와 구매 한도는 회차 등록과 동일하게 검증한다. 공개 이력이 있는 공연의 회차 일정·구매 한도를 바꾸는 요청은 400 `INVALID_REQUEST`다. 이때 회차 행을 잠그지 않으므로 진행 중인 선점을 기다리지 않는다. 초안은 취소·만료를 포함한 선점·예약 이력이 없고 예매 오픈 전일 때 수정할 수 있다. 예매 오픈이 지났다면 먼저 공연 예매 오픈 시각을 미래로 바꿔야 한다. 같은 값의 재요청은 예매 시작 후에도 허용한다. 좌석 배치와 가격은 이 API에서 변경하지 않는다.
 
 변경 기한 또는 선점 이력 제한에 걸리면 409 `TICKET_SCHEDULE_CHANGE_CLOSED`, 기간·시각 등 입력 오류는 400, 타인 공연·회차 또는 없는 대상은 404다. 선점은 회차 설정을 공유 잠금으로 읽고 수정은 쓰기 잠금을 얻어, 동시에 진행 중인 선점이 변경 전 설정으로 나중에 확정되지 않도록 한다. 공연 수정과 회차 등록·수정은 공연을 먼저 잠가 기간 검증을 직렬화한다.
 
@@ -85,7 +95,7 @@
 
 ### 공연 전체 공개
 
-`POST /api/organizer/concerts/{concertId}/publish`는 요청 본문 없이 공연과 등록된 모든 회차를 한 번에 공개한다. ORGANIZER는 본인 공연, ADMIN은 모든 공연에 요청할 수 있다. 공연 제목·공연장·공통 배치·공연 기간·소요 시간과 최소 한 회차가 필요하며, 판매 가능한 모든 구역의 1원 이상 공통 가격이 설정돼야 한다. 모든 회차는 공연 기간·시간 순서·구매 한도·배치 조건을 지키고 서로 겹치지 않아야 한다. 각 회차의 판매 좌석은 배치 좌석과 정확히 대응하고 공통 등급·가격과 일치해야 한다. 공개 시점의 DB 현재 시각보다 모든 회차의 예매 시작이 엄격히 미래여야 한다.
+`POST /api/organizer/concerts/{concertId}/publish`는 요청 본문 없이 공연과 등록된 모든 회차를 한 번에 공개한다. ORGANIZER는 본인 공연, ADMIN은 모든 공연에 요청할 수 있다. 공연 제목·공연장·공통 배치·공연 기간·소요 시간과 최소 한 회차가 필요하며, 판매 가능한 모든 구역의 1원 이상 공통 가격이 설정돼야 한다. 모든 회차는 공연 기간·시간 순서·구매 한도·배치 조건을 지키고 서로 겹치지 않아야 한다. 각 회차의 판매 좌석은 배치 좌석과 정확히 대응하고 공통 등급·가격과 일치해야 한다. 공연 예매 오픈 시각이 있어야 하고 모든 회차의 예매 오픈이 그 값과 같아야 하며, 공개 시점의 DB 현재 시각보다 엄격히 미래여야 한다.
 
 검증과 공개는 같은 트랜잭션에서 공연 행을 잠근 뒤 진행한다. 한 조건이라도 만족하지 못하면 400 `INVALID_REQUEST`이며 비공개가 유지된다. 인증 실패는 401, 역할 부족은 403, 타인의 공연 또는 없는 공연은 404다. 성공하면 200과 관리 공연 상세를 반환한다. 이미 공개된 공연에 대한 재요청은 권한 검사 후 현재 상세를 반환하며 기존 공개 시각을 유지한다. 최초 공개 후 고객 공연 및 회차 조회가 가능해지며 예매는 별도의 예매 시간 조건을 따른다.
 
@@ -96,13 +106,12 @@
 ```json
 {
   "startsAt": "2027-03-01T10:00:00Z",
-  "bookingOpensAt": "2027-02-01T01:00:00Z",
-  "bookingClosesAt": "2027-03-01T09:00:00Z",
+  "bookingClosesAt": "2027-02-28T08:00:00Z",
   "maxTicketsPerUser": 4
 }
 ```
 
-공연에는 배치, 모든 판매 구역의 공통 가격, 기간과 소요 시간이 먼저 설정돼 있어야 한다. 회차 시작 시각을 공연장의 시간대로 변환한 날짜가 공연 시작일 이상·종료일 이하여야 한다. 예매 시작은 예매 마감보다 빨라야 하고, 예매 마감은 회차 시작과 같거나 빨라야 한다. 구매 한도는 양수다. 모든 회차는 공연의 공통 배치를 사용하므로 요청에서 layoutId를 받지 않는다.
+공연에는 배치, 모든 판매 구역의 공통 가격, 기간과 소요 시간, 예매 오픈 시각이 먼저 설정돼 있어야 한다. 회차의 예매 오픈은 공연 값을 복사하며 요청에서 받지 않는다. `bookingClosesAt`은 선택이며 비우면 회차 시작 전날 17:00(공연장 시간대)이다. 회차 시작 시각을 공연장의 시간대로 변환한 날짜가 공연 시작일 이상·종료일 이하여야 한다. 예매 오픈은 예매 마감보다 빨라야 하고, 예매 마감은 회차 시작과 같거나 빨라야 한다. 기본 마감이 예매 오픈보다 이르면 400이며 마감을 지정해야 한다. 구매 한도는 양수다. 모든 회차는 공연의 공통 배치를 사용하므로 요청에서 layoutId를 받지 않는다.
 
 성공하면 `201 Created`와 회차 단일 항목을 반환하고, 상태는 `SCHEDULED`다. 회차와 공통 가격이 반영된 모든 판매 좌석을 같은 트랜잭션에서 생성한다. 하나라도 생성할 수 없으면 전체 요청을 롤백한다. 새 공연은 초안이므로 공개 전까지 고객 조회·예매 경로에 노출되지 않는다.
 
@@ -564,7 +573,7 @@ Java 엔티티, Repository는 Performance/PerformanceRepository, DB 테이블은
 
 ### 주최자 초안 일괄 등록, 공연장·배치 변경과 삭제
 
-- `POST /api/organizer/concerts/{concertId}/performances/batch`: 공통 `bookingOpensAt`, `maxTicketsPerUser`, 회차별 `performances[{startsAt,bookingClosesAt}]`을 받는다. 1~10개이며 201 응답은 `{performances:[...]}`이다. 회차와 좌석은 한 트랜잭션으로 처리하며 하나라도 실패하면 전체 취소한다. 회차 검증 오류의 `details.performanceIndex`는 요청 배열의 0부터 시작하는 순서다. 공개된 공연에 대한 요청은 400 `INVALID_REQUEST`다.
+- `POST /api/organizer/concerts/{concertId}/performances/batch`: 공통 `maxTicketsPerUser`, 회차별 `performances[{startsAt,bookingClosesAt}]`을 받는다. 예매 오픈은 공연 값을 쓰고, `bookingClosesAt`을 비우면 단건 등록과 같은 기본값이다. 1~10개이며 201 응답은 `{performances:[...]}`이다. 회차와 좌석은 한 트랜잭션으로 처리하며 하나라도 실패하면 전체 취소한다. 회차 검증 오류의 `details.performanceIndex`는 요청 배열의 0부터 시작하는 순서다. 공개된 공연에 대한 요청은 400 `INVALID_REQUEST`다.
 - `PUT /api/organizer/concerts/{concertId}/venue-layout`: `venueId`, `layoutId`를 받는다. 공개 이력과 회차가 없는 경우 변경할 수 있으며 실제 변경 시 공통 가격을 삭제한다. 동일 설정의 재요청은 가격을 유지한다. 공개 이력이 있거나 회차가 있는 공연을 다른 공연장·배치로 바꾸는 요청은 400 `INVALID_REQUEST`, 없는 공연장이나 그 공연장에 속하지 않은 배치는 404 `NOT_FOUND`다.
 - `DELETE /api/organizer/performances/{performanceId}`: 공개 이력과 선점·예약 이력이 없는 회차 및 판매 좌석을 삭제한다. 성공 시 204다. 공개 이력, 선점·예약 이력(취소·만료 포함), 사용 가능 상태가 아닌 판매 좌석, FK 참조가 있으면 409 `CONCERT_DELETE_CONFLICT`다.
 - `DELETE /api/organizer/concerts/{concertId}`: 공개 이력, 회차 및 드롭·경매 참조가 없는 초안을 삭제한다. 성공 시 204다. 삭제 불가 조건은 409 `CONCERT_DELETE_CONFLICT`다. 드롭·경매 참조는 사전 조회 없이 `drops`·`auctions`의 공연 FK 위반으로 판정하므로, 거절 사유가 드롭인지 경매인지는 응답에 담지 않는다.

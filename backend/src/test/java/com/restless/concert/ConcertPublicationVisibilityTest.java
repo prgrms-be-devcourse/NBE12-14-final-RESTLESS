@@ -1,6 +1,7 @@
 package com.restless.concert;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -86,6 +87,21 @@ class ConcertPublicationVisibilityTest {
                 venueId, customerId);
         assertThat(jdbc.queryForObject("SELECT is_published FROM concerts WHERE venue_id=? AND title='direct'", Boolean.class, venueId)).isTrue();
         assertThat(jdbc.queryForObject("SELECT published_at IS NULL FROM concerts WHERE venue_id=? AND title='direct'", Boolean.class, venueId)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT ever_published FROM concerts WHERE venue_id=? AND title='direct'", Boolean.class, venueId)).isTrue();
+    }
+
+    @Test
+    @DisplayName("공개 중이거나 최초 공개 시각이 있는 공연은 공개 이력이 있어야 한다")
+    void publicationRequiresPublicationHistory() {
+        jdbc.update("INSERT INTO concerts (venue_id, seller_id, title, status, created_at, is_published, ever_published) VALUES (?, ?, 'draft', 'SCHEDULED', UTC_TIMESTAMP(6), FALSE, FALSE)",
+                venueId, customerId);
+        assertThatThrownBy(() -> jdbc.update("UPDATE concerts SET is_published=TRUE WHERE venue_id=? AND title='draft'", venueId))
+                .hasMessageContaining("ck_concerts_publication_history");
+        assertThatThrownBy(() -> jdbc.update("UPDATE concerts SET published_at=UTC_TIMESTAMP(6) WHERE venue_id=? AND title='draft'", venueId))
+                .hasMessageContaining("ck_concerts_publication_history");
+        // 비공개로 돌린 공연은 공개 이력과 최초 공개 시각을 그대로 둔다.
+        jdbc.update("UPDATE concerts SET ever_published=TRUE, published_at=UTC_TIMESTAMP(6) WHERE venue_id=? AND title='draft'", venueId);
+        assertThat(jdbc.queryForObject("SELECT is_published FROM concerts WHERE venue_id=? AND title='draft'", Boolean.class, venueId)).isFalse();
     }
 
     @Test
