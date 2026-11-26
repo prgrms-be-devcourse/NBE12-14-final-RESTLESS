@@ -1100,7 +1100,7 @@ class TicketCheckoutServiceTest {
             String date = starts.atZone(java.time.ZoneId.of("Asia/Seoul")).toLocalDate().toString();
             String concert = "{\"venueId\":" + fixture.venueId() + ",\"layoutId\":" + layoutId
                     + ",\"title\":\"Pricing\",\"periodStartDate\":\"" + date + "\",\"periodEndDate\":\"" + date
-                    + "\",\"durationMinutes\":120}";
+                    + "\",\"durationMinutes\":120,\"bookingOpensAt\":\"" + now.plusSeconds(3600) + "\"}";
             mockMvc.perform(post("/api/organizer/concerts").with(organizer).contentType("application/json").content(concert))
                     .andExpect(status().isCreated());
             Long concertId = jdbc.queryForObject("SELECT MAX(id) FROM concerts WHERE venue_id=?", Long.class, fixture.venueId());
@@ -1112,7 +1112,7 @@ class TicketCheckoutServiceTest {
             mockMvc.perform(put(path, concertId).with(organizer).contentType("application/json").content(body)).andExpect(status().isOk());
             body = body.replace("150000", "180000").replace("100000", "90000");
             mockMvc.perform(put(path, concertId).with(organizer).contentType("application/json").content(body)).andExpect(status().isOk());
-            String performance = "{\"startsAt\":\"" + starts + "\",\"bookingOpensAt\":\"" + now.plusSeconds(3600)
+            String performance = "{\"startsAt\":\"" + starts
                     + "\",\"bookingClosesAt\":\"" + now.plusSeconds(7200) + "\",\"maxTicketsPerUser\":3}";
             mockMvc.perform(post("/api/organizer/concerts/{id}/performances", concertId).with(organizer)
                     .contentType("application/json").content(performance)).andExpect(status().isCreated());
