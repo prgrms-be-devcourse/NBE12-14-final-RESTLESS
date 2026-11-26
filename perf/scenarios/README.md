@@ -379,6 +379,7 @@ AU-2·AU-3은 현재 공개된 GET이므로 토큰 없이 호출합니다. 401�
 | `POST_RUN_CLOSE_WAIT_SECONDS` | `90` | 마지막 단계 뒤 최종 CLOSED 이벤트 대기 시간. 60초 연장 포함 |
 | `PERF_APP_IP` 또는 `PERF_ALB_HOST` | 둘 중 하나 필수 | 환경 변수로만 지정하는 대상 IP 또는 ALB 주소 |
 | `PERF_APP_HOST`, `PERF_ALLOWED_APP_HOSTS` | `perf-local` | 논리 Host 이름과 허용 목록. ALB면 실행기가 ALB 주소로 채움 |
+| `PERF_BID_APP_IP` | 없음 | AU-9. 측정 입찰만 이 서버로 보낸다 (`PERF_APP_IP`와 다른 서버, ALB 아님) |
 | `PERF_MANAGEMENT_IPS` | 없음 | ALB일 때 SSE 연결 수 게이지를 더할 서버별 관리 포트 IP (쉼표 구분) |
 
 각 단계는 시도·성공(HTTP 200 및 첫 이벤트)·상태별 실패·끊김·활성·변경 이벤트 수신 연결 수와 이벤트 지연 p50/p95/최대를 기록합니다. 최고 입찰자 연속 입찰은 거절되므로 관전자와 별도인 두 측정 계정이 번갈아 입찰합니다. 스크립트는 로그인·연결 계획에 입찰 연장 시간을 더해 경매 수명을 정하고 마지막 CLOSED 이벤트를 기다립니다. 연결이 남으면 클라이언트 연결을 닫고, 서버가 끊긴 emitter를 정리하도록 별도 정리 입찰을 보냅니다. 입찰 응답에는 revision이 없으므로 OPEN revision에 성공한 측정 입찰 수를 더해 기대 revision을 계산합니다.

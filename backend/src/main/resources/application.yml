@@ -114,6 +114,9 @@ restless:
       # 모든 연결에 내용 없는 주석을 보내는 간격(ms) (#447). 서버는 써 봐야 떠난 클라이언트를 알 수 있으므로,
       # 입찰이 없는 경매에서도 떠난 연결을 이 간격의 약 2배 안에 정리한다. 앞단 프록시의 무응답 끊김(보통 60초)도 막는다.
       heartbeat-interval-ms: 15000
+      # 관전 중인 경매의 revision을 DB에서 확인하는 간격(ms) (ADR-0007). 서버가 여러 대일 때 다른 서버가 바꾼 경매를
+      # 이 서버의 관전자에게 보내고 조회 캐시를 버린다. 0이면 끈다 (서버 한 대). 서버당 이 간격마다 기본 키 조회 한 번이다.
+      revision-poll-interval-ms: ${AUCTION_STREAM_REVISION_POLL_INTERVAL_MS:500}
     query-cache:
       # 목록·상세 조회의 앱 메모리 캐시. 변경 이벤트로 상세를 즉시 갱신한다.
       enabled: true

@@ -14,6 +14,7 @@ import static org.mockito.Mockito.verify;
 import com.restless.TestcontainersConfiguration;
 import com.restless.auction.api.AuctionStreams;
 import com.restless.auction.application.AuctionCloseService;
+import com.restless.auction.application.AuctionQueryCache;
 import com.restless.auction.application.AuctionQueryService;
 import com.restless.auction.application.AuctionQueryService.AuctionSnapshot;
 import com.restless.auction.application.BidService;
@@ -51,6 +52,8 @@ import tools.jackson.databind.json.JsonMapper;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
     "spring.docker.compose.enabled=false",
     "restless.auction.stream.flush-interval-ms=3600000",
+    // AuctionStreamTest와 Spring 컨텍스트를 같이 쓰려고 설정을 맞춘다.
+    "restless.auction.stream.revision-poll-interval-ms=0",
 })
 @Import(TestcontainersConfiguration.class)
 class AuctionStreamJsonTest {
@@ -63,6 +66,8 @@ class AuctionStreamJsonTest {
     @Autowired MeterRegistry meters;
     @MockitoSpyBean JsonMapper json;
     @MockitoSpyBean AuctionQueryService queries;
+    // AuctionStreamTest와 Spring 컨텍스트를 같이 쓰려고 같은 spy를 둔다.
+    @MockitoSpyBean AuctionQueryCache queryCache;
 
     final HttpClient http = HttpClient.newHttpClient();
     final List<Stream<String>> opened = new ArrayList<>();

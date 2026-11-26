@@ -1,10 +1,14 @@
 package com.restless.auction;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import com.restless.TestcontainersConfiguration;
 import com.restless.auction.api.AuctionStreams;
 import com.restless.auction.application.AuctionCloseService;
+import com.restless.auction.application.AuctionQueryCache;
 import com.restless.auction.application.AuctionQueryService;
 import com.restless.auction.application.BidService;
 import com.restless.auction.application.SellerAuctionService;
@@ -14,8 +18,10 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -38,10 +44,12 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * 실제 포트로 SSE를 연결해 확인한다. 자동 전송 간격을 1시간으로 늘리고
  * {@link AuctionStreams#flush()}를 직접 불러 "모아서 한 번" 보내는지 결정적으로 본다.
+ * revision 확인도 자동으로 돌지 않게 끄고 {@link AuctionStreams#pollRevisions()}를 직접 부른다.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "spring.docker.compose.enabled=false",
         "restless.auction.stream.flush-interval-ms=3600000",
+        "restless.auction.stream.revision-poll-interval-ms=0",
 })
 @Import(TestcontainersConfiguration.class)
 class AuctionStreamTest {
@@ -50,6 +58,8 @@ class AuctionStreamTest {
     @Autowired BidService bidService;
     @Autowired AuctionCloseService closeService;
     @Autowired SellerAuctionService sellerAuctionService;
+    // 캐시를 버렸는지 호출로 확인한다. 시간 만료(1초)와 구분하기 위해서다. 스텁하지 않으므로 실제 빈처럼 동작한다.
+    @MockitoSpyBean AuctionQueryCache queryCache;
     @Autowired JwtTokenProvider tokenProvider;
     // AuctionStreamJsonTest와 Spring 컨텍스트를 같이 쓰려고 같은 이름과 타입의 spy를 둔다. 스텁하지 않으므로 실제 빈처럼 동작한다.
     @MockitoSpyBean JsonMapper json;
@@ -127,6 +137,17 @@ class AuctionStreamTest {
 
     long revision(Long auctionId) {
         return jdbc.queryForObject("SELECT revision FROM auctions WHERE auction_id = ?", Long.class, auctionId);
+    }
+
+    /**
+     * 다른 서버가 커밋한 변경을 흉내 낸다. DB만 바꾸므로 이 서버에는 변경 이벤트가 오지 않는다.
+     * 다른 서버의 입찰 연장과 같은 모양이다: 종료 시각이 늘고 revision이 오른다.
+     */
+    Instant changeOnOtherServer(Long auctionId) {
+        Instant endsAt = Instant.now().plusSeconds(7200).truncatedTo(ChronoUnit.SECONDS);
+        jdbc.update("UPDATE auctions SET ends_at = ?, revision = revision + 1 WHERE auction_id = ?",
+                Timestamp.from(endsAt), auctionId);
+        return endsAt;
     }
 
     @Test void 토큰_없이_연결하면_401() throws Exception {
@@ -230,6 +251,63 @@ class AuctionStreamTest {
         streams.flush();
         assertThat(next(queue)).isEqualTo(Event.END);
         assertThat(streams.connections(auctionId)).isZero();
+    }
+
+    @Test void 다른_서버의_변경은_revision_확인으로_찾아_보낸다_ADR_0007() throws Exception {
+        Long auctionId = f.openAuction(seller);
+        BlockingQueue<Event> queue = connect(chulsoo, auctionId);
+        next(queue);
+
+        Instant endsAt = changeOnOtherServer(auctionId);
+        streams.flush();
+        assertThat(queue.poll(300, TimeUnit.MILLISECONDS)).as("이벤트가 없으므로 확인 전에는 모른다").isNull();
+
+        assertThat(streams.pollRevisions()).contains(auctionId);
+        streams.flush();
+        Event event = next(queue);
+        assertThat(event.id()).isEqualTo(String.valueOf(revision(auctionId)));
+        assertThat(Instant.parse(event.data().get("endsAt").asString())).isEqualTo(endsAt);
+    }
+
+    @Test void 보낸_것과_같은_revision이면_다시_보내지_않는다() throws Exception {
+        Long auctionId = f.openAuction(seller);
+        BlockingQueue<Event> queue = connect(chulsoo, auctionId);
+        next(queue);
+        bid(chulsoo, auctionId, 50_000);
+        streams.flush();
+        next(queue);
+
+        assertThat(streams.pollRevisions()).doesNotContain(auctionId);
+        streams.flush();
+        assertThat(queue.poll(300, TimeUnit.MILLISECONDS)).as("이 서버가 이미 보낸 변경이다").isNull();
+    }
+
+    @Test void 다른_서버가_삭제한_경매는_revision_확인_뒤_연결을_닫는다() throws Exception {
+        Long auctionId = f.auction(seller, Instant.now().plusSeconds(3600), Instant.now().plusSeconds(7200));
+        f.setStatus(auctionId, "SCHEDULED");
+        BlockingQueue<Event> queue = connect(chulsoo, auctionId);
+        next(queue);
+
+        jdbc.update("DELETE FROM auctions WHERE auction_id = ?", auctionId);
+        streams.pollRevisions();
+        streams.flush();
+        assertThat(next(queue)).isEqualTo(Event.END);
+        assertThat(streams.connections(auctionId)).isZero();
+    }
+
+    @Test void 다른_서버의_변경을_찾으면_이_서버의_조회_캐시도_버린다_ADR_0007() throws Exception {
+        Long auctionId = f.openAuction(seller);
+        BlockingQueue<Event> queue = connect(chulsoo, auctionId);
+        next(queue);
+        clearInvocations(queryCache);
+
+        streams.pollRevisions();
+        verify(queryCache, never()).invalidate(auctionId);
+
+        changeOnOtherServer(auctionId);
+        streams.pollRevisions();
+        verify(queryCache).invalidate(auctionId);
+        assertThat(queryCache.detail(auctionId).revision()).isEqualTo(revision(auctionId));
     }
 
     @Test void 연결이_끊겨도_입찰과_확보는_그대로다_INV_AU_09() throws Exception {

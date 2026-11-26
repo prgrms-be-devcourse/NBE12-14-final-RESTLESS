@@ -27,6 +27,7 @@
 | AU-6 | 떠난 연결 정리 (heartbeat) | `GET /api/auctions/{id}/stream` | 필요 |
 | AU-7 | 관전과 입찰 몰림 동시 | stream + `POST /api/auctions/{id}/bids` | 필요 |
 | AU-8 | 관전 연결 장시간 유지 | `GET /api/auctions/{id}/stream` | 필요 |
+| AU-9 | 서버 간 전달 (서버 2대 이상) | 서버 1 stream + 서버 2 `POST /api/auctions/{id}/bids` | 필요 |
 
 AU-1은 기본적으로 판 시각 T에서 1,000ms 뒤를 원래 종료 시각으로 둡니다. 수락된 입찰은 `max(현재 종료 시각, acceptedAt + 60초)`까지 종료 시각을 연장합니다. 원래 마감 전에 보냈는데 `AUCTION_CLOSED`로 거절된 수, 최종 종료 시각, 종료 처리 지연을 기록합니다. 최종 결과는 낙찰자가 한 명이어야 하며 마지막 수락 입찰자가 낙찰되어야 합니다.
 
@@ -39,6 +40,7 @@ AU-6~8은 `auction-sse.mjs`의 `MODE`로 실행합니다.
 - AU-6 (`MODE=cleanup`): 연결을 연 뒤 입찰 없이 클라이언트만 모두 끊고, 서버 연결 게이지가 측정 전 값으로 돌아오기까지 걸린 시간을 1초 간격으로 기록합니다. heartbeat 간격(15초)의 약 2배 안이어야 합니다.
 - AU-7 (`MODE=mixed`, `AUCTION_ID`): `PHASES=8000 auction-run.sh bid`가 만든 경매에 관전 연결을 붙이고, 입찰은 그 실행이 보냅니다. 관전자마다 받은 이벤트 수, 최종 revision 도달 여부, 마지막 수락 입찰부터 최종 가격을 받기까지의 시간(서버 시계 기준)을 기록합니다.
 - AU-8 (`MODE=soak`): 입찰 없이 `HOLD_SECONDS` 동안 연결을 유지하며 `SNAPSHOT_SECONDS`마다 열린 연결, 끊긴 연결, 서버 게이지, heartbeat 수신 수를 기록합니다. 끝에 AU-6과 같은 정리 시간도 기록합니다.
+- AU-9 (`MODE=steps`, `PERF_BID_APP_IP`): AU-5와 같지만 관전은 `PERF_APP_IP` 서버에, 측정 입찰은 `PERF_BID_APP_IP` 서버에 보냅니다. 관전 서버에는 변경 이벤트가 오지 않으므로 단계별 전달 지연이 곧 서버 간 전달([ADR-0007](../../decisions/0007-auction-stream-cross-server.md)) 지연입니다. 기대값은 같은 서버 전달보다 최대 약 0.5초 늦은 것이고, 마지막 CLOSED도 모든 연결에 가야 합니다. 두 서버에 직접 닿아야 하므로 ALB로는 하지 않습니다.
 
 ## 3. 공통 기록과 시나리오별 기록
 

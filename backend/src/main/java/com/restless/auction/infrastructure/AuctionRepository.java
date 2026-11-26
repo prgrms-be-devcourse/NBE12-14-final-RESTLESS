@@ -23,6 +23,19 @@ public interface AuctionRepository extends JpaRepository<Auction, Long> {
 
     Page<Auction> findByStatus(AuctionStatus status, Pageable pageable);
 
+    /**
+     * 경매별 revision. 서버가 여러 대일 때 다른 서버가 바꾼 경매를 찾는 데 쓴다 (ADR-0007).
+     * 기본 키 조회이고 잠그지 않는다. 없는 경매(삭제됨)는 결과에 없다.
+     */
+    @Query("select a.id as auctionId, a.revision as revision from Auction a where a.id in :ids")
+    List<AuctionRevision> findRevisions(@Param("ids") Collection<Long> ids);
+
+    interface AuctionRevision {
+        Long getAuctionId();
+
+        long getRevision();
+    }
+
     /** 시작 시각이 지난 예정 경매. 인덱스 (status, starts_at). */
     @Query("select a.id from Auction a where a.status = :status and a.startsAt <= :now order by a.startsAt")
     List<Long> findIdsToOpen(@Param("status") AuctionStatus status, @Param("now") Instant now, Pageable limit);

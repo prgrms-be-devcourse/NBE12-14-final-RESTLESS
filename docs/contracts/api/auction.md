@@ -282,7 +282,7 @@ Authorization: Bearer <accessToken>
 
 브라우저 기본 `EventSource`는 헤더를 붙일 수 없으므로, 프론트는 fetch 기반 SSE 클라이언트(예: `@microsoft/fetch-event-source`)를 쓴다. 토큰을 쿼리 문자열에 넣지 않는다.
 
-서버는 연결 직후 현재 상태를 한 번 보내고, 이후 경매별로 변경을 모아 0.2초마다 최신 상태를 보낸다.
+서버는 연결 직후 현재 상태를 한 번 보내고, 이후 경매별로 변경을 모아 0.2초마다 최신 상태를 보낸다. 서버가 여러 대이면 다른 서버에서 처리된 변경은 최대 약 0.5초 더 늦게 온다 ([ADR-0007](../../decisions/0007-auction-stream-cross-server.md)). 메시지 형식과 순서 규칙(`revision`)은 같다.
 
 ```text
 event: auction

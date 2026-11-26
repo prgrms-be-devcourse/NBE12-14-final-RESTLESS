@@ -1,6 +1,7 @@
 package com.restless.auction.api;
 
 import com.restless.auction.application.AuctionChangedEvent;
+import com.restless.auction.application.AuctionQueryCache;
 import com.restless.auction.application.AuctionQueryService;
 import com.restless.auction.application.AuctionQueryService.AuctionSnapshot;
 import com.restless.auction.domain.AuctionStatus;
@@ -12,6 +13,7 @@ import tools.jackson.databind.json.JsonMapper;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -43,20 +45,26 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  *       연결마다 힙을 쓰므로, 상한이 없으면 관전자가 몰릴 때 앱 전체가 메모리 부족으로 멈춘다.</li>
  *   <li>같은 스레드가 일정 간격(기본 15초)마다 모든 연결에 주석을 보낸다 (#447). 서버는 써 봐야 떠난 클라이언트를 알 수 있으므로,
  *       입찰이 없는 경매에서도 떠난 연결을 정리한다.</li>
+ *   <li>별도 스레드가 일정 간격(기본 0.5초)마다 이 서버에서 관전 중인 경매의 revision을 DB에서 읽는다 (ADR-0007).
+ *       마지막으로 보낸 revision보다 크면 다른 서버가 바꾼 것이므로 "바뀜"으로 표시하고 이 서버의 조회 캐시도 버린다.
+ *       이벤트는 이 서버 안에서만 돌기 때문이다. 없어진 경매(삭제)도 "바뀜"으로 표시해 다음 전송이 연결을 닫게 한다.</li>
  * </ul>
  *
  * <p>읽기 전용이다. 연결이 끊기거나 전송이 실패해도 입찰과 낙찰에는 영향이 없다 (INV-AU-09).
  * 실패는 로그와 메트릭({@code auction.stream.failure})으로 남긴다.
  *
- * <p>연결은 이 서버 메모리에만 있다. 서버가 여러 대일 때의 전달은 1차 범위 밖이다 (policy.md 9절).
+ * <p>연결은 이 서버 메모리에만 있다. 다른 서버에서 받은 변경은 위의 revision 확인으로 최대 그 간격만큼 늦게 전달된다.
  */
 @Component
 public class AuctionStreams {
 
     private static final Logger log = LoggerFactory.getLogger(AuctionStreams.class);
     static final String EVENT_NAME = "auction";
+    /** revision을 한 번에 읽는 경매 수. IN 목록이 너무 길어지지 않게 나눈다. */
+    static final int REVISION_BATCH = 500;
 
     private final AuctionQueryService queries;
+    private final AuctionQueryCache queryCache;
     private final MeterRegistry meters;
     private final JsonMapper json;
     private final long timeoutMs;
@@ -68,19 +76,30 @@ public class AuctionStreams {
     private final Counter rejected;
     private final Counter heartbeatRemoved;
     private final Set<Long> changed = ConcurrentHashMap.newKeySet();
+    /** 경매별로 그 경매의 모든 연결에 마지막으로 보낸 revision. 다른 서버의 변경을 알아보는 기준이다. */
+    private final Map<Long, Long> sentRevisions = new ConcurrentHashMap<>();
+    /** revision 확인이 "바뀜"으로 표시한 수. 다른 서버의 변경과, 아직 전송 전인 이 서버의 변경이 함께 들어간다. */
+    private final Counter pollChanged;
     private final ScheduledExecutorService flusher;
+    /** revision 확인 전용. DB가 느려도 이 서버 변경의 전송(flusher)이 밀리지 않게 스레드를 나눈다. 간격이 0이면 없다. */
+    private final ScheduledExecutorService revisionPoller;
 
-    public AuctionStreams(AuctionQueryService queries, MeterRegistry meters, JsonMapper json,
+    public AuctionStreams(AuctionQueryService queries, AuctionQueryCache queryCache, MeterRegistry meters, JsonMapper json,
                           @Value("${restless.auction.stream.flush-interval-ms:200}") long flushIntervalMs,
                           @Value("${restless.auction.stream.timeout-ms:1800000}") long timeoutMs,
                           @Value("${restless.auction.stream.max-connections:6000}") int maxConnections,
                           @Value("${restless.auction.stream.retry-after-seconds:5}") int retryAfterSeconds,
-                          @Value("${restless.auction.stream.heartbeat-interval-ms:15000}") long heartbeatIntervalMs) {
+                          @Value("${restless.auction.stream.heartbeat-interval-ms:15000}") long heartbeatIntervalMs,
+                          @Value("${restless.auction.stream.revision-poll-interval-ms:500}") long revisionPollIntervalMs) {
         if (maxConnections < 1 || retryAfterSeconds < 1 || heartbeatIntervalMs < 1) {
             throw new IllegalStateException("restless.auction.stream.max-connections, retry-after-seconds, "
                     + "heartbeat-interval-ms must be positive");
         }
+        if (revisionPollIntervalMs < 0) {
+            throw new IllegalStateException("restless.auction.stream.revision-poll-interval-ms must be 0 (off) or positive");
+        }
         this.queries = queries;
+        this.queryCache = queryCache;
         this.meters = meters;
         this.json = json;
         this.timeoutMs = timeoutMs;
@@ -91,16 +110,28 @@ public class AuctionStreams {
         // 측정 전부터 0으로 보이도록 미리 등록한다.
         this.rejected = meters.counter("auction.stream.rejected");
         this.heartbeatRemoved = meters.counter("auction.stream.heartbeat.removed");
+        this.pollChanged = meters.counter("auction.stream.poll.changed");
         // 다른 스케줄러(경매 종료, 미완료 결제 재확인 작업)와 스레드를 나누지 않아야 0.2초 간격이 밀리지 않는다.
         this.flusher = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofPlatform().name("auction-stream-flush").daemon().factory());
         flusher.scheduleWithFixedDelay(this::flushSafely, flushIntervalMs, flushIntervalMs, TimeUnit.MILLISECONDS);
         // 전송과 같은 스레드에서 보내므로 한 연결에 두 스레드가 동시에 쓰지 않는다.
         flusher.scheduleWithFixedDelay(this::heartbeatSafely, heartbeatIntervalMs, heartbeatIntervalMs, TimeUnit.MILLISECONDS);
+        if (revisionPollIntervalMs > 0) {
+            this.revisionPoller = Executors.newSingleThreadScheduledExecutor(
+                    Thread.ofPlatform().name("auction-stream-revision-poll").daemon().factory());
+            revisionPoller.scheduleWithFixedDelay(this::pollRevisionsSafely, revisionPollIntervalMs, revisionPollIntervalMs,
+                    TimeUnit.MILLISECONDS);
+        } else {
+            this.revisionPoller = null;
+        }
     }
 
     @PreDestroy
     void shutdown() {
+        if (revisionPoller != null) {
+            revisionPoller.shutdownNow();
+        }
         flusher.shutdownNow();
         subscribers.values().forEach(set -> set.forEach(SseEmitter::complete));
         subscribers.clear();
@@ -141,6 +172,8 @@ public class AuctionStreams {
             remove(auctionId, emitter);
             throw exception;
         }
+        // 이 경매의 첫 연결이면 기준을 잡는다. 이미 있으면 그대로 둔다: 먼저 붙은 연결은 아직 그 값까지만 받았을 수 있다.
+        sentRevisions.putIfAbsent(auctionId, snapshot.get().revision());
         return emitter;
     }
 
@@ -163,6 +196,41 @@ public class AuctionStreams {
                 meters.counter("auction.stream.failure", "stage", "flush").increment();
             }
         }
+    }
+
+    /**
+     * 이 서버에서 관전 중인 경매의 revision을 DB에서 읽어, 마지막으로 보낸 것보다 크면 "바뀜"으로 표시한다 (ADR-0007).
+     * 다른 서버에서 받은 입찰·시작·종료·수정은 이 서버에 이벤트가 오지 않으므로 이렇게 알아낸다.
+     * 전용 스레드가 부르고, 테스트에서는 직접 부른다.
+     *
+     * @return 이번에 "바뀜"으로 표시한 경매 ID
+     */
+    public Set<Long> pollRevisions() {
+        Set<Long> watched = new HashSet<>(subscribers.keySet());
+        // 연결이 모두 떠난 경매의 기준은 버린다. 그 사이 새로 붙은 경매가 빠져도 다음 확인에서 한 번 더 보낼 뿐이다.
+        sentRevisions.keySet().retainAll(watched);
+        Set<Long> marked = new HashSet<>();
+        if (watched.isEmpty()) {
+            return marked;
+        }
+        List<Long> ids = List.copyOf(watched);
+        for (int from = 0; from < ids.size(); from += REVISION_BATCH) {
+            List<Long> batch = ids.subList(from, Math.min(from + REVISION_BATCH, ids.size()));
+            Map<Long, Long> current = queries.revisions(batch);
+            for (Long auctionId : batch) {
+                Long revision = current.get(auctionId);
+                Long sent = sentRevisions.get(auctionId);
+                if (revision != null && sent != null && revision <= sent) {
+                    continue;
+                }
+                // 이 서버의 변경이 아직 전송 전이어도 여기에 걸린다. 같은 경매를 한 번 더 표시할 뿐이라 괜찮다.
+                changed.add(auctionId);
+                queryCache.invalidate(auctionId);
+                pollChanged.increment();
+                marked.add(auctionId);
+            }
+        }
+        return marked;
     }
 
     /** 이 경매에 열려 있는 연결 수. */
@@ -225,6 +293,8 @@ public class AuctionStreams {
             return;
         }
         send(auctionId, List.copyOf(set), snapshot.get());
+        // 연결 전부에 이 revision까지 보냈다. 기준은 줄지 않는다 (늦게 끝난 조회가 더 낮은 값을 들고 올 수 있다).
+        sentRevisions.merge(auctionId, snapshot.get().revision(), Math::max);
     }
 
     private void send(Long auctionId, List<SseEmitter> emitters, AuctionSnapshot snapshot) {
@@ -256,6 +326,16 @@ public class AuctionStreams {
         } catch (Throwable t) {
             log.error("Auction stream flush loop failed", t);
             meters.counter("auction.stream.failure", "stage", "loop").increment();
+        }
+    }
+
+    private void pollRevisionsSafely() {
+        try {
+            pollRevisions();
+        } catch (Throwable t) {
+            // DB가 잠깐 안 되면 다음 주기에 다시 본다. 다른 서버의 변경만 그만큼 늦게 간다.
+            log.error("Auction stream revision poll failed", t);
+            meters.counter("auction.stream.failure", "stage", "poll").increment();
         }
     }
 
