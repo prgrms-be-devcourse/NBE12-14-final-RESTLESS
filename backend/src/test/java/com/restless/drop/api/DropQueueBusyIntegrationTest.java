@@ -14,6 +14,7 @@ import com.restless.drop.application.DropQueueAdmissionJob;
 import com.restless.drop.application.DropQueueConcurrencyLimiter;
 import com.restless.drop.application.DropQueueConcurrencyLimiter.Kind;
 import com.restless.drop.application.dto.CreateDropRequest;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -45,6 +46,7 @@ class DropQueueBusyIntegrationTest {
     @Autowired DropAdminService admin;
     @Autowired DropQueueAdmissionJob admission;
     @Autowired DropQueueConcurrencyLimiter limiter;
+    @Autowired MeterRegistry registry;
     private final List<Kind> held = new ArrayList<>();
     private Long user;
     private Long drop;
@@ -115,6 +117,9 @@ class DropQueueBusyIntegrationTest {
         enter().andExpect(status().isServiceUnavailable()).andExpect(header().string("Retry-After", "5"))
                 .andExpect(jsonPath("$.code").value("DROP_QUEUE_BUSY")).andExpect(jsonPath("$.traceId").exists());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_entries WHERE drop_id=?", Long.class, drop)).isZero();
+        // 거절도 HTTP 관측에 진입 경로 패턴으로 남는다 (#477).
+        assertThat(registry.find("http.server.requests").tag("uri", "/api/drops/{dropId}/queue/entries")
+                .tag("status", "503").timer()).isNotNull();
 
         limiter.release(held.remove(0));
         enter().andExpect(status().isCreated());
