@@ -17,6 +17,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.filter.ServerHttpObservationFilter;
 import org.springframework.web.util.UrlPathHelper;
 
 /**
@@ -37,6 +38,8 @@ public class DropQueueConcurrencyFilter extends OncePerRequestFilter {
     private static final String PREFIX = "/api/drops/";
     private static final String ENTRIES = "/queue/entries";
     private static final String ME = "/queue/me";
+    private static final String ENTRIES_PATTERN = "/api/drops/{dropId}/queue/entries";
+    private static final String ME_PATTERN = "/api/drops/{dropId}/queue/me";
     private static final UrlPathHelper PATHS = UrlPathHelper.defaultInstance;
 
     private final DropQueueConcurrencyLimiter limiter;
@@ -61,6 +64,9 @@ public class DropQueueConcurrencyFilter extends OncePerRequestFilter {
             return;
         }
         if (!limiter.tryAcquire(kind)) {
+            // MVC를 지나지 않으므로 HTTP 관측의 uri 태그를 직접 채운다. 비우면 uri=UNKNOWN으로 남는다.
+            ServerHttpObservationFilter.findObservationContext(request)
+                    .ifPresent(context -> context.setPathPattern(kind == Kind.ENTRY ? ENTRIES_PATTERN : ME_PATTERN));
             reject(response, kind);
             return;
         }
@@ -76,9 +82,8 @@ public class DropQueueConcurrencyFilter extends OncePerRequestFilter {
         boolean post = "POST".equals(method);
         boolean read = "GET".equals(method) || "HEAD".equals(method);
         if (!post && !read) return null;
-        String uri = request.getRequestURI();
-        if (uri == null || !uri.contains(PREFIX)) return null;
-        // MVC와 같은 방식으로 context path를 빼고, URL 인코딩과 세미콜론 내용을 풀어 우회를 막는다.
+        // MVC와 같은 방식으로 context path를 빼고, URL 인코딩과 세미콜론 내용을 푼 경로로만 판정한다.
+        // 원본 URI로 먼저 거르면 /api/drop%73/... 처럼 인코딩한 경로가 상한을 건너뛴다 (#477 검증 D1).
         String path = PATHS.getPathWithinApplication(request);
         if (post && isQueuePath(path, ENTRIES)) return Kind.ENTRY;
         if (read && isQueuePath(path, ME)) return Kind.STATUS;

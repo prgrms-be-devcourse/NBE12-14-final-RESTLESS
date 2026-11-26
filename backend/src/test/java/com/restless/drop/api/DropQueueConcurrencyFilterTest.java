@@ -21,6 +21,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.http.server.observation.ServerRequestObservationContext;
+import org.springframework.web.filter.ServerHttpObservationFilter;
 
 @DisplayName("대기열 동시 처리 상한 필터 (#390, #477)")
 class DropQueueConcurrencyFilterTest {
@@ -105,11 +107,35 @@ class DropQueueConcurrencyFilterTest {
     @DisplayName("인코딩과 세미콜론으로 경로를 바꿔도 같은 상한을 받는다")
     void encodedPathsAreLimited() throws Exception {
         limiter.tryAcquire(Kind.ENTRY);
-        for (String uri : new String[] {"/api/drops/1/queue/%65ntries", "/api/drops/1;x=1/queue/entries"}) {
+        for (String uri : new String[] {"/api/drops/1/queue/%65ntries", "/api/drops/1;x=1/queue/entries",
+                "/api/drop%73/1/queue/entries", "/%61pi/drops/1/queue/entries", "/api/%64rops/1/queue/entries"}) {
             var response = new MockHttpServletResponse();
             filter.doFilter(request("POST", uri), response, new MockFilterChain());
             assertThat(response.getStatus()).as(uri).isEqualTo(503);
         }
+    }
+
+    @Test
+    @DisplayName("인코딩한 접두어로 조회해도 같은 상한을 받는다 (#477 검증 D1)")
+    void encodedPrefixStatusIsLimited() throws Exception {
+        limiter.tryAcquire(Kind.STATUS);
+        for (String method : new String[] {"GET", "HEAD"}) {
+            var response = new MockHttpServletResponse();
+            filter.doFilter(request(method, "/%61pi/drops/1/queue/me"), response, new MockFilterChain());
+            assertThat(response.getStatus()).as(method).isEqualTo(503);
+        }
+    }
+
+    @Test
+    @DisplayName("거절할 때 HTTP 관측의 경로 패턴을 채워 uri 태그가 UNKNOWN이 되지 않게 한다")
+    void rejectionSetsObservedPathPattern() throws Exception {
+        limiter.tryAcquire(Kind.ENTRY);
+        var request = request("POST", ENTRIES);
+        var response = new MockHttpServletResponse();
+        var context = new ServerRequestObservationContext(request, response);
+        request.setAttribute(ServerHttpObservationFilter.CURRENT_OBSERVATION_CONTEXT_ATTRIBUTE, context);
+        filter.doFilter(request, response, new MockFilterChain());
+        assertThat(context.getPathPattern()).isEqualTo("/api/drops/{dropId}/queue/entries");
     }
 
     @Test
