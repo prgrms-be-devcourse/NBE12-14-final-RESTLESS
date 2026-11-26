@@ -14,7 +14,7 @@
 | 대표 판매 측정 | `sale` (재고 1,000과 워밍업 드롭) | false / true | PT5M | 켬은 정한 `admit-per-run`, fixedDelay 1초 | 고정 |
 | 대기열 폴링 측정 | `base`, 대기열 미리 채움 0 | true | PT5M | `scheduler.enabled=false` | 고정 |
 
-비밀값 없는 실행 기록에 이미지 digest와 커밋, 시드와 스크립트 해시, DB 행 수와 SKU 재고 분배, EC2와 RDS 사양, CPU 크레딧, JVM, JFR 사용 여부, Tomcat, Hikari, PG, TTL, 스케줄러 설정, UTC를 남긴다. 전후 비교 중에는 바꾸는 하나 말고는 고정한다.
+비밀값 없는 실행 기록에 이미지 digest와 커밋, 시드와 스크립트 해시, DB 행 수와 SKU 재고 분배, EC2와 RDS 사양, CPU 크레딧, JVM, JFR 모드(default, profile, off), Tomcat, Hikari, PG, TTL, 스케줄러 설정, UTC를 남긴다. 전후 비교 중에는 바꾸는 하나 말고는 고정한다.
 
 `perf.env`(root 소유 600)는 권한 있는 편집기로 바꾸고 비밀값은 출력하지 않는다. 자주 바꾸는 키:
 
@@ -34,7 +34,7 @@
 4. `start` 뒤 `lockstats`로 행 잠금 누적값을 남긴다. 이 값은 RDS 재시작 때만 0이 되므로 실행 전후 차이로 본다.
 5. 노트북에서 `prom-collect.sh`를 시작한다. 노트북 `~/.curlrc`에 `ipv4` 줄이 있는지 먼저 본다.
 6. 변경 전 예측을 결과 폴더에 한 줄 적는다.
-7. k6를 한 번 돌린다. 요약은 터미널을 지우기 전에 저장한다.
+7. 노트북에서 [7-2절의 부하 발생기 사전 검사](#7-2-서버별-지표-수집과-k6)를 통과한 뒤 k6를 한 번 돌린다. 요약과 `k6.log`를 저장하고 사후 검사 결과를 보고서에 넣는다.
 8. 수집을 멈추고 `after-run.prom`을 받는다. 서버가 두 대면 서버마다 받는다. `lockstats`를 다시 남긴다.
 9. 진행 중 거래가 수렴했는지 보고 `verify`를 돌린다. 불확실한 거래를 임의 실패로 닫지 않는다.
 10. JFR을 켠 회차는 [7-4절](#7-4-jfr-켜기와-꺼내기)에 따라 앱을 멈추고 컨테이너를 지우거나 다시 띄우기 전에 JFR 파일을 꺼낸다.
@@ -125,17 +125,26 @@ perf/scenarios/prom-collect.sh http://perf-app2:8081 .ai-output/perf/<날짜>-<�
 
 DB 프로브 `sample`은 k6를 시작하기 직전에 서버 1의 두 번째 터미널에서 시작한다. 초 수는 워밍업, 판매 스파이크, 관측 구간을 모두 덮게 정한다. 브라우저 터미널에서는 끝날 때까지 막히므로 별도 창에서 돌린다.
 
-k6는 ALB로 보내고 관리 포트 지표는 서버 1에서 읽는다. 칠 수 있는 호스트를 모두 허용 목록에 넣는다.
+k6는 ALB로 보내고 관리 포트 지표는 서버 1에서 읽는다. 칠 수 있는 호스트를 모두 허용 목록에 넣는다. 서버 한 대에서 측정할 때는 앱 주소를 `http://perf-app:8080`으로 바꾸고 허용 목록에는 `perf-app`만 넣는다.
+
+macOS 노트북에서 k6 실행 전에 임시 포트 범위가 32768 ~ 65535를 포함하고 TCP MSL이 1000ms 이하인지 검사한다. 실패하면 k6가 시작되지 않는다. 검사기가 출력한 `sudo sysctl -w` 명령은 노트북에서 사용자가 직접 실행하고 검사를 다시 한다.
 
 ```bash
-ulimit -n 65536
-BASE_URL=http://perf-alb \
-MANAGEMENT_URL=http://perf-app:8081 \
-PERF_ALLOWED_APP_HOSTS=perf-alb,perf-app \
-SEED_OUT="$PWD/perf/seed/out" QUEUE=on \
-SUMMARY_PATH=.ai-output/perf/<날짜>-<측정>/summary.json \
-k6 run --out json=.ai-output/perf/<날짜>-<측정>/sale.raw.json perf/scenarios/drop-sale.js 2>&1 | tee .ai-output/perf/<날짜>-<측정>/k6.log
+result_dir='.ai-output/perf/<날짜>-<측정>'
+(
+  set -o pipefail
+  ulimit -n 65536 &&
+  bash perf/scenarios/check-load-generator.sh preflight &&
+  BASE_URL=http://perf-alb \
+  MANAGEMENT_URL=http://perf-app:8081 \
+  PERF_ALLOWED_APP_HOSTS=perf-alb,perf-app \
+  SEED_OUT="$PWD/perf/seed/out" QUEUE=on \
+  SUMMARY_PATH="$result_dir/summary.json" \
+  k6 run --out "json=$result_dir/sale.raw.json" perf/scenarios/drop-sale.js 2>&1 | tee "$result_dir/k6.log"
+)
 ```
+
+실행이 끝나면 guard 중단이나 k6 실패 시에도 `k6.log`를 검사한다. `bash perf/scenarios/check-load-generator.sh report "$result_dir/k6.log" > "$result_dir/load-generator.md"`로 만든 판정 줄을 측정 보고서에 넣는다. 포트 할당 오류나 dial 오류가 한 건이라도 있으면 부하 발생기 무효다. 로그가 없거나 비어 있으면 판정 근거가 없는 상태로 기록한다.
 
 - `--out json`은 창별 지연과 매분 00 ~ 02초 제외 p95를 구하는 원자료다. 빼면 요약 파일만 남아 [측정 규약 1절](drop-performance-measurement.md#1-단위-분모-판정-구간)의 분석을 할 수 없다.
 - 시나리오는 호스트가 `perf-`로 시작하지 않으면 시작하지 않는다. ALB 이름도 `perf-`로 시작하게 `/etc/hosts`에 둔다.
@@ -155,10 +164,10 @@ RDS 콘솔의 CPU는 1분 값이고 Performance Insights와 performance_schema�
 
 ### 7-4. JFR 켜기와 꺼내기
 
-Drop perf 측정용 `perf-ec2.sh start <태그>`는 JFR을 기본으로 켠다. 다음 기준선도 비교 대상과 같은 JFR 설정으로 잰다. 프로파일러 부담이 있으므로 JFR을 켠 회차의 처리량을 끈 회차와 바로 비교하지 않는다. 서버 두 대의 입장 허가 작업과 DB 프로브 설정이 다르면 서버별 CPU 비교에 함께 기록한다.
+Drop perf 측정용 `perf-ec2.sh start <태그>`는 JFR `settings=default`를 사용한다. 기준선과 비교 회차에는 같은 JFR 모드를 쓴다. JFR을 켠 회차와 끈 회차, default 회차와 profile 회차의 성능 지표는 직접 비교하지 않는다. 서버 두 대의 입장 허가 작업과 DB 프로브 설정이 다르면 서버별 CPU 비교에 함께 기록한다.
 
-1. 측정용 앱은 각 서버에서 `perf/ec2/perf-ec2.sh start <태그>`로 띄운다. JFR을 끄는 회차는 각 서버에서 `start <태그> --no-jfr`를 실행하고 그 조건을 기록한다.
-2. `start`는 이미지 또는 `perf.env`의 JVM 옵션에 JFR 옵션을 더한다. `settings=profile`, `stackdepth=256`, `dumponexit=true`로 `/tmp/run.jfr`에 기록한다. 기본 스택 깊이 64는 Tomcat과 앱 코드 같은 바깥 계층을 과소 집계할 수 있다.
+1. 측정용 앱은 각 서버에서 `perf/ec2/perf-ec2.sh start <태그>`로 띄운다. 더 자세한 진단에는 `start <태그> --jfr-profile`, JFR을 끄는 회차에는 `start <태그> --no-jfr`를 쓰고 선택한 모드를 기록한다.
+2. `start`는 이미지 또는 `perf.env`의 JVM 옵션에 JFR 옵션을 더한다. default와 profile 모두 `dumponexit=true`로 `/tmp/run.jfr`에 기록한다. `--jfr-profile`만 `settings=profile`과 `stackdepth=256`을 더한다. default 설정의 기본 스택 깊이 64는 Tomcat과 앱 코드 같은 바깥 계층을 과소 집계할 수 있다.
 3. 지표 수집과 `verify`를 마친 뒤(멀티는 7-5의 1번과 2번) 각 서버에서 `perf-ec2.sh stop-app`으로 종료한다. 종료 대기 한도는 60초다. **컨테이너를 지우거나 다시 띄우기 전에** `docker cp restless-perf:/tmp/run.jfr ~/run-<날짜>-<측정>-<서버>.jfr`로 서버 홈에 꺼낸다. EC2 소유자는 `scp`로 노트북의 결과 폴더에 받는다. 브라우저 터미널로는 내려받을 수 없다.
 4. 노트북의 JDK 21에서 `jfr print --events jdk.CPULoad,jdk.GarbageCollection`으로 CPU와 GC 정지를 보고, `jfr print --events jdk.ExecutionSample`로 판매 창의 실행 표본을 뽑는다. 라이브러리별 몫은 스택의 첫 JDK 밖 프레임으로 묶는다. 깊이 제한으로 요청 경로를 확인할 수 없는 표본은 따로 센다.
 5. 파일을 확인한 뒤 7-5의 정리 순서를 따른다. JFR 파일은 결과 폴더에 보관하고 커밋하지 않는다.

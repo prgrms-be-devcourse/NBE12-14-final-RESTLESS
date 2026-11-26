@@ -74,10 +74,12 @@ tar -xzf perf/seed/out/seed-out.tar.gz -C perf/seed/out && rm perf/seed/out/seed
 
 ```bash
 $R start sha-<태그> && $R lockstats      # 서버, 측정 전 값
-# 노트북에서 k6 실행
+# 노트북에서 부하 발생기 사전 검사를 통과한 뒤 k6 실행
 $R lockstats                             # 서버, 측정 후 값
 $R verify <스케일>                       # 서버
 ```
+
+[부하 발생기 검사와 실행 명령](../../docs/testing/drop-performance-procedure.md#7-2-서버별-지표-수집과-k6)을 따라 k6 로그 판정을 보고서에 넣는다.
 
 5. 인계. `sudoedit /opt/restless/perf.env`로 바꾼 값을 되돌리고 `$R check`를 실행한 뒤 채널에 끝을 알린다.
 
@@ -120,10 +122,10 @@ sudo groupdel perf-runners
 - 아무것도 바꾸지 않는다.
 - 언제: perf.env를 고친 직후, 테스트 시작 전.
 
-### `start <태그> [--no-jfr]`: perf 앱 띄우기
+### `start <태그> [--jfr-profile|--no-jfr]`: perf 앱 띄우기
 1. `deploy.paused`를 만들어 자동 배포를 멈춘다.
 2. 배포 컨테이너 `restless`와 기존 `restless-perf`를 지운다.
-3. 태그 이미지를 받아 perf.env로 `restless-perf`를 띄운다. 포트는 8080, 8081이다. JFR 기본값은 `settings=profile`, `stackdepth=256`이다. `--no-jfr`를 주면 스크립트가 JFR 옵션을 추가하지 않는다.
+3. 태그 이미지를 받아 perf.env로 `restless-perf`를 띄운다. 포트는 8080, 8081이다. JFR 기본값은 `settings=default`다. 진단 회차의 `--jfr-profile`은 `settings=profile`과 `stackdepth=256`을 쓴다. `--no-jfr`를 주면 스크립트가 JFR 옵션을 추가하지 않는다. 켠 회차와 끈 회차, default 회차와 profile 회차의 성능 지표는 직접 비교하지 않는다.
 4. health가 응답할 때까지 최대 180초 기다린다.
 5. Flyway 결과를 보여 준다. 빈 DB면 이때 스키마가 만들어진다.
 

@@ -4,7 +4,7 @@
 #
 #   perf-ec2.sh check                 perf.env 키와 값 조건 확인 (값은 출력하지 않는다)
 #   perf-ec2.sh create-db             RDS에 perf DB 생성 (이름은 perf.env의 DB_URL)
-#   perf-ec2.sh start <image tag> [--no-jfr]  자동 배포 멈춤, JFR을 켜고 restless-perf 기동, Flyway 확인
+#   perf-ec2.sh start <image tag> [--jfr-profile|--no-jfr]  자동 배포 멈춤, restless-perf 기동, Flyway 확인
 #   perf-ec2.sh stop-app              restless-perf 중지 (시드, 토큰 전달 전)
 #   perf-ec2.sh seed <scale>          빈 perf DB에 시드, 토큰 묶음 생성
 #   perf-ec2.sh refresh <scale>       판매 기간과 토큰 만료 갱신
@@ -92,13 +92,21 @@ case "$cmd" in
     ;;
   start)
     tag="${1:?image tag is required, e.g. sha-<12 chars> or dev}"
-    [[ $# -eq 1 || ( $# -eq 2 && "$2" == --no-jfr ) ]] || die 'usage: start <image tag> [--no-jfr]'
+    jfr_settings=default
+    jfr_stack_option=
+    case "$#:${2:-}" in
+      1:) ;;
+      2:--jfr-profile) jfr_settings=profile
+        jfr_stack_option='-XX:FlightRecorderOptions:stackdepth=256 ' ;;
+      2:--no-jfr) jfr_settings= ;;
+      *) die 'usage: start <image tag> [--jfr-profile|--no-jfr]' ;;
+    esac
     load_env
     sudo touch "$PAUSE_FILE"
     docker rm -f restless >/dev/null 2>&1 || true
     docker rm -f restless-perf >/dev/null 2>&1 || true
     docker pull -q "$IMAGE:$tag"
-    if [[ "${2:-}" == --no-jfr ]]; then
+    if [[ -z "$jfr_settings" ]]; then
       set --
     else
       # docker run은 perf.env의 값을 이미지 ENV보다 우선한다.
@@ -112,7 +120,7 @@ case "$cmd" in
           options = $0
         } END { print options }'
       )
-      set -- -e "JAVA_TOOL_OPTIONS=${java_options:+$java_options }-XX:FlightRecorderOptions:stackdepth=256 -XX:StartFlightRecording=settings=profile,disk=true,filename=/tmp/run.jfr,dumponexit=true"
+      set -- -e "JAVA_TOOL_OPTIONS=${java_options:+$java_options }${jfr_stack_option}-XX:StartFlightRecording=settings=$jfr_settings,disk=true,filename=/tmp/run.jfr,dumponexit=true"
     fi
     docker run -d --name restless-perf --env-file "$ENV_FILE" -p 8080:8080 -p 8081:8081 "$@" "$IMAGE:$tag" >/dev/null
     wait_health

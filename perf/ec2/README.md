@@ -41,9 +41,9 @@ perf/ec2/perf-ec2.sh start sha-<같은 태그>
 perf/ec2/perf-ec2.sh lockstats
 ```
 
-6. 노트북에서 시나리오를 실행한다 ([scenarios](../scenarios/README.md)).
+6. 노트북 사전 검사를 통과한 뒤 시나리오를 실행한다. 실행 뒤에는 k6 로그를 검사하고 판정 결과를 보고서에 넣는다. [부하 발생기 검사와 실행 명령](../../docs/testing/drop-performance-procedure.md#7-2-서버별-지표-수집과-k6)
 7. 실행마다 EC2에서 `lockstats`와 `verify <scale>`을 실행한다. 드롭 불변식, 금액, FK 고아 행 검사는 0이어야 한다. `seed baseline` 검사는 부하 뒤에 실패하는 것이 정상이다. 드롭 `sale` 측정 뒤에는 그중 `hot drop untouched` 한 건만 실패해야 하고 그 밖의 실패는 정합성 위반이다.
-   JFR은 `start`에서 기본으로 켜진다. JFR을 켠 회차는 지표 수집과 `verify` 뒤에는 [JFR 수집 절차](../../docs/testing/drop-performance-procedure.md#7-4-jfr-켜기와-꺼내기)대로 종료하고 파일을 꺼낸 뒤 컨테이너를 교체하거나 정리한다.
+   `start`의 JFR 기본값은 `settings=default`다. 진단에는 `--jfr-profile`(`settings=profile`, `stackdepth=256`), 끌 때는 `--no-jfr`를 쓴다. 켠 회차와 끈 회차, default 회차와 profile 회차의 성능 지표는 직접 비교하지 않는다. JFR을 켠 회차는 지표 수집과 `verify` 뒤 [JFR 수집 절차](../../docs/testing/drop-performance-procedure.md#7-4-jfr-켜기와-꺼내기)대로 종료하고 파일을 꺼낸 뒤 컨테이너를 교체하거나 정리한다.
 8. 계정을 다 썼거나 스케일을 바꿀 때는 DB를 다시 만든다.
 
 ```bash
