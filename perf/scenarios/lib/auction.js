@@ -1,5 +1,8 @@
-// Shared auction load-test setup. This library deliberately has no seed-file mode.
+// Shared auction load-test setup.
+// 입찰자 토큰은 기본으로 시드가 만든 users.csv에서 읽는다 (AUTH_MODE=seed, #483). AUTH_MODE=login이면 예전처럼 로그인한다.
 import http from 'k6/http';
+import encoding from 'k6/encoding';
+import { SharedArray } from 'k6/data';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { fail, sleep } from 'k6';
 
@@ -37,6 +40,10 @@ export const phaseMetrics = Object.fromEntries([...new Set(configuredPhases)].fi
     closed: new Counter(`${prefix}_closed`), closedBeforeEnd: new Counter(`${prefix}_closed_before_original_end`),
     latency: new Trend(`${prefix}_response_latency`, true), sendOffset: new Trend(`${prefix}_send_offset_ms`, true),
     responseFromT: new Trend(`${prefix}_response_from_t_ms`, true), withinOneSecond: new Rate(`${prefix}_within_one_second`),
+    // 응답 시간 나누기 (#483): 연결 차례 대기(blocked), TCP 연결 맺기(connecting), 요청을 보낸 뒤 첫 바이트까지(waiting).
+    // connecting이 길면 노트북·네트워크 쪽 연결 지연, waiting이 길면 서버 쪽 대기·처리다.
+    blocked: new Trend(`${prefix}_blocked_ms`, true), connecting: new Trend(`${prefix}_connecting_ms`, true),
+    waiting: new Trend(`${prefix}_waiting_ms`, true),
     statuses: counters(phaseStatusValues.map((value) => `status_${value}`).concat('status_other')),
     errors: Object.fromEntries(phaseErrorValues.map((code) => [code, new Counter(`${prefix}_error_${code}`)]).concat([
       ['error_other', new Counter(`${prefix}_error_other`)],
@@ -100,6 +107,55 @@ function hostOf(url) {
 export function checkTarget() {
   const res = http.get(`${MANAGEMENT_URL}/actuator/prometheus`, { tags: { name: 'setup/actuator' }, timeout: '5s' });
   if (res.status !== 200) fail(`management /actuator/prometheus returned HTTP ${res.status}`);
+}
+
+export const AUTH_MODE = __ENV.AUTH_MODE || 'seed';
+if (!['seed', 'login'].includes(AUTH_MODE)) throw new Error('AUTH_MODE must be seed or login');
+const SEED_OUT = (__ENV.SEED_OUT || '../seed/out').replace(/\/$/, '');
+
+/**
+ * users.csv에서 fanq{first}~fanq{first+count-1} 회원의 Access Token을 순서대로 읽는다. init 단계에서만 부를 수 있다.
+ * 파일은 SharedArray로 한 번만 읽어 VU 1만 개가 나눠 쓴다. 빠진 회원이 있으면 시작하지 않는다.
+ */
+export function loadSeedTokens(first, count) {
+  const tokens = new SharedArray(`seed-tokens-${first}-${count}`, () => {
+    const lines = open(`${SEED_OUT}/users.csv`).split('\n');
+    const header = lines[0].split(',');
+    const emailAt = header.indexOf('email'), tokenAt = header.indexOf('access_token');
+    if (emailAt < 0 || tokenAt < 0) throw new Error('users.csv needs email and access_token columns');
+    const byOffset = new Array(count);
+    for (let i = 1; i < lines.length; i++) {
+      if (!lines[i]) continue;
+      const cols = lines[i].split(',');
+      const match = /^fanq(\d+)@fanq\.com$/.exec(cols[emailAt]);
+      if (!match) continue;
+      const offset = Number(match[1]) - first;
+      if (offset >= 0 && offset < count) byOffset[offset] = cols[tokenAt];
+    }
+    const missing = byOffset.findIndex((token) => !token);
+    if (missing >= 0) throw new Error(`users.csv has no token for fanq${first + missing}@fanq.com; check SEED_OUT and the seed scale`);
+    return byOffset;
+  });
+  return tokens;
+}
+
+/** JWT의 exp(초)를 밀리초로. 서명은 확인하지 않는다. 만료 전에 측정이 끝나는지만 본다. */
+export function tokenExpiresAtMs(token) {
+  try {
+    const payload = JSON.parse(encoding.b64decode(token.split('.')[1], 'rawurl', 's'));
+    return Number.isFinite(payload.exp) ? payload.exp * 1000 : NaN;
+  } catch (_) { return NaN; }
+}
+
+/** 첫 토큰과 마지막 토큰이 needUntilMs까지 유효하지 않으면 멈춘다. 시드 토큰은 72시간 유효하다 (scale.yml). */
+export function requireTokensValidUntil(tokens, needUntilMs) {
+  for (const token of [tokens[0], tokens[tokens.length - 1]]) {
+    const exp = tokenExpiresAtMs(token);
+    if (!Number.isFinite(exp)) fail('seed token has no readable exp; refetch perf/seed/out from the perf server');
+    if (exp < needUntilMs) {
+      fail(`seed tokens expire at ${new Date(exp).toISOString()}, before this run ends; run perf-ec2.sh refresh <scale> and fetch the bundle again`);
+    }
+  }
 }
 
 export function tryLogin(email, password) {
@@ -249,10 +305,13 @@ function recordResponse(res, receivedAt, sentAt, phase, phaseStartMs, api) {
   responseLatency.add(res.timings?.duration || receivedAt - sentAt, { phase });
   phaseSummary.latency.add(res.timings?.duration || receivedAt - sentAt);
   if (res.status !== 0) {
-  if (res.status !== 0) {
     responseFromT.add(receivedAt - start, { phase, api });
     phaseSummary.responseFromT.add(receivedAt - start);
-  }
+    if (res.timings) {
+      phaseSummary.blocked.add(res.timings.blocked);
+      phaseSummary.connecting.add(res.timings.connecting);
+      phaseSummary.waiting.add(res.timings.waiting);
+    }
   }
   phaseSummary.withinOneSecond.add(res.status !== 0 && receivedAt - start <= 1000);
   withinOneSecond.add(res.status !== 0 && receivedAt - start <= 1000, { phase, api });
@@ -274,6 +333,7 @@ export function summarize(data, conditions) {
     const offset = values(p + '_send_offset_ms');
     const within = values(p + '_within_one_second');
     const sentAt = values(p + '_start_ms').min;
+    const pick = (name) => { const v = values(p + name); return { p50: v.med ?? null, p95: v['p(95)'] ?? null, max: v.max ?? null }; };
     return { phase, phaseStartsAt: sentAt === undefined ? null : new Date(sentAt).toISOString(),
       serverClockOffsetMs: values(p + '_server_offset_ms').min ?? null,
       sent: values(p + '_sent').count || 0, received: values(p + '_received').count || 0,
@@ -283,6 +343,8 @@ export function summarize(data, conditions) {
         p99: latency['p(99)'] ?? null, max: latency.max ?? null },
       responseWithinOneSecond: within.rate ?? null, lastResponseFromTMs: values(p + '_response_from_t_ms').max ?? null,
       sendSpreadMs: { p50: offset.med ?? null, max: offset.max ?? null },
+      // 응답을 받은 요청만. 연결 실패는 connectionFailures로 따로 센다.
+      timingMs: { blocked: pick('_blocked_ms'), connecting: pick('_connecting_ms'), waiting: pick('_waiting_ms') },
       auctionId: values(p + '_target_id').min ?? null };
   });
   const errorsByPhase = phases.map((p) => ({ phase: p.phase, errors: p.errors }));
@@ -305,7 +367,9 @@ export function summarize(data, conditions) {
     '  phase ' + p.phase + ': sent=' + p.sent + ' received=' + p.received + ' connection=' + p.connectionFailures
       + ' 5xx=' + p.fiveXx + ' accepted=' + p.accepted + ' latency=' + JSON.stringify(p.responseLatencyMs)
       + ' <=1s=' + (p.responseWithinOneSecond ?? '-') + ' lastFromT=' + (p.lastResponseFromTMs ?? '-')
-      + 'ms sendSpread=' + JSON.stringify(p.sendSpreadMs)),
+      + 'ms sendSpread=' + JSON.stringify(p.sendSpreadMs)
+      + '\n    timing p95: blocked=' + (p.timingMs.blocked.p95 ?? '-') + 'ms connecting=' + (p.timingMs.connecting.p95 ?? '-')
+      + 'ms waiting=' + (p.timingMs.waiting.p95 ?? '-') + 'ms'),
     '  statuses/errors: ' + JSON.stringify(phases.map((p) => ({ phase: p.phase, statuses: p.statuses, errors: p.errors }))), warning, ''];
   result.stdout = lines.join('\n');
   return result;

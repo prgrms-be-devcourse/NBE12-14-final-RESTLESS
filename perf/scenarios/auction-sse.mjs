@@ -8,7 +8,9 @@
 //   mixed   (AU-7) watch an existing auction (AUCTION_ID, e.g. the one auction-burst.js created) while another
 //           process bids. No measurement bid; record events per connection, gaps, and whether every watcher caught up.
 import { writeFile, mkdir } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
@@ -25,6 +27,9 @@ const FIRST_ID = Number(env.BIDDER_FIRST_ID || 1);
 const LAST_ALLOWED_ID = Number(env.BIDDER_LAST_ALLOWED_ID || 96900);
 const ACCOUNTS = Number(env.ACCOUNTS || 1000);
 const LOGIN_RATE = Number(env.LOGIN_RATE || 15);
+// 관전·측정 계정 토큰은 기본으로 시드 users.csv에서 읽는다 (#483). AUTH_MODE=login이면 LOGIN_RATE로 로그인한다.
+const AUTH_MODE = env.AUTH_MODE || 'seed';
+const SEED_OUT = resolve(env.SEED_OUT || resolve(dirname(fileURLToPath(import.meta.url)), '../seed/out'));
 const CONNECT_RATE = Number(env.CONNECT_RATE || 200);
 const HOLD_SECONDS = Number(env.HOLD_SECONDS || 60);
 const PROPAGATION_WAIT_SECONDS = Number(env.PROPAGATION_WAIT_SECONDS || 15);
@@ -43,6 +48,7 @@ const EXTENSION_SECONDS = 60;
 const REQUESTED_BIDDERS = ACCOUNTS + 2;
 
 if (!['steps', 'cleanup', 'soak', 'mixed'].includes(MODE)) throw new Error('MODE must be steps, cleanup, soak, or mixed');
+if (!['seed', 'login'].includes(AUTH_MODE)) throw new Error('AUTH_MODE must be seed or login');
 if (MODE === 'mixed' && !Number.isSafeInteger(EXISTING_AUCTION_ID)) throw new Error('MODE=mixed requires AUCTION_ID');
 if (MODE !== 'mixed' && EXISTING_AUCTION_ID !== null) throw new Error('AUCTION_ID is only used with MODE=mixed');
 if (![DRAIN_WAIT_SECONDS, SNAPSHOT_SECONDS].every((n) => Number.isSafeInteger(n) && n > 0)) throw new Error('invalid DRAIN_WAIT_SECONDS or SNAPSHOT_SECONDS');
@@ -64,7 +70,7 @@ const headers = (extra = {}, port = '8080') => ({ Host: `${APP_HOST}:${port}`, .
 const results = [];
 const connections = [];
 const pendingEvents = new Map();
-const metrics = { organizerLoginMs: null, observerLoginRequested: ACCOUNTS, observerLoginSucceeded: 0,
+const metrics = { organizerLoginMs: null, observerLoginRequested: AUTH_MODE === 'login' ? ACCOUNTS : 0, observerLoginSucceeded: 0,
   observerLoginSeconds: null, measurementBidderIds: [FIRST_ID + ACCOUNTS, FIRST_ID + ACCOUNTS + 1],
   createdAuctionId: null, steps: results, baselineServerMetric: null, activeServerMetric: null,
   serverMetricAfterClose: null, cleanupProbe: null, auctionLifetimeSeconds: null, closedEventCount: 0,
@@ -87,6 +93,35 @@ async function login(email) {
   try { body = await response.json(); } catch { /* invalid response */ }
   if (response.status !== 200 || !body.accessToken) throw new Error(`login failed for account ${email.replace(/@.*/, '')}: HTTP ${response.status}`);
   return body.accessToken;
+}
+/** users.csv에서 fanq{first}~fanq{first+count-1}의 Access Token을 순서대로 읽는다. 빠지면 멈춘다. */
+function loadSeedTokens(first, count) {
+  const lines = readFileSync(`${SEED_OUT}/users.csv`, 'utf8').split('\n');
+  const header = lines[0].split(',');
+  const emailAt = header.indexOf('email'), tokenAt = header.indexOf('access_token');
+  if (emailAt < 0 || tokenAt < 0) throw new Error('users.csv needs email and access_token columns');
+  const tokens = new Array(count);
+  for (const line of lines.slice(1)) {
+    if (!line) continue;
+    const cols = line.split(',');
+    const match = /^fanq(\d+)@fanq\.com$/.exec(cols[emailAt]);
+    const offset = match ? Number(match[1]) - first : -1;
+    if (offset >= 0 && offset < count) tokens[offset] = cols[tokenAt];
+  }
+  const missing = tokens.findIndex((token) => !token);
+  if (missing >= 0) throw new Error(`users.csv has no token for fanq${first + missing}@fanq.com; check SEED_OUT and the seed scale`);
+  return tokens;
+}
+/** 첫·마지막 토큰의 exp가 needUntilMs 전이면 멈춘다. 서명은 확인하지 않는다. */
+function requireTokensValidUntil(tokens, needUntilMs) {
+  for (const token of [tokens[0], tokens.at(-1)]) {
+    let exp = NaN;
+    try { exp = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')).exp * 1000; } catch { /* unreadable */ }
+    if (!Number.isFinite(exp)) throw new Error('seed token has no readable exp; refetch perf/seed/out from the perf server');
+    if (exp < needUntilMs) {
+      throw new Error(`seed tokens expire at ${new Date(exp).toISOString()}, before this run ends; run perf-ec2.sh refresh <scale> and fetch the bundle again`);
+    }
+  }
 }
 async function getDetail(id, token = '') {
   const response = await request(`${BASE_URL}/api/auctions/${id}`, {
@@ -286,7 +321,7 @@ async function writeSummary(interrupted = false) {
     steps: STEPS, drainWaitSeconds: DRAIN_WAIT_SECONDS, snapshotSeconds: SNAPSHOT_SECONDS, connectRate: CONNECT_RATE, holdSeconds: HOLD_SECONDS, accounts: ACCOUNTS,
     observerIds: { first: FIRST_ID, last: FIRST_ID + ACCOUNTS - 1 },
     measurementBidderIds: metrics.measurementBidderIds, createdAuctionId: metrics.createdAuctionId,
-    organizer: ORGANIZER_EMAIL, loginRate: LOGIN_RATE, propagationWaitSeconds: PROPAGATION_WAIT_SECONDS,
+    organizer: ORGANIZER_EMAIL, authMode: AUTH_MODE, loginRate: AUTH_MODE === 'login' ? LOGIN_RATE : null, propagationWaitSeconds: PROPAGATION_WAIT_SECONDS,
     auctionLifetimeSeconds: metrics.auctionLifetimeSeconds, postRunCloseWaitSeconds: POST_RUN_CLOSE_WAIT_SECONDS,
   }, preparation: { organizerLoginMs: metrics.organizerLoginMs, observerLoginRequested: metrics.observerLoginRequested,
     observerLoginSucceeded: metrics.observerLoginSucceeded, observerLoginSeconds: metrics.observerLoginSeconds },
@@ -401,7 +436,11 @@ async function main() {
     const previous = index ? STEPS[index - 1] : 0;
     return total + Math.max(HOLD_SECONDS, PROPAGATION_WAIT_SECONDS) + (requested - previous) / CONNECT_RATE;
   }, 0);
-  metrics.auctionLifetimeSeconds = Math.ceil(20 + REQUESTED_BIDDERS / LOGIN_RATE + plannedStageSeconds + EXTENSION_SECONDS);
+  const loginSeconds = AUTH_MODE === 'login' ? REQUESTED_BIDDERS / LOGIN_RATE : 0;
+  metrics.auctionLifetimeSeconds = Math.ceil(20 + loginSeconds + plannedStageSeconds + EXTENSION_SECONDS);
+  const seedTokens = AUTH_MODE === 'seed' ? loadSeedTokens(FIRST_ID, REQUESTED_BIDDERS) : null;
+  // soak·mixed는 경매 수명과 따로 HOLD_SECONDS만큼 더 유지한다.
+  if (seedTokens) requireTokensValidUntil(seedTokens, Date.now() + (metrics.auctionLifetimeSeconds + HOLD_SECONDS + POST_RUN_CLOSE_WAIT_SECONDS + 600) * 1000);
   let opened;
   if (MODE === 'mixed') {
     metrics.createdAuctionId = EXISTING_AUCTION_ID;
@@ -419,9 +458,9 @@ async function main() {
   metrics.heartbeatRemovedBefore = await readMetric('auction_stream_heartbeat_removed_total');
 
   const loginStartedAt = performance.now();
-  const accountTokens = [];
+  const accountTokens = seedTokens ? seedTokens.slice(0, ACCOUNTS) : [];
   const loginEpoch = performance.now() + 1000;
-  for (let i = 0; i < ACCOUNTS; i++) {
+  for (let i = 0; !seedTokens && i < ACCOUNTS; i++) {
     const scheduled = loginEpoch + i * 1000 / LOGIN_RATE;
     if (performance.now() < scheduled) await delay(scheduled - performance.now());
     accountTokens.push(await login(`fanq${FIRST_ID + i}@fanq.com`));
@@ -429,12 +468,14 @@ async function main() {
   }
   const observerLoginSeconds = (performance.now() - loginStartedAt) / 1000;
   metrics.observerLoginSeconds = observerLoginSeconds;
-  measurementTokens = [];
-  for (const id of MEASURE_BID ? metrics.measurementBidderIds : []) {
+  measurementTokens = seedTokens && MEASURE_BID ? seedTokens.slice(ACCOUNTS, ACCOUNTS + 2) : [];
+  for (const id of !seedTokens && MEASURE_BID ? metrics.measurementBidderIds : []) {
     await delay(1000 / LOGIN_RATE);
     measurementTokens.push(await login(`fanq${id}@fanq.com`));
   }
-  console.log(`logged in ${metrics.observerLoginSucceeded}/${ACCOUNTS} observers in ${observerLoginSeconds.toFixed(2)}s at ${LOGIN_RATE}/s${MEASURE_BID ? '; two measurement bidders will alternate' : ''}`);
+  console.log(seedTokens
+    ? `using seed tokens for ${ACCOUNTS} observers${MEASURE_BID ? ' and two measurement bidders' : ''} (${SEED_OUT}/users.csv)`
+    : `logged in ${metrics.observerLoginSucceeded}/${ACCOUNTS} observers in ${observerLoginSeconds.toFixed(2)}s at ${LOGIN_RATE}/s${MEASURE_BID ? '; two measurement bidders will alternate' : ''}`);
 
   let previous = 0;
   let currentRevision = opened.revision;

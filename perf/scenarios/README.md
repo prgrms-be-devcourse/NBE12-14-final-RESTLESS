@@ -321,7 +321,7 @@ perf/scenarios/prom-collect.sh http://perf-app:8081 .ai-output/perf/<실행>/pro
 
 ## 경매 몰림 부하 테스트: AU-1~AU-5
 
-앱을 `perf` 프로필로 실행하고 `base` 시드를 측정 기간 시작에 한 번 넣습니다. 스크립트가 주최자로 로그인하고 필요한 판마다 새 경매를 만듭니다. 판마다 DB를 복원할 필요는 없습니다. 생성한 경매는 DB에 남으므로 독립적인 측정 기간을 시작할 때만 새 시드를 준비합니다.
+앱을 `perf` 프로필로 실행하고 `base` 시드를 측정 기간 시작에 한 번 넣습니다. 스크립트가 주최자로 로그인하고 필요한 판마다 새 경매를 만듭니다. 입찰자와 관전자는 기본으로 시드 토큰(`perf/seed/out/users.csv`, `AUTH_MODE=seed`)을 쓰고, `AUTH_MODE=login`이면 `LOGIN_RATE`로 로그인합니다. 토큰 받는 법은 [경매 부하 테스트 계획](../../docs/domains/auction/load-test.md#시드-토큰-받기)에 있습니다. 판마다 DB를 복원할 필요는 없습니다. 생성한 경매는 DB에 남으므로 독립적인 측정 기간을 시작할 때만 새 시드를 준비합니다.
 
 Mac에는 k6 2.4.0(`brew install k6`)과 Node 24가 필요합니다. `PERF_APP_IP`에 대상 주소를 지정하면 실행기가 이를 `perf-local`에 매핑합니다. 실제 IP는 저장소나 결과에 기록하지 않습니다.
 
@@ -329,19 +329,20 @@ Mac에는 k6 2.4.0(`brew install k6`)과 Node 24가 필요합니다. `PERF_APP_I
 export PERF_APP_IP=<perf 서버 IP>
 PHASES=200,300 perf/scenarios/auction-run.sh detail local-detail
 PHASES=200,300 perf/scenarios/auction-run.sh list local-list
-PHASES=200,300 LOGIN_RATE=50 perf/scenarios/auction-run.sh bid local-bid
-PHASES=200,300 LOGIN_RATE=50 PHASE_GAP_SECONDS=240 perf/scenarios/auction-run.sh ending local-ending
+PHASES=200,300 perf/scenarios/auction-run.sh bid local-bid
+PHASES=200,300 PHASE_GAP_SECONDS=240 perf/scenarios/auction-run.sh ending local-ending
+PHASES=200 AUTH_MODE=login LOGIN_RATE=50 perf/scenarios/auction-run.sh bid local-bid-login
 STEPS=50,100 ACCOUNTS=20 HOLD_SECONDS=20 perf/scenarios/auction-run.sh sse local-sse
 ```
 
-기본 k6 실행은 한 번에 8,000건 판을 보낸 뒤 10,000건 판을 보냅니다. 로컬 확인에는 `PHASES`로 요청 수를 줄일 수 있습니다. 실행기는 Actuator 수집을 시작하고 시나리오 종료 뒤 멈춥니다.
+기본 k6 실행은 한 번에 8,000건 판을 보낸 뒤 10,000건 판을 보냅니다. `PHASES`는 판 하나 또는 둘을 받고, 로컬 확인에는 요청 수를 줄일 수 있습니다. 실행기는 Actuator 수집을 시작하고 시나리오 종료 뒤 멈춥니다.
 
 | ID | 실행 이름 | API / 인증 | 확인 목적 |
 |---|---|---|---|
-| AU-1 | `ending` | 입찰 POST, 로그인 | 마감 직전 입찰, 마감 전 발신 후 `AUCTION_CLOSED` 거절, 연장과 낙찰 정합성 |
+| AU-1 | `ending` | 입찰 POST, 시드 토큰 또는 로그인 | 마감 직전 입찰, 마감 전 발신 후 `AUCTION_CLOSED` 거절, 연장과 낙찰 정합성 |
 | AU-2 | `detail` | 공개 상세 GET | 한 경매 상세 조회 몰림 |
 | AU-3 | `list` | 공개 경매 목록 GET | OPEN 경매 목록 조회 몰림 |
-| AU-4 | `bid` | 입찰 POST, 로그인 | 평시 입찰 몰림 |
+| AU-4 | `bid` | 입찰 POST, 시드 토큰 또는 로그인 | 평시 입찰 몰림 |
 | AU-5 | `sse` | 인증 SSE GET | 연결 유지와 변경 이벤트 전달 지연 |
 
 AU-2·AU-3은 현재 공개된 GET이므로 토큰 없이 호출합니다. 401이면 공개 GET 경로가 막힌 것으로 기록합니다.
@@ -385,7 +386,7 @@ AU-2·AU-3은 현재 공개된 GET이므로 토큰 없이 호출합니다. 401�
 
 `auction-run.sh ending|detail|list|bid|sse [name]`은 `.ai-output/perf/auction/` 아래에 결과를 씁니다. JSON에는 조건, 판별 전송·응답·연결 실패, 상태·오류 코드 수, 지연, 입찰 대조 및 종료/SSE 결과가 들어갑니다. k6 실행은 HTML 대시보드도 만들고, 모든 실행은 로그와 2초 간격 Actuator CSV를 남깁니다.
 
-각 판은 전송·응답·연결 실패·5xx·상태 코드, 지연 p50/p95/p99/최대, T부터 1초 안에 응답한 비율, 마지막 응답 시각, 전송 시각 퍼짐을 기록합니다. 입찰은 201 응답 수와 서버 수락 수를 대조합니다. 비영(非零) 5xx·연결 실패·입찰 수 차이·낙찰자 불일치·최종 종료 시각 뒤 수락(INV-AU-11)은 눈에 띄게 표시합니다. 원래 마감 뒤 수락은 연장 정책상 정상일 수 있습니다. 별도로 원래 마감 전에 보냈는데 `AUCTION_CLOSED`로 거절된 수를 기록합니다. 지연·처리량 합격선은 두지 않습니다.
+각 판은 전송·응답·연결 실패·5xx·상태 코드, 지연 p50/p95/p99/최대, T부터 1초 안에 응답한 비율, 마지막 응답 시각, 전송 시각 퍼짐, 응답 시간 나누기(`timingMs`: 연결 차례 대기 `blocked`, TCP 연결 `connecting`, 첫 바이트까지 `waiting`)를 기록합니다. 입찰은 201 응답 수와 서버 수락 수를 대조합니다. 비영(非零) 5xx·연결 실패·입찰 수 차이·낙찰자 불일치·최종 종료 시각 뒤 수락(INV-AU-11)은 눈에 띄게 표시합니다. 원래 마감 뒤 수락은 연장 정책상 정상일 수 있습니다. 별도로 원래 마감 전에 보냈는데 `AUCTION_CLOSED`로 거절된 수를 기록합니다. 지연·처리량 합격선은 두지 않습니다.
 
 CSV는 Hikari 활성·대기·타임아웃, Tomcat busy thread·현재 연결, 프로세스·시스템 CPU, `auction_stream_connections`, `http_server_requests_active_seconds_gcount` 합계, JVM 힙 사용·확보·최대(`area="heap"` 합계), GC 멈춤 시간 합과 횟수, JVM 스레드 수, 열린 파일 수를 샘플링합니다. 힙 열은 연결 수에 따른 메모리를 볼 때 씁니다. 컨테이너 전체 메모리는 Actuator에 없으므로 필요하면 EC2에서 `docker stats restless-perf`로 봅니다. 없는 지표나 응답은 빈 칸입니다.
 
