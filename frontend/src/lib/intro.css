@@ -1,0 +1,18 @@
+/* 인트로 연출 문. 레이아웃에는 끼어들지 않는다 */
+.fq-intro {
+  display: contents;
+}
+/*
+ * 하이드레이션 전, 꺼 둔 사람에게는 연출을 그리지 않은 것처럼 보인다.
+ * display: none으로 숨기면 하이드레이션 순간 크기 0인 무대에서 캔버스 효과가 깨지므로,
+ * 화면 크기 그대로 보이지 않는 고정 층에 띄워 흐름과 스크롤 높이에서만 뺀다. 설정을 읽으면 곧 빠진다.
+ */
+html[data-intro="off"] .fq-intro[data-pending] {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}

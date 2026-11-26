@@ -14,7 +14,7 @@
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot_4.1-6DB33F?style=for-the-badge&logo=springboot&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL_8-4479A1?style=for-the-badge&logo=mysql&logoColor=white)
 ![React](https://img.shields.io/badge/React-61DAFB?style=for-the-badge&logo=react&logoColor=black)
-![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js_16-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 <br>
 ![AWS](https://img.shields.io/badge/AWS_EC2_RDS-FF9900?style=for-the-badge&logo=amazonwebservices&logoColor=white)
@@ -165,7 +165,7 @@ flowchart LR
 |---|---|
 | 🍃 백엔드 | Java 21, Spring Boot 4.1, Spring Data JPA, Flyway, Gradle |
 | 🐬 데이터베이스 | MySQL 8 |
-| ⚛️ 프론트엔드 | React, Vite, TypeScript |
+| ⚛️ 프론트엔드 | Next.js, React, TypeScript |
 | 💳 결제 | 토스페이먼츠 테스트 환경 |
 | 🧪 테스트 | JUnit, Testcontainers, ArchUnit, k6 |
 | ☁️ 인프라 | AWS EC2, RDS, Docker, GitHub Actions, GHCR |
@@ -213,7 +213,7 @@ cd backend && ./gradlew build
 ├── CLAUDE.md        # Claude Code용, AGENTS.md를 불러옴
 ├── CONTRIBUTING.md  # 브랜치, PR, 커밋 규칙, 로컬 실행
 ├── backend/         # Spring Boot 애플리케이션, 모듈마다 api, application, domain, infrastructure
-├── frontend/        # React, Vite, TypeScript
+├── frontend/        # Next.js (App Router), React, TypeScript
 ├── deploy/          # EC2 배포 스크립트
 ├── perf/            # 부하 테스트 시드 데이터와 k6 시나리오
 └── docs/            # 설계 문서. 시작은 docs/README.md

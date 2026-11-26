@@ -1,0 +1,238 @@
+/* 응원봉 분해 쇼케이스. 테마와 관계없이 어두운 무대로 그린다. */
+.fq-stick {
+  position: relative;
+  height: 900vh;
+  margin-top: 40px;
+}
+.fq-stick-stage {
+  position: sticky;
+  top: 14px;
+  height: calc(100vh - 28px);
+  min-height: 560px;
+  overflow: hidden;
+  border-radius: 28px;
+  color: #f4f0e8;
+  background:
+    radial-gradient(50% 60% at 62% 45%, rgba(123, 97, 255, 0.3), transparent 70%),
+    radial-gradient(35% 45% at 85% 85%, rgba(90, 209, 255, 0.14), transparent 70%),
+    radial-gradient(40% 50% at 15% 10%, rgba(255, 122, 147, 0.12), transparent 70%),
+    #05060f;
+  box-shadow:
+    0 30px 80px -30px rgba(10, 8, 40, 0.7),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  isolation: isolate;
+}
+/* 바닥 반사광 */
+.fq-stick-stage::after {
+  content: "";
+  position: absolute;
+  left: 30%;
+  right: 5%;
+  bottom: -12%;
+  height: 40%;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(183, 164, 255, 0.18), transparent 70%);
+  pointer-events: none;
+}
+.fq-stick-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+/* ── 왼쪽 글 ─────────────────────────── */
+.fq-stick-copy {
+  position: absolute;
+  z-index: 3;
+  left: clamp(22px, 4vw, 56px);
+  bottom: clamp(80px, 12vh, 120px);
+  width: min(520px, 40%);
+}
+.fq-stick-no {
+  font-family: var(--fq-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: rgba(244, 240, 232, 0.5);
+}
+.fq-stick-title {
+  margin: 10px 0 10px;
+  font-size: clamp(40px, 5vw, 76px);
+  font-weight: 950;
+  line-height: 0.92;
+  letter-spacing: -0.05em;
+  background: linear-gradient(120deg, #fff 30%, #b7a4ff 70%, #5ad1ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: fq-stick-in 0.7s var(--ux-ease) both;
+}
+.fq-stick-sub {
+  margin: 0;
+  max-width: 32ch;
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgba(244, 240, 232, 0.74);
+  animation: fq-stick-in 0.7s 0.08s var(--ux-ease) both;
+}
+@keyframes fq-stick-in {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(16px);
+  }
+}
+.fq-stick-colors {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+}
+.fq-stick-colors button {
+  pointer-events: auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  transition: transform 0.35s var(--ux-spring), border-color 0.25s;
+}
+.fq-stick-colors button.is-black {
+  background: linear-gradient(140deg, #3a3a48, #101016);
+}
+.fq-stick-colors button.is-white {
+  background: linear-gradient(140deg, #ffffff, #d9d6e4);
+}
+.fq-stick-colors button.is-silver {
+  background: linear-gradient(140deg, #f2f4f8, #9aa0ae 60%, #e4e7ee);
+}
+.fq-stick-colors button.is-on {
+  border-color: #b7a4ff;
+  transform: scale(1.15);
+  box-shadow: 0 0 0 4px rgba(183, 164, 255, 0.25);
+}
+.fq-stick-colors button:focus-visible {
+  outline: 2px solid #b7a4ff;
+  outline-offset: 3px;
+}
+
+/* 색 장에서 무대에 번지는 색 */
+.fq-stick-tint {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(55% 60% at 60% 45%, color-mix(in srgb, var(--tint, #6a57f2) 40%, transparent), transparent 70%);
+  transition: background 0.8s var(--ux-ease);
+  pointer-events: none;
+}
+/* 분해 장: 지금 풀린 부품 설명 카드 */
+.fq-stick-part {
+  position: absolute;
+  z-index: 4;
+  right: clamp(22px, 6vw, 96px);
+  top: 50%;
+  display: grid;
+  gap: 6px;
+  min-width: 220px;
+  padding: 20px 22px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  transform: translateY(-50%);
+  animation: fq-stick-part-in 0.5s var(--ux-ease) both;
+}
+@keyframes fq-stick-part-in {
+  from {
+    opacity: 0;
+    transform: translate(20px, -50%);
+  }
+}
+.fq-stick-part span {
+  font-family: var(--fq-mono);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  color: #b7a4ff;
+}
+.fq-stick-part b {
+  font-size: clamp(24px, 2.6vw, 34px);
+  font-weight: 950;
+  letter-spacing: -0.04em;
+}
+.fq-stick-part small {
+  font-size: 14px;
+  color: rgba(244, 240, 232, 0.72);
+}
+.fq-stick-buy {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: 16%;
+  padding: 14px 26px;
+  border-radius: 999px;
+  background: #f4f0e8;
+  color: #0b0c12;
+  font-size: 15px;
+  font-weight: 850;
+  text-decoration: none;
+  opacity: 0;
+  transform: translate(-50%, 20px);
+  transition: opacity 0.5s var(--ux-ease), transform 0.6s var(--ux-ease);
+  pointer-events: none;
+}
+.fq-stick-buy.is-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}
+
+@media (max-width: 900px) {
+  .fq-stick-copy {
+    top: 24px;
+    bottom: 0;
+    pointer-events: none;
+    right: 22px;
+    width: auto;
+  }
+  .fq-stick-title {
+    font-size: clamp(34px, 10vw, 56px);
+  }
+  .fq-stick-sub {
+    font-size: 13.5px;
+  }
+  .fq-stick-colors {
+    position: absolute;
+    left: 0;
+    bottom: 64px;
+    margin: 0;
+  }
+}
+@media (max-width: 900px) {
+  .fq-stick {
+    height: 640vh;
+  }
+  .fq-stick-part {
+    top: auto;
+    bottom: 120px;
+    right: 16px;
+    left: 16px;
+    min-width: 0;
+    transform: none;
+    animation: none;
+  }
+}
+@media (max-width: 760px) {
+  .fq-stick-stage {
+    top: 8px;
+    height: calc(100dvh - 120px);
+    min-height: 520px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fq-stick-title,
+  .fq-stick-sub {
+    animation: none;
+  }
+}

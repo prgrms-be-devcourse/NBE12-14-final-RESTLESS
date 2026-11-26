@@ -1,0 +1,105 @@
+/* 긴 스크롤 연출 공통: 장 표시와 건너뛰기 */
+.fq-hud {
+  position: absolute;
+  z-index: 6;
+  left: clamp(18px, 3vw, 40px);
+  bottom: clamp(16px, 3vh, 28px);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 6px 12px;
+  width: min(260px, 50%);
+  pointer-events: none;
+  color: #f4f0e8;
+}
+.fq-hud.is-light {
+  color: var(--ux-ink);
+}
+.fq-hud-no {
+  font-family: var(--fq-mono);
+  font-size: 13px;
+  font-weight: 800;
+}
+.fq-hud-no small {
+  opacity: 0.45;
+}
+.fq-hud-name {
+  font-size: 13px;
+  font-weight: 750;
+  opacity: 0.8;
+  animation: fq-hud-in 0.5s var(--ux-ease) both;
+}
+@keyframes fq-hud-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.fq-hud-bar {
+  grid-column: 1 / -1;
+  height: 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  overflow: hidden;
+}
+.fq-hud-bar i {
+  display: block;
+  height: 100%;
+  background: currentColor;
+  transform: scaleX(var(--p, 0));
+  transform-origin: 0 50%;
+}
+/* 건너뛰기와 다음부터 연출 끄기를 오른쪽 위에 세로로 모은다 */
+.fq-skips {
+  position: absolute;
+  z-index: 6;
+  top: clamp(14px, 2.5vh, 24px);
+  right: clamp(14px, 2.5vw, 28px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.fq-skip {
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f4f0e8;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 750;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  transition: background 0.25s, transform 0.35s var(--ux-spring);
+}
+.fq-skip:hover {
+  background: rgba(255, 255, 255, 0.14);
+  transform: translateY(-2px);
+}
+.fq-skip:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 3px;
+}
+.fq-skip.is-light {
+  border-color: var(--ux-line-2);
+  background: var(--ux-surface);
+  color: var(--ux-ink);
+}
+/* 다음부터 연출 없이 보기: 건너뛰기보다 한 단계 조용하게 */
+.fq-skip.is-quiet {
+  padding: 6px 12px;
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11.5px;
+  font-weight: 650;
+  opacity: 0.78;
+}
+.fq-skip.is-quiet:hover {
+  opacity: 1;
+}
+.fq-skip.is-quiet.is-light {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ux-surface) 70%, transparent);
+}

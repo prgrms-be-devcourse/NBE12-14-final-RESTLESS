@@ -1,0 +1,81 @@
+.fq-foot {
+  position: relative;
+  margin-top: 120px;
+  padding-top: 36px;
+  border-top: 1px solid var(--ux-line-2);
+  overflow: hidden;
+}
+.fq-foot-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.fq-foot-top p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--ux-ink-2);
+}
+.fq-foot nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+}
+.fq-foot nav a {
+  position: relative;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ux-ink);
+}
+/* 밑줄이 왼쪽에서 그어진다 */
+.fq-foot nav a::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform 0.4s var(--ux-ease);
+}
+.fq-foot nav a:hover::after,
+.fq-foot nav a:focus-visible::after {
+  transform: scaleX(1);
+}
+/* 화면 폭을 꽉 채우는 외곽선 글자. 아래가 잘려 바닥에 묻힌 것처럼 보인다 */
+.fq-foot-word {
+  margin: 28px 0 -0.2em;
+  font-size: clamp(120px, 27vw, 420px);
+  font-weight: 900;
+  line-height: 0.8;
+  letter-spacing: -0.06em;
+  text-align: center;
+  color: transparent;
+  -webkit-text-stroke: 1px var(--ux-line-2);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ux-ink) 14%, transparent), transparent 75%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  user-select: none;
+}
+.fq-foot-base {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  padding: 14px 0 6px;
+  border-top: 1px solid var(--ux-line-2);
+  background: var(--ux-page);
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--ux-ink-3);
+}
+@media (max-width: 760px) {
+  .fq-foot {
+    margin-top: 80px;
+  }
+}

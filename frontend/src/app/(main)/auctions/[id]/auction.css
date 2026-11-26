@@ -1,0 +1,281 @@
+.fq-item-desc {
+  margin-top: 14px;
+}
+.fq-item-desc p {
+  margin: 6px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.fq-board {
+  position: relative;
+  margin: 18px 0;
+  padding: 24px;
+  border-radius: 26px;
+  background: var(--fq-deep);
+  color: #f4f0e8;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  overflow: hidden;
+}
+.fq-board::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(400px 200px at 100% 0%, rgba(183, 164, 255, 0.35), transparent 70%),
+    radial-gradient(300px 200px at 0% 100%, rgba(255, 122, 147, 0.25), transparent 70%);
+  pointer-events: none;
+}
+.fq-board > * {
+  position: relative;
+}
+.fq-board-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 750;
+  color: color-mix(in srgb, #f4f0e8 60%, transparent);
+}
+.fq-board-clock {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #f4f0e8 12%, transparent);
+  color: #f4f0e8;
+  font-size: 15px;
+  font-weight: 850;
+}
+.fq-board.is-urgent .fq-board-clock {
+  background: #ff5a6e;
+  color: #fff;
+  animation: fq-beat 1s infinite;
+}
+.fq-board-price {
+  display: block;
+  margin: 10px 0 12px;
+  font-size: clamp(40px, 6vw, 64px);
+  font-weight: 950;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  background: linear-gradient(120deg, #fff, #e6dcff 40%, #ffd36e);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: fq-price-bump 0.6s var(--ux-spring);
+}
+.fq-board-who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14.5px;
+  font-weight: 700;
+}
+.fq-board-who i {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffd3a8, #ff7a93 60%, #8b6cff);
+}
+.fq-board.is-leading {
+  box-shadow: 0 0 0 3px #ffd36e, 0 0 40px -6px rgba(255, 211, 110, 0.6);
+}
+.fq-board-alert {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 90, 110, 0.2);
+  color: #ffb3bd;
+  font-size: 13px;
+  font-weight: 750;
+}
+@keyframes fq-price-bump {
+  0% {
+    transform: scale(1.18);
+    filter: brightness(1.8);
+  }
+}
+@keyframes fq-beat {
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+.fq-bidbox {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fq-bid-row {
+  position: relative;
+}
+.fq-bid-row .fq-input {
+  width: 100%;
+  height: 60px;
+  padding-right: 44px;
+  font-size: 26px;
+  font-weight: 850;
+  letter-spacing: -0.03em;
+}
+.fq-bid-unit {
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-weight: 750;
+  color: var(--ux-ink-3);
+}
+.fq-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fq-feed {
+  margin-top: 22px;
+}
+.fq-feed ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.fq-feed li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--ux-surface);
+  box-shadow: 0 0 0 1px var(--ux-line);
+  font-size: 14px;
+  animation: fq-feed-in 0.5s var(--ux-spring);
+}
+.fq-feed li.fq-muted {
+  display: block;
+}
+.fq-feed li small {
+  color: var(--ux-ink-3);
+  font-size: 12px;
+}
+.fq-feed li.is-top {
+  box-shadow: 0 0 0 2px var(--ux-accent);
+  background: var(--ux-accent-soft);
+}
+.fq-feed li.is-mine span::after {
+  content: "나";
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--ux-hot);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+@keyframes fq-feed-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.97);
+  }
+}
+
+/* ── 카지노 테이블 상세 ───────────────── */
+.fq-au-detail {
+  --au-red: #e3263a;
+  --au-gold: #e9c27a;
+  --au-serif: "Bodoni 72", Didot, "Playfair Display", Georgia, "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", sans-serif;
+}
+.fq-au-stage {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 26px;
+  padding: 40px 24px 34px;
+  border-radius: 28px;
+  overflow: hidden;
+  color: #f6efe1;
+  background:
+    radial-gradient(60% 55% at 50% 45%, rgba(227, 38, 58, 0.34), transparent 70%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 2px, transparent 2px 6px),
+    #0c0708;
+  box-shadow:
+    inset 0 0 0 1px rgba(233, 194, 122, 0.18),
+    0 40px 80px -40px rgba(0, 0, 0, 0.8);
+}
+.fq-au-stage::after {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(233, 194, 122, 0.2);
+  pointer-events: none;
+}
+.fq-au-stage.is-closed {
+  filter: saturate(0.4);
+}
+.fq-au-stage-kicker {
+  font-family: var(--fq-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: var(--au-gold);
+}
+.fq-au-stage-word {
+  max-width: 100%;
+  font-family: var(--au-serif);
+  font-size: clamp(30px, 3.6vw, 48px);
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1.05;
+  text-align: center;
+  color: #f6efe1;
+  overflow-wrap: anywhere;
+}
+.fq-au-detail .fq-detail-title {
+  font-family: var(--au-serif);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.fq-au-detail .fq-board {
+  background:
+    radial-gradient(420px 220px at 100% 0%, rgba(227, 38, 58, 0.35), transparent 70%),
+    radial-gradient(300px 200px at 0% 100%, rgba(233, 194, 122, 0.16), transparent 70%),
+    #0c0708;
+  box-shadow: inset 0 0 0 1px rgba(233, 194, 122, 0.2);
+}
+.fq-au-detail .fq-board::before {
+  display: none;
+}
+.fq-au-detail .fq-board-price {
+  display: flex;
+  margin: 14px 0 14px;
+  font-size: clamp(44px, 6.4vw, 76px);
+  background: none;
+  color: #f6efe1;
+  -webkit-text-fill-color: currentColor;
+  animation: none;
+}
+.fq-au-detail .fq-board-price .fq-odo-unit {
+  color: var(--au-gold);
+}
+.fq-au-detail .fq-board.is-leading {
+  box-shadow: 0 0 0 2px var(--au-gold), 0 0 50px -8px rgba(233, 194, 122, 0.6);
+}
+.fq-au-detail .fq-board.is-urgent .fq-board-clock {
+  background: var(--au-red);
+}
+.fq-au-detail .fq-feed li.is-top {
+  box-shadow: 0 0 0 2px var(--au-red);
+  background: color-mix(in srgb, var(--au-red) 10%, transparent);
+}
+@media (max-width: 900px) {
+  .fq-au-stage {
+    padding: 28px 18px 24px;
+    gap: 18px;
+  }
+  .fq-au-stage .fq-chip3d {
+    --size: 160px !important;
+  }
+}
