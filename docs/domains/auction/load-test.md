@@ -74,6 +74,17 @@ AU-6~8은 `auction-sse.mjs`의 `MODE`로 실행합니다.
 
 시드는 측정 기간 시작에 한 번 준비합니다. 스크립트가 각 판에 새 경매를 등록하므로 판 사이에 perf DB를 복원할 필요는 없습니다. 하루의 측정이 끝나면 불변식을 확인하고 결과를 정리합니다.
 
+1. AU-2 상세 조회
+2. AU-3 목록 조회
+3. AU-4 평시 입찰 몰림
+4. AU-1 마감 직전 입찰 몰림
+5. AU-5 SSE 연결 유지와 상한
+6. AU-6 떠난 연결 정리
+7. AU-7 관전과 입찰 동시
+8. AU-8 관전 연결 장시간 유지
+
+각 k6 실행은 8,000건 판 다음 10,000건 판을 이어서 수행합니다. 실행기로 `.ai-output/perf/auction/`에 `.json`, `.html`(k6), `.log`, `-metrics.csv`를 저장합니다. 실험 보고서도 같은 폴더에 실험별로 작성하고 레포에 올리지 않습니다.
+
 ### 시드 토큰 받기
 
 시드(`seed`, `refresh`)가 서버에 토큰 묶음을 만듭니다. 팀원 계정은 앱을 켠 채로 그 묶음을 읽을 수 있습니다 ([RUNBOOK](../../../perf/ec2/RUNBOOK.md#팀원-계정으로-실행)). 노트북에서:
@@ -88,16 +99,24 @@ tar -xzf perf/seed/out/seed-out.tar.gz -C perf/seed/out && rm perf/seed/out/seed
 - `users.csv`에 필요한 회원(입찰자 `fanq1`~판 크기, 관전자 `ACCOUNTS`+측정 계정 2개)이 없으면 시작하지 않습니다.
 - 토큰 파일은 git에 올리지 않습니다 (`perf/seed/out/`은 무시 목록에 있다).
 
-1. AU-2 상세 조회
-2. AU-3 목록 조회
-3. AU-4 평시 입찰 몰림
-4. AU-1 마감 직전 입찰 몰림
-5. AU-5 SSE 연결 유지와 상한
-6. AU-6 떠난 연결 정리
-7. AU-7 관전과 입찰 동시
-8. AU-8 관전 연결 장시간 유지
+### ALB 뒤 여러 서버에서 측정
 
-각 k6 실행은 8,000건 판 다음 10,000건 판을 이어서 수행합니다. 실행기로 `.ai-output/perf/auction/`에 `.json`, `.html`(k6), `.log`, `-metrics.csv`를 저장합니다. 실험 보고서도 같은 폴더에 실험별로 작성하고 레포에 올리지 않습니다.
+서버 하나는 `PERF_APP_IP`로 직접 보내고, 여러 대는 ALB 주소(`PERF_ALB_HOST`, HTTP 80)로 보냅니다. 둘 중 하나만 줍니다. ALB는 8080만 넘기므로 서버 지표는 서버마다 SSH로 서버 안에서 받습니다 (`perf-ec2.sh sample`, `prom`).
+
+```bash
+export PERF_ALB_HOST=<ALB 주소>
+export PERF_SSH_TARGETS="<팀원 계정>@<서버 1 IP> <팀원 계정>@<서버 2 IP>"
+PHASES=8000 perf/scenarios/auction-run.sh bid alb-2-bid
+```
+
+- 서버 지표는 `PERF_SSH_TARGETS` 순서대로 `<실행 이름>-metrics-s1.csv`, `-s2.csv`와 `-prom-before-s1.txt`, `-prom-after-s1.txt`에 남습니다. 측정 전 스냅샷이 실패하면 측정을 시작하지 않습니다. 서버 지표 없이 돌리려면 `PERF_SSH_TARGETS=none`을 줍니다.
+- 시작 전에 ALB로 공개 목록 조회를 한 번 보냅니다. 노트북 IP가 ALB 보안 그룹에 없거나 정상 대상이 없으면 여기서 멈춥니다.
+- SSE의 서버 연결 수 게이지는 서버별 관리 포트를 `PERF_MANAGEMENT_IPS`(쉼표 구분)로 주면 더해서 기록합니다. 없으면 비워 두고 서버별 CSV로 봅니다.
+- 결과 JSON에는 `via`(`direct` 또는 `alb`)와 `servers`(SSH 대상 수)만 남기고 주소는 남기지 않습니다.
+- 서버를 켠 뒤 ALB가 정상으로 판정할 때까지 기다립니다 (헬스 체크 30초 간격, 5회 성공). 대상 그룹에서 뺀 서버는 기존 연결을 최대 300초 유지하므로, 대수를 바꾼 뒤에는 그만큼 쉬고 시작합니다.
+- 측정이 끝나면 서버별 CSV에서 서버마다 요청을 받았는지 확인합니다. 한 서버만 받았다면 정상 대상이 한 대뿐이었던 것입니다.
+- 같은 ALB와 DB를 다른 도메인 측정도 쓰므로 시간을 겹치지 않게 잡습니다.
+
 
 ## 6. 알려진 한계
 
@@ -110,5 +129,5 @@ tar -xzf perf/seed/out/seed-out.tar.gz -C perf/seed/out && rm perf/seed/out/seed
 - 가정한 나머지 9만 명의 배경 부하는 만들지 않습니다.
 - `AUTH_MODE=login`이면 로그인을 기본 초당 15회로 제한합니다. 입찰자 10,000명은 첫 판 전 여유 시간을 제외하고 약 11분이 걸립니다. 2 vCPU 서버에서 초당 30회는 CPU가 포화되어 로그인이 시간 초과됩니다 (2026-11-26).
 - AU-2·AU-3 GET은 현재 구현에서만 공개입니다. 인증 정책이 바뀌면 시나리오를 조정해야 합니다.
-- SSE는 Node 24 내장 fetch를 사용합니다. `PERF_APP_IP`로 서버 주소를 전달하고 `Host: perf-local`을 보냅니다. 허용 목록에 든 perf 호스트만 허용합니다.
+- SSE는 Node 24 내장 fetch를 사용합니다. 서버 하나는 `PERF_APP_IP`로 주소를 전달하고 `Host: perf-local`을 보냅니다. ALB는 `PERF_ALB_HOST`로 주소를 전달합니다. 허용 목록에 든 perf 호스트 또는 ALB 주소만 허용합니다.
 - 실행할 때마다 측정용 경매가 DB에 추가됩니다. 독립적인 측정 기간 사이에는 새 시드를 준비합니다.
