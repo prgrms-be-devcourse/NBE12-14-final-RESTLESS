@@ -21,6 +21,13 @@ public interface AuctionRepository extends JpaRepository<Auction, Long> {
     @Query("select a from Auction a where a.id = :id")
     Optional<Auction> findByIdForUpdate(@Param("id") Long id);
 
+    /**
+     * 경매 행을 잠그되, 다른 트랜잭션(다른 서버의 스케줄러, 입찰)이 잡고 있으면 기다리지 않고 비어서 돌아온다.
+     * 스케줄러의 시작·종료가 쓴다. 건너뛴 경매는 다음 주기에 다시 본다.
+     */
+    @Query(value = "SELECT * FROM auctions WHERE auction_id = :id FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    Optional<Auction> findByIdForUpdateSkipLocked(@Param("id") Long id);
+
     Page<Auction> findByStatus(AuctionStatus status, Pageable pageable);
 
     /**

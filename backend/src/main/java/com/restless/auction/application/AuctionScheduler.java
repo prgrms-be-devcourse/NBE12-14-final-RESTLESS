@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
  *
  * <p>입찰 가능 여부는 상태가 아니라 시각으로 판단하므로, 스케줄러가 늦어도 종료 시각 뒤 입찰은 거절된다.
  * 서버가 재시작되면 다음 실행에서 밀린 경매를 처리한다. 서버가 여러 대여도 잠금과 재확인 덕분에 결과는 하나다.
+ * 다른 서버나 입찰이 잡은 경매는 기다리지 않고 다음 주기로 넘긴다 ({@link AuctionCloseService}의 SKIP LOCKED).
  *
  * <p>테스트에서는 {@code restless.auction.scheduler.enabled=false}로 끈다 (build.gradle).
  */
