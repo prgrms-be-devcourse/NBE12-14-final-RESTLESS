@@ -158,6 +158,20 @@ class DropSoldOutCacheTest {
     }
 
     @Test
+    @DisplayName("판매 종료 시각이 유효 시간 안에 오면 DB를 다시 읽지 않고 그 순간부터 거절을 멈춘다")
+    void saleEndInsideTtlStopsRejectingWithoutRecheck() {
+        when(drop.getClosesAt()).thenReturn(START.plusMillis(500));
+        stock(3, 0);
+        cache.observeVariantSoldOut(DROP);
+        clock.advance(Duration.ofMillis(499));
+        assertThat(cache.rejects(DROP)).isTrue();
+        clock.advance(Duration.ofMillis(1));
+        assertThat(cache.rejects(DROP)).isFalse();
+        verify(drops, times(1)).findById(DROP);
+        verify(inventories, times(1)).activeStockOfDrop(DROP);
+    }
+
+    @Test
     @DisplayName("판매 중이 아닌 드롭은 재고가 0이어도 표시하지 않고, 재확인 때 판매 중이 아니면 표시를 끈다")
     void notOnSaleDropIsNotMarked() {
         stock(3, 0);
