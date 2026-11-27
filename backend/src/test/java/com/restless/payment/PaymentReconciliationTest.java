@@ -3,6 +3,7 @@ package com.restless.payment;
 import static org.assertj.core.api.Assertions.*;
 
 import com.restless.TestcontainersConfiguration;
+import com.restless.support.RecordedLogs;
 import com.restless.payment.application.*;
 import com.restless.payment.application.payable.*;
 import com.restless.payment.application.pg.*;
@@ -158,6 +159,37 @@ class PaymentReconciliationTest {
         assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.APPROVED);
         assertThat(handler.approved).hasSize(1);
         assertThat(pg.approvals.get()).isEqualTo(1);
+    }
+
+    @Test
+    void dropUnknownLogsFollowCommittedTransitionsAcrossRetries() {
+        var p = prepare(1);
+        fake.willLoseResponse(p.pgOrderId());
+        String fields = "event=drop.payment.approval_transition paymentId=" + p.paymentId();
+        String entered = "WARN " + fields + " from=PROCESSING to=UNKNOWN";
+        try (var logs = new RecordedLogs(PaymentTransactions.class);
+                var failures = new RecordedLogs(PaymentReconciler.class)) {
+            confirm(p);
+            age(11);
+            pg.results.put(p.pgOrderId(), new PgQueryResult.Unknown("private-provider-text"));
+            reconciler.runOnce();
+            age(22);
+            pg.results.put(p.pgOrderId(), approved(p));
+            handler.throwApproved = true;
+            reconciler.runOnce();
+            assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.UNKNOWN);
+            assertThat(logs.entries()).containsExactly(entered);
+            assertThat(failures.entries()).singleElement().asString()
+                    .contains("ERROR Payment reconciliation failed stage=apply paymentId=" + p.paymentId())
+                    .doesNotContain("key-" + p.paymentId(), "private-provider-text", "handler unavailable");
+
+            handler.throwApproved = false;
+            age(33);
+            reconciler.runOnce();
+            reconciler.runOnce();
+            assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.APPROVED);
+            assertThat(logs.entries()).containsExactly(entered, "INFO " + fields + " from=UNKNOWN to=APPROVED");
+        }
     }
 
     @Test
