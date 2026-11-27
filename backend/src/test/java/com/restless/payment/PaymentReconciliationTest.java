@@ -3,6 +3,7 @@ package com.restless.payment;
 import static org.assertj.core.api.Assertions.*;
 
 import com.restless.TestcontainersConfiguration;
+import com.restless.support.RecordedLogs;
 import com.restless.payment.application.*;
 import com.restless.payment.application.payable.*;
 import com.restless.payment.application.pg.*;
@@ -11,6 +12,9 @@ import com.restless.payment.infrastructure.*;
 import com.restless.payment.infrastructure.fake.FakePgClient;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -49,6 +53,7 @@ class PaymentReconciliationTest {
     @Autowired MutableClock clock;
     @Autowired JdbcTemplate jdbc;
     @Autowired MeterRegistry meters;
+    @PersistenceContext EntityManager entityManager;
     @Autowired PlatformTransactionManager tm;
     @Autowired ApplicationContext context;
     Long user;
@@ -158,6 +163,88 @@ class PaymentReconciliationTest {
         assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.APPROVED);
         assertThat(handler.approved).hasSize(1);
         assertThat(pg.approvals.get()).isEqualTo(1);
+    }
+
+    @Test
+    void dropUnknownLogsFollowCommittedTransitionsAcrossRetries() {
+        var p = prepare(1);
+        fake.willLoseResponse(p.pgOrderId());
+        String fields = transitionFields(p);
+        String entered = "WARN " + fields + " from=PROCESSING to=UNKNOWN";
+        try (var logs = new RecordedLogs(PaymentTransactions.class);
+                var failures = new RecordedLogs(PaymentReconciler.class)) {
+            confirm(p);
+            age(11);
+            pg.results.put(p.pgOrderId(), new PgQueryResult.Unknown("private-provider-text"));
+            reconciler.runOnce();
+            age(22);
+            pg.results.put(p.pgOrderId(), approved(p));
+            handler.throwApproved = true;
+            reconciler.runOnce();
+            assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.UNKNOWN);
+            assertThat(logs.entries()).containsExactly(entered);
+            assertThat(failures.payloads()).singleElement().asString()
+                    .contains("ERROR Payment reconciliation failed stage=apply paymentId=" + p.paymentId())
+                    .doesNotContain("key-" + p.paymentId(), "private-provider-text", "handler unavailable");
+
+            handler.throwApproved = false;
+            age(33);
+            reconciler.runOnce();
+            reconciler.runOnce();
+            assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.APPROVED);
+            assertThat(logs.entries()).containsExactly(entered, "INFO " + fields + " from=UNKNOWN to=APPROVED");
+        }
+    }
+
+    // Force a MySQL column-length failure during commit, after the handler returns.
+    private Runnable failPaymentFlush(PreparePaymentResult p) {
+        return () -> ReflectionTestUtils.setField(
+                entityManager.find(Payment.class, p.paymentId()), "failureCode", "x".repeat(5000));
+    }
+
+    private String transitionFields(PreparePaymentResult p) {
+        return "event=drop.payment.approval_transition paymentId=" + p.paymentId();
+    }
+
+    @Test
+    void recoveryFlushFailureLeavesUnknownWithoutCompletionLog() {
+        var p = prepare(1);
+        fake.willLoseResponse(p.pgOrderId());
+        try (var logs = new RecordedLogs(PaymentTransactions.class);
+                var failures = new RecordedLogs(PaymentReconciler.class)) {
+            confirm(p);
+            age(11);
+            pg.results.put(p.pgOrderId(), approved(p));
+            handler.approvedHook = failPaymentFlush(p);
+            reconciler.runOnce();
+            assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.UNKNOWN);
+            assertThat(failures.entries()).anyMatch(e -> e.contains("stage=apply paymentId=" + p.paymentId()));
+            assertThat(logs.entries()).containsExactly("WARN " + transitionFields(p) + " from=PROCESSING to=UNKNOWN");
+        }
+    }
+
+    @Test
+    void unknownEntryFlushFailureLeavesProcessingWithoutWarning() {
+        var p = prepare(1);
+        fake.willLoseResponse(p.pgOrderId());
+        handler.unknownHook = failPaymentFlush(p);
+        try (var logs = new RecordedLogs(PaymentTransactions.class);
+                var failures = new RecordedLogs(PaymentService.class)) {
+            assertThat(confirm(p).status()).isEqualTo(PaymentStatus.PROCESSING);
+            assertThat(payment(p).getStatus()).isEqualTo(PaymentStatus.PROCESSING);
+            assertThat(logs.entries()).isEmpty();
+            assertThat(failures.entries()).singleElement().asString()
+                    .contains("Payment result transaction rolled back paymentId=" + p.paymentId());
+        }
+    }
+
+    @Test
+    void ordinaryApprovalDoesNotEmitRecoveryLogs() {
+        var p = prepare(1);
+        try (var transitions = new RecordedLogs(PaymentTransactions.class)) {
+            assertThat(confirm(p).status()).isEqualTo(PaymentStatus.APPROVED);
+            assertThat(transitions.entries()).isEmpty();
+        }
     }
 
     @Test

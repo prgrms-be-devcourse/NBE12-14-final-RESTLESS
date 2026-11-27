@@ -2,6 +2,7 @@ package com.restless.drop.application;
 
 import com.restless.drop.infrastructure.DropReservationRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import com.restless.support.RecordedLogs;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -21,7 +22,11 @@ class DropReservationExpiryJobTest {
         when(lifecycle.expire(1L)).thenThrow(new IllegalStateException("DB unavailable"));
         when(lifecycle.expire(2L)).thenReturn(true);
         when(lifecycle.expire(3L)).thenReturn(false);
-        new DropReservationExpiryJob(reservations, lifecycle, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), meters).runOnce();
+        try (var logs = new RecordedLogs(DropReservationExpiryJob.class)) {
+            new DropReservationExpiryJob(reservations, lifecycle, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), meters).runOnce();
+            assertThat(logs.entries()).containsExactly(
+                    "ERROR Drop expiry failed reservationId=1 errorType=java.lang.IllegalStateException");
+        }
         assertThat(meters.get("drop.expiry.processed").tag("result", "failed").counter().count()).isEqualTo(1);
         assertThat(meters.get("drop.expiry.processed").tag("result", "expired").counter().count()).isEqualTo(1);
         assertThat(meters.get("drop.expiry.processed").tag("result", "skipped").counter().count()).isEqualTo(1);
