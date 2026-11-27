@@ -20,12 +20,14 @@ export function runCheckout(data, context) {
       ['GET', `${base}/api/performances/${performanceId}/seats`, null, { headers: seatHeaders(user), tags: { name: 'GET seats', phase: 'entry' } }],
       ['GET', `${base}/api/performances/${performanceId}/booking-availability`, null, { headers: headers(user), tags: { name: 'GET booking availability', phase: 'entry' } }],
     ]);
+    // page와 같게 두 응답을 받은 직후의 시간을 잰다. 파싱·검증 시간은 넣지 않는다.
+    const pageElapsed = Date.now() - pageStart;
     const seatList = seats.status === 200 ? json(seats) : null;
     const seatsOk = Array.isArray(seatList) && seatList.length === data.seatCount && encodingMatches(seats);
     const body = availability.status === 200 ? json(availability) : null;
     const availabilityOk = !!body && ['maximum', 'confirmed', 'reserved', 'remaining'].every(key => Number.isInteger(body[key]))
       && Object.prototype.hasOwnProperty.call(body, 'activeReservation');
-    pageEntryLatency.add(Date.now() - pageStart, { outcome: seatsOk && availabilityOk ? 'ok' : 'error' });
+    pageEntryLatency.add(pageElapsed, { outcome: seatsOk && availabilityOk ? 'ok' : 'error' });
     if (!seatsOk || !availabilityOk) { count(seatsOk ? 'page_availability_error' : 'page_seats_error', true); return; }
   }
   const journeyStart = Date.now();
