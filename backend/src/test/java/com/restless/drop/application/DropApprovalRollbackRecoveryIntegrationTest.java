@@ -85,15 +85,16 @@ class DropApprovalRollbackRecoveryIntegrationTest {
         pg.willDelay(prepared.pgOrderId(), Duration.ZERO);
         double failures = meters.counter("payment.result.apply.failure").count();
         DropReservationSettlement target = org.springframework.test.util.AopTestUtils.getUltimateTargetObject(settlement);
-        doThrow(new IllegalStateException("Injected TX3 rollback"))
+        doThrow(new IllegalStateException("Injected TX3 rollback",
+                new IllegalArgumentException("private-pg-cause")))
                 .doCallRealMethod().when(target).confirm(any());
         try (var logs = new RecordedLogs(PaymentService.class)) {
             var result = payments.confirm(new ConfirmPaymentCommand(user,
                     "test-key-" + UUID.randomUUID(), prepared.pgOrderId(), prepared.amount()));
             assertThat(result.status()).isEqualTo(PaymentStatus.PROCESSING);
-            assertThat(logs.entries()).singleElement().asString()
+            assertThat(logs.payloads()).singleElement().asString()
                     .contains("ERROR Payment result transaction rolled back paymentId=" + prepared.paymentId())
-                    .doesNotContain("test-key-", "Injected TX3 rollback");
+                    .doesNotContain("test-key-", "Injected TX3 rollback", "private-pg-cause");
         }
         assertThat(pg.query(prepared.pgOrderId())).isInstanceOf(PgQueryResult.Approved.class);
         pending(prepared.paymentId());

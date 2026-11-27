@@ -165,9 +165,9 @@ UNKNOWN 나이를 제공한다. **운영 확인 등록 여부 저장, 중복 없
 ### 드롭 복구 로그
 
 - 입장 gate가 누락되면 복구 시도를 WARN `event=drop.queue.gate.repair_started`로 기록한다. 재시도 뒤에도 누락이면 ERROR `event=drop.queue.gate.repair_unresolved`를 남긴다. 같은 `variantId`의 판매 상태, 유효 입장 수와 대기 인원을 확인한다.
-- 드롭 승인 결과가 처음 UNKNOWN으로 바뀌면 WARN `event=drop.payment.approval_transition`을 남긴다. UNKNOWN 해소와 오래된 PROCESSING 재확인 결과는 commit된 상태 변경을 INFO로 기록한다. `paymentId`, `from`, `to`로 조회한다. CANCEL_PENDING은 보상 취소 대기 상태다.
+- 드롭 승인 결과가 처음 UNKNOWN으로 바뀌면 WARN `event=drop.payment.approval_transition`을 남긴다. UNKNOWN 해소와 오래된 PROCESSING 재확인 결과는 commit된 상태 변경을 INFO로 기록한다. `paymentId`, `from`, `to`로 조회한다. CANCEL_PENDING은 보상 취소 대기 상태다. 이후의 취소 결과는 같은 paymentId로 조회하며, PG 취소 거절은 ERROR `Payment cancellation rejected`에 기록된다.
 - 최초 승인 반영 rollback은 `Payment result transaction rolled back`, 재확인 반영 실패는 `Payment reconciliation failed stage=apply`로 조회한다. 동일 상태 재조회에는 전이 로그가 없다. 만료 worker 실패는 `Drop expiry failed`와 `reservationId`로 추적한다.
-- 로그 회귀 검증은 backend에서 `./gradlew test --tests '*DropQueueAdmissionJobTest' --tests '*DropReservationExpiryJobTest' --tests '*DropApprovalRollbackRecoveryIntegrationTest' --tests '*PaymentReconciliationTest.dropUnknownLogs*'`로 실행한다.
+- 로그 회귀 검증은 backend에서 `./gradlew test --tests '*DropQueueAdmissionJobTest' --tests '*DropReservationExpiryJobTest' --tests '*DropApprovalRollbackRecoveryIntegrationTest' --tests '*PaymentReconciliationTest'`로 실행한다.
 
 ## PG 설정
 
