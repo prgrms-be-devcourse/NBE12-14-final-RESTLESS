@@ -1,0 +1,136 @@
+name: Frontend deploy
+
+# dev의 CI가 성공한 커밋만 S3에 올린다. 백엔드 이미지(backend-image.yml)와 같은 방식이다.
+# AWS 접근은 GitHub OIDC로 역할을 받아서 한다. 저장소에 AWS 키를 두지 않는다.
+# 저장소 변수: FRONTEND_DEPLOY_ROLE_ARN, FRONTEND_BUCKET, FRONTEND_DISTRIBUTION_ID, TOSS_CLIENT_KEY.
+# FRONTEND_BUCKET이 비어 있으면 작업을 건너뛴다. 설정 방법은 deploy/frontend/README.md에 있다.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 한 번에 하나만 올린다. 업로드 중간에 끊으면 버킷에 두 빌드가 섞이므로 진행 중인 실행은 취소하지 않는다.
+concurrency:
+  group: frontend-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      vars.FRONTEND_BUCKET != '' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev') ||
+       (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # AWS 역할의 신뢰 조건이 이 environment 이름을 본다. 다른 워크플로는 역할을 받을 수 없다.
+    environment: frontend
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Resolve commit
+        id: ref
+        working-directory: .
+        env:
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then sha="$RUN_SHA"; else sha="$GITHUB_SHA"; fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Frontend tests
+        run: |
+          set -e
+          for t in tests/*.cjs; do echo "::group::$t"; node "$t"; echo "::endgroup::"; done
+
+      # 토스 클라이언트 키는 브라우저에 공개되는 값이라 저장소 변수로 둔다. 시크릿 키는 백엔드에만 있다.
+      - name: Build
+        env:
+          NEXT_PUBLIC_TOSS_CLIENT_KEY: ${{ vars.TOSS_CLIENT_KEY }}
+        run: |
+          if [ -z "$NEXT_PUBLIC_TOSS_CLIENT_KEY" ]; then
+            echo "::error::TOSS_CLIENT_KEY repository variable is empty. The payment window would break."
+            exit 1
+          fi
+          npm run build
+          if [ ! -f out/index.html ]; then
+            echo "::error::out/index.html is missing. next.config.ts must build with output: export."
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.FRONTEND_DEPLOY_ROLE_ARN }}
+          aws-region: ap-northeast-2
+
+      # CI는 커밋마다 끝나는 시점이 달라서, 늦게 끝난 옛 커밋이 최신 화면을 덮어쓰지 않게 한다.
+      # concurrency 그룹으로 한 번에 하나만 돌므로 확인과 업로드 사이에 다른 배포가 끼지 않는다.
+      - name: Check dev tip
+        id: tip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.ref.outputs.sha }}
+        run: |
+          tip="$(gh api "repos/$GITHUB_REPOSITORY/commits/dev" --jq .sha)"
+          if [ "$tip" = "$SHA" ]; then
+            echo "latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::dev is now at ${tip:0:12}, so ${SHA:0:12} is not deployed."
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload
+        if: steps.tip.outputs.latest == 'true'
+        env:
+          BUCKET: ${{ vars.FRONTEND_BUCKET }}
+        run: |
+          # 이름에 해시가 붙은 정적 파일은 오래 캐시하고 지우지 않는다. 배포 전에 화면을 연 사용자가 옛 파일을 계속 받는다.
+          aws s3 sync out/_next/static "s3://$BUCKET/_next/static" \
+            --cache-control "public,max-age=31536000,immutable"
+          # 화면(html)과 화면 데이터(txt)는 매번 다시 확인하게 하고, 이번 빌드에 없는 파일은 지운다.
+          aws s3 sync out "s3://$BUCKET" --exclude "_next/static/*" --delete \
+            --cache-control "public,max-age=0,must-revalidate"
+
+      - name: Invalidate CloudFront
+        id: invalidate
+        if: steps.tip.outputs.latest == 'true'
+        env:
+          DISTRIBUTION: ${{ vars.FRONTEND_DISTRIBUTION_ID }}
+        run: |
+          id="$(aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION" --paths '/*' \
+            --query Invalidation.Id --output text)"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        if: steps.tip.outputs.latest == 'true'
+        env:
+          SHA: ${{ steps.ref.outputs.sha }}
+          INVALIDATION: ${{ steps.invalidate.outputs.id }}
+        run: |
+          {
+            echo "### Deployed"
+            echo "- commit \`${SHA:0:12}\`"
+            echo "- CloudFront invalidation \`$INVALIDATION\`"
+          } >> "$GITHUB_STEP_SUMMARY"
