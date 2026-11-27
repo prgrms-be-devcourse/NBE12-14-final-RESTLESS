@@ -112,9 +112,9 @@ PG 승인이 확인된 뒤 하나의 트랜잭션에서:
 4. 예약이 CONFIRMING 또는 RECONCILING이 아니면 `DROP_INVALID_STATE`로 거절한다
 5. 승인 금액이 서버 주문 금액과 다르면 예약을 COMPENSATING으로 바꾸고 `DROP_AMOUNT_MISMATCH`로 거절한다 (결제 모듈이 보상 취소, INV-08)
 6. 예약 CONFIRMED
-7. reserved -1, sold +1
-8. 주문 PAID
-9. 구매 슬롯 해제 (같은 사용자가 다시 구매할 수 있게). 슬롯의 `active_reservation_id`가 이 예약일 때만 비운다
+7. 주문 PAID
+8. 구매 슬롯 해제 (같은 사용자가 다시 구매할 수 있게). 슬롯의 `active_reservation_id`가 이 예약일 때만 비운다
+9. reserved -1, sold +1. 버킷 행은 그 버킷의 모든 구매자가 같이 쓰는 행이라 마지막에 바꾸고 커밋까지만 잠근다 (#504, TX1과 같은 순서). 바뀐 행이 1개가 아니면 7, 8번도 함께 롤백한다
 10. Commit
 
 승인 시각(`approvedAt`)이 예약 기한 뒤여도 확정한다. 기한은 TX2에서 판정했다.

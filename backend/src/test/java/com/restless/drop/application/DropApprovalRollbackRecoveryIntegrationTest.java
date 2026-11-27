@@ -126,6 +126,31 @@ class DropApprovalRollbackRecoveryIntegrationTest {
         assertThat(meters.counter("payment.result.apply.failure").count()).isEqualTo(failures + 1);
     }
 
+    // INV-01, INV-02, INV-09, INV-10. TX3 updates the bucket last (#504); a bucket miss there must still roll back
+    // the order and slot changes made earlier in the same transaction.
+    @Test
+    void inv01BucketMissAfterOrderAndSlotChangesRollsBackWholeTx3() {
+        var prepared = payments.prepare(new PreparePaymentCommand(
+                user, PayableType.DROP, reservation, UUID.randomUUID().toString()));
+        pg.willApprove(prepared.pgOrderId());
+        pg.willDelay(prepared.pgOrderId(), Duration.ZERO);
+        jdbc.update("UPDATE drop_inventory_buckets SET total_quantity = 0, reserved_quantity = 0 WHERE variant_id = ?", variant);
+
+        var result = payments.confirm(new ConfirmPaymentCommand(user,
+                "test-key-" + UUID.randomUUID(), prepared.pgOrderId(), prepared.amount()));
+
+        assertThat(result.status()).isEqualTo(PaymentStatus.PROCESSING);
+        assertThat(status()).isEqualTo("CONFIRMING");
+        assertThat(orderStatus()).isEqualTo("PAYMENT_CONFIRMING");
+        assertThat(slot()).isEqualTo(reservation);
+        assertThat(DropStock.totals(jdbc, variant)).containsEntry("total", 0).containsEntry("sold", 0);
+
+        jdbc.update("UPDATE drop_inventory_buckets SET total_quantity = 1, reserved_quantity = 1 WHERE variant_id = ?", variant);
+        clock.now = clock.instant().plusSeconds(31);
+        reconciler.runOnce();
+        confirmed(prepared.paymentId());
+    }
+
     private void pending(Long payment) {
         assertThat(payments.get(payment, user).status()).isEqualTo(PaymentStatus.PROCESSING);
         assertThat(status()).isEqualTo("CONFIRMING");

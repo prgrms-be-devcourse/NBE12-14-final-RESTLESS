@@ -24,10 +24,12 @@ public class DropReservationSettlement {
     private final DropPurchaseSlotRepository slots;
     private final Clock clock;
 
+    // The bucket row is shared by every buyer in it, so its UPDATE runs last and holds the lock only until commit
+    // (same order as TX1, #322). A bucket miss still rolls back the order and slot changes above.
     public void confirm(DropReservation reservation) {
-        requireOne(inventories.confirm(reservation.getVariantId(), reservation.getBucketNo()));
         orders.changeStatus(reservation.getOrderId(), OrderStatus.PAID);
         clearSlot(reservation);
+        requireOne(inventories.confirm(reservation.getVariantId(), reservation.getBucketNo()));
     }
 
     public void release(DropReservation reservation) {
