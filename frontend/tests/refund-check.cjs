@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const ts = require('typescript');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
-const source = fs.readFileSync(require('node:path').join(__dirname, '../src/app/(main)/checkout/[orderId]/view.tsx'), 'utf8');
+const source = fs.readFileSync(require('node:path').join(__dirname, '../src/app/(main)/checkout/view.tsx'), 'utf8');
 const match = source.match(/  const refund = async \(\) => \{[\s\S]*?\n  \};/);
 assert.ok(match);
 const js = ts.transpile(match[0] + '\nrefund()', {target:ts.ScriptTarget.ES2022});

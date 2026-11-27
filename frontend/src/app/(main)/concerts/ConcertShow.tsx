@@ -7,7 +7,7 @@ import { chapterAt, ramp, smooth } from "@/lib/chapters";
 import { dateTime } from "@/lib/format";
 import { useScrollProgress } from "@/lib/scroll";
 import type { PerformanceInfo } from "@/lib/types";
-import "./[id]/concert.css";
+import "./detail/concert.css";
 
 const STEPS = [
   { no: "01", title: "회차를 고르고", body: "날짜와 시간을 고르면 그 회차의 좌석 배치도가 열려요. 1인당 살 수 있는 매수는 회차마다 달라요." },

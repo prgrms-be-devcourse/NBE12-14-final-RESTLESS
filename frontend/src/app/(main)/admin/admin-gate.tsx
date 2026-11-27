@@ -13,7 +13,8 @@ export default function AdminGate({ lead, children }: { lead: React.ReactNode; c
   const router = useRouter();
   const pathname = usePathname();
   useEffect(() => {
-    if (ready && !profile) router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+    // 상세 화면 id는 쿼리에 있다. usePathname은 쿼리를 빼므로 돌아올 주소는 location에서 읽는다
+    if (ready && !profile) router.replace(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
   }, [ready, profile, router, pathname]);
   if (!ready || !profile) return <div className="fq-skel" style={{ height: 300 }} />;
   if (profile.role === "USER") return <LoadError error={new ApiError(403, { code: "FORBIDDEN", message: "권한이 없어요." })} />;

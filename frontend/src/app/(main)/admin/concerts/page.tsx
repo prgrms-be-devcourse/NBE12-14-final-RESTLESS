@@ -53,7 +53,7 @@ function CreateConcert() {
         },
       });
       toast(`공연 #${r.concertId} 초안을 만들었어요`, "ok");
-      router.push(`/admin/concerts/${r.concertId}`);
+      router.push(`/admin/concerts/detail?id=${r.concertId}`);
     } catch (err) {
       const ex = err as ApiError;
       setError(firstFieldError(ex.details) ?? ex.message);
@@ -140,7 +140,7 @@ function MyConcerts() {
                   </small>
                 </div>
                 <div className="fq-order-r">
-                  <Link className="fq-btn is-ghost is-sm" href={`/admin/concerts/${c.concertId}`}>
+                  <Link className="fq-btn is-ghost is-sm" href={`/admin/concerts/detail?id=${c.concertId}`}>
                     관리
                   </Link>
                 </div>

@@ -4,7 +4,7 @@ const vm = require("node:vm");
 const assert = require("node:assert/strict");
 const ts = require("typescript");
 
-const source = fs.readFileSync(path.join(__dirname, "../src/app/(main)/performances/[id]/seat-state.ts"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "../src/app/(main)/performances/seat-state.ts"), "utf8");
 const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
 const context = { exports: {} };
 vm.runInNewContext(js, context);

@@ -10,7 +10,8 @@ export default function LoadError({ error, backHref = "/home" }: { error: ApiErr
   const pathname = usePathname();
   const router = useRouter();
   useEffect(() => {
-    if (error.status === 401) router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+    // 상세 화면 id는 쿼리에 있다. usePathname은 쿼리를 빼므로 돌아올 주소는 location에서 읽는다
+    if (error.status === 401) router.replace(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
   }, [error.status, pathname, router]);
   if (error.status === 401) return <p className="fq-muted">로그인 화면으로 이동하고 있어요…</p>;
   const message = error.status === 403 ? "권한이 없어요." : error.status === 404 ? "찾을 수 없어요." : error.isUnavailable ? "서버에 연결할 수 없어요." : error.message;

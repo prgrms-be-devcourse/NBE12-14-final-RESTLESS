@@ -5,7 +5,7 @@ const ts = require('typescript');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 
-const src = fs.readFileSync(path.join(__dirname, '../src/app/(main)/drops/[id]/purchase.ts'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '../src/app/(main)/drops/detail/purchase.ts'), 'utf8');
 const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const mod = { exports: {} };
 vm.runInNewContext(js, { module: mod, exports: mod.exports, JSON, Math, Number, Error, String });
