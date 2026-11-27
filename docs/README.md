@@ -10,7 +10,7 @@
 | [domains/](domains/) | 도메인별 정책, 불변식, 상태 머신, 트랜잭션, 데이터 모델 |
 | [architecture/](architecture/) | [기술 결정 현황, 패키지 규칙, 배포](architecture/overview.md), [통합 ERD](architecture/erd.md) |
 | [contracts/](contracts/) | [API 계약 목록과 공통 규칙](contracts/api/README.md), 이벤트 계약([events/](contracts/events/)) |
-| [decisions/](decisions/) | [ADR-0001 이벤트 처리](decisions/0001-event-handling.md), [ADR-0002 공통 규약](decisions/0002-common-conventions.md), [ADR-0003 결제 모듈 경계](decisions/0003-payment-module-boundary.md), [ADR-0004 요청 횟수 제한](decisions/0004-request-rate-limit.md), [ADR-0005 드롭 재고 행 분할](decisions/0005-drop-inventory-buckets.md), [ADR-0006 드롭 대기실 Redis 전환](decisions/0006-drop-waiting-room-redis.md) (실험 승인), [ADR-0007 경매 실시간 전달 서버 여러 대](decisions/0007-auction-stream-cross-server.md), [폐기한 가정](decisions/superseded.md) |
+| [decisions/](decisions/) | [ADR-0001 이벤트 처리](decisions/0001-event-handling.md), [ADR-0002 공통 규약](decisions/0002-common-conventions.md), [ADR-0003 결제 모듈 경계](decisions/0003-payment-module-boundary.md), [ADR-0004 요청 횟수 제한](decisions/0004-request-rate-limit.md), [ADR-0005 드롭 재고 행 분할](decisions/0005-drop-inventory-buckets.md), [ADR-0006 드롭 대기실 Redis 전환](decisions/0006-drop-waiting-room-redis.md) (실험 승인), [ADR-0007 경매 실시간 전달 서버 여러 대](decisions/0007-auction-stream-cross-server.md), [ADR-0008 좌석 조회 응답 0.5초 공유](decisions/0008-ticketing-seat-response-cache.md), [폐기한 가정](decisions/superseded.md) |
 | [testing/](testing/) | [테스트 전략과 실행 명령](testing/strategy.md), [성능 실험 계획](testing/performance.md) |
 | [operations/](operations/) | [장애 처리 설계](operations/failure-handling.md), [SKU 입장 제어 배포 전환](operations/drop-sku-queue-cutover.md), [드롭 재고 버킷 분할 배포 전환](operations/drop-inventory-buckets-cutover.md) |
 
