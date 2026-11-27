@@ -64,7 +64,7 @@ export default function AuctionsPage() {
               <ul className="fq-au-rows">
                 {mine.data.map((bid, i) => (
                   <li key={bid.auctionId}>
-                    <Link className="fq-au-row" href={`/auctions/${bid.auctionId}`} style={{ animationDelay: `${i * 70}ms` }}>
+                    <Link className="fq-au-row" href={`/auctions/detail?id=${bid.auctionId}`} style={{ animationDelay: `${i * 70}ms` }}>
                       <span className="fq-au-lot">{String(i + 1).padStart(2, "0")}</span>
                       <Chip seed={bid.auctionId} top="BID" big={String(i + 1).padStart(2, "0")} size={64} still />
                       <div className="fq-au-main">
@@ -118,7 +118,7 @@ export default function AuctionsPage() {
 function Row({ a, lot, now, price, delay }: { a: AuctionSummary; lot: string; now: number; price?: number; delay: number }) {
   const urgent = a.status === "OPEN" && msLeft(a.endsAt, now) < 15 * 60_000;
   return (
-    <Link className={`fq-au-row is-${a.status.toLowerCase()}${urgent ? " is-urgent" : ""}`} href={`/auctions/${a.auctionId}`} style={{ animationDelay: `${delay}ms` }}>
+    <Link className={`fq-au-row is-${a.status.toLowerCase()}${urgent ? " is-urgent" : ""}`} href={`/auctions/detail?id=${a.auctionId}`} style={{ animationDelay: `${delay}ms` }}>
       <span className="fq-au-lot">{lot}</span>
       <Chip seed={a.auctionId} top="LOT" big={lot} size={64} still />
       <div className="fq-au-main">

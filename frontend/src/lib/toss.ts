@@ -69,8 +69,8 @@ export async function openTossPayment(c: TossCheckout, handlers: TossHandlers): 
       await widgets.requestPayment({
         orderId: c.pgOrderId,
         orderName,
-        successUrl: `${window.location.origin}${c.successPath ?? `/checkout/${c.orderId}/success`}`,
-        failUrl: `${window.location.origin}${c.failPath ?? `/checkout/${c.orderId}/fail`}`,
+        successUrl: `${window.location.origin}${c.successPath ?? `/checkout/success?order=${c.orderId}`}`,
+        failUrl: `${window.location.origin}${c.failPath ?? `/checkout/fail?order=${c.orderId}`}`,
       });
     } catch (e) {
       const code = (e as { code?: string }).code;

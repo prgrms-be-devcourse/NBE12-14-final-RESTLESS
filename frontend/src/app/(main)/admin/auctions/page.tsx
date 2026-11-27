@@ -159,7 +159,7 @@ function Manage() {
                   </small>
                 </div>
                 <div className="fq-order-r fq-row">
-                  <Link className="fq-btn is-ghost is-sm" href={`/auctions/${a.auctionId}`}>
+                  <Link className="fq-btn is-ghost is-sm" href={`/auctions/detail?id=${a.auctionId}`}>
                     보기
                   </Link>
                   <button type="button" className="fq-btn is-ghost is-sm" disabled={busy === a.auctionId} onClick={() => open(a.auctionId)}>
@@ -288,7 +288,7 @@ function AuctionForm({
           {saving ? "저장 중…" : editing ? "고친 내용 저장" : "경매 등록"}
         </button>
         {created ? (
-          <Link className="fq-chip is-mint" href={`/auctions/${created}`}>
+          <Link className="fq-chip is-mint" href={`/auctions/detail?id=${created}`}>
             #{created}, 예정
           </Link>
         ) : null}

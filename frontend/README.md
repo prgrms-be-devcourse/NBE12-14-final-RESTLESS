@@ -14,17 +14,19 @@ npm run dev          # http://localhost:3000
 
 ## 화면
 
+빌드 결과는 S3에 올리는 정적 파일(`output: "export"`)이라 동적 경로를 쓰지 않는다. 상세 화면 id는 쿼리 문자열로 넘긴다.
+
 | 경로 | 내용 | API |
 |---|---|---|
 | `/` | 워프 인트로(길게 눌러 워프) → 스플릿 메뉴 | - |
 | `/home` | 문구 띠, 마감 임박 경매, 드롭·공연·경매, 팬미팅 준비 중 안내 | concerts, drops, auctions |
-| `/concerts`, `/concerts/[id]` | 공연 목록, 회차 선택 | `GET /api/concerts`, `/{id}/performances` |
-| `/performances/[id]` | 좌석 배치도 → 선점 → 체크아웃 | `GET /seats`, `GET /seats/status` (수동 새로고침), `POST /api/ticket-reservations`, `/checkout`, `DELETE` |
-| `/drops`, `/drops/[id]` | 옵션, 배송지 확인 → 결제하기(대기열 입장) → 입장 허가 → 자동 재고 점유와 주문 생성 → 토스 결제창 | `POST /queue/entries`, `GET /queue/me`, `POST /reservations` |
-| `/auctions`, `/auctions/[id]` | 실시간 입찰(SSE `event: auction`) | `GET /stream`, `POST /bids`, `GET /api/me/wallet` |
-| `/fan-meetings`, `/fan-meetings/[id]` | 목록은 API 준비 중 안내, 상세 응모·취소 | `GET /{id}`, `POST/GET/DELETE /applications` |
-| `/fan-meetings/[id]/result` | 추첨 결과: 당첨·예비 순번·미당첨, 결제 포기 | `/result/me`, `/orders/me`, `/orders/{orderId}/decline` |
-| `/checkout/[orderId]` | 공통 결제(금액 고정) → 완료·실패·확인 중 | `GET /api/orders/{id}`, `POST /api/payments`, `/confirm` |
+| `/concerts`, `/concerts/detail?id=` | 공연 목록, 회차 선택 | `GET /api/concerts`, `/{id}/performances` |
+| `/performances?id=` | 좌석 배치도 → 선점 → 체크아웃 | `GET /seats`, `GET /seats/status` (수동 새로고침), `POST /api/ticket-reservations`, `/checkout`, `DELETE` |
+| `/drops`, `/drops/detail?id=` | 옵션, 배송지 확인 → 결제하기(대기열 입장) → 입장 허가 → 자동 재고 점유와 주문 생성 → 토스 결제창 | `POST /queue/entries`, `GET /queue/me`, `POST /reservations` |
+| `/auctions`, `/auctions/detail?id=` | 실시간 입찰(SSE `event: auction`) | `GET /stream`, `POST /bids`, `GET /api/me/wallet` |
+| `/fan-meetings`, `/fan-meetings/detail?id=` | 목록은 API 준비 중 안내, 상세 응모·취소 | `GET /{id}`, `POST/GET/DELETE /applications` |
+| `/fan-meetings/result?id=` | 추첨 결과: 당첨·예비 순번·미당첨, 결제 포기 | `/result/me`, `/orders/me`, `/orders/{orderId}/decline` |
+| `/checkout?order=` | 공통 결제(금액 고정) → 완료·실패·확인 중 | `GET /api/orders/{id}`, `POST /api/payments`, `/confirm` |
 | `/me` | 프로필·배송지 수정, 크레딧, 진행 중 예매, 주문 요약, 회원 탈퇴 | `/api/me/profile`, `/wallet`, `/wallet/grants`, `POST /api/me/withdraw` |
 | `/me/orders` | 주문·참여 내역 6상태(결제 대기·확인 중·완료·만료·포기·환불됨) | `GET /api/me/orders`* |
 | `/admin` | 역할별 드롭 등록·공개 및 팬미팅 등록 | `/api/admin/drops`, `/api/organizer/fan-meetings` |
@@ -34,7 +36,7 @@ npm run dev          # http://localhost:3000
 
 ## 결제 (토스 결제창형)
 
-흐름: `POST /api/payments`(준비) → 토스 결제창(`src/lib/toss.ts`) → `/checkout/[orderId]/success`가 `POST /api/payments/confirm` → 결제 화면이 서버 상태를 보여 줌. 실패와 취소는 `/checkout/[orderId]/fail`.
+흐름: `POST /api/payments`(준비) → 토스 결제창(`src/lib/toss.ts`) → `/checkout/success?order=`가 `POST /api/payments/confirm` → 결제 화면이 서버 상태를 보여 줌. 실패와 취소는 `/checkout/fail?order=`. 토스가 복귀 주소에 `orderId`(PG 주문번호)를 붙이므로 우리 주문 id는 `order`로 넘긴다.
 
 - 프론트: `.env.local`에 `NEXT_PUBLIC_TOSS_CLIENT_KEY`(클라이언트 키만). 기본값은 문서용 공개 테스트 키 `test_gck_docs_*`다.
 - 백엔드: 같은 종류의 시크릿 키가 짝이어야 한다. 예) `PG_PROVIDER=toss TOSS_SECRET_KEY=test_gsk_docs_... ./gradlew bootRun`. 시크릿 키는 서버에서만 읽는다.

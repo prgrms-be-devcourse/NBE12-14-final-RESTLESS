@@ -86,7 +86,7 @@ function Tickets() {
                     </small>
                   </div>
                   <div className="fq-order-r">
-                    <Link className="fq-btn is-ghost is-sm" href={`/me/tickets/${t.ticketId}`}>
+                    <Link className="fq-btn is-ghost is-sm" href={`/me/tickets/detail?id=${t.ticketId}`}>
                       티켓 보기
                     </Link>
                   </div>

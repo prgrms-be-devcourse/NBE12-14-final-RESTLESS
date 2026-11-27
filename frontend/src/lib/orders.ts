@@ -41,5 +41,5 @@ export function checkoutHref(o: { orderId: number; kind: OrderKind; title: strin
   if (o.expired) q.set("expired", "1");
   if (o.back) q.set("back", o.back);
   if (o.eventId !== undefined) q.set("eventId", String(o.eventId));
-  return `/checkout/${o.orderId}?${q.toString()}`;
+  return `/checkout?order=${o.orderId}&${q.toString()}`;
 }

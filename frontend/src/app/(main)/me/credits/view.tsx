@@ -115,8 +115,8 @@ export default function CreditsView() {
       await openTossPayment({
         pgOrderId: prepared.pgOrderId, amount: prepared.amount, orderName: prepared.orderName,
         orderId: charge.chargeId,
-        successPath: `/me/credits/${charge.chargeId}/success`,
-        failPath: `/me/credits/${charge.chargeId}/fail`,
+        successPath: `/me/credits/success?charge=${charge.chargeId}`,
+        failPath: `/me/credits/fail?charge=${charge.chargeId}`,
       }, {
         onCancel: () => toast("결제를 취소했어요. 다시 시도할 수 있어요.", "info"),
         onError: (error) => toast((error as Error).message || "결제창을 열지 못했어요.", "err"),

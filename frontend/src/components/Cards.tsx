@@ -21,7 +21,7 @@ export function DropStatusChip({ item, now }: { item: DropItem; now: number }) {
 export function DropCard({ item }: { item: DropItem }) {
   const now = useNow();
   return (
-    <Link href={`/drops/${item.dropId}`} className="fq-card fq-ccard">
+    <Link href={`/drops/detail?id=${item.dropId}`} className="fq-card fq-ccard">
       <Poster seed={item.dropId + 1} word={firstWord(item.title)} kicker={`DROP #${String(item.dropId).padStart(3, "0")}`} imageUrl={item.imageUrl} ratio="1 / 1" />
       <div className="fq-ccard-b">
         <DropStatusChip item={item} now={now} />
@@ -44,7 +44,7 @@ export function AuctionStatusChip({ a, now }: { a: { status: string; startsAt: s
 export function AuctionCard({ a }: { a: AuctionSummary }) {
   const now = useNow();
   return (
-    <Link href={`/auctions/${a.auctionId}`} className="fq-card fq-ccard">
+    <Link href={`/auctions/detail?id=${a.auctionId}`} className="fq-card fq-ccard">
       <Poster seed={a.auctionId + 3} word={a.itemName} kicker={`LOT ${String(a.auctionId).padStart(2, "0")}`} ratio="4 / 3" />
       <div className="fq-ccard-b">
         <AuctionStatusChip a={a} now={now} />
@@ -59,7 +59,7 @@ export function AuctionCard({ a }: { a: AuctionSummary }) {
 
 export function ConcertCard({ c }: { c: ConcertDetail }) {
   return (
-    <Link href={`/concerts/${c.concertId}`} className="fq-card fq-ccard">
+    <Link href={`/concerts/detail?id=${c.concertId}`} className="fq-card fq-ccard">
       <Poster seed={c.concertId} word={firstWord(c.title)} kicker={c.status === "ON_SALE" ? "ON SALE" : "COMING SOON"} />
       <div className="fq-ccard-b">
         <span className={`fq-chip${c.status === "ON_SALE" ? " is-mint" : ""}`}>{c.status === "ON_SALE" ? "예매 중" : "예매 예정"}</span>
@@ -83,7 +83,7 @@ export function FanMeetingCard({ f }: { f: FanMeetingSummary }) {
   const now = useNow();
   const s = FM_STATUS[f.status] ?? { label: f.status, tone: "" };
   return (
-    <Link href={`/fan-meetings/${f.eventId}`} className="fq-card fq-ccard">
+    <Link href={`/fan-meetings/detail?id=${f.eventId}`} className="fq-card fq-ccard">
       <Poster seed={f.eventId + 4} word={firstWord(f.title)} kicker="FAN MEETING" ratio="4 / 5" />
       <div className="fq-ccard-b">
         <div className="fq-row">

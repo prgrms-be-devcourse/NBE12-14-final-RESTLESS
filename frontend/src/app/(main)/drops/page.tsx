@@ -266,7 +266,7 @@ function Rail({ items, now }: { items: Row[]; now: number }) {
         </div>
         <div ref={trackRef} className="fq-dl-track">
           {items.map(({ d, s }, i) => (
-            <Link key={d.dropId} href={`/drops/${d.dropId}`} className={`fq-dl-card is-${s.toLowerCase()}${i === active ? " is-active" : ""}`} style={{ "--tilt": i % 2 ? 1 : -1 } as React.CSSProperties}>
+            <Link key={d.dropId} href={`/drops/detail?id=${d.dropId}`} className={`fq-dl-card is-${s.toLowerCase()}${i === active ? " is-active" : ""}`} style={{ "--tilt": i % 2 ? 1 : -1 } as React.CSSProperties}>
               <span className="fq-dl-no fq-num" aria-hidden="true">
                 {String(i + 1).padStart(2, "0")}
               </span>
@@ -321,7 +321,7 @@ function NextDrop({ row, now }: { row: Row; now: number }) {
         <br />
         {dateTime(row.d.opensAt)} 오픈
       </p>
-      <Link href={`/drops/${row.d.dropId}`} className="fq-dl-next-cta">
+      <Link href={`/drops/detail?id=${row.d.dropId}`} className="fq-dl-next-cta">
         상품 보기 →
       </Link>
     </section>
@@ -338,7 +338,7 @@ function Archive({ rows }: { rows: Row[] }) {
       <h2>지난 드롭</h2>
       <div className="fq-dl-archive-grid">
         {rows.map(({ d }, i) => (
-          <Link key={d.dropId} href={`/drops/${d.dropId}`} className="fq-dl-archive-card" style={{ animationDelay: `${i * 80}ms` }}>
+          <Link key={d.dropId} href={`/drops/detail?id=${d.dropId}`} className="fq-dl-archive-card" style={{ animationDelay: `${i * 80}ms` }}>
             <Poster seed={d.dropId + 1} word={productWord(d.title)} kicker={`DROP #${String(d.dropId).padStart(3, "0")}`} imageUrl={d.imageUrl} ratio="1 / 1" />
             <b>{d.title}</b>
             <small>{dateOnly(d.closesAt)} 종료</small>

@@ -196,7 +196,7 @@ export default function AuctionShow({ live, now, listId }: { live: AuctionDetail
               <p>
                 시작가 {won(lot.startingPriceAmount)}에서 지금 {lot.highestBid ? `${lot.highestBid.nickname} 님이 앞서고 있어요.` : "첫 입찰을 기다리고 있어요."} 마감까지 <b className="fq-num">{countdown(lot.endsAt, now)}</b>
               </p>
-              <Link href={`/auctions/${lot.auctionId}`} className="fq-show-cta">
+              <Link href={`/auctions/detail?id=${lot.auctionId}`} className="fq-show-cta">
                 이 경매 보기 →
               </Link>
             </>
