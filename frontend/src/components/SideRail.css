@@ -385,6 +385,24 @@
   gap: 8px;
   padding-top: 6px;
 }
+.u040-head-out {
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ux-surface);
+  box-shadow: 0 0 0 1px var(--ux-line);
+  color: var(--ux-ink-3);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.u040-head-out:hover,
+.u040-head-out:focus-visible {
+  color: var(--ux-ink);
+}
 
 /* ── 모바일: 아래쪽 탭 바 ───────────────────────── */
 @media (max-width: 760px) {

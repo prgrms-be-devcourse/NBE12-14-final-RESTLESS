@@ -232,7 +232,12 @@ export default function SideRail({ children }: { children: React.ReactNode }) {
           <div className="u040-head-r">
             <ThemeToggle className="u040-head-theme" />
             <IntroToggle className="u040-head-theme" />
-
+            {/* 레일의 로그아웃은 메뉴를 펼쳐야 보이므로, 메인 화면에서는 머리말에도 둔다 */}
+            {pathname === "/home" && profile ? (
+              <button type="button" className="u040-head-out" onClick={() => logout()}>
+                로그아웃
+              </button>
+            ) : null}
           </div>
         </header>
         <div className="u040-body">{children}</div>
