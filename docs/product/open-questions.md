@@ -41,7 +41,7 @@ PROPOSED 항목이다. 승인 전에는 결정으로 보지 않는다.
 |---|---|
 | Outbox/Kafka 채택 | [ADR-0001](../decisions/0001-event-handling.md) 재검토 조건에 따름 |
 | PostgreSQL 전환 | 비교 실험 후 |
-| Redis 입장 제어 전환 | 비교 실험 후. 대기실을 Redis로 옮기는 안은 [ADR-0006](../decisions/0006-drop-waiting-room-redis.md) PROPOSED 초안이다. 결정은 사람이 하며 승인 전에는 결정으로 보지 않는다 |
+| Redis 입장 제어 전환 | 비교 실험 승인 (2026-11-28). [ADR-0006](../decisions/0006-drop-waiting-room-redis.md)의 (b) 번호표 카운터로 측정하고, 채택은 ADR의 합격 기준으로 정한다. 채택 전에는 정본 문서와 계약을 바꾸지 않는다 |
 | 다중 EC2 도입 | 병목과 목표 확인 후 |
 
 ## 4. 결정됨
