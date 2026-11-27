@@ -3,7 +3,7 @@ import exec from 'k6/execution';
 import { sleep } from 'k6';
 
 export function runHold(data, context) {
-  const { base, performanceId, users, mode, participants, holdDelay, mixedHold, hotSeats, runId, headers, holdAttempts, holdCompleted, replayCompleted, holdErrors, count, holdLatency } = context;
+  const { base, performanceId, users, mode, participants, holdDelay, mixedHold, hotSeats, runId, headers, holdAttempts, holdCompleted, replayCompleted, holdErrors, count, holdLatency, startOffset } = context;
   if (mode === 'mixed' && exec.vu.iterationInScenario > 0) { sleep(1); return; }
   const n = mode === 'mixed' ? exec.vu.idInTest - participants - 1 : exec.scenario.iterationInTest;
   const user = users[mode === 'mixed' ? participants + n : n];
@@ -13,6 +13,7 @@ export function runHold(data, context) {
   const body = JSON.stringify({ performanceId, seatIds: ids });
   const request = () => http.post(`${base}/api/ticket-reservations`, body, { headers: headers(user, key), tags: { name: 'POST reservation' } });
   holdAttempts.add(1);
+  startOffset.add(Date.now() - exec.scenario.startTime, { phase: 'hold' });
   const res = request();
   holdCompleted.add(1);
   let code = '', reservationId; try { const json = res.json(); code = json.code; reservationId = json.reservationId; } catch (_) { /* malformed */ }

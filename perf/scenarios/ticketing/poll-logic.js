@@ -3,17 +3,15 @@ import exec from 'k6/execution';
 import { sleep } from 'k6';
 
 export function runPoll(data, context) {
-  const { base, performanceId, users, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, burstStartDelay, refreshCount, refreshInterval, refreshRequests } = context;
+  const { base, performanceId, users, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, refreshCount, refreshInterval, refreshRequests } = context;
   const user = users[exec.vu.idInTest - 1];
-  if (mode === 'burst') {
-    const wait = data.burstAt - Date.now();
-    if (wait > 0) sleep(wait / 1000);
-    burstStartDelay.add(Date.now() - data.burstAt);
-  }
   // 분산 진입은 자동 갱신이 아니라 최초 요청의 시작 시간만 3초에 분산한다.
-  if (entry === 'spread' && mode !== 'burst') sleep(3 * (exec.vu.idInTest - 1) / (mode === 'mixed' ? participants : vus));
+  if (entry === 'spread') sleep(3 * (exec.vu.idInTest - 1) / (mode === 'mixed' ? participants : vus));
+  // page와 mixed 조회자는 화면 진입처럼 좌석과 구매 가능 정보를 함께 조회한다.
+  const pageEntry = mode === 'page' || mode === 'mixed';
   let res, pageElapsed, availabilityValid = false;
-  if (mode === 'page') {
+  startOffset.add(Date.now() - exec.scenario.startTime, { phase: 'entry' });
+  if (pageEntry) {
     const pageStart = Date.now();
     const responses = http.batch([
       ['GET', `${base}/api/performances/${performanceId}/seats`, null, { headers: seatHeaders(user), tags: { name: 'GET seats', phase: 'entry' } }],
@@ -32,9 +30,9 @@ export function runPoll(data, context) {
   seatEncodingErrors.add(!encodingMatches(res));
   let seats; try { seats = res.json(); } catch (_) { /* malformed */ }
   const initialOk = res.status === 200 && Array.isArray(seats) && seats.length === data.seatCount;
-  if (mode === 'page') pageEntryLatency.add(pageElapsed, { outcome: initialOk && availabilityValid && encodingMatches(res) ? 'ok' : 'error' });
+  if (pageEntry) pageEntryLatency.add(pageElapsed, { outcome: initialOk && availabilityValid && encodingMatches(res) ? 'ok' : 'error' });
   pollRequests.add(1); pollErrors.add(!initialOk); count(initialOk ? 'poll_ok' : 'poll_error', !initialOk); pollLatency.add(res.timings.duration, { outcome: initialOk ? 'ok' : 'error', phase: 'entry' });
-  if (!initialOk || mode === 'burst') return;
+  if (!initialOk) return;
   let ids = seats.map(s => s.seatId);
   for (let i = 0; i < refreshCount; i++) {
     sleep(refreshInterval);

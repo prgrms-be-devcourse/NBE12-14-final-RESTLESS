@@ -19,7 +19,7 @@ function positive(name, fallback) {
   if (!Number.isSafeInteger(n) || n < 1) throw new Error(`${name} must be a positive integer`);
   return n;
 }
-if (!['poll', 'page', 'burst', 'distributed', 'hot', 'overlap', 'replay', 'mixed'].includes(mode)) throw new Error('invalid MODE');
+if (!['poll', 'page', 'distributed', 'hot', 'overlap', 'replay', 'mixed'].includes(mode)) throw new Error('invalid MODE');
 const performanceId = positive('PERFORMANCE_ID', 0);
 const participants = positive('PARTICIPANTS', 100);
 const vus = positive('VUS', mode === 'poll' ? participants : 50);
@@ -39,14 +39,12 @@ if (setupMode === 'self' && totalUsers > 1000) throw new Error('self setup suppo
 const refreshCount = Number(__ENV.REFRESH_COUNT || 0);
 if (!Number.isSafeInteger(refreshCount) || refreshCount < 0 || refreshCount > 100) throw new Error('REFRESH_COUNT must be an integer from 0 to 100');
 const refreshInterval = positive('REFRESH_INTERVAL_SECONDS', 30);
-if (mode === 'burst' && refreshCount) throw new Error('burst does not support manual refresh');
-const burstDelay = positive('BURST_DELAY_SECONDS', 20);
-const entry = fixedEntry || __ENV.POLL_ENTRY || 'spread';
+// 진입 방식은 화면 진입(page, mixed 조회자)에만 적용한다. 좌석 조회(poll)와 선점 시나리오는 항상 동시 출발한다.
+const entry = mode === 'page' || mode === 'mixed' ? (fixedEntry || __ENV.POLL_ENTRY || 'spread') : 'simultaneous';
 if (!['spread', 'simultaneous'].includes(entry)) throw new Error('POLL_ENTRY must be spread or simultaneous');
 const runId = __ENV.RUN_ID;
 if (!runId || !/^[a-zA-Z0-9_-]{1,40}$/.test(runId)) throw new Error('RUN_ID is required (1-40 letters, numbers, _ or -)');
-if ((mode === 'poll' || mode === 'page' || mode === 'burst') && vus !== participants) throw new Error('poll and burst require VUS=PARTICIPANTS');
-if (mode === 'burst' && setupMode !== 'csv') throw new Error('burst requires CSV accounts');
+if ((mode === 'poll' || mode === 'page') && vus !== participants) throw new Error('poll and page require VUS=PARTICIPANTS');
 const users = setupMode === 'csv' ? new SharedArray('users', () => {
   const lines = open(__ENV.USERS_CSV || '../../seed/out/users.csv').trim().split('\n');
   const header = lines.shift().trim().split(',');
@@ -58,14 +56,14 @@ if (setupMode === 'csv' && (users.length < totalUsers || users.some(u => !u.id |
   throw new Error('users.csv needs enough distinct user IDs and access tokens');
 const options = {
   setupTimeout: '10m',
-  scenarios: { ticketing: ['burst', 'poll', 'page', 'mixed'].includes(mode)
+  scenarios: { ticketing: ['poll', 'page', 'mixed'].includes(mode)
     ? { executor: 'per-vu-iterations', vus: mode === 'mixed' ? totalUsers : vus, iterations: 1, maxDuration: __ENV.MAX_DURATION || '5m' }
     : { executor: 'shared-iterations', vus, iterations: participants, maxDuration: __ENV.MAX_DURATION || '5m' } },
   thresholds: {
     ticket_unexpected: ['rate==0'],
-    ...(['poll', 'page', 'burst', 'mixed'].includes(mode) ? { ticket_seat_encoding_errors: ['rate==0'] } : {}),
-    ...(mode === 'page' ? { ticket_availability_requests: ['count>0'], ticket_availability_errors: ['rate==0'] } : {}),
-    ...(mode !== 'poll' && mode !== 'page' && mode !== 'burst' ? {
+    ...(['poll', 'page', 'mixed'].includes(mode) ? { ticket_seat_encoding_errors: ['rate==0'] } : {}),
+    ...(['page', 'mixed'].includes(mode) ? { ticket_availability_requests: ['count>0'], ticket_availability_errors: ['rate==0'] } : {}),
+    ...(mode !== 'poll' && mode !== 'page' ? {
       ticket_hold_attempts: [`count==${mode === 'mixed' ? holdParticipants : participants}`],
       ticket_hold_completed: [`count==${mode === 'mixed' ? holdParticipants : participants}`],
       ...(mode === 'replay' ? { ticket_replay_completed: [`count==${participants}`] } : {}),
@@ -88,10 +86,11 @@ const options = {
     ...(mode === 'mixed' ? { ticket_poll_requests: [`count>=${participants}`], ticket_poll_errors: ['rate==0'], ticket_hold_errors: ['rate==0'] } : {}),
     ...(['poll', 'page'].includes(mode) ? { ticket_poll_requests: [`count>=${participants}`], ticket_poll_errors: ['rate==0'] } : {}),
     ...(refreshCount && ['poll', 'page', 'mixed'].includes(mode) ? { ticket_refresh_requests: [`count==${participants * refreshCount}`] } : {}),
-    ...(mode === 'burst' ? { ticket_poll_requests: [`count==${participants}`], ticket_poll_errors: ['rate==0'] } : {}),
     'ticket_poll_duration{outcome:ok}': [],
     'ticket_poll_duration{phase:entry}': [],
-    ...(mode === 'page' ? { 'ticket_page_entry_duration{outcome:ok}': [], 'ticket_page_entry_duration{outcome:error}': [] } : {}),
+    ...(['page', 'mixed'].includes(mode) ? { 'ticket_page_entry_duration{outcome:ok}': [], 'ticket_page_entry_duration{outcome:error}': [] } : {}),
+    'ticket_start_offset{phase:entry}': [],
+    ...(mode !== 'poll' && mode !== 'page' ? { 'ticket_start_offset{phase:hold}': [] } : {}),
   },
   summaryTrendStats: ['count', 'avg', 'med', 'p(95)', 'p(99)', 'max'],
 };
@@ -106,7 +105,8 @@ const holdAttempts = new Counter('ticket_hold_attempts');
 const holdCompleted = new Counter('ticket_hold_completed');
 const replayCompleted = new Counter('ticket_replay_completed');
 const pollLatency = new Trend('ticket_poll_duration', true);
-const burstStartDelay = new Trend('ticket_burst_start_delay', true);
+// 시나리오 시작부터 사용자의 첫 요청 직전까지. 동시 출발이 실제로 지켜졌는지 확인한다.
+const startOffset = new Trend('ticket_start_offset', true);
 const seatGzipResponses = new Counter('ticket_seat_gzip_responses');
 const seatEncodingErrors = new Rate('ticket_seat_encoding_errors');
 const availabilityRequests = new Counter('ticket_availability_requests');
@@ -148,39 +148,34 @@ function setup() {
   if (!Array.isArray(seats)) fail('seat probe did not return an array');
   const ids = seats.filter(s => s.status === 'AVAILABLE').map(s => s.seatId);
   if (!seats.length) fail('performance has no seats');
-  if (mode !== 'poll' && mode !== 'page' && mode !== 'burst' && !ids.length) fail('no available seats');
+  if (mode !== 'poll' && mode !== 'page' && !ids.length) fail('no available seats');
   if ((mode === 'distributed' || mode === 'replay') && ids.length < participants) fail('not enough available seats');
   if (mode === 'mixed' && mixedHold === 'distributed' && ids.length < holdParticipants) fail('not enough available seats for mixed distributed holds');
   if ((mode === 'hot' || (mode === 'mixed' && mixedHold === 'hot')) && ids.length < hotSeats) fail('not enough hot seats');
   if (mode === 'overlap' && (ids.length < 3 || participants < 2)) fail('overlap needs at least 3 seats and 2 users');
-  console.log(`mode=${mode} entry=${mode === 'poll' ? entry : 'n/a'} performance=${performanceId} seats=${seats.length} available=${ids.length} pollUsers=${participants} holdUsers=${holdParticipants} mixedHold=${mode === 'mixed' ? mixedHold : 'n/a'} run=${runId}`);
-  if (mode !== 'poll' && mode !== 'page' && mode !== 'burst') { holdAttempts.add(0); holdCompleted.add(0); }
+  console.log(`mode=${mode} entry=${entry} performance=${performanceId} seats=${seats.length} available=${ids.length} pollUsers=${participants} holdUsers=${holdParticipants} mixedHold=${mode === 'mixed' ? mixedHold : 'n/a'} run=${runId}`);
+  if (mode !== 'poll' && mode !== 'page') { holdAttempts.add(0); holdCompleted.add(0); }
   if (mode === 'replay') replayCompleted.add(0);
   if (mode === 'mixed') pollRequests.add(0);
   if (refreshCount && ['poll', 'page', 'mixed'].includes(mode)) refreshRequests.add(0);
-  if (mode === 'burst') {
-    const burstAt = Date.now() + burstDelay * 1000;
-    console.log(`burst scheduled=${new Date(burstAt).toISOString()} participants=${participants}`);
-    return { seatCount: seats.length, burstAt };
-  }
   return { ids, seatCount: seats.length, seatIds: seats.map(s => s.seatId), users: activeUsers };
 }
 function run(data) {
-  const activeUsers = mode === 'burst' ? users : data.users;
-  const pollUser = mode === 'poll' || mode === 'page' || mode === 'burst' || (mode === 'mixed' && exec.vu.idInTest <= participants);
+  const activeUsers = data.users;
+  const pollUser = mode === 'poll' || mode === 'page' || (mode === 'mixed' && exec.vu.idInTest <= participants);
   if (pollUser) {
-    return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, burstStartDelay, refreshCount, refreshInterval, refreshRequests });
+    return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, refreshCount, refreshInterval, refreshRequests });
   }
-  return runHold(data, { base, performanceId, users: activeUsers, mode, participants, holdDelay, mixedHold, hotSeats, runId, headers, holdAttempts, holdCompleted, replayCompleted, holdErrors, count, holdLatency });
+  return runHold(data, { base, performanceId, users: activeUsers, mode, participants, holdDelay, mixedHold, hotSeats, runId, headers, holdAttempts, holdCompleted, replayCompleted, holdErrors, count, holdLatency, startOffset });
 }
 function handleSummary(data) {
   const { setup_data: setupData, ...safeData } = data;
   const safeSetup = setupData ? { ...setupData, ...(Array.isArray(setupData.users) ? { users: setupData.users.map(user => ({ id: user.id })) } : {}) } : setupData;
-  const report = { ...safeData, setup_data: safeSetup, conditions: { mode, entry: mode === 'poll' || mode === 'page' || mode === 'mixed' ? entry : null,
+  const report = { ...safeData, setup_data: safeSetup, conditions: { mode, entry,
     mixedHold: mode === 'mixed' ? mixedHold : null, performanceId, participants, holdParticipants,
     vus: mode === 'mixed' ? totalUsers : vus, refreshCount, refreshIntervalSeconds: refreshCount ? refreshInterval : null,
     maxDuration: __ENV.MAX_DURATION || '5m',
-    hotSeats, holdDelaySeconds: mode === 'mixed' ? holdDelay : null, burstDelaySeconds: mode === 'burst' ? burstDelay : null, seatEncoding, runId, baseUrl: base, rowOffset } };
+    hotSeats, holdDelaySeconds: mode === 'mixed' ? holdDelay : null, seatEncoding, runId, baseUrl: base, rowOffset } };
   const out = { stdout: JSON.stringify(report, null, 2) };
   if (__ENV.SUMMARY_PATH) out[__ENV.SUMMARY_PATH] = JSON.stringify(report, null, 2);
   return out;

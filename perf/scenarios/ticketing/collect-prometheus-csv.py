@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 
 
 SCENARIOS = {
-    "spread", "simultaneous", "burst", "page", "hot", "overlap", "distributed", "replay",
+    "simultaneous", "page", "hot", "overlap", "distributed", "replay",
     "mixed", "mixed-distributed",
 }
 SAMPLE = re.compile(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{.*\})?\s+(\S+)(?:\s+\d+)?$")
