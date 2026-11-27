@@ -57,6 +57,7 @@ class DropQueueIntegrationTest {
     @Autowired javax.sql.DataSource dataSource;
     @Autowired MutableClock clock;
     @Autowired MeterRegistry meters;
+    @Autowired com.restless.drop.infrastructure.DropQueueEntryRepository entries;
     private final Instant opens = Instant.parse("2026-11-20T03:00:00Z");
     private Long user;
     private Long drop;
@@ -170,6 +171,55 @@ class DropQueueIntegrationTest {
         job.runOnce();
         assertThat(entryStatus()).isEqualTo("EXPIRED");
         assertThat(queue.me(drop, later).orElseThrow().status()).isEqualTo(DropQueueStatus.UNAVAILABLE);
+    }
+
+    /** #519: the closing query reads one status in index order, so its lock stops at the batch limit. */
+    @Test
+    void soldOutClosingQueryReadsIndexOrderWithoutSort() {
+        var sql = com.restless.drop.infrastructure.DropQueueEntryRepository.LOCK_LIVE_BY_STATUS
+                .replace(":variantId", "?").replace(":status", "?").replace(":batch", "?");
+        var plan = jdbc.queryForList("EXPLAIN " + sql, variant, "WAITING", 100);
+        assertThat(plan).hasSize(1);
+        assertThat(plan.get(0).get("key")).isEqualTo("ix_drop_queue_sku_order");
+        assertThat(String.valueOf(plan.get(0).get("Extra"))).doesNotContain("filesort");
+    }
+
+    /** #519: a sold-out closing batch locks only its own rows, so a heartbeat on a row outside the batch does not wait. */
+    @Test
+    void soldOutClosingBatchDoesNotLockRowsOutsideTheBatch() throws Exception {
+        int size = DropQueueAdmissionTransactions.CLOSE_BATCH_SIZE;
+        Long outside = null;
+        for (int i = 0; i <= size; i++) {
+            Long member = newUser();
+            queue.enter(drop, member, variant);
+            outside = member;
+        }
+        Long outsideId = jdbc.queryForObject("SELECT MAX(id) FROM drop_queue_entries WHERE drop_id=? AND user_id=?",
+                Long.class, drop, outside);
+        var locked = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            // Production runs the closing batch in READ COMMITTED (DropQueueAdmissionTransactions.runBatch).
+            var readCommitted = new TransactionTemplate(transactions.getTransactionManager());
+            readCommitted.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+            Future<Integer> holder = executor.submit(() -> readCommitted.execute(status -> {
+                int rows = entries.lockLive(variant, size).size();
+                locked.countDown();
+                try { release.await(10, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                return rows;
+            }));
+            try {
+                assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
+                try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+                    statement.execute("SET SESSION innodb_lock_wait_timeout = 1");
+                    assertThat(statement.executeUpdate("UPDATE drop_queue_entries SET last_seen_at = last_seen_at WHERE id = "
+                            + outsideId)).isEqualTo(1);
+                }
+            } finally {
+                release.countDown();
+            }
+            assertThat(holder.get(10, TimeUnit.SECONDS)).isEqualTo(size);
+        }
     }
 
     @Test
