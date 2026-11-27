@@ -4,6 +4,7 @@ import exec from 'k6/execution';
 import { fail, sleep } from 'k6';
 import { runPoll } from './poll-logic.js';
 import { runHold } from './hold-logic.js';
+import { runCheckout } from './checkout-logic.js';
 import { SharedArray } from 'k6/data';
 import { Counter, Trend, Rate } from 'k6/metrics';
 
@@ -19,7 +20,7 @@ function positive(name, fallback) {
   if (!Number.isSafeInteger(n) || n < 1) throw new Error(`${name} must be a positive integer`);
   return n;
 }
-if (!['poll', 'page', 'distributed', 'hot', 'overlap', 'replay', 'mixed'].includes(mode)) throw new Error('invalid MODE');
+if (!['poll', 'page', 'distributed', 'hot', 'overlap', 'replay', 'mixed', 'checkout'].includes(mode)) throw new Error('invalid MODE');
 const performanceId = positive('PERFORMANCE_ID', 0);
 const participants = positive('PARTICIPANTS', 100);
 const vus = positive('VUS', mode === 'poll' ? participants : 50);
@@ -27,6 +28,8 @@ const hotSeats = positive('HOT_SEATS', 1);
 const holdParticipants = mode === 'mixed' ? positive('HOLD_PARTICIPANTS', 20) : 0;
 // 0이면 바로 출발, 양수면 준비가 끝난 뒤 N초 뒤의 같은 시각에 함께 출발한다(대규모 동시 출발용). 조회·화면 진입·혼합에 적용한다.
 const startDelay = Number(__ENV.START_DELAY_SECONDS || 0);
+// checkout에서 선점 전에 좌석 화면 진입(좌석·구매 가능 정보)을 함께 보낼지. 1이면 보낸다.
+const checkoutPageEntry = (__ENV.CHECKOUT_PAGE_ENTRY || '0') === '1';
 if (!Number.isSafeInteger(startDelay) || startDelay < 0 || startDelay > 600) throw new Error('START_DELAY_SECONDS must be an integer from 0 to 600');
 const mixedHold = fixedMixedHold || __ENV.MIXED_HOLD || 'hot';
 if (mode === 'mixed' && !['hot', 'distributed'].includes(mixedHold)) throw new Error('MIXED_HOLD must be hot or distributed');
@@ -86,6 +89,12 @@ const options = {
       'ticket_hold_duration{outcome:unavailable}': [],
       'ticket_hold_duration{outcome:lock_timeout}': [],
       ...(mode === 'replay' ? { 'ticket_hold_duration{outcome:replay_ok}': [] } : {}),
+      ...(mode === 'checkout' ? {
+        'ticket_outcomes{outcome:prepared}': [],
+        'ticket_checkout_duration{outcome:ok}': [], 'ticket_checkout_duration{outcome:lock_timeout}': [], 'ticket_checkout_duration{outcome:error}': [],
+        'ticket_payment_prepare_duration{outcome:ok}': [], 'ticket_payment_prepare_duration{outcome:error}': [],
+        'ticket_journey_duration{outcome:ok}': [], 'ticket_journey_duration{outcome:error}': [],
+      } : {}),
     } : {}),
     ...(mode === 'mixed' ? { ticket_poll_requests: [`count>=${participants}`], ticket_poll_errors: ['rate==0'], ticket_hold_errors: ['rate==0'] } : {}),
     ...(['poll', 'page'].includes(mode) ? { ticket_poll_requests: [`count>=${participants}`], ticket_poll_errors: ['rate==0'] } : {}),
@@ -120,6 +129,12 @@ const availabilityErrors = new Rate('ticket_availability_errors');
 const availabilityLatency = new Trend('ticket_availability_duration', true);
 const pageEntryLatency = new Trend('ticket_page_entry_duration', true);
 const holdLatency = new Trend('ticket_hold_duration', true);
+const checkoutLatency = new Trend('ticket_checkout_duration', true);
+const prepareLatency = new Trend('ticket_payment_prepare_duration', true);
+// checkout: 선점 요청 시작부터 결제 준비 응답까지(화면 진입 제외).
+const journeyLatency = new Trend('ticket_journey_duration', true);
+const checkoutCompleted = new Counter('ticket_checkout_completed');
+const prepareCompleted = new Counter('ticket_payment_prepare_completed');
 function count(outcome, bad) { outcomes.add(1, { outcome }); unexpected.add(bad); }
 function headers(user, key) { return { Authorization: `Bearer ${user.token}`, 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) }; }
 function seatHeaders(user) { return { ...headers(user), 'Accept-Encoding': seatEncoding }; }
@@ -155,13 +170,14 @@ function setup() {
   const ids = seats.filter(s => s.status === 'AVAILABLE').map(s => s.seatId);
   if (!seats.length) fail('performance has no seats');
   if (mode !== 'poll' && mode !== 'page' && !ids.length) fail('no available seats');
-  if ((mode === 'distributed' || mode === 'replay') && ids.length < participants) fail('not enough available seats');
+  if ((mode === 'distributed' || mode === 'replay' || mode === 'checkout') && ids.length < participants) fail('not enough available seats');
   if (mode === 'mixed' && mixedHold === 'distributed' && ids.length < holdParticipants) fail('not enough available seats for mixed distributed holds');
   if ((mode === 'hot' || (mode === 'mixed' && mixedHold === 'hot')) && ids.length < hotSeats) fail('not enough hot seats');
   if (mode === 'overlap' && (ids.length < 3 || participants < 2)) fail('overlap needs at least 3 seats and 2 users');
   console.log(`mode=${mode} entry=${entry} performance=${performanceId} seats=${seats.length} available=${ids.length} pollUsers=${participants} holdUsers=${holdParticipants} mixedHold=${mode === 'mixed' ? mixedHold : 'n/a'} run=${runId}`);
   if (mode !== 'poll' && mode !== 'page') { holdAttempts.add(0); holdCompleted.add(0); }
   if (mode === 'replay') replayCompleted.add(0);
+  if (mode === 'checkout') { checkoutCompleted.add(0); prepareCompleted.add(0); }
   if (mode === 'mixed') pollRequests.add(0);
   if (refreshCount && ['poll', 'page', 'mixed'].includes(mode)) refreshRequests.add(0);
   const startAt = startDelay ? Date.now() + startDelay * 1000 : null;
@@ -176,6 +192,11 @@ function run(data) {
   if (pollUser) {
     return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, entryEndOffset, origin, refreshCount, refreshInterval, refreshRequests });
   }
+  if (mode === 'checkout') {
+    return runCheckout(data, { base, performanceId, users: activeUsers, runId, origin, headers, seatHeaders, count, startOffset,
+      pageEntry: checkoutPageEntry, holdAttempts, holdCompleted, holdLatency, checkoutLatency, prepareLatency, journeyLatency,
+      checkoutCompleted, prepareCompleted });
+  }
   return runHold(data, { base, performanceId, users: activeUsers, mode, participants, holdParticipants, entry, origin, mixedHold, hotSeats, runId, headers, holdAttempts, holdCompleted, replayCompleted, holdErrors, count, holdLatency, startOffset });
 }
 function handleSummary(data) {
@@ -185,7 +206,7 @@ function handleSummary(data) {
     mixedHold: mode === 'mixed' ? mixedHold : null, performanceId, participants, holdParticipants,
     vus: mode === 'mixed' ? totalUsers : vus, refreshCount, refreshIntervalSeconds: refreshCount ? refreshInterval : null,
     maxDuration: __ENV.MAX_DURATION || '5m',
-    hotSeats, startDelaySeconds: startDelay || null, seatEncoding, runId, baseUrl: base, rowOffset } };
+    hotSeats, startDelaySeconds: startDelay || null, checkoutPageEntry: mode === 'checkout' ? checkoutPageEntry : null, seatEncoding, runId, baseUrl: base, rowOffset } };
   const out = { stdout: JSON.stringify(report, null, 2) };
   if (__ENV.SUMMARY_PATH) out[__ENV.SUMMARY_PATH] = JSON.stringify(report, null, 2);
   return out;

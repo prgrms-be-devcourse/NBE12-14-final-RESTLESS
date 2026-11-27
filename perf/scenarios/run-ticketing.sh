@@ -11,18 +11,19 @@ SCENARIO:
   hot, overlap               인기 좌석 또는 겹치는 좌석 선점 경쟁 (동시 진입)
   distributed, replay        서로 다른 좌석 선점 또는 멱등성 재요청 (동시 진입)
   mixed, mixed-distributed   화면 진입 80% + 선점 20% (인기 좌석 또는 분산)
+  checkout                   서로 다른 좌석 선점 → checkout → 결제 준비 (승인 없음, 동시 진입)
 
 USERS는 전체 테스트 사용자 수다. 예: run-ticketing.sh page 100
 필수 환경변수: BASE_URL, PERFORMANCE_ID, MANAGEMENT_URL, PERF_ALLOWED_APP_HOSTS
 인증: USERS_CSV 또는 SETUP=self (시드 계정 로그인)
 선택 환경변수: MAX_DURATION, REFRESH_COUNT, REFRESH_INTERVAL_SECONDS, HOT_SEATS,
-              POLL_ENTRY (page/mixed), START_DELAY_SECONDS (simultaneous/page/mixed), SEAT_ENCODING, MANAGEMENT_URL, K6_BIN
+              POLL_ENTRY (page/mixed), START_DELAY_SECONDS (simultaneous/page/mixed), CHECKOUT_PAGE_ENTRY (checkout), SEAT_ENCODING, MANAGEMENT_URL, K6_BIN
 HELP
 }
 if [[ "${1:-}" == '-h' || "${1:-}" == '--help' ]]; then usage; exit 0; fi
 [[ $# == 2 ]] || { usage >&2; exit 2; }
 scenario="$1"
-case "$scenario" in simultaneous|page|hot|overlap|distributed|replay|mixed|mixed-distributed) ;; *) echo "알 수 없는 시나리오: $scenario" >&2; usage >&2; exit 2;; esac
+case "$scenario" in simultaneous|page|hot|overlap|distributed|replay|mixed|mixed-distributed|checkout) ;; *) echo "알 수 없는 시나리오: $scenario" >&2; usage >&2; exit 2;; esac
 [[ "$2" =~ ^[1-9][0-9]{0,5}$ ]] || { echo 'USERS는 1~999999 사이의 양의 정수여야 합니다.' >&2; exit 2; }
 users="$2"
 for name in BASE_URL PERFORMANCE_ID MANAGEMENT_URL PERF_ALLOWED_APP_HOSTS; do
@@ -45,7 +46,7 @@ export MIXED_HOLD=hot
 case "$scenario" in
   simultaneous) export MODE=poll ;;
   page) export MODE=page POLL_ENTRY="${POLL_ENTRY:-spread}" ;;
-  hot|overlap|distributed|replay) export MODE="$scenario" ;;
+  hot|overlap|distributed|replay|checkout) export MODE="$scenario" ;;
   mixed|mixed-distributed)
     readers=$(( users * 4 / 5 )); holders=$(( users - readers ))
     (( readers > 0 && holders > 0 )) || { echo '혼합 시나리오는 최소 2명이 필요합니다.' >&2; exit 2; }
