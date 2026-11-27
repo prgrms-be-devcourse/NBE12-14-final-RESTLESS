@@ -6,7 +6,7 @@ export const sectionName = (name: string) => name.endsWith("구역") ? name : `$
 // ID, 좌석명, 가격, 상태는 그대로 사용한다.
 // 일반 배치는 구역 내부 좌표를 유지하고, 겹치는 구역만 화면에서 아래로 옮긴다.
 export function spacedMapSeats(seats: TicketSeatInfo[]): TicketSeatInfo[] {
-  if (!isLocalArcSample(seats)) return separateSections(seats);
+  if (!isLocalArcSample(seats)) return separateSections(widenTightLayout(seats));
   const centers: Record<string, [number, number]> = { A: [150, 6], B: [90, 8], C: [30, 6] };
   return seats.map((seat) => {
     const [center, count] = centers[seat.sectionLabel.replace(/구역$/, "").trim()];
@@ -14,6 +14,35 @@ export function spacedMapSeats(seats: TicketSeatInfo[]): TicketSeatInfo[] {
     const angle = (center + ((count + 1) / 2 - Number(seat.seatNumber)) * 8) * Math.PI / 180;
     return { ...seat, posX: 450 + radius * Math.cos(angle), posY: 80 + radius * Math.sin(angle) };
   });
+}
+
+// 확대한 좌석(16px)이 겹치지 않는 최소 좌석 간격. 성능 시드처럼 좌표가 1칸 단위인 배치는 이 간격으로 넓힌다.
+const MIN_PITCH = 20;
+
+/** 같은 열 안의 가로 간격과 열 사이 세로 간격 중 가장 좁은 값. 좌석이 하나뿐이면 Infinity */
+export function seatPitch(seats: TicketSeatInfo[]) {
+  const minGap = (values: number[]) => {
+    const sorted = Array.from(new Set(values)).sort((a, b) => a - b);
+    let gap = Infinity;
+    for (let i = 1; i < sorted.length; i++) gap = Math.min(gap, sorted[i] - sorted[i - 1]);
+    return gap;
+  };
+  const rows = new Map<string, number[]>();
+  const rowYs = new Map<string, number[]>();
+  for (const s of seats) {
+    const row = `${s.sectionLabel}/${s.rowLabel}`;
+    rows.set(row, [...(rows.get(row) ?? []), Number(s.posX)]);
+    rowYs.set(s.sectionLabel, [...(rowYs.get(s.sectionLabel) ?? []), Number(s.posY)]);
+  }
+  return Math.min(...Array.from(rows.values()).concat(Array.from(rowYs.values())).map(minGap));
+}
+
+/** 좌석 간격이 좌석 크기보다 좁으면 좌표 전체를 같은 배율로 넓힌다. 구역 배치 모양은 그대로다 */
+export function widenTightLayout(seats: TicketSeatInfo[]): TicketSeatInfo[] {
+  const pitch = seatPitch(seats);
+  if (!Number.isFinite(pitch) || pitch <= 0 || pitch >= MIN_PITCH) return seats;
+  const k = MIN_PITCH / pitch;
+  return seats.map((s) => ({ ...s, posX: Number(s.posX) * k, posY: Number(s.posY) * k }));
 }
 
 const SECTION_TOP = 10;
