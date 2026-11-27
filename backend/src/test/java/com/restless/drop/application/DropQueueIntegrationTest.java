@@ -57,6 +57,8 @@ class DropQueueIntegrationTest {
     @Autowired javax.sql.DataSource dataSource;
     @Autowired MutableClock clock;
     @Autowired MeterRegistry meters;
+    @Autowired com.restless.drop.infrastructure.DropQueueEntryRepository entries;
+    @Autowired org.testcontainers.mysql.MySQLContainer mysql;
     private final Instant opens = Instant.parse("2026-11-20T03:00:00Z");
     private Long user;
     private Long drop;
@@ -172,6 +174,71 @@ class DropQueueIntegrationTest {
         assertThat(queue.me(drop, later).orElseThrow().status()).isEqualTo(DropQueueStatus.UNAVAILABLE);
     }
 
+    /** #519: the closing query reads one status in index order, so its lock stops at the batch limit. */
+    @Test
+    void soldOutClosingQueryReadsIndexOrderWithoutSort() {
+        var sql = com.restless.drop.infrastructure.DropQueueEntryRepository.LOCK_LIVE_BY_STATUS
+                .replace(":variantId", "?").replace(":status", "?").replace(":batch", "?");
+        var plan = jdbc.queryForList("EXPLAIN " + sql, variant, "WAITING", 100);
+        assertThat(plan).hasSize(1);
+        assertThat(plan.get(0).get("key")).isEqualTo("ix_drop_queue_sku_order");
+        assertThat(String.valueOf(plan.get(0).get("Extra"))).doesNotContain("filesort");
+    }
+
+    /** #519: a sold-out closing batch locks only its own rows, so a heartbeat on a row outside the batch does not wait. */
+    @Test
+    void soldOutClosingBatchDoesNotLockRowsOutsideTheBatch() throws Exception {
+        int size = DropQueueAdmissionTransactions.CLOSE_BATCH_SIZE;
+        Long outside = null;
+        for (int i = 0; i <= size; i++) {
+            Long member = newUser();
+            queue.enter(drop, member, variant);
+            outside = member;
+        }
+        Long outsideId = jdbc.queryForObject("SELECT MAX(id) FROM drop_queue_entries WHERE drop_id=? AND user_id=?",
+                Long.class, drop, outside);
+        var locked = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            // Production runs the closing batch in READ COMMITTED (DropQueueAdmissionTransactions.runBatch).
+            var readCommitted = new TransactionTemplate(transactions.getTransactionManager());
+            readCommitted.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+            var holderThread = new java.util.concurrent.atomic.AtomicLong();
+            Future<Integer> holder = executor.submit(() -> readCommitted.execute(status -> {
+                int rows = entries.lockLive(variant, size).size();
+                holderThread.set(jdbc.queryForObject("SELECT PS_CURRENT_THREAD_ID()", Long.class));
+                locked.countDown();
+                try { release.await(10, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                return rows;
+            }));
+            try {
+                assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
+                try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+                    statement.execute("SET SESSION innodb_lock_wait_timeout = 1");
+                    assertThat(statement.executeUpdate("UPDATE drop_queue_entries SET last_seen_at = last_seen_at WHERE id = "
+                            + outsideId)).isEqualTo(1);
+                }
+                // Plan-independent guard: the batch's row locks come through the per-status index and stay within
+                // the batch, whatever plan this small test database would pick for a single IN query.
+                // data_locks needs a privilege the application user lacks; the container root shares its password.
+                var locksByIndex = new java.util.HashMap<String, Long>();
+                try (var root = java.sql.DriverManager.getConnection(mysql.getJdbcUrl(), "root", mysql.getPassword());
+                     var query = root.prepareStatement("""
+                             SELECT INDEX_NAME, COUNT(*) FROM performance_schema.data_locks
+                             WHERE THREAD_ID = ? AND OBJECT_NAME = 'drop_queue_entries' AND LOCK_TYPE = 'RECORD'
+                             GROUP BY INDEX_NAME""")) {
+                    query.setLong(1, holderThread.get());
+                    try (var rs = query.executeQuery()) { while (rs.next()) locksByIndex.put(rs.getString(1), rs.getLong(2)); }
+                }
+                assertThat(locksByIndex).containsKey("ix_drop_queue_sku_order");
+                assertThat(locksByIndex.getOrDefault("PRIMARY", 0L)).isLessThanOrEqualTo(size);
+            } finally {
+                release.countDown();
+            }
+            assertThat(holder.get(10, TimeUnit.SECONDS)).isEqualTo(size);
+        }
+    }
+
     @Test
     void expiredAdmissionClosesWithStockLeftAndLeavesLiveList() {
         queue.enter(drop, user, variant);
@@ -260,6 +327,33 @@ class DropQueueIntegrationTest {
         }
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_entries WHERE drop_id=? AND user_id=?", Integer.class, drop, user)).isEqualTo(1);
         assertThat(meters.counter("drop.queue.entered").count()).isEqualTo(before + 1);
+    }
+
+    /** #516: a first entry must not wait for the neighbouring member's uncommitted entry row. */
+    @Test
+    void firstEntryDoesNotWaitForNeighbourMembersUncommittedEntry() throws Exception {
+        Long neighbour = newUser();
+        Long member = newUser();
+        var inserted = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<?> holder = executor.submit(() -> transactions.execute(status -> {
+                queue.enter(drop, neighbour, variant);
+                inserted.countDown();
+                try { release.await(10, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                return null;
+            }));
+            try {
+                assertThat(inserted.await(5, TimeUnit.SECONDS)).isTrue();
+                var entered = executor.submit(() -> queue.enter(drop, member, variant)).get(3, TimeUnit.SECONDS);
+                assertThat(entered.existing()).isFalse();
+            } finally {
+                release.countDown();
+                holder.get(10, TimeUnit.SECONDS);
+            }
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_entries WHERE drop_id=? AND user_id IN (?, ?)",
+                Integer.class, drop, neighbour, member)).isEqualTo(2);
     }
 
     @Test
@@ -405,7 +499,8 @@ class DropQueueIntegrationTest {
                 } finally { connection.rollback(); }
             }
             assertThat(meters.counter("drop.queue.gate.missing").count()).isEqualTo(missingBefore);
-            assertThat(output.getAll()).doesNotContain("Drop queue gate missing variantId=" + variant);
+            assertThat(output.getAll()).doesNotContain("event=drop.queue.gate.repair_started variantId=" + variant,
+                    "event=drop.queue.gate.repair_unresolved variantId=" + variant);
         }
     }
 
@@ -484,7 +579,7 @@ class DropQueueIntegrationTest {
     }
 
     @Test
-    void missingGateIsRepairedAndAdmitsWithOneErrorAndUntaggedMetric(org.springframework.boot.test.system.CapturedOutput output) {
+    void missingGateIsRepairedAndAdmitsWithOneWarningAndUntaggedMetric(org.springframework.boot.test.system.CapturedOutput output) {
         queue.enter(drop, user, variant);
         jdbc.update("DELETE FROM drop_queue_gates WHERE variant_id=?", variant);
         var before = meters.counter("drop.queue.gate.missing").count();
@@ -493,8 +588,11 @@ class DropQueueIntegrationTest {
         assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.ADMITTED);
         assertThat(meters.counter("drop.queue.gate.missing").count()).isEqualTo(before + 1);
         assertThat(meters.find("drop.queue.gate.missing").counter().getId().getTags()).isEmpty();
-        var errors = output.getAll().lines().filter(line -> line.contains("ERROR") && line.contains("Drop queue gate missing variantId=" + variant)).count();
-        assertThat(errors).isEqualTo(1);
+        var repairEvents = output.getAll().lines()
+                .filter(line -> line.contains("event=drop.queue.gate.repair_") && line.endsWith("variantId=" + variant))
+                .toList();
+        assertThat(repairEvents).singleElement().asString()
+                .contains("WARN", "event=drop.queue.gate.repair_started");
     }
 
     @Test

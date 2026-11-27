@@ -53,6 +53,14 @@ JUnit 5, Spring Boot Test, MySQL Testcontainers, Mockito, k6. 필요하면 Redis
 - 시간에 따라 도는 작업(만료, 입장)은 빈 이름으로 직접 실행한다: `dropReservationExpiryJob.runOnce()`, `dropQueueAdmissionJob.runOnce()`.
 - 테스트가 계약과 다르면 테스트를 고치지 말고 계약과 테스트를 함께 바꾸는 PR을 따로 연다.
 
+### 드롭 결제 복구 로그의 회귀 검증
+
+- 상태 전이 로그의 시점이 바뀌면 handler가 정상 반환한 뒤 MySQL이 commit 중 flush를 거부하는 경우를 재현한다. DB에 `PROCESSING`이 남으면 `to=UNKNOWN` WARN이 없어야 하고, `UNKNOWN`이 남으면 `to=APPROVED` INFO가 없어야 한다. `afterCommit`의 로그를 transaction 안으로 옮긴 변이는 해당 테스트에서 실패해야 한다.
+- 민감 정보는 테스트용 식별 문자열을 넣고 Logback의 formatted message, 인자 배열, throwable 메시지와 중첩 cause까지 검사한다. 최초 승인 반영 실패와 재확인 실패 각각에서 예외 객체를 logger에 넘기는 변이로 노출을 검출한다.
+- 정상 승인과 같은 상태 재조회에서는 복구 로그가 없어야 한다. 복구 전이가 commit되면 해당 `paymentId`의 이전 상태, 새 상태, 레벨, 발생 횟수를 확인한다.
+
+실행 명령과 운영 로그 검색 키는 [드롭 복구 로그](../operations/failure-handling.md#드롭-복구-로그)에 있다.
+
 ## 6. 테스트 실행 환경
 
 `backend/build.gradle`의 `test` 작업이 정하는 JVM 설정이다. 모든 테스트에 적용된다.

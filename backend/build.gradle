@@ -59,6 +59,8 @@ tasks.named('test') {
     systemProperty 'restless.ratelimit.enabled', 'false'
     // 기존 테스트는 DB를 직접 바꾼다. 경매 조회 캐시는 AuctionQueryCacheTest에서만 켠다.
     systemProperty 'restless.auction.query-cache.enabled', 'false'
+    // 배치 좌석 위치 캐시도 같은 이유로 끈다. TicketSeatQueryApiTest, LayoutSeatPositionCacheTest에서만 켠다.
+    systemProperty 'restless.concert.layout-cache.enabled', 'false'
     systemProperty 'restless.payment.reconcile.enabled', 'false'
     systemProperty 'restless.drop.expiry.enabled', 'false'
     // JDBC Timestamp fixtures and JPA TIMESTAMP_UTC must use the same time zone on every host.

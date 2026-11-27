@@ -5,11 +5,9 @@ import com.restless.common.error.ErrorCode;
 import com.restless.common.observability.SeatQueryMetrics;
 import com.restless.concert.application.dto.*;
 import com.restless.concert.domain.Concert;
-import com.restless.concert.domain.LayoutSeat;
 import com.restless.concert.domain.Performance;
 import com.restless.concert.domain.Venue;
 import com.restless.concert.infrastructure.ConcertRepository;
-import com.restless.concert.infrastructure.LayoutSeatPositionRepository;
 import com.restless.concert.infrastructure.LayoutSeatRepository;
 import com.restless.concert.infrastructure.PerformanceRepository;
 import com.restless.concert.infrastructure.VenueRepository;
@@ -19,6 +17,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -30,7 +29,7 @@ public class ConcertQueryService {
 
     private final PerformanceRepository performanceRepository;
     private final LayoutSeatRepository layoutSeatRepository;
-    private final LayoutSeatPositionRepository layoutSeatPositions;
+    private final LayoutSeatPositionCache layoutSeatPositions;
     private final ConcertRepository concertRepository;
     private final VenueRepository venueRepository;
     private final SeatQueryMetrics seatQueryMetrics;
@@ -100,23 +99,21 @@ public class ConcertQueryService {
     /** 고객 좌석 조회용 배치. 없는 회차와 초안 공연의 회차는 404다. */
     @Transactional(readOnly = true)
     public PerformanceLayout getPerformanceLayout(Long performanceId) {
-        Performance performance = seatQueryMetrics.measure("performance", () -> performanceRepository.findById(performanceId)
+        Long layoutId = seatQueryMetrics.measure("performance", () -> performanceRepository.findPublishedLayoutId(performanceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다.")));
-        if (!concertRepository.isPerformancePublished(performanceId).orElse(false)) throw new BusinessException(ErrorCode.NOT_FOUND);
         List<SeatPosition> seats = seatQueryMetrics.measure("layout_seats",
-                () -> layoutSeatPositions.findByLayoutId(performance.getLayoutId()));
-        return new PerformanceLayout(performance.getLayoutId(), seats);
+                () -> layoutSeatPositions.get(layoutId));
+        return new PerformanceLayout(layoutId, seats);
     }
 
     /** 구매 가능 정보 조회에는 좌석 배치 없이 회차당 한도만 제공한다. */
     @Transactional(readOnly = true)
     public int getMaxTicketsPerUser(Long performanceId) {
-        if (!concertRepository.isPerformancePublished(performanceId).orElse(false)) throw new BusinessException(ErrorCode.NOT_FOUND);
-        return performanceRepository.findMaxTicketsPerUser(performanceId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다."));
+        return performanceRepository.findPublishedMaxTicketsPerUser(performanceId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
     }
 
-    /** 선점에 필요한 회차 정책과 판매 가능한 배치 좌석만 제공한다. */
+    /** 선점에 필요한 회차 정책만 제공한다. */
     @Transactional(readOnly = true)
     public BookingPerformance getBookingPerformance(Long performanceId) {
         Performance performance = performanceRepository.findById(performanceId)
@@ -134,12 +131,18 @@ public class ConcertQueryService {
         return bookingPerformance(performance);
     }
 
+    /**
+     * 선점 트랜잭션 안에서 고른 물리 좌석 중 배치에서 판매 가능한 것만 돌려준다.
+     * 배치 좌석 전체를 엔티티로 읽지 않는다(#510).
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public Set<Long> sellableVenueSeatIds(Long layoutId, Collection<Long> venueSeatIds) {
+        if (venueSeatIds.isEmpty()) return Set.of();
+        return Set.copyOf(layoutSeatRepository.findSellableVenueSeatIds(layoutId, venueSeatIds));
+    }
+
     private BookingPerformance bookingPerformance(Performance performance) {
-        Set<Long> sellableSeatIds = layoutSeatRepository.findAllById_LayoutId(performance.getLayoutId()).stream()
-                .filter(LayoutSeat::isSellable)
-                .map(seat -> seat.getId().getVenueSeatId())
-                .collect(Collectors.toUnmodifiableSet());
         return new BookingPerformance(performance.getLayoutId(), performance.getBookingOpensAt(),
-                performance.getBookingClosesAt(), performance.getMaxTicketsPerUser(), sellableSeatIds);
+                performance.getBookingClosesAt(), performance.getMaxTicketsPerUser());
     }
 }

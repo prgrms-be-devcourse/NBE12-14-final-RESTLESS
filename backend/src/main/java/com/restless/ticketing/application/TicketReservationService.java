@@ -127,12 +127,14 @@ public class TicketReservationService {
         }
 
         List<TicketSeat> lockedSeats = lockSeats(orderedIds);
+        Set<Long> sellableVenueSeatIds = concertQueryService.sellableVenueSeatIds(performance.layoutId(),
+                lockedSeats.stream().map(TicketSeat::getVenueSeatId).toList());
         Set<Long> expiredOwners = new HashSet<>();
 
         for (TicketSeat seat : lockedSeats) {
             if (!performanceId.equals(seat.getPerformanceId())
                     || !performance.layoutId().equals(seat.getLayoutId())
-                    || !performance.sellableSeatIds().contains(seat.getVenueSeatId())) {
+                    || !sellableVenueSeatIds.contains(seat.getVenueSeatId())) {
                 throw new BusinessException(ErrorCode.SEAT_UNAVAILABLE);
             }
 

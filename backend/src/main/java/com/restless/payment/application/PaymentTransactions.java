@@ -193,7 +193,12 @@ public class PaymentTransactions {
                 ignored -> {
                     Payment payment = payments.findByIdForUpdate(paymentId).orElseThrow();
                     if (!approvalPending(payment)) return current(payment);
-                    return applyApprovalLocked(payment, result);
+                    PaymentStatus before = payment.getStatus();
+                    Step applied = applyApprovalLocked(payment, result);
+                    if (before == PaymentStatus.UNKNOWN || applied.status() == PaymentStatus.UNKNOWN) {
+                        logDropApprovalTransition(payment, before);
+                    }
+                    return applied;
                 });
     }
 
@@ -260,6 +265,26 @@ public class PaymentTransactions {
                 yield current(payment);
             }
         };
+    }
+
+    private void logDropApprovalTransition(Payment payment, PaymentStatus before) {
+        PaymentStatus after = payment.getStatus();
+        if (payment.getPayableType() != PayableType.DROP || before == after) return;
+        Long paymentId = payment.getId();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    var logger = after == PaymentStatus.UNKNOWN ? log.atWarn() : log.atInfo();
+                    logger.log("event=drop.payment.approval_transition paymentId={} from={} to={}",
+                            paymentId, before, after);
+                } catch (RuntimeException failure) {
+                    meters.counter("drop.payment.transition.log.failure").increment();
+                    log.error("Drop payment transition log failed paymentId={} errorType={}",
+                            paymentId, failure.getClass().getName());
+                }
+            }
+        });
     }
 
     private boolean approvalPending(Payment payment) {
@@ -483,7 +508,7 @@ public class PaymentTransactions {
                         return current(payment);
                     Instant now = clock.instant();
                     payment.recordReconciliationCheck(now);
-                    return switch (result) {
+                    Step applied = switch (result) {
                         // Single conversion point: both confirm and reconciliation use the same
                         // TX-B.
                         case PgQueryResult.Approved approved ->
@@ -527,6 +552,8 @@ public class PaymentTransactions {
                         }
                         case PgQueryResult.InProgress progress -> current(payment);
                     };
+                    logDropApprovalTransition(payment, expected);
+                    return applied;
                 });
     }
 
