@@ -488,6 +488,20 @@ class TicketReservationServiceTest {
     }
 
     @Test
+    @DisplayName("배치에 판매 불가 좌석이 있어도 고른 좌석이 모두 판매 가능하면 선점한다")
+    void unsellableSeatOutsideRequestDoesNotBlockReservation() {
+        jdbc.update("""
+                UPDATE layout_seats l JOIN performance_seats s
+                    ON s.layout_id=l.layout_id AND s.venue_seat_id=l.venue_seat_id
+                SET l.is_sellable=false WHERE s.id=?
+                """, seat(2));
+        reserve(fixture.firstUserId(), "sellable-request", List.of(seat(0), seat(1)));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM performance_seats WHERE id IN (?, ?) AND status='HELD'",
+                Integer.class, seat(0), seat(1))).isEqualTo(2);
+        assertThat(count("seat_holds")).isEqualTo(2);
+    }
+
+    @Test
     @DisplayName("판매 불가 좌석이 하나라도 포함되면 전체 선점과 구매 수량 생성을 거절한다")
     void nonSellableSeatRejectsEntireReservation() {
         jdbc.update("""
