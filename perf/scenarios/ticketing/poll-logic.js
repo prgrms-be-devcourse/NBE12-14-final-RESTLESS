@@ -3,10 +3,13 @@ import exec from 'k6/execution';
 import { sleep } from 'k6';
 
 export function runPoll(data, context) {
-  const { base, performanceId, users, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, entryEndOffset, origin, refreshCount, refreshInterval, refreshRequests } = context;
-  const user = users[exec.vu.idInTest - 1];
+  const { base, performanceId, users, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, entryEndOffset, origin, refreshCount, refreshInterval, refreshRequests, arrival, arrivalRate, arrivalLag } = context;
+  // 도착률 모드는 반복 순서로 사용자를 고른다(반복 하나가 사용자 한 명). 아니면 VU 하나가 사용자 한 명이다.
+  const index = arrival ? exec.scenario.iterationInTest : exec.vu.idInTest - 1;
+  const user = users[index];
+  if (arrival) arrivalLag.add(Math.max(0, Date.now() - (exec.scenario.startTime + index * 1000 / arrivalRate)));
   // 분산 진입은 자동 갱신이 아니라 최초 요청의 시작 시간만 3초에 분산한다.
-  if (entry === 'spread') sleep(3 * (exec.vu.idInTest - 1) / (mode === 'mixed' ? participants : vus));
+  if (!arrival && entry === 'spread') sleep(3 * (exec.vu.idInTest - 1) / (mode === 'mixed' ? participants : vus));
   // page와 mixed 조회자는 화면 진입처럼 좌석과 구매 가능 정보를 함께 조회한다.
   const pageEntry = mode === 'page' || mode === 'mixed';
   let res, pageElapsed, availabilityValid = false;
