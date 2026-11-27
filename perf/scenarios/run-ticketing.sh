@@ -18,7 +18,8 @@ USERS는 전체 테스트 사용자 수다. 예: run-ticketing.sh page 100
 인증: USERS_CSV 또는 SETUP=self (시드 계정 로그인)
 선택 환경변수: MAX_DURATION, REFRESH_COUNT, REFRESH_INTERVAL_SECONDS, HOT_SEATS,
               POLL_ENTRY (page/mixed), START_DELAY_SECONDS (simultaneous/page/mixed), CHECKOUT_PAGE_ENTRY (checkout),
-              ARRIVAL_RATE·ARRIVAL_SECONDS (simultaneous/page 도착률, USERS = 둘의 곱), SEAT_ENCODING, MANAGEMENT_URL, K6_BIN
+              ARRIVAL_RATE·ARRIVAL_SECONDS (simultaneous/page 도착률, USERS = 둘의 곱),
+              SEAT_CHECK=full|light (light: 좌석 본문 파싱 생략), SEAT_ENCODING, MANAGEMENT_URL, K6_BIN
 HELP
 }
 if [[ "${1:-}" == '-h' || "${1:-}" == '--help' ]]; then usage; exit 0; fi

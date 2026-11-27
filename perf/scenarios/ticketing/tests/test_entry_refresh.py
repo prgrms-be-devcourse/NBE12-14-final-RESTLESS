@@ -22,6 +22,7 @@ class Handler(BaseHTTPRequestHandler):
     posts = []
     seat_auth = []
     seat_requests = 0
+    short_seats = False
 
     def log_message(self, *_):
         pass
@@ -40,7 +41,8 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.endswith('/seats'):
             Handler.seat_requests += 1
             Handler.seat_auth.append(self.headers.get('Authorization'))
-            body = json.dumps([dict(seatId=1, status='AVAILABLE')])
+            # short_seats: 준비 요청(첫 요청) 뒤로는 비정상적으로 짧은 본문을 준다
+            body = '[]' if Handler.short_seats and Handler.seat_requests > 1 else json.dumps([dict(seatId=1, status='AVAILABLE')])
         else:
             self.send_error(404)
             return
@@ -86,7 +88,7 @@ class ScenarioTest(unittest.TestCase):
         cls.thread.join()
 
     def run_scenario(self, scenario, refresh=0, mismatch=False, invalid_availability=False, entry='simultaneous',
-                     reject_token=None, expect_failure=False, participants=None, extra_env=None, checkout_status=200, checkout_delay=0, user_count=2):
+                     reject_token=None, expect_failure=False, participants=None, extra_env=None, checkout_status=200, checkout_delay=0, user_count=2, short_seats=False):
         Handler.mismatch = mismatch
         Handler.invalid_availability = invalid_availability
         Handler.reject_token = reject_token
@@ -94,6 +96,7 @@ class ScenarioTest(unittest.TestCase):
         Handler.checkout_delay = checkout_delay
         Handler.posts = []
         Handler.seat_auth = []
+        Handler.short_seats = short_seats
         Handler.seat_requests = 0
         with tempfile.TemporaryDirectory() as tmp:
             users = Path(tmp) / 'users.csv'
@@ -257,6 +260,17 @@ class ScenarioTest(unittest.TestCase):
                                     env=env, capture_output=True, text=True, timeout=20)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('ARRIVAL_RATE x ARRIVAL_SECONDS', result.stderr)
+
+    def test_light_seat_check_accepts_full_length_and_rejects_short_body(self):
+        report = self.run_scenario('page', participants='8', user_count=8,
+                                   extra_env={'ARRIVAL_RATE': '4', 'ARRIVAL_SECONDS': '2', 'SEAT_CHECK': 'light'})
+        metrics = report['metrics']
+        self.assertEqual(report['conditions']['seatCheck'], 'light')
+        self.assertEqual(metrics['ticket_page_entry_duration{outcome:ok}']['values']['count'], 8)
+        self.assertEqual(metrics['ticket_poll_errors']['values']['passes'], 0)
+        metrics = self.run_scenario('page', participants='8', user_count=8, expect_failure=True, short_seats=True,
+                                    extra_env={'ARRIVAL_RATE': '4', 'ARRIVAL_SECONDS': '2', 'SEAT_CHECK': 'light'})['metrics']
+        self.assertEqual(metrics['ticket_poll_errors']['values']['passes'], 8)
 
     def test_unauthorized_seat_response_fails_run(self):
         metrics = self.run_scenario('simultaneous', reject_token='fake-2', expect_failure=True)['metrics']
