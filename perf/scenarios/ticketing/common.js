@@ -82,6 +82,7 @@ const options = {
       'ticket_hold_duration{outcome:created}': [],
       'ticket_hold_duration{outcome:unavailable}': [],
       'ticket_hold_duration{outcome:lock_timeout}': [],
+      ...(mode === 'replay' ? { 'ticket_hold_duration{outcome:replay_ok}': [] } : {}),
     } : {}),
     ...(mode === 'mixed' ? { ticket_poll_requests: [`count>=${participants}`], ticket_poll_errors: ['rate==0'], ticket_hold_errors: ['rate==0'] } : {}),
     ...(['poll', 'page'].includes(mode) ? { ticket_poll_requests: [`count>=${participants}`], ticket_poll_errors: ['rate==0'] } : {}),

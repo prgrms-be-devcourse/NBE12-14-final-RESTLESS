@@ -69,7 +69,7 @@ class ScenarioTest(unittest.TestCase):
         cls.thread.join()
 
     def run_scenario(self, scenario, refresh=0, mismatch=False, invalid_availability=False, entry='simultaneous',
-                     reject_token=None, expect_failure=False):
+                     reject_token=None, expect_failure=False, participants=None):
         Handler.mismatch = mismatch
         Handler.invalid_availability = invalid_availability
         Handler.reject_token = reject_token
@@ -82,7 +82,7 @@ class ScenarioTest(unittest.TestCase):
             output = Path(tmp) / 'summary.json'
             env = dict(os.environ, BASE_URL=f'http://127.0.0.1:{self.server.server_port}',
                        MANAGEMENT_URL=f'http://127.0.0.1:{self.server.server_port}', PERFORMANCE_ID='1',
-                       PARTICIPANTS='1' if scenario == 'mixed' else '2', HOLD_PARTICIPANTS='1', VUS='2',
+                       PARTICIPANTS=participants or ('1' if scenario == 'mixed' else '2'), HOLD_PARTICIPANTS='1', VUS=participants or '2',
                        USERS_CSV=str(users), SETUP='csv', RUN_ID='scenario-test', POLL_ENTRY=entry,
                        REFRESH_COUNT=str(refresh), REFRESH_INTERVAL_SECONDS='1', HOLD_DELAY_SECONDS='1',
                        SUMMARY_PATH=str(output))
@@ -148,6 +148,11 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(offset['count'], 2)
         self.assertLess(offset['max'], 500)
         self.assertEqual(metrics['ticket_hold_completed']['values']['count'], 2)
+
+    def test_replay_reports_first_and_repeated_requests_separately(self):
+        metrics = self.run_scenario('replay', participants='1')['metrics']  # 스텁 좌석이 1석이다.
+        self.assertEqual(metrics['ticket_hold_duration{outcome:created}']['values']['count'], 1)
+        self.assertEqual(metrics['ticket_hold_duration{outcome:replay_ok}']['values']['count'], 1)
 
     def test_unauthorized_seat_response_fails_run(self):
         metrics = self.run_scenario('simultaneous', reject_token='fake-2', expect_failure=True)['metrics']
