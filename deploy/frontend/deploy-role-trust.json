@@ -8,7 +8,7 @@
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:prgrms-be-devcourse/NBE12-14-final-RESTLESS:environment:frontend"
+          "token.actions.githubusercontent.com:sub": "repo:prgrms-be-devcourse@88020948/NBE12-14-final-RESTLESS@1452595028:environment:frontend"
         }
       }
     }

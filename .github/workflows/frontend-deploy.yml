@@ -70,6 +70,10 @@ jobs:
         env:
           NEXT_PUBLIC_TOSS_CLIENT_KEY: ${{ vars.TOSS_CLIENT_KEY }}
         run: |
+          if [ -z "$NEXT_PUBLIC_TOSS_CLIENT_KEY" ]; then
+            echo "::error::TOSS_CLIENT_KEY repository variable is empty. The payment window would break."
+            exit 1
+          fi
           npm run build
           if [ ! -f out/index.html ]; then
             echo "::error::out/index.html is missing. next.config.ts must build with output: export."

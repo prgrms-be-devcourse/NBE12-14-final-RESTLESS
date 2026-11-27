@@ -13,7 +13,9 @@ GitHub에는 AWS 키를 두지 않는다. 워크플로가 OIDC로 배포 역할�
 3. `_next/static`은 1년 캐시하고 지우지 않는다. 화면(html)과 화면 데이터(txt)는 매번 다시 확인하고, 이번 빌드에 없는 파일은 지운다.
 4. CloudFront 캐시를 `/*`로 무효화한다.
 
-`FRONTEND_BUCKET` 변수가 비어 있으면 작업을 건너뛴다. 지금 배포를 다시 하려면 Actions에서 Frontend deploy를 dev로 실행한다.
+`FRONTEND_BUCKET` 변수가 비어 있으면 작업을 건너뛴다. `TOSS_CLIENT_KEY`가 비어 있으면 결제 화면이 깨지므로 빌드 전에 실패한다.
+
+지금 배포를 다시 하려면 Actions에서 Frontend deploy를 dev로 실행한다. 수동 실행은 CI 결과를 보지 않고 dev 최신 커밋을 올린다. 같은 작업 안에서 테스트와 빌드를 다시 하고, 통과해야 올린다.
 
 ## 처음 설정 (콘솔)
 
@@ -29,7 +31,9 @@ GitHub에는 AWS 키를 두지 않는다. 워크플로가 OIDC로 배포 역할�
 4. 버킷 정책: CloudFront가 주는 OAC 정책을 넣는다. `s3:ListBucket`도 허용하면 없는 주소가 403 대신 404가 된다.
 5. IAM > 자격 증명 공급자: `token.actions.githubusercontent.com`, 대상 `sts.amazonaws.com`. 이미 있으면 그대로 쓴다.
 6. IAM 역할: 신뢰 정책 [deploy-role-trust.json](deploy-role-trust.json), 권한 [deploy-role-policy.json](deploy-role-policy.json). `<계정 ID>`, `<버킷 이름>`, `<배포 ID>`를 채운다.
-7. GitHub 저장소 변수(Settings > Secrets and variables > Actions > Variables)
+   - 신뢰 정책의 `sub`는 `repo:prgrms-be-devcourse@88020948/NBE12-14-final-RESTLESS@1452595028:environment:frontend`다. 이 저장소는 GitHub의 불변 subject 형식을 쓴다(`gh api repos/prgrms-be-devcourse/NBE12-14-final-RESTLESS/actions/oidc/customization/sub`). `owner/repo` 형식으로 쓰면 역할을 받지 못한다.
+7. GitHub environment(Settings > Environments): `frontend`를 만들고 Deployment branches and tags를 Selected branches and tags로 바꿔 `dev`만 허용한다. 이 제한이 없으면 다른 브랜치의 워크플로도 `environment: frontend`를 선언해 역할을 받을 수 있다. 배포 워크플로는 dev 기준으로 돌기 때문에 이 제한에 막히지 않는다.
+8. GitHub 저장소 변수(Settings > Secrets and variables > Actions > Variables)
 
 | 변수 | 값 |
 |---|---|
