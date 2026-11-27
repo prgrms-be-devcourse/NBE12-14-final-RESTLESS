@@ -18,6 +18,7 @@ class Handler(BaseHTTPRequestHandler):
     invalid_availability = False
     reject_token = None
     checkout_status = 200
+    checkout_delay = 0
     posts = []
     seat_requests = 0
 
@@ -53,6 +54,7 @@ class Handler(BaseHTTPRequestHandler):
         Handler.posts.append((self.path, self.headers.get('Idempotency-Key'), body))
         status = 201
         if self.path.endswith('/checkout'):
+            time.sleep(Handler.checkout_delay)
             status = Handler.checkout_status
             payload = (json.dumps(dict(reservationId=1, orderId=7, totalAmount=1000, checkoutStartedAt='2026-11-27T00:00:00Z',
                                        paymentExpiresAt='2026-11-27T00:05:00Z')) if status == 200
@@ -82,11 +84,12 @@ class ScenarioTest(unittest.TestCase):
         cls.thread.join()
 
     def run_scenario(self, scenario, refresh=0, mismatch=False, invalid_availability=False, entry='simultaneous',
-                     reject_token=None, expect_failure=False, participants=None, extra_env=None, checkout_status=200):
+                     reject_token=None, expect_failure=False, participants=None, extra_env=None, checkout_status=200, checkout_delay=0):
         Handler.mismatch = mismatch
         Handler.invalid_availability = invalid_availability
         Handler.reject_token = reject_token
         Handler.checkout_status = checkout_status
+        Handler.checkout_delay = checkout_delay
         Handler.posts = []
         Handler.seat_requests = 0
         with tempfile.TemporaryDirectory() as tmp:
@@ -208,6 +211,26 @@ class ScenarioTest(unittest.TestCase):
         metrics = self.run_scenario('checkout', participants='1', extra_env={'CHECKOUT_PAGE_ENTRY': '1'})['metrics']
         self.assertEqual(metrics['ticket_outcomes{outcome:prepared}']['values']['count'], 1)
         self.assertEqual(metrics['http_reqs']['values']['count'], 7)  # 관리 확인 + 좌석 확인 + 화면 2 + 선점·checkout·결제 준비
+
+    def test_checkout_interrupted_before_payment_fails_run(self):
+        # checkout 응답이 완료 제한 시간(+gracefulStop)보다 늦으면 k6가 사용자를 중단한다. 이때 실행이 성공으로 끝나면 안 된다.
+        metrics = self.run_scenario('checkout', participants='1', checkout_delay=4, expect_failure=True,
+                                    extra_env={'MAX_DURATION': '1s', 'GRACEFUL_STOP': '0s'})['metrics']
+        self.assertEqual(metrics['ticket_hold_completed']['values']['count'], 1)
+        self.assertEqual(metrics['ticket_checkout_completed']['values']['count'], 0)
+
+    def test_checkout_page_entry_failure_stops_before_hold(self):
+        metrics = self.run_scenario('checkout', participants='1', invalid_availability=True,
+                                    extra_env={'CHECKOUT_PAGE_ENTRY': '1'})['metrics']
+        self.assertEqual(metrics['ticket_page_entry_duration{outcome:error}']['values']['count'], 1)
+        self.assertEqual(metrics['ticket_unexpected']['values']['passes'], 1)
+        self.assertEqual(Handler.posts, [])
+
+    def test_checkout_hold_start_is_recorded_after_page_entry(self):
+        metrics = self.run_scenario('checkout', participants='1', extra_env={'CHECKOUT_PAGE_ENTRY': '1'})['metrics']
+        entry = metrics['ticket_start_offset{phase:entry}']['values']['max']
+        hold = metrics['ticket_start_offset{phase:hold}']['values']['max']
+        self.assertGreaterEqual(hold - entry, 150)  # 구매 가능 정보 스텁이 200ms 걸린다.
 
     def test_unauthorized_seat_response_fails_run(self):
         metrics = self.run_scenario('simultaneous', reject_token='fake-2', expect_failure=True)['metrics']

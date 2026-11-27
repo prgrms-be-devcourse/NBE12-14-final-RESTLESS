@@ -63,8 +63,8 @@ if (setupMode === 'csv' && (users.length < totalUsers || users.some(u => !u.id |
 const options = {
   setupTimeout: '10m',
   scenarios: { ticketing: ['poll', 'page', 'mixed'].includes(mode)
-    ? { executor: 'per-vu-iterations', vus: mode === 'mixed' ? totalUsers : vus, iterations: 1, maxDuration: __ENV.MAX_DURATION || '5m' }
-    : { executor: 'shared-iterations', vus, iterations: participants, maxDuration: __ENV.MAX_DURATION || '5m' } },
+    ? { executor: 'per-vu-iterations', vus: mode === 'mixed' ? totalUsers : vus, iterations: 1, maxDuration: __ENV.MAX_DURATION || '5m', gracefulStop: __ENV.GRACEFUL_STOP || '30s' }
+    : { executor: 'shared-iterations', vus, iterations: participants, maxDuration: __ENV.MAX_DURATION || '5m', gracefulStop: __ENV.GRACEFUL_STOP || '30s' } },
   thresholds: {
     ticket_unexpected: ['rate==0'],
     ...(['poll', 'page', 'mixed'].includes(mode) ? { ticket_seat_encoding_errors: ['rate==0'] } : {}),
@@ -90,7 +90,12 @@ const options = {
       'ticket_hold_duration{outcome:lock_timeout}': [],
       ...(mode === 'replay' ? { 'ticket_hold_duration{outcome:replay_ok}': [] } : {}),
       ...(mode === 'checkout' ? {
-        'ticket_outcomes{outcome:prepared}': [],
+        // 중간에 멈추거나 시간이 초과돼도 통과하지 않게 단계별 완료 수를 참가자 수와 맞춘다.
+        ticket_checkout_completed: [`count==${participants}`],
+        ticket_payment_prepare_completed: [`count==${participants}`],
+        'ticket_outcomes{outcome:prepared}': [`count==${participants}`],
+        // 화면 진입 실패는 ticket_unexpected로 실행을 실패시킨다.
+        ...(checkoutPageEntry ? { 'ticket_page_entry_duration{outcome:ok}': [], 'ticket_page_entry_duration{outcome:error}': [] } : {}),
         'ticket_checkout_duration{outcome:ok}': [], 'ticket_checkout_duration{outcome:lock_timeout}': [], 'ticket_checkout_duration{outcome:error}': [],
         'ticket_payment_prepare_duration{outcome:ok}': [], 'ticket_payment_prepare_duration{outcome:error}': [],
         'ticket_journey_duration{outcome:ok}': [], 'ticket_journey_duration{outcome:error}': [],
@@ -193,8 +198,8 @@ function run(data) {
     return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, entryEndOffset, origin, refreshCount, refreshInterval, refreshRequests });
   }
   if (mode === 'checkout') {
-    return runCheckout(data, { base, performanceId, users: activeUsers, runId, origin, headers, seatHeaders, count, startOffset,
-      pageEntry: checkoutPageEntry, holdAttempts, holdCompleted, holdLatency, checkoutLatency, prepareLatency, journeyLatency,
+    return runCheckout(data, { base, performanceId, users: activeUsers, runId, origin, headers, seatHeaders, encodingMatches, count, startOffset,
+      pageEntry: checkoutPageEntry, pageEntryLatency, holdAttempts, holdCompleted, holdLatency, checkoutLatency, prepareLatency, journeyLatency,
       checkoutCompleted, prepareCompleted });
   }
   return runHold(data, { base, performanceId, users: activeUsers, mode, participants, holdParticipants, entry, origin, mixedHold, hotSeats, runId, headers, holdAttempts, holdCompleted, replayCompleted, holdErrors, count, holdLatency, startOffset });
