@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Locale;
 import java.util.zip.GZIPOutputStream;
@@ -20,6 +21,14 @@ import org.springframework.web.util.ContentCachingResponseWrapper;
 @Component
 public class TicketSeatCompressionFilter extends OncePerRequestFilter {
     private static final int MIN_SIZE = 2048;
+    private static final String PRECOMPRESSED = TicketSeatCompressionFilter.class.getName() + ".PRECOMPRESSED";
+
+    /** 응답 본문 그대로의 gzip 바이트를 미리 알려 준다. 압축을 정하면 같은 본문일 때만 다시 압축하지 않고 쓴다. */
+    private record Precompressed(byte[] body, byte[] gzip) { }
+
+    static void offerPrecompressed(HttpServletRequest request, byte[] body, byte[] gzip) {
+        request.setAttribute(PRECOMPRESSED, new Precompressed(body, gzip));
+    }
     private final boolean enabled;
 
     public TicketSeatCompressionFilter(@Value("${HTTP_COMPRESSION_ENABLED:true}") boolean enabled) {
@@ -51,14 +60,19 @@ public class TicketSeatCompressionFilter extends OncePerRequestFilter {
             wrapped.copyBodyToResponse();
             return;
         }
+        byte[] compressed = request.getAttribute(PRECOMPRESSED) instanceof Precompressed pre && Arrays.equals(pre.body(), body)
+                ? pre.gzip() : gzip(body);
+        response.setHeader(HttpHeaders.CONTENT_ENCODING, "gzip");
+        response.setContentLength(compressed.length);
+        response.getOutputStream().write(compressed);
+    }
+
+    private static byte[] gzip(byte[] body) throws IOException {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         try (GZIPOutputStream gzip = new GZIPOutputStream(buffer)) {
             gzip.write(body);
         }
-        byte[] compressed = buffer.toByteArray();
-        response.setHeader(HttpHeaders.CONTENT_ENCODING, "gzip");
-        response.setContentLength(compressed.length);
-        response.getOutputStream().write(compressed);
+        return buffer.toByteArray();
     }
 
     private static boolean acceptsGzip(HttpServletRequest request) {

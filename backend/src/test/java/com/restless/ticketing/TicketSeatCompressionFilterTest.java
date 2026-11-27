@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.restless.ticketing.api.TicketSeatCompressionFilter;
+import com.restless.ticketing.api.TicketSeatCompressionFilterAccess;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.zip.GZIPInputStream;
@@ -86,6 +87,30 @@ class TicketSeatCompressionFilterTest {
             assertEquals(alreadyEncoded ? "br" : null, response.getHeader(HttpHeaders.CONTENT_ENCODING));
             assertTrue(response.getHeaders(HttpHeaders.VARY).contains("Accept-Encoding"));
             assertArrayEquals(BODY, response.getContentAsByteArray());
+        }
+    }
+
+    @Test
+    void reusesOfferedGzipOnlyForTheSameBody() throws Exception {
+        byte[] marker = "precompressed".getBytes(StandardCharsets.UTF_8);
+        for (boolean sameBody : new boolean[] {true, false}) {
+            var request = new MockHttpServletRequest("GET", "/api/performances/1/seats");
+            request.addHeader(HttpHeaders.ACCEPT_ENCODING, "gzip");
+            TicketSeatCompressionFilterAccess.offer(request, sameBody ? BODY : new byte[] {1, 2, 3}, marker);
+            var response = new MockHttpServletResponse();
+            new TicketSeatCompressionFilter(true).doFilter(request, response, (req, res) -> {
+                var httpResponse = (jakarta.servlet.http.HttpServletResponse) res;
+                httpResponse.setContentType("application/json");
+                httpResponse.getOutputStream().write(BODY);
+            });
+            assertEquals("gzip", response.getHeader(HttpHeaders.CONTENT_ENCODING));
+            if (sameBody) {
+                assertArrayEquals(marker, response.getContentAsByteArray());
+            } else {
+                try (var gzip = new GZIPInputStream(new ByteArrayInputStream(response.getContentAsByteArray()))) {
+                    assertArrayEquals(BODY, gzip.readAllBytes());
+                }
+            }
         }
     }
 
