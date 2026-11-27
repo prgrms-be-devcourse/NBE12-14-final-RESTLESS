@@ -329,6 +329,33 @@ class DropQueueIntegrationTest {
         assertThat(meters.counter("drop.queue.entered").count()).isEqualTo(before + 1);
     }
 
+    /** #516: a first entry must not wait for the neighbouring member's uncommitted entry row. */
+    @Test
+    void firstEntryDoesNotWaitForNeighbourMembersUncommittedEntry() throws Exception {
+        Long neighbour = newUser();
+        Long member = newUser();
+        var inserted = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<?> holder = executor.submit(() -> transactions.execute(status -> {
+                queue.enter(drop, neighbour, variant);
+                inserted.countDown();
+                try { release.await(10, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                return null;
+            }));
+            try {
+                assertThat(inserted.await(5, TimeUnit.SECONDS)).isTrue();
+                var entered = executor.submit(() -> queue.enter(drop, member, variant)).get(3, TimeUnit.SECONDS);
+                assertThat(entered.existing()).isFalse();
+            } finally {
+                release.countDown();
+                holder.get(10, TimeUnit.SECONDS);
+            }
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM drop_queue_entries WHERE drop_id=? AND user_id IN (?, ?)",
+                Integer.class, drop, neighbour, member)).isEqualTo(2);
+    }
+
     @Test
     void heartbeatBoundaryReturns404BeforeCleanupAndReentryGetsNewSequence() {
         queue.enter(drop, user, variant);

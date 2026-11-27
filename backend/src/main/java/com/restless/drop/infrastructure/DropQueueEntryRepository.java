@@ -30,8 +30,22 @@ public interface DropQueueEntryRepository extends JpaRepository<DropQueueEntry, 
             """, nativeQuery = true)
     int recordHeartbeat(long id, Instant now, Instant cutoff, Instant dueBefore);
 
-    @Query(value = "SELECT * FROM drop_queue_entries WHERE drop_id=:dropId AND user_id=:userId ORDER BY id DESC LIMIT 1 FOR UPDATE", nativeQuery = true)
-    Optional<DropQueueEntry> lockLatest(Long dropId, Long userId);
+    /**
+     * Locks only the member's latest row, by primary key (#516). A locking range read on (drop_id, user_id) also
+     * locked the neighbouring member's row when this member had none, so a first entry waited for the neighbour's
+     * uncommitted entry. Callers run in READ COMMITTED and hold the member's purchase slot lock, so the plain read
+     * sees the member's latest committed row and no newer row can be inserted before the lock. The locked read
+     * returns the row's latest committed state.
+     */
+    default Optional<DropQueueEntry> lockLatest(Long dropId, Long userId) {
+        return latestId(dropId, userId).flatMap(this::lockById);
+    }
+
+    @Query(value = "SELECT id FROM drop_queue_entries WHERE drop_id=:dropId AND user_id=:userId ORDER BY id DESC LIMIT 1", nativeQuery = true)
+    Optional<Long> latestId(Long dropId, Long userId);
+
+    @Query(value = "SELECT * FROM drop_queue_entries WHERE id=:id FOR UPDATE", nativeQuery = true)
+    Optional<DropQueueEntry> lockById(Long id);
 
     @Query(value = "SELECT DISTINCT variant_id FROM drop_queue_entries WHERE status IN ('WAITING','ADMITTED')", nativeQuery = true)
     List<Long> liveVariantIds();
