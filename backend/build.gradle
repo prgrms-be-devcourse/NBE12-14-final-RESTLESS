@@ -61,6 +61,8 @@ tasks.named('test') {
     systemProperty 'restless.auction.query-cache.enabled', 'false'
     // 배치 좌석 위치 캐시도 같은 이유로 끈다. TicketSeatQueryApiTest, LayoutSeatPositionCacheTest에서만 켠다.
     systemProperty 'restless.concert.layout-cache.enabled', 'false'
+    // 좌석 조회 응답 공유(ADR-0008)도 같은 이유로 끈다. TicketSeatResponseCacheTest, TicketSeatResponseCacheApiTest에서만 켠다.
+    systemProperty 'restless.ticketing.seat-response-cache.enabled', 'false'
     systemProperty 'restless.payment.reconcile.enabled', 'false'
     systemProperty 'restless.drop.expiry.enabled', 'false'
     // JDBC Timestamp fixtures and JPA TIMESTAMP_UTC must use the same time zone on every host.
