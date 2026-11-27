@@ -2,9 +2,9 @@
 
 ## 티켓팅
 
-좌석 조회는 `ticketing/spread.js`(분산 진입)와 `ticketing/simultaneous.js`(동시 진입)를 사용한다. 선점과 혼합을 포함한 모든 티켓팅 시나리오는 `run-ticketing.sh`로 실행한다. `users.csv`는 공통 시드가 만든 서로 다른 사용자 토큰을 사용하며, 파일은 Git에 올리지 않는다.
+좌석 화면 진입은 `ticketing/page.js`, 좌석 조회만 보는 동시 진입은 `ticketing/simultaneous.js`를 사용한다. 선점과 혼합을 포함한 모든 티켓팅 시나리오는 `run-ticketing.sh`로 실행한다. `users.csv`는 공통 시드가 만든 서로 다른 사용자 토큰을 사용하며, 파일은 Git에 올리지 않는다.
 
-조회·페이지·혼합 시나리오는 사용자당 최초 `/seats` 요청을 한 번 수행한다. 자동 폴링은 없다. `REFRESH_COUNT`를 지정하면 각 사용자가 수동 새로고침 버튼을 누르는 상황을 가정해 `/seats/status`를 지정 횟수만큼 조회한다. 목록이 일치하지 않으면 전체 좌석을 다시 조회한다. `burst`는 최초 전체 목록 조회만 한 번 수행한다.
+조회·페이지·혼합 시나리오는 사용자당 최초 `/seats` 요청을 한 번 수행한다. 자동 폴링은 없다. `REFRESH_COUNT`를 지정하면 각 사용자가 수동 새로고침 버튼을 누르는 상황을 가정해 `/seats/status`를 지정 횟수만큼 조회한다. 목록이 일치하지 않으면 전체 좌석을 다시 조회한다.
 
 ```bash
 export BASE_URL="http://<테스트-서버>:8080"
@@ -13,9 +13,9 @@ export PERF_ALLOWED_APP_HOSTS="<테스트-서버>"
 export PERFORMANCE_ID=<회차_ID>
 export USERS_CSV="$PWD/perf/seed/out/users.csv"
 
-perf/scenarios/run-ticketing.sh spread 100
-perf/scenarios/run-ticketing.sh simultaneous 100
 perf/scenarios/run-ticketing.sh page 100
+POLL_ENTRY=simultaneous perf/scenarios/run-ticketing.sh page 100
+perf/scenarios/run-ticketing.sh simultaneous 100
 ```
 
 숫자는 전체 사용자 수다. 각 사용자는 한 번 진입하며 `DURATION`은 적용되지 않는다. `MAX_DURATION`(기본 5분)은 완료 제한 시간이다. 예: `REFRESH_COUNT=2 REFRESH_INTERVAL_SECONDS=30 perf/scenarios/run-ticketing.sh page 100`은 사용자당 30초 간격으로 두 번의 수동 새로고침을 가정한다. 실제 사용자의 새로고침 빈도를 뜻하지 않는다. 기존 3초 폴링 결과와 요청 수 및 응답시간을 직접 비교하지 않는다. 실행기는 CSV 계정을 사용하며, 같은 서버 주소·회차에서 이미 배정한 사용자 ID를 `.ai-output/perf/ticketing-account-ledger.sqlite3`에 기록하고 건너뛴다. 과거 요약에 계정 정보가 있으면 해당 기록도 반영한다. 실패·중단된 실행의 배정도 유지한다. 직접 JS를 실행하거나 다른 컴퓨터에서 실행한 결과, 다른 주소로 접근한 같은 서버의 기록은 공유되지 않으므로 별도 조율이 필요하다. HTTP 사용 시 토큰은 암호화되지 않는다. 시작 전에 perf 프로필, 테스트 DB, 회차와 토큰 유효기간을 확인한다.
@@ -24,11 +24,17 @@ perf/scenarios/run-ticketing.sh page 100
 
 `ticket_page_entry_duration`은 최초 두 요청의 `http.batch` 시작부터 둘 다 끝날 때까지의 시간으로, 연결 수립·요청 대기를 포함한다. 분산 진입을 위한 사전 대기, 응답 검증, 수동 새로고침과 브라우저 렌더링은 포함하지 않는다. 결과의 `ticket_page_entry_duration{outcome:ok}` p95로 두 응답이 모두 정상인 경우를 확인하고, `outcome:error` 건수와 기존 오류율도 함께 본다. 전체 지표에는 실패도 포함되며 별도의 1초 임계값은 강제하지 않는다. 실행 전에 생성된 과거 결과에는 이 지표가 없다.
 
-다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 요약 결과는 `.ai-output/perf/ticketing-<시나리오>/summary-<UTC 날짜시간>.json`, HTML 보고서는 같은 폴더의 `report-<UTC 날짜시간>.html`에 자동 저장된다. 예: `.ai-output/perf/ticketing-spread/summary-20261118T010203Z.json`. k6 표준 출력과 오류는 같은 폴더의 `k6-<UTC 날짜시간>.log`에 저장되며 터미널에도 표시된다. 실행 중에는 `http://localhost:5665`에서 대시보드를 볼 수 있다. 실행기가 기본으로 대시보드와 HTML 내보내기를 켜므로 별도 k6 환경변수를 지정하지 않아도 된다.
+다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 요약 결과는 `.ai-output/perf/ticketing-<시나리오>/summary-<UTC 날짜시간>.json`, HTML 보고서는 같은 폴더의 `report-<UTC 날짜시간>.html`에 자동 저장된다. 예: `.ai-output/perf/ticketing-page/summary-20261118T010203Z.json`. k6 표준 출력과 오류는 같은 폴더의 `k6-<UTC 날짜시간>.log`에 저장되며 터미널에도 표시된다. 실행 중에는 `http://localhost:5665`에서 대시보드를 볼 수 있다. 실행기가 기본으로 대시보드와 HTML 내보내기를 켜므로 별도 k6 환경변수를 지정하지 않아도 된다.
 
-`burst`는 준비된 각 사용자가 정해진 시각에 좌석 조회를 한 번씩 보낸다. 예를 들어 `perf/scenarios/run-ticketing.sh burst 5000`은 서로 다른 미사용 토큰 5,000개가 필요하다. 실행 전 좌석 및 관리 지표 확인 요청이 각각 한 번 추가된다. 기본적으로 준비 완료 20초 후 시작하며 `BURST_DELAY_SECONDS=30`으로 조절한다. `DURATION`은 적용되지 않고 `MAX_DURATION`(기본 5분)에 준비 대기와 응답 대기를 포함한다. `ticket_poll_requests`와 오류 임계값으로 완료 여부를 확인하고, `ticket_burst_start_delay`의 p95·최댓값으로 실제 요청 시작이 얼마나 퍼졌는지 살핀다. 이 값은 요청 전 로컬 시각 기준이며 서버 도착 시각은 아니다. 부하 생성기 성능이나 VU 초기화 때문에 설정 인원이 정확히 동시에 도착한다고 보장하지 않는다. 각 테스트 환경에 필요한 수만큼의 유효하고 미사용인 계정을 준비한다.
+진입 방식(`POLL_ENTRY`)은 `page`와 `mixed`·`mixed-distributed`의 조회자에만 적용한다. 기본은 3초 분산이다. `simultaneous`와 선점 시나리오(`hot`, `overlap`, `distributed`, `replay`)는 항상 모든 사용자가 동시에 출발한다. `mixed`의 선점자는 조회자와 같은 방식으로 출발한다(동시 진입이면 함께, 분산 진입이면 같은 3초 구간에 고르게). 조회와 선점이 실제로 겹쳤는지는 선점의 `ticket_start_offset{phase:hold}`와 조회의 `ticket_entry_end_offset`(시작부터 화면 진입 응답 완료까지)을 비교해 확인한다. 선점 출발이 조회 완료보다 늦으면 두 부하가 겹치지 않은 실행이다.
 
-좌석 응답 압축 비교는 같은 서버와 데이터 조건에서 `SEAT_ENCODING=identity perf/scenarios/run-ticketing.sh burst 500`과 `SEAT_ENCODING=gzip perf/scenarios/run-ticketing.sh burst 500`을 각각 실행한다. 기본값은 identity다. gzip을 요청했는데 준비 요청에서 압축되지 않으면 테스트를 중단하며, 본 요청의 `ticket_seat_encoding_errors`와 `ticket_seat_gzip_responses`로 적용 여부를 확인한다. 2KB 미만 응답은 서버가 압축하지 않으므로 gzip 비교에 적합하지 않다. 요약의 `conditions.seatEncoding`, `data_received`, 응답 시간과 서버 CPU를 함께 비교한다. 서버는 회차별 좌석 조회 JSON에만 압축을 적용한다. `HTTP_COMPRESSION_ENABLED=false`로 압축을 끌 수 있고 변경 후 앱을 재시작해야 한다.
+`START_DELAY_SECONDS`(기본 0)를 주면 `simultaneous`, `page`, `mixed`의 모든 사용자가 준비를 마친 뒤 그 초만큼 지난 같은 시각에 출발한다. 사용자가 많아 VU 시작 자체가 출발을 퍼뜨릴 때 쓴다. 이때 `ticket_start_offset`과 `ticket_entry_end_offset`은 지정 시각 기준이고, `MAX_DURATION`에 대기 시간이 포함된다.
+
+`ticket_start_offset`은 시나리오 시작부터 각 사용자의 첫 요청 직전까지의 시간이다. `{phase:entry}`는 조회, `{phase:hold}`는 선점이다. 동시 진입에서는 p95가 수십 ms 안이어야 부하 발생기가 동시 출발을 만든 것이다. 수백 ms 이상이면 그 실행은 부하 발생기 쪽 원인을 먼저 의심한다. 분산 진입에서는 0~3초에 고르게 퍼지는 것이 정상이다. 요청 전 로컬 시각 기준이며 서버 도착 시각은 아니다.
+
+`mixed`·`mixed-distributed`의 조회자는 `page`와 같이 좌석과 구매 가능 정보를 병렬 조회하고 `ticket_page_entry_duration`을 남긴다. 선점 지연은 `ticket_hold_duration{outcome:created}`와 `{outcome:unavailable}`을 따로 본다. `replay`는 첫 요청이 `{outcome:created}`, 같은 키 재요청이 `{outcome:replay_ok}`로 기록되므로 태그 없는 `ticket_hold_duration`은 두 요청이 섞인 분포다.
+
+좌석 응답 압축 비교는 같은 서버와 데이터 조건에서 `SEAT_ENCODING=identity perf/scenarios/run-ticketing.sh simultaneous 500`과 `SEAT_ENCODING=gzip perf/scenarios/run-ticketing.sh simultaneous 500`을 각각 실행한다. 기본값은 identity다. gzip을 요청했는데 준비 요청에서 압축되지 않으면 테스트를 중단하며, 본 요청의 `ticket_seat_encoding_errors`와 `ticket_seat_gzip_responses`로 적용 여부를 확인한다. 2KB 미만 응답은 서버가 압축하지 않으므로 gzip 비교에 적합하지 않다. 요약의 `conditions.seatEncoding`, `data_received`, 응답 시간과 서버 CPU를 함께 비교한다. 서버는 회차별 좌석 조회 JSON에만 압축을 적용한다. `HTTP_COMPRESSION_ENABLED=false`로 압축을 끌 수 있고 변경 후 앱을 재시작해야 한다.
 
 ### 테스트 중 서버 지표를 CSV로 수집
 
