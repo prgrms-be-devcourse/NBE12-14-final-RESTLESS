@@ -2,6 +2,7 @@ package com.restless.drop.application;
 
 import com.restless.drop.acceptance.DropStock;
 import com.restless.TestcontainersConfiguration;
+import com.restless.support.RecordedLogs;
 import com.restless.drop.application.DropPaymentTestClockConfig.MutableClock;
 import com.restless.common.error.BusinessException;
 import com.restless.drop.application.dto.CreateDropRequest;
@@ -84,11 +85,17 @@ class DropApprovalRollbackRecoveryIntegrationTest {
         pg.willDelay(prepared.pgOrderId(), Duration.ZERO);
         double failures = meters.counter("payment.result.apply.failure").count();
         DropReservationSettlement target = org.springframework.test.util.AopTestUtils.getUltimateTargetObject(settlement);
-        doThrow(new IllegalStateException("Injected TX3 rollback"))
+        doThrow(new IllegalStateException("Injected TX3 rollback",
+                new IllegalArgumentException("private-pg-cause")))
                 .doCallRealMethod().when(target).confirm(any());
-        var result = payments.confirm(new ConfirmPaymentCommand(user,
-                "test-key-" + UUID.randomUUID(), prepared.pgOrderId(), prepared.amount()));
-        assertThat(result.status()).isEqualTo(PaymentStatus.PROCESSING);
+        try (var logs = new RecordedLogs(PaymentService.class)) {
+            var result = payments.confirm(new ConfirmPaymentCommand(user,
+                    "test-key-" + UUID.randomUUID(), prepared.pgOrderId(), prepared.amount()));
+            assertThat(result.status()).isEqualTo(PaymentStatus.PROCESSING);
+            assertThat(logs.payloads()).singleElement().asString()
+                    .contains("ERROR Payment result transaction rolled back paymentId=" + prepared.paymentId())
+                    .doesNotContain("test-key-", "Injected TX3 rollback", "private-pg-cause");
+        }
         assertThat(pg.query(prepared.pgOrderId())).isInstanceOf(PgQueryResult.Approved.class);
         pending(prepared.paymentId());
         assertThat(meters.counter("payment.result.apply.failure").count()).isEqualTo(failures + 1);
@@ -105,12 +112,17 @@ class DropApprovalRollbackRecoveryIntegrationTest {
         pending(prepared.paymentId());
 
         clock.now = clock.instant().plusSeconds(31);
-        reconciler.runOnce();
-        confirmed(prepared.paymentId());
-        verify(target, times(2)).confirm(any());
-        reconciler.runOnce();
-        confirmed(prepared.paymentId());
-        verify(target, times(2)).confirm(any());
+        try (var logs = new RecordedLogs(PaymentTransactions.class)) {
+            reconciler.runOnce();
+            confirmed(prepared.paymentId());
+            verify(target, times(2)).confirm(any());
+            reconciler.runOnce();
+            confirmed(prepared.paymentId());
+            verify(target, times(2)).confirm(any());
+            assertThat(logs.entries()).containsExactly(
+                    "INFO event=drop.payment.approval_transition paymentId=" + prepared.paymentId()
+                            + " from=PROCESSING to=APPROVED");
+        }
         assertThat(meters.counter("payment.result.apply.failure").count()).isEqualTo(failures + 1);
     }
 

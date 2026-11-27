@@ -246,7 +246,7 @@ PG 취소 결과가 불명확하면 재고를 복원하지 않는다.
 게이트 행이 없을 때의 복구:
 
 - 게이트 락 결과는 LOCKED, BUSY, MISSING이다. SKIP LOCKED 결과가 비면 잠그지 않는 존재 조회로 BUSY와 MISSING을 구분한다.
-- MISSING이면 batch transaction을 끝낸 뒤 ERROR 로그와 태그 없는 `drop.queue.gate.missing`을 남긴다. 별도 REQUIRES_NEW transaction에서 INSERT IGNORE로 게이트를 만들고 batch를 한 번 재시도한다. 재시도도 비면 건너뛴다.
+- MISSING이면 batch transaction을 끝낸 뒤 복구 시도 WARN 로그와 태그 없는 `drop.queue.gate.missing`을 남긴다. 별도 REQUIRES_NEW transaction에서 INSERT IGNORE로 게이트를 만들고 batch를 한 번 재시도한다. 재시도 뒤에도 gate가 없으면 같은 variantId로 ERROR를 기록하고 건너뛴다.
 - 정상 LOCKED와 BUSY 경로에는 INSERT가 없다. TX1은 이 복구 경로를 쓰지 않는다.
 - 동시 복구의 INSERT는 PK 충돌 처리 때문에 짧게 기다릴 수 있다. 그래도 admission transaction을 쥔 채 기다리지 않는다.
 

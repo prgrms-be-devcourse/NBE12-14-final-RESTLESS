@@ -472,7 +472,8 @@ class DropQueueIntegrationTest {
                 } finally { connection.rollback(); }
             }
             assertThat(meters.counter("drop.queue.gate.missing").count()).isEqualTo(missingBefore);
-            assertThat(output.getAll()).doesNotContain("Drop queue gate missing variantId=" + variant);
+            assertThat(output.getAll()).doesNotContain("event=drop.queue.gate.repair_started variantId=" + variant,
+                    "event=drop.queue.gate.repair_unresolved variantId=" + variant);
         }
     }
 
@@ -551,7 +552,7 @@ class DropQueueIntegrationTest {
     }
 
     @Test
-    void missingGateIsRepairedAndAdmitsWithOneErrorAndUntaggedMetric(org.springframework.boot.test.system.CapturedOutput output) {
+    void missingGateIsRepairedAndAdmitsWithOneWarningAndUntaggedMetric(org.springframework.boot.test.system.CapturedOutput output) {
         queue.enter(drop, user, variant);
         jdbc.update("DELETE FROM drop_queue_gates WHERE variant_id=?", variant);
         var before = meters.counter("drop.queue.gate.missing").count();
@@ -560,8 +561,11 @@ class DropQueueIntegrationTest {
         assertThat(queue.me(drop, user).orElseThrow().status()).isEqualTo(com.restless.drop.domain.DropQueueStatus.ADMITTED);
         assertThat(meters.counter("drop.queue.gate.missing").count()).isEqualTo(before + 1);
         assertThat(meters.find("drop.queue.gate.missing").counter().getId().getTags()).isEmpty();
-        var errors = output.getAll().lines().filter(line -> line.contains("ERROR") && line.contains("Drop queue gate missing variantId=" + variant)).count();
-        assertThat(errors).isEqualTo(1);
+        var repairEvents = output.getAll().lines()
+                .filter(line -> line.contains("event=drop.queue.gate.repair_") && line.endsWith("variantId=" + variant))
+                .toList();
+        assertThat(repairEvents).singleElement().asString()
+                .contains("WARN", "event=drop.queue.gate.repair_started");
     }
 
     @Test
