@@ -69,7 +69,7 @@ const FM_FIELD: Record<string, keyof FmForm> = {
  * 팬미팅 만들기와 고치기에 같이 쓰는 폼.
  * eventId가 있으면 PUT /api/organizer/fan-meetings/{eventId}로 전체 설정을 다시 보낸다.
  */
-export function FanMeetingForm({ eventId, initial, onSaved }: { eventId?: number; initial?: FmForm; onSaved?: (r: FanMeetingDetail) => void } = {}) {
+export function FanMeetingForm({ eventId, initial, onSaved, onCreated }: { eventId?: number; initial?: FmForm; onSaved?: (r: FanMeetingDetail) => void; onCreated?: () => void } = {}) {
   const editing = eventId !== undefined;
   const toast = useToast();
   const btn = useRef<HTMLButtonElement>(null);
@@ -133,6 +133,7 @@ export function FanMeetingForm({ eventId, initial, onSaved }: { eventId?: number
       setCreated(r);
       burstFrom(btn.current);
       toast(`팬미팅 #${r.eventId}을 만들었어요`, "ok");
+      onCreated?.();
     } catch (err) {
       const ex = err as ApiError;
       // 백엔드 검증 오류(details.fields)는 해당 필드 아래에 붙인다

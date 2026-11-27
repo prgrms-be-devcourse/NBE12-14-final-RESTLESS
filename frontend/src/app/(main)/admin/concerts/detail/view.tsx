@@ -24,7 +24,7 @@ const errText = (err: unknown) => {
 
 export default function ConcertManageView({ id }: { id: number }) {
   return (
-    <AdminGate lead={<>공연 정보, 좌석 배치, 구역 가격, 회차를 정하고 공개해요. 가격은 회차를 추가하기 전에 정해야 하고, 공개한 뒤에는 일정과 가격을 바꿀 수 없어요.</>}>
+    <AdminGate lead={<>공연 정보, 좌석 배치, 예매 오픈, 구역 가격, 회차 순서로 정하고 공개해요. 가격과 예매 오픈은 회차를 추가하기 전에 정해야 하고, 공개한 뒤에는 일정과 가격을 바꿀 수 없어요.</>}>
       <Manage id={id} />
     </AdminGate>
   );
@@ -97,11 +97,12 @@ function Manage({ id }: { id: number }) {
             공연 삭제
           </button>
         </div>
-        {!c.published ? <p className="fq-hint" style={{ marginTop: 10 }}>공개하려면 기간, 공연 시간, 모든 구역 가격, 예매 시작 전인 회차가 하나 이상 있어야 해요.</p> : null}
+        {!c.published ? <p className="fq-hint" style={{ marginTop: 10 }}>공개하려면 기간, 공연 시간, 예매 오픈, 모든 구역 가격, 회차가 하나 이상 있어야 하고, 예매 오픈 전이어야 해요.</p> : null}
       </section>
 
       <DetailsForm c={c} onSaved={(next) => concert.setData(next)} />
       <VenueLayout c={c} layouts={layouts} onSaved={(next) => { concert.setData(next); void reloadAll(); }} />
+      <BookingOpens c={c} onSaved={(next) => { concert.setData(next); void perfs.reload().catch(() => undefined); }} />
       <SectionPrices c={c} layouts={layouts.data} onSaved={() => void concert.reload().catch(() => undefined)} />
       <Performances c={c} perfs={perfs} />
     </>
@@ -308,27 +309,77 @@ function SectionPrices({ c, layouts, onSaved }: { c: OrganizerConcert; layouts: 
   );
 }
 
-type PerfForm = { startsAt: string; bookingOpensAt: string; bookingClosesAt: string; maxTicketsPerUser: number };
+/** 예매 시작은 회차마다 받지 않는다. 서버가 공연의 예매 오픈을 모든 회차에 복사한다 */
+type PerfForm = { startsAt: string; bookingClosesAt: string; maxTicketsPerUser: number };
 
 const defaultPerf = (c: OrganizerConcert): PerfForm => {
-  // 공연 시작일 19시, 예매는 내일 20시부터 공연 하루 전까지
+  // 공연 시작일 19시, 예매 마감은 공연 하루 전
   const base = c.periodStartDate ? new Date(`${c.periodStartDate}T19:00`).getTime() : Date.now() + 14 * 86400_000;
-  const opens = new Date(Date.now() + 86400_000);
-  opens.setHours(20, 0, 0, 0);
-  return { startsAt: toLocal(base), bookingOpensAt: toLocal(opens.getTime()), bookingClosesAt: toLocal(base - 86400_000), maxTicketsPerUser: 4 };
+  return { startsAt: toLocal(base), bookingClosesAt: toLocal(base - 86400_000), maxTicketsPerUser: 4 };
 };
 
-/** 백엔드와 같은 기본 규칙: 예매 시작 < 예매 마감 <= 공연 시작, 1인 한도 1 이상 */
-const checkPerf = (p: PerfForm) => {
-  const [s, o, cl] = [Date.parse(p.startsAt), Date.parse(p.bookingOpensAt), Date.parse(p.bookingClosesAt)];
-  if ([s, o, cl].some(Number.isNaN)) return "공연, 예매 시각을 모두 정해 주세요.";
-  if (o >= cl) return "예매 시작은 예매 마감보다 앞이어야 해요.";
+/** 백엔드와 같은 기본 규칙: 공연 예매 오픈 < 예매 마감 <= 공연 시작, 1인 한도 1 이상 */
+const checkPerf = (p: PerfForm, bookingOpensAt: string | null) => {
+  if (!bookingOpensAt) return "공연 예매 오픈 시각을 먼저 정해 주세요.";
+  const [s, o, cl] = [Date.parse(p.startsAt), Date.parse(bookingOpensAt), Date.parse(p.bookingClosesAt)];
+  if ([s, cl].some(Number.isNaN)) return "공연 시작과 예매 마감을 모두 정해 주세요.";
+  if (o >= cl) return "예매 마감은 공연 예매 오픈보다 뒤여야 해요.";
   if (cl > s) return "예매 마감은 공연 시작과 같거나 앞이어야 해요.";
   if (!Number.isInteger(p.maxTicketsPerUser) || p.maxTicketsPerUser < 1) return "1인 구매 한도는 1장 이상이어야 해요.";
   return null;
 };
 
-const perfBody = (p: PerfForm) => ({ startsAt: iso(p.startsAt), bookingOpensAt: iso(p.bookingOpensAt), bookingClosesAt: iso(p.bookingClosesAt), maxTicketsPerUser: p.maxTicketsPerUser });
+const perfBody = (p: PerfForm) => ({ startsAt: iso(p.startsAt), bookingClosesAt: iso(p.bookingClosesAt), maxTicketsPerUser: p.maxTicketsPerUser });
+
+/** 공연 단위 예매 오픈. 바꾸면 모든 회차의 예매 시작이 함께 바뀐다 */
+function BookingOpens({ c, onSaved }: { c: OrganizerConcert; onSaved: (c: OrganizerConcert) => void }) {
+  const toast = useToast();
+  const [value, setValue] = useState(() => isoToLocal(c.bookingOpensAt));
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  // 공개한 공연은 예매 오픈 전이고 새 시각도 미래일 때만 바꿀 수 있다
+  const locked = c.published && (!c.bookingOpensAt || Date.parse(c.bookingOpensAt) <= Date.now());
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const t = Date.parse(value);
+    if (Number.isNaN(t)) return setError("예매 오픈 시각을 정해 주세요.");
+    if (c.published && t <= Date.now()) return setError("공개한 공연은 지금 이후로만 바꿀 수 있어요.");
+    setError(null);
+    setSaving(true);
+    try {
+      const r = await api<OrganizerConcert>(`/api/organizer/concerts/${c.concertId}/booking-opens-at`, { method: "PUT", body: { bookingOpensAt: iso(value) } });
+      toast("예매 오픈 시각을 저장했어요", "ok");
+      onSaved(r);
+    } catch (err) {
+      setError(errText(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <form className="fq-card is-pad fq-form" style={{ marginTop: 18 }} onSubmit={submit} noValidate>
+      <span className="fq-eyebrow">예매 오픈</span>
+      <p className="fq-muted">
+        {c.bookingOpensAt ? `${dateTime(c.bookingOpensAt)}에 모든 회차 예매가 열려요.` : "아직 정하지 않았어요. 회차를 추가하기 전에 정해 주세요."}
+      </p>
+      <div className="fq-field">
+        <label htmlFor="cd-opens">예매 오픈 시각</label>
+        <input id="cd-opens" className="fq-input" type="datetime-local" disabled={locked} value={value} onChange={(e) => setValue(e.target.value)} />
+      </div>
+      <p className="fq-hint">
+        {locked ? "예매가 이미 열려 바꿀 수 없어요." : "모든 회차의 예매 마감보다 앞이어야 해요. 선점 이력이 있는 회차가 있으면 바꿀 수 없어요."}
+      </p>
+      {error ? (
+        <p className="fq-err" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <button className="fq-btn is-grad" disabled={saving || locked}>
+        {saving ? "저장 중…" : "예매 오픈 저장"}
+      </button>
+    </form>
+  );
+}
 
 function PerfFields({ p, onChange, idPrefix, disabled }: { p: PerfForm; onChange: (p: PerfForm) => void; idPrefix: string; disabled?: boolean }) {
   return (
@@ -336,10 +387,6 @@ function PerfFields({ p, onChange, idPrefix, disabled }: { p: PerfForm; onChange
       <div className="fq-field">
         <label htmlFor={`${idPrefix}-starts`}>공연 시작</label>
         <input id={`${idPrefix}-starts`} className="fq-input" type="datetime-local" disabled={disabled} value={p.startsAt} onChange={(e) => onChange({ ...p, startsAt: e.target.value })} />
-      </div>
-      <div className="fq-field">
-        <label htmlFor={`${idPrefix}-opens`}>예매 시작</label>
-        <input id={`${idPrefix}-opens`} className="fq-input" type="datetime-local" disabled={disabled} value={p.bookingOpensAt} onChange={(e) => onChange({ ...p, bookingOpensAt: e.target.value })} />
       </div>
       <div className="fq-field">
         <label htmlFor={`${idPrefix}-closes`}>예매 마감</label>
@@ -362,7 +409,7 @@ function Performances({ c, perfs }: { c: OrganizerConcert; perfs: { data: Perfor
 
   const save = async () => {
     if (!editing) return;
-    const msg = checkPerf(editing.form);
+    const msg = checkPerf(editing.form, c.bookingOpensAt);
     if (msg) return toast(msg, "err");
     setBusy(true);
     try {
@@ -447,7 +494,7 @@ function Performances({ c, perfs }: { c: OrganizerConcert; perfs: { data: Perfor
                       type="button"
                       className="fq-btn is-ghost is-sm"
                       disabled={busy || c.published}
-                      onClick={() => setEditing({ id: p.performanceId, form: { startsAt: isoToLocal(p.startsAt), bookingOpensAt: isoToLocal(p.bookingOpensAt), bookingClosesAt: isoToLocal(p.bookingClosesAt), maxTicketsPerUser: p.maxTicketsPerUser } })}
+                      onClick={() => setEditing({ id: p.performanceId, form: { startsAt: isoToLocal(p.startsAt), bookingClosesAt: isoToLocal(p.bookingClosesAt), maxTicketsPerUser: p.maxTicketsPerUser } })}
                     >
                       고치기
                     </button>
@@ -472,13 +519,13 @@ function AddPerformances({ c, onAdded }: { c: OrganizerConcert; onAdded: () => v
   const [one, setOne] = useState<PerfForm>(() => defaultPerf(c));
   const [batch, setBatch] = useState(() => {
     const d = defaultPerf(c);
-    return { bookingOpensAt: d.bookingOpensAt, maxTicketsPerUser: d.maxTicketsPerUser, items: [{ startsAt: d.startsAt, bookingClosesAt: d.bookingClosesAt }] };
+    return { maxTicketsPerUser: d.maxTicketsPerUser, items: [{ startsAt: d.startsAt, bookingClosesAt: d.bookingClosesAt }] };
   });
   const [busy, setBusy] = useState(false);
 
   const addOne = async (e: React.FormEvent) => {
     e.preventDefault();
-    const msg = checkPerf(one);
+    const msg = checkPerf(one, c.bookingOpensAt);
     if (msg) return toast(msg, "err");
     setBusy(true);
     try {
@@ -495,7 +542,7 @@ function AddPerformances({ c, onAdded }: { c: OrganizerConcert; onAdded: () => v
   const addBatch = async (e: React.FormEvent) => {
     e.preventDefault();
     for (const item of batch.items) {
-      const msg = checkPerf({ ...item, bookingOpensAt: batch.bookingOpensAt, maxTicketsPerUser: batch.maxTicketsPerUser });
+      const msg = checkPerf({ ...item, maxTicketsPerUser: batch.maxTicketsPerUser }, c.bookingOpensAt);
       if (msg) return toast(msg, "err");
     }
     setBusy(true);
@@ -503,7 +550,6 @@ function AddPerformances({ c, onAdded }: { c: OrganizerConcert; onAdded: () => v
       const r = await api<{ performances: PerformanceInfo[] }>(`/api/organizer/concerts/${c.concertId}/performances/batch`, {
         method: "POST",
         body: {
-          bookingOpensAt: iso(batch.bookingOpensAt),
           maxTicketsPerUser: batch.maxTicketsPerUser,
           performances: batch.items.map((it) => ({ startsAt: iso(it.startsAt), bookingClosesAt: iso(it.bookingClosesAt) })),
         },
@@ -533,7 +579,9 @@ function AddPerformances({ c, onAdded }: { c: OrganizerConcert; onAdded: () => v
           </button>
         </div>
       </div>
-      <p className="fq-hint">회차는 공연 기간 안이어야 하고, 앞 회차와 공연 시간({c.durationMinutes ?? "?"}분)만큼 떨어져 있어야 해요.</p>
+      <p className="fq-hint">
+        회차는 공연 기간 안이어야 하고, 앞 회차와 공연 시간({c.durationMinutes ?? "?"}분)만큼 떨어져 있어야 해요. 예매 시작은 공연 예매 오픈({c.bookingOpensAt ? dateTime(c.bookingOpensAt) : "미정"})을 따라요.
+      </p>
       {mode === "one" ? (
         <form className="fq-form" onSubmit={addOne}>
           <PerfFields p={one} onChange={setOne} idPrefix="pa" />
@@ -543,15 +591,9 @@ function AddPerformances({ c, onAdded }: { c: OrganizerConcert; onAdded: () => v
         </form>
       ) : (
         <form className="fq-form" onSubmit={addBatch}>
-          <div className="fq-form-2">
-            <div className="fq-field">
-              <label htmlFor="pb-opens">공통 예매 시작</label>
-              <input id="pb-opens" className="fq-input" type="datetime-local" value={batch.bookingOpensAt} onChange={(e) => setBatch({ ...batch, bookingOpensAt: e.target.value })} />
-            </div>
-            <div className="fq-field">
-              <label htmlFor="pb-max">공통 1인 구매 한도</label>
-              <input id="pb-max" className="fq-input" type="number" min={1} value={batch.maxTicketsPerUser} onChange={(e) => setBatch({ ...batch, maxTicketsPerUser: Number(e.target.value) })} />
-            </div>
+          <div className="fq-field">
+            <label htmlFor="pb-max">공통 1인 구매 한도</label>
+            <input id="pb-max" className="fq-input" type="number" min={1} value={batch.maxTicketsPerUser} onChange={(e) => setBatch({ ...batch, maxTicketsPerUser: Number(e.target.value) })} />
           </div>
           <div className="fq-between">
             <span className="fq-muted">회차 {batch.items.length}/10</span>
