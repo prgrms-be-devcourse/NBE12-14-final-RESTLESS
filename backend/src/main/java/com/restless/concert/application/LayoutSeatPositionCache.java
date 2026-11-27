@@ -3,13 +3,12 @@ package com.restless.concert.application;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Ticker;
-import com.restless.concert.application.dto.SeatPosition;
+import com.restless.concert.application.dto.PerformanceLayout;
 import com.restless.concert.infrastructure.LayoutSeatPositionRepository;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.cache.CaffeineCacheMetrics;
 import java.time.Clock;
 import java.time.Duration;
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -29,7 +28,7 @@ public class LayoutSeatPositionCache {
 
     private final LayoutSeatPositionRepository positions;
     private final boolean enabled;
-    private final Cache<Long, List<SeatPosition>> layouts;
+    private final Cache<Long, PerformanceLayout> layouts;
 
     public LayoutSeatPositionCache(LayoutSeatPositionRepository positions, Clock clock, MeterRegistry registry,
             @Value("${restless.concert.layout-cache.enabled:true}") boolean enabled,
@@ -49,11 +48,15 @@ public class LayoutSeatPositionCache {
         CaffeineCacheMetrics.monitor(registry, layouts, "concert.layout_seat_positions");
     }
 
-    /** 배치의 모든 좌석 위치. 반환 목록은 바꿀 수 없다. */
-    public List<SeatPosition> get(Long layoutId) {
+    /** 배치의 모든 좌석 위치와 물리 좌석 ID 색인. 바꿀 수 없다. */
+    public PerformanceLayout get(Long layoutId) {
         if (!enabled) {
-            return positions.findByLayoutId(layoutId);
+            return load(layoutId);
         }
-        return layouts.get(layoutId, id -> List.copyOf(positions.findByLayoutId(id)));
+        return layouts.get(layoutId, this::load);
+    }
+
+    private PerformanceLayout load(Long layoutId) {
+        return new PerformanceLayout(layoutId, positions.findByLayoutId(layoutId));
     }
 }

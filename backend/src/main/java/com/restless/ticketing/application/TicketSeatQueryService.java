@@ -11,8 +11,6 @@ import com.restless.ticketing.infrastructure.TicketSeatRepository;
 import com.restless.ticketing.infrastructure.TicketSeatSnapshotRepository;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,12 +39,10 @@ public class TicketSeatQueryService {
     }
 
     private List<TicketSeatInfo> combineSeats(PerformanceLayout layout, List<TicketSeatSnapshot> seats) {
-        Map<Long, SeatPosition> positions = layout.seats().stream()
-                .collect(Collectors.toMap(SeatPosition::venueSeatId, Function.identity()));
-
+        // 배치 색인은 캐시된 PerformanceLayout이 들고 있다. 요청마다 Map을 만들지 않는다.
         return seats.stream()
                 .map(seat -> {
-                    SeatPosition position = positions.get(seat.venueSeatId());
+                    SeatPosition position = layout.position(seat.venueSeatId());
                     if (!layout.layoutId().equals(seat.layoutId()) || position == null) {
                         throw new IllegalStateException("회차의 판매 좌석과 배치가 일치하지 않습니다: " + seat.id());
                     }

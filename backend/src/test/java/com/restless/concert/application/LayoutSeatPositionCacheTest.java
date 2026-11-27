@@ -7,6 +7,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.restless.concert.application.dto.PerformanceLayout;
 import com.restless.concert.application.dto.SeatPosition;
 import com.restless.concert.infrastructure.LayoutSeatPositionRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -40,9 +41,9 @@ class LayoutSeatPositionCacheTest {
         when(repository.findByLayoutId(2L)).thenReturn(List.of(position(20L)));
         var cache = cache(true);
 
-        assertThat(cache.get(1L)).extracting(SeatPosition::venueSeatId).containsExactly(10L);
-        assertThat(cache.get(1L)).extracting(SeatPosition::venueSeatId).containsExactly(10L);
-        assertThat(cache.get(2L)).extracting(SeatPosition::venueSeatId).containsExactly(20L);
+        assertThat(cache.get(1L).seats()).extracting(SeatPosition::venueSeatId).containsExactly(10L);
+        assertThat(cache.get(1L).seats()).extracting(SeatPosition::venueSeatId).containsExactly(10L);
+        assertThat(cache.get(2L).seats()).extracting(SeatPosition::venueSeatId).containsExactly(20L);
 
         verify(repository, times(1)).findByLayoutId(1L);
         verify(repository, times(1)).findByLayoutId(2L);
@@ -56,9 +57,9 @@ class LayoutSeatPositionCacheTest {
 
         cache.get(1L);
         clock.advance(TTL.minusMillis(1));
-        assertThat(cache.get(1L)).extracting(SeatPosition::venueSeatId).containsExactly(10L);
+        assertThat(cache.get(1L).seats()).extracting(SeatPosition::venueSeatId).containsExactly(10L);
         clock.advance(Duration.ofMillis(1));
-        assertThat(cache.get(1L)).extracting(SeatPosition::venueSeatId).containsExactly(11L);
+        assertThat(cache.get(1L).seats()).extracting(SeatPosition::venueSeatId).containsExactly(11L);
 
         verify(repository, times(2)).findByLayoutId(1L);
     }
@@ -83,7 +84,7 @@ class LayoutSeatPositionCacheTest {
         var cache = cache(true);
 
         assertThatThrownBy(() -> cache.get(1L)).isInstanceOf(IllegalStateException.class).hasMessage("db down");
-        assertThat(cache.get(1L)).extracting(SeatPosition::venueSeatId).containsExactly(10L);
+        assertThat(cache.get(1L).seats()).extracting(SeatPosition::venueSeatId).containsExactly(10L);
 
         verify(repository, times(2)).findByLayoutId(1L);
     }
@@ -95,10 +96,10 @@ class LayoutSeatPositionCacheTest {
         when(repository.findByLayoutId(1L)).thenReturn(loaded);
         var cache = cache(true);
 
-        var first = cache.get(1L);
+        var first = cache.get(1L).seats();
         loaded.add(position(99L));
 
-        assertThat(cache.get(1L)).extracting(SeatPosition::venueSeatId).containsExactly(10L);
+        assertThat(cache.get(1L).seats()).extracting(SeatPosition::venueSeatId).containsExactly(10L);
         assertThatThrownBy(() -> first.add(position(1L))).isInstanceOf(UnsupportedOperationException.class);
     }
 
@@ -117,7 +118,7 @@ class LayoutSeatPositionCacheTest {
         var ready = new CountDownLatch(callers);
         ExecutorService pool = Executors.newFixedThreadPool(callers);
         try {
-            List<Future<List<SeatPosition>>> results = new ArrayList<>();
+            List<Future<PerformanceLayout>> results = new ArrayList<>();
             for (int i = 0; i < callers; i++) {
                 results.add(pool.submit(() -> {
                     ready.countDown();
@@ -128,12 +129,34 @@ class LayoutSeatPositionCacheTest {
             Thread.sleep(100);
             release.countDown();
             for (var result : results) {
-                assertThat(result.get(5, TimeUnit.SECONDS)).extracting(SeatPosition::venueSeatId).containsExactly(10L);
+                assertThat(result.get(5, TimeUnit.SECONDS).seats()).extracting(SeatPosition::venueSeatId).containsExactly(10L);
             }
         } finally {
             pool.shutdownNow();
         }
         assertThat(loads).hasValue(1);
+    }
+
+    @Test
+    @DisplayName("기억한 배치는 물리 좌석 ID로 위치를 찾고 같은 색인을 재사용한다")
+    void keepsVenueSeatIndexWithCachedLayout() {
+        when(repository.findByLayoutId(1L)).thenReturn(List.of(position(10L), position(20L)));
+        var cache = cache(true);
+
+        var first = cache.get(1L);
+        assertThat(first.layoutId()).isEqualTo(1L);
+        assertThat(first.position(20L).venueSeatId()).isEqualTo(20L);
+        assertThat(first.position(99L)).isNull();
+        assertThat(cache.get(1L).positionsByVenueSeatId()).isSameAs(first.positionsByVenueSeatId());
+    }
+
+    @Test
+    @DisplayName("같은 배치에 같은 물리 좌석이 두 번 오면 기억하지 않고 실패한다")
+    void rejectsDuplicateVenueSeat() {
+        when(repository.findByLayoutId(1L)).thenReturn(List.of(position(10L), position(10L)));
+        var cache = cache(true);
+
+        assertThatThrownBy(() -> cache.get(1L)).isInstanceOf(IllegalStateException.class);
     }
 
     @Test

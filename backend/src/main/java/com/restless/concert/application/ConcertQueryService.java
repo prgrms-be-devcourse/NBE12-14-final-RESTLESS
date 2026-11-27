@@ -101,9 +101,7 @@ public class ConcertQueryService {
     public PerformanceLayout getPerformanceLayout(Long performanceId) {
         Long layoutId = seatQueryMetrics.measure("performance", () -> performanceRepository.findPublishedLayoutId(performanceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다.")));
-        List<SeatPosition> seats = seatQueryMetrics.measure("layout_seats",
-                () -> layoutSeatPositions.get(layoutId));
-        return new PerformanceLayout(layoutId, seats);
+        return seatQueryMetrics.measure("layout_seats", () -> layoutSeatPositions.get(layoutId));
     }
 
     /** 구매 가능 정보 조회에는 좌석 배치 없이 회차당 한도만 제공한다. */
