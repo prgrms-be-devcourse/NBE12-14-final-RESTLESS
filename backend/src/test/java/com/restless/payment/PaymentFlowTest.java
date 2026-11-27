@@ -709,6 +709,7 @@ class PaymentFlowTest {
         volatile boolean throwApproved, throwRefunded;
         volatile boolean lockDomainRows;
         volatile Runnable afterLoadLock;
+        volatile Runnable approvedHook = () -> {}, unknownHook = () -> {};
         final JdbcTemplate jdbc;
 
         Handler(JdbcTemplate jdbc) {
@@ -729,6 +730,8 @@ class PaymentFlowTest {
             throwRefunded = false;
             lockDomainRows = false;
             afterLoadLock = () -> {};
+            approvedHook = () -> {};
+            unknownHook = () -> {};
             starting.clear();
             failed.clear();
             unknown.clear();
@@ -770,6 +773,7 @@ class PaymentFlowTest {
                     p.paymentId());
             approved.add(p);
             if (throwApproved) throw new IllegalStateException("handler unavailable");
+            approvedHook.run();
             return approvedDecision;
         }
 
@@ -781,6 +785,7 @@ class PaymentFlowTest {
         public void onUnknown(Long id, PaymentAttemptContext a) {
             inTx();
             unknown.add(a);
+            unknownHook.run();
         }
 
         public void onRefunded(Long id, RefundContext r) {

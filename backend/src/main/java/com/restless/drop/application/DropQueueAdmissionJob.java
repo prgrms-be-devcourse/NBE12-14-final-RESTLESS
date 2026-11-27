@@ -39,10 +39,11 @@ public class DropQueueAdmissionJob {
             var result = transactions.runBatch(variantId);
             if (result == DropQueueAdmissionTransactions.Result.MISSING) {
                 if (repaired) {
+                    log.error("event=drop.queue.gate.repair_unresolved variantId={}", variantId);
                     metrics.skipped();
                     return;
                 }
-                log.error("Drop queue gate missing variantId={}", variantId);
+                log.warn("event=drop.queue.gate.repair_started variantId={}", variantId);
                 metrics.gateMissing();
                 repair.createIfMissing(variantId);
                 repaired = true;
