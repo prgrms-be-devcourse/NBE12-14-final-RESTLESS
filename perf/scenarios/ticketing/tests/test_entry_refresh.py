@@ -6,14 +6,16 @@ from pathlib import Path
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = Path(os.environ.get('TICKETING_SCENARIO_ROOT', Path(__file__).resolve().parents[4]))
 
 
 class Handler(BaseHTTPRequestHandler):
     mismatch = False
+    invalid_availability = False
     seat_requests = 0
 
     def log_message(self, *_):
@@ -23,7 +25,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/actuator/prometheus':
             body = 'up 1\n'
         elif self.path.endswith('/booking-availability'):
-            body = json.dumps(dict(maximum=3, confirmed=0, reserved=0, remaining=3, activeReservation=None))
+            time.sleep(0.2)
+            body = json.dumps({} if self.invalid_availability else dict(maximum=3, confirmed=0, reserved=0, remaining=3, activeReservation=None))
         elif self.path.endswith('/seats/status'):
             body = json.dumps([dict(seatId=2 if self.mismatch else 1, status='AVAILABLE')])
         elif self.path.endswith('/seats'):
@@ -61,8 +64,9 @@ class ScenarioTest(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join()
 
-    def run_scenario(self, scenario, refresh=0, mismatch=False):
+    def run_scenario(self, scenario, refresh=0, mismatch=False, invalid_availability=False, entry='simultaneous'):
         Handler.mismatch = mismatch
+        Handler.invalid_availability = invalid_availability
         Handler.seat_requests = 0
         with tempfile.TemporaryDirectory() as tmp:
             users = Path(tmp) / 'users.csv'
@@ -73,12 +77,15 @@ class ScenarioTest(unittest.TestCase):
             env = dict(os.environ, BASE_URL=f'http://127.0.0.1:{self.server.server_port}',
                        MANAGEMENT_URL=f'http://127.0.0.1:{self.server.server_port}', PERFORMANCE_ID='1',
                        PARTICIPANTS='1' if scenario == 'mixed' else '2', HOLD_PARTICIPANTS='1', VUS='2',
-                       USERS_CSV=str(users), SETUP='csv', RUN_ID='scenario-test', POLL_ENTRY='simultaneous',
+                       USERS_CSV=str(users), SETUP='csv', RUN_ID='scenario-test', POLL_ENTRY=entry,
                        REFRESH_COUNT=str(refresh), REFRESH_INTERVAL_SECONDS='1', HOLD_DELAY_SECONDS='1',
                        SUMMARY_PATH=str(output))
             result = subprocess.run(['k6', 'run', '--quiet', str(ROOT / 'perf/scenarios/ticketing' / (scenario + '.js'))],
                                     env=env, capture_output=True, text=True, timeout=20)
-            self.assertEqual(result.returncode, 0, result.stderr)
+            if invalid_availability:
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+            else:
+                self.assertEqual(result.returncode, 0, result.stderr)
             return json.loads(output.read_text())
 
     def test_page_refresh_and_safe_summary(self):
@@ -87,7 +94,22 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(metrics['ticket_poll_duration{phase:entry}']['values']['count'], 2)
         self.assertEqual(metrics['ticket_refresh_requests']['values']['count'], 2)
         self.assertEqual(metrics['ticket_availability_requests']['values']['count'], 2)
+        page = metrics['ticket_page_entry_duration{outcome:ok}']['values']
+        self.assertEqual(page['count'], 2)
+        self.assertGreaterEqual(page['avg'], 150)
+        self.assertGreater(metrics['iteration_duration']['values']['avg'] - page['avg'], 800)
         self.assertEqual(report['setup_data']['users'], [{'id': '1'}, {'id': '2'}])
+
+    def test_page_failure_is_recorded_separately(self):
+        metrics = self.run_scenario('page', invalid_availability=True)['metrics']
+        self.assertEqual(metrics['ticket_page_entry_duration{outcome:error}']['values']['count'], 2)
+        self.assertEqual(metrics['ticket_availability_errors']['values']['passes'], 2)
+
+    def test_page_duration_excludes_spread_delay(self):
+        metrics = self.run_scenario('page', entry='spread')['metrics']
+        page = metrics['ticket_page_entry_duration{outcome:ok}']['values']
+        self.assertEqual(page['count'], 2)
+        self.assertGreater(metrics['iteration_duration']['values']['avg'] - page['avg'], 400)
 
     def test_no_automatic_polling_and_mixed_hold(self):
         for scenario, count in [('simultaneous', 2), ('mixed', 1)]:

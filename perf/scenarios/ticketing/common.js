@@ -91,6 +91,7 @@ const options = {
     ...(mode === 'burst' ? { ticket_poll_requests: [`count==${participants}`], ticket_poll_errors: ['rate==0'] } : {}),
     'ticket_poll_duration{outcome:ok}': [],
     'ticket_poll_duration{phase:entry}': [],
+    ...(mode === 'page' ? { 'ticket_page_entry_duration{outcome:ok}': [], 'ticket_page_entry_duration{outcome:error}': [] } : {}),
   },
   summaryTrendStats: ['count', 'avg', 'med', 'p(95)', 'p(99)', 'max'],
 };
@@ -111,6 +112,7 @@ const seatEncodingErrors = new Rate('ticket_seat_encoding_errors');
 const availabilityRequests = new Counter('ticket_availability_requests');
 const availabilityErrors = new Rate('ticket_availability_errors');
 const availabilityLatency = new Trend('ticket_availability_duration', true);
+const pageEntryLatency = new Trend('ticket_page_entry_duration', true);
 const holdLatency = new Trend('ticket_hold_duration', true);
 function count(outcome, bad) { outcomes.add(1, { outcome }); unexpected.add(bad); }
 function headers(user, key) { return { Authorization: `Bearer ${user.token}`, 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) }; }
@@ -167,7 +169,7 @@ function run(data) {
   const activeUsers = mode === 'burst' ? users : data.users;
   const pollUser = mode === 'poll' || mode === 'page' || mode === 'burst' || (mode === 'mixed' && exec.vu.idInTest <= participants);
   if (pollUser) {
-    return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, burstStartDelay, refreshCount, refreshInterval, refreshRequests });
+    return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, burstStartDelay, refreshCount, refreshInterval, refreshRequests });
   }
   return runHold(data, { base, performanceId, users: activeUsers, mode, participants, holdDelay, mixedHold, hotSeats, runId, headers, holdAttempts, holdCompleted, replayCompleted, holdErrors, count, holdLatency });
 }
