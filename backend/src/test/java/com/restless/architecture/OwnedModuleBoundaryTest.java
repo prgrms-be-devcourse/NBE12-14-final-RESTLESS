@@ -92,6 +92,22 @@ class OwnedModuleBoundaryTest {
             .because("다른 모듈의 Repository(infrastructure)를 직접 쓰지 않는다 (AGENTS.md 5절). "
                     + "위 목록 규칙과 달리 새로 생기는 모듈(auth, credit, coupon 등)도 자동으로 포함된다");
 
+    @ArchTest
+    static final ArchRule ownedDomainStaysBelowOtherLayers = noClasses()
+            .that().resideInAnyPackage(
+                    "com.restless.drop.domain..", "com.restless.order.domain..", "com.restless.payment.domain..")
+            .should().dependOnClassesThat().resideInAnyPackage(
+                    "com.restless.*.application..", "com.restless.*.api..", "com.restless.*.infrastructure..")
+            .because("domain은 가장 안쪽 레이어다. 어느 모듈의 application, api, infrastructure도 알지 않는다. "
+                    + "JPA와 Spring Data 의존은 현재 설계상 허용한다");
+
+    @ArchTest
+    static final ArchRule ownedApiDoesNotUseInfrastructure = noClasses()
+            .that().resideInAnyPackage(
+                    "com.restless.drop.api..", "com.restless.order.api..", "com.restless.payment.api..")
+            .should().dependOnClassesThat().resideInAnyPackage("com.restless.*.infrastructure..")
+            .because("api는 application을 거친다. 자기 모듈의 Repository도 직접 쓰지 않는다");
+
     private static ArchCondition<JavaClass> notDependOnAnotherModulesInfrastructure() {
         return new ArchCondition<>("not depend on another module's infrastructure package") {
             @Override
