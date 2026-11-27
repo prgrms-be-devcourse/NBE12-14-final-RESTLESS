@@ -39,6 +39,7 @@ Codex는 레포 루트에서 실행하면 이 파일을 자동으로 읽지 않�
 - **L-02** 크레딧 확보·해제·차감은 `Propagation.MANDATORY`다. 별도 트랜잭션(`REQUIRES_NEW`)으로 바꾸면 종료 중 실패 때 "차감은 됐는데 결과는 없는" 상태가 남는다 (#140, INV-AU-13, `AuctionCloseFailureTest`).
 - **L-03** 스케줄러는 경매마다 실패를 잡아 기록하고 다음 경매로 넘어간다. 예외를 밖으로 던지면 한 경매의 실패가 나머지 경매의 종료를 막는다 (#140, `AuctionCloseFailureTest`).
 - **L-04** UNIQUE 위반을 잡아 "기존 행을 돌려주는" 코드는 그 저장과 같은 트랜잭션 안에 두지 않는다. 저장이 실패한 트랜잭션은 롤백 전용이 돼서, 기존 행을 읽어 정상 응답해도 커밋에서 500이 난다. 저장을 끝낸 뒤 새 조회로 읽는다 (#316, `CreditChargeService.create`, `CreditChargeApiTest` 같은 요청 키 동시 요청). 입찰처럼 위반을 409로 바꿔 던지기만 하면 같은 트랜잭션이어도 된다.
+- **L-05** SSE 연결은 heartbeat와 컨테이너 오류 콜백이 서로 다른 스레드에서 함께 뺄 수 있다. 누가 뺐는지(`remove()`의 반환값)로 지표를 세면 경쟁에 따라 값이 달라진다. 무엇을 감지했는지로 센다 (#530, `AuctionStreams.heartbeat`, `AuctionStreamLimitTest`).
 
 ## 테스트
 

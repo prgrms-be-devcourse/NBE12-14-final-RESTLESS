@@ -155,7 +155,7 @@ AuctionChangedEvent (AFTER_COMMIT)
 - **연결 상한 (#244):** 서버 전체 연결 수를 원자적으로 세어 상한 확인과 자리 확보를 한 번에 한다. 넘으면 연결을 만들지 않고 503 `AUCTION_STREAM_BUSY`를 준다. 자리는 연결이 목록에서 빠질 때 한 번만 돌려준다 (완료·오류·전송 실패가 겹쳐도 한 번). 경매가 없어 404가 되거나 첫 전송이 실패한 연결도 자리를 돌려준다.
 - **heartbeat (#447):** 같은 전송 스레드가 15초마다 모든 연결에 주석 줄을 보낸다. 한 연결에 두 스레드가 동시에 쓰지 않는다. 클라이언트가 떠나도 서버는 써 봐야 알 수 있으므로, 입찰이 없는 경매의 떠난 연결은 이 전송이 실패할 때 정리된다 (보통 1~2번째 heartbeat).
 - **설정** (`application.yml` `restless.auction.stream`): `flush-interval-ms`(기본 200), `timeout-ms`(연결 최대 유지 시간, 기본 30분. 지나면 서버가 닫고 클라이언트가 재연결한다), `max-connections`(기본 6,000, 환경변수 `AUCTION_STREAM_MAX_CONNECTIONS`), `retry-after-seconds`(기본 5), `heartbeat-interval-ms`(기본 15,000).
-- **메트릭:** `auction.stream.connections`(열린 연결 수), `auction.stream.rejected`(상한 거절 수), `auction.stream.heartbeat.removed`(heartbeat로 정리한 연결 수), `auction.stream.failure`(`stage` = `send` 끊긴 연결로 전송 실패, `flush` 한 경매 조회·전송 실패, `loop` 전송 주기 자체 실패, `heartbeat` heartbeat 주기 자체 실패).
+- **메트릭:** `auction.stream.connections`(열린 연결 수), `auction.stream.rejected`(상한 거절 수), `auction.stream.heartbeat.removed`(heartbeat 쓰기가 실패해 찾아낸 떠난 연결 수. 같은 실패를 받은 오류 콜백이 먼저 목록에서 빼도 센다), `auction.stream.failure`(`stage` = `send` 끊긴 연결로 전송 실패, `flush` 한 경매 조회·전송 실패, `loop` 전송 주기 자체 실패, `heartbeat` heartbeat 주기 자체 실패).
 
 ## 조회 캐시 (트랜잭션 밖)
 

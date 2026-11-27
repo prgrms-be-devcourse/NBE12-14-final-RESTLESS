@@ -209,6 +209,8 @@ class AuctionStreamLimitTest {
         assertThat(alive.statusCode()).isEqualTo(200);
 
         closeClients();
+        // 닫은 뒤에 등록해야 위에서 닫히지 않는다. 아래 단언이 실패해도 정리 단계가 이 연결을 닫아 다음 테스트로 남지 않는다.
+        opened.add(alive.body());
         for (int i = 0; i < 50 && streams.connections(quiet) > 0; i++) {
             streams.heartbeat();
             Thread.sleep(100);
@@ -218,6 +220,5 @@ class AuctionStreamLimitTest {
         assertThat(streams.connections(watched)).isEqualTo(1);
         assertThat(counter("auction.stream.heartbeat.removed")).isEqualTo(removedBefore + 1);
         assertThat(gauge()).isEqualTo(1);
-        opened.add(alive.body());
     }
 }
