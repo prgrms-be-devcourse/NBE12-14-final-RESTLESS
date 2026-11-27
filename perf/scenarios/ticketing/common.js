@@ -25,7 +25,9 @@ const participants = positive('PARTICIPANTS', 100);
 const vus = positive('VUS', mode === 'poll' ? participants : 50);
 const hotSeats = positive('HOT_SEATS', 1);
 const holdParticipants = mode === 'mixed' ? positive('HOLD_PARTICIPANTS', 20) : 0;
-const holdDelay = mode === 'mixed' ? positive('HOLD_DELAY_SECONDS', 3) : 0;
+// 0이면 바로 출발, 양수면 준비가 끝난 뒤 N초 뒤의 같은 시각에 함께 출발한다(대규모 동시 출발용). 조회·화면 진입·혼합에 적용한다.
+const startDelay = Number(__ENV.START_DELAY_SECONDS || 0);
+if (!Number.isSafeInteger(startDelay) || startDelay < 0 || startDelay > 600) throw new Error('START_DELAY_SECONDS must be an integer from 0 to 600');
 const mixedHold = fixedMixedHold || __ENV.MIXED_HOLD || 'hot';
 if (mode === 'mixed' && !['hot', 'distributed'].includes(mixedHold)) throw new Error('MIXED_HOLD must be hot or distributed');
 const totalUsers = participants + holdParticipants;
@@ -42,6 +44,7 @@ const refreshInterval = positive('REFRESH_INTERVAL_SECONDS', 30);
 // 진입 방식은 화면 진입(page, mixed 조회자)에만 적용한다. 좌석 조회(poll)와 선점 시나리오는 항상 동시 출발한다.
 const entry = mode === 'page' || mode === 'mixed' ? (fixedEntry || __ENV.POLL_ENTRY || 'spread') : 'simultaneous';
 if (!['spread', 'simultaneous'].includes(entry)) throw new Error('POLL_ENTRY must be spread or simultaneous');
+if (startDelay && !['poll', 'page', 'mixed'].includes(mode)) throw new Error('START_DELAY_SECONDS is supported for simultaneous, page and mixed');
 const runId = __ENV.RUN_ID;
 if (!runId || !/^[a-zA-Z0-9_-]{1,40}$/.test(runId)) throw new Error('RUN_ID is required (1-40 letters, numbers, _ or -)');
 if ((mode === 'poll' || mode === 'page') && vus !== participants) throw new Error('poll and page require VUS=PARTICIPANTS');
@@ -108,6 +111,8 @@ const replayCompleted = new Counter('ticket_replay_completed');
 const pollLatency = new Trend('ticket_poll_duration', true);
 // 시나리오 시작부터 사용자의 첫 요청 직전까지. 동시 출발이 실제로 지켜졌는지 확인한다.
 const startOffset = new Trend('ticket_start_offset', true);
+// 시나리오 시작(또는 지정 출발 시각)부터 조회자의 화면 진입 응답이 끝날 때까지. mixed에서 선점 출발과 겹쳤는지 본다.
+const entryEndOffset = new Trend('ticket_entry_end_offset', true);
 const seatGzipResponses = new Counter('ticket_seat_gzip_responses');
 const seatEncodingErrors = new Rate('ticket_seat_encoding_errors');
 const availabilityRequests = new Counter('ticket_availability_requests');
@@ -159,15 +164,19 @@ function setup() {
   if (mode === 'replay') replayCompleted.add(0);
   if (mode === 'mixed') pollRequests.add(0);
   if (refreshCount && ['poll', 'page', 'mixed'].includes(mode)) refreshRequests.add(0);
-  return { ids, seatCount: seats.length, seatIds: seats.map(s => s.seatId), users: activeUsers };
+  const startAt = startDelay ? Date.now() + startDelay * 1000 : null;
+  if (startAt) console.log(`start scheduled=${new Date(startAt).toISOString()}`);
+  return { ids, seatCount: seats.length, seatIds: seats.map(s => s.seatId), users: activeUsers, startAt };
 }
 function run(data) {
   const activeUsers = data.users;
+  if (data.startAt) { const wait = data.startAt - Date.now(); if (wait > 0) sleep(wait / 1000); }
+  const origin = data.startAt || exec.scenario.startTime;
   const pollUser = mode === 'poll' || mode === 'page' || (mode === 'mixed' && exec.vu.idInTest <= participants);
   if (pollUser) {
-    return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, refreshCount, refreshInterval, refreshRequests });
+    return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, entryEndOffset, origin, refreshCount, refreshInterval, refreshRequests });
   }
-  return runHold(data, { base, performanceId, users: activeUsers, mode, participants, holdDelay, mixedHold, hotSeats, runId, headers, holdAttempts, holdCompleted, replayCompleted, holdErrors, count, holdLatency, startOffset });
+  return runHold(data, { base, performanceId, users: activeUsers, mode, participants, holdParticipants, entry, origin, mixedHold, hotSeats, runId, headers, holdAttempts, holdCompleted, replayCompleted, holdErrors, count, holdLatency, startOffset });
 }
 function handleSummary(data) {
   const { setup_data: setupData, ...safeData } = data;
@@ -176,7 +185,7 @@ function handleSummary(data) {
     mixedHold: mode === 'mixed' ? mixedHold : null, performanceId, participants, holdParticipants,
     vus: mode === 'mixed' ? totalUsers : vus, refreshCount, refreshIntervalSeconds: refreshCount ? refreshInterval : null,
     maxDuration: __ENV.MAX_DURATION || '5m',
-    hotSeats, holdDelaySeconds: mode === 'mixed' ? holdDelay : null, seatEncoding, runId, baseUrl: base, rowOffset } };
+    hotSeats, startDelaySeconds: startDelay || null, seatEncoding, runId, baseUrl: base, rowOffset } };
   const out = { stdout: JSON.stringify(report, null, 2) };
   if (__ENV.SUMMARY_PATH) out[__ENV.SUMMARY_PATH] = JSON.stringify(report, null, 2);
   return out;

@@ -26,7 +26,9 @@ perf/scenarios/run-ticketing.sh simultaneous 100
 
 다른 시나리오는 `hot`, `overlap`, `distributed`, `replay`, `mixed`, `mixed-distributed`다. 선점·혼합 요청은 좌석 상태를 변경하므로 실험 간 복원과 정합성 점검이 필요하다. 요약 결과는 `.ai-output/perf/ticketing-<시나리오>/summary-<UTC 날짜시간>.json`, HTML 보고서는 같은 폴더의 `report-<UTC 날짜시간>.html`에 자동 저장된다. 예: `.ai-output/perf/ticketing-page/summary-20261118T010203Z.json`. k6 표준 출력과 오류는 같은 폴더의 `k6-<UTC 날짜시간>.log`에 저장되며 터미널에도 표시된다. 실행 중에는 `http://localhost:5665`에서 대시보드를 볼 수 있다. 실행기가 기본으로 대시보드와 HTML 내보내기를 켜므로 별도 k6 환경변수를 지정하지 않아도 된다.
 
-진입 방식(`POLL_ENTRY`)은 `page`와 `mixed`·`mixed-distributed`의 조회자에만 적용한다. 기본은 3초 분산이다. `simultaneous`와 선점 시나리오(`hot`, `overlap`, `distributed`, `replay`)는 항상 모든 사용자가 동시에 출발한다. `mixed`의 선점자는 `HOLD_DELAY_SECONDS`(기본 3초) 뒤에 출발한다.
+진입 방식(`POLL_ENTRY`)은 `page`와 `mixed`·`mixed-distributed`의 조회자에만 적용한다. 기본은 3초 분산이다. `simultaneous`와 선점 시나리오(`hot`, `overlap`, `distributed`, `replay`)는 항상 모든 사용자가 동시에 출발한다. `mixed`의 선점자는 조회자와 같은 방식으로 출발한다(동시 진입이면 함께, 분산 진입이면 같은 3초 구간에 고르게). 조회와 선점이 실제로 겹쳤는지는 선점의 `ticket_start_offset{phase:hold}`와 조회의 `ticket_entry_end_offset`(시작부터 화면 진입 응답 완료까지)을 비교해 확인한다. 선점 출발이 조회 완료보다 늦으면 두 부하가 겹치지 않은 실행이다.
+
+`START_DELAY_SECONDS`(기본 0)를 주면 `simultaneous`, `page`, `mixed`의 모든 사용자가 준비를 마친 뒤 그 초만큼 지난 같은 시각에 출발한다. 사용자가 많아 VU 시작 자체가 출발을 퍼뜨릴 때 쓴다. 이때 `ticket_start_offset`과 `ticket_entry_end_offset`은 지정 시각 기준이고, `MAX_DURATION`에 대기 시간이 포함된다.
 
 `ticket_start_offset`은 시나리오 시작부터 각 사용자의 첫 요청 직전까지의 시간이다. `{phase:entry}`는 조회, `{phase:hold}`는 선점이다. 동시 진입에서는 p95가 수십 ms 안이어야 부하 발생기가 동시 출발을 만든 것이다. 수백 ms 이상이면 그 실행은 부하 발생기 쪽 원인을 먼저 의심한다. 분산 진입에서는 0~3초에 고르게 퍼지는 것이 정상이다. 요청 전 로컬 시각 기준이며 서버 도착 시각은 아니다.
 

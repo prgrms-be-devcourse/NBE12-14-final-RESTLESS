@@ -16,7 +16,7 @@ class Server(http.server.ThreadingHTTPServer):
  request_queue_size=64  # 조회자마다 요청 2개를 동시에 보낸다.
 s=Server(('127.0.0.1',0),Handler); s.events=[]
 threading.Thread(target=s.serve_forever,daemon=True).start()
-env=os.environ.copy();env.update(BASE_URL='http://perf-app:8080',MANAGEMENT_URL='http://perf-app:8080',PERF_ALLOWED_APP_HOSTS='perf-app',PERFORMANCE_ID='1',USERS_CSV=str(csv),MODE='mixed',PARTICIPANTS='4',HOLD_PARTICIPANTS='1',VUS='1000',HOLD_DELAY_SECONDS='1',DURATION='5s',RUN_ID='timing',POLL_ENTRY='spread',HTTP_PROXY=f'http://127.0.0.1:{s.server_port}',HTTPS_PROXY=f'http://127.0.0.1:{s.server_port}',NO_PROXY='')
+env=os.environ.copy();env.update(BASE_URL='http://perf-app:8080',MANAGEMENT_URL='http://perf-app:8080',PERF_ALLOWED_APP_HOSTS='perf-app',PERFORMANCE_ID='1',USERS_CSV=str(csv),MODE='mixed',PARTICIPANTS='4',HOLD_PARTICIPANTS='1',VUS='1000',DURATION='5s',RUN_ID='timing',POLL_ENTRY='spread',HTTP_PROXY=f'http://127.0.0.1:{s.server_port}',HTTPS_PROXY=f'http://127.0.0.1:{s.server_port}',NO_PROXY='')
 try:
  r=subprocess.run(['k6','run','--quiet',str(root/'perf/scenarios/ticketing/mixed.js')],env=env,capture_output=True,text=True,timeout=20);assert r.returncode==0,r.stderr
  first={}

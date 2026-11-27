@@ -3,14 +3,14 @@ import exec from 'k6/execution';
 import { sleep } from 'k6';
 
 export function runPoll(data, context) {
-  const { base, performanceId, users, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, refreshCount, refreshInterval, refreshRequests } = context;
+  const { base, performanceId, users, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, entryEndOffset, origin, refreshCount, refreshInterval, refreshRequests } = context;
   const user = users[exec.vu.idInTest - 1];
   // 분산 진입은 자동 갱신이 아니라 최초 요청의 시작 시간만 3초에 분산한다.
   if (entry === 'spread') sleep(3 * (exec.vu.idInTest - 1) / (mode === 'mixed' ? participants : vus));
   // page와 mixed 조회자는 화면 진입처럼 좌석과 구매 가능 정보를 함께 조회한다.
   const pageEntry = mode === 'page' || mode === 'mixed';
   let res, pageElapsed, availabilityValid = false;
-  startOffset.add(Date.now() - exec.scenario.startTime, { phase: 'entry' });
+  startOffset.add(Date.now() - origin, { phase: 'entry' });
   if (pageEntry) {
     const pageStart = Date.now();
     const responses = http.batch([
@@ -30,6 +30,7 @@ export function runPoll(data, context) {
   seatEncodingErrors.add(!encodingMatches(res));
   let seats; try { seats = res.json(); } catch (_) { /* malformed */ }
   const initialOk = res.status === 200 && Array.isArray(seats) && seats.length === data.seatCount;
+  entryEndOffset.add(Date.now() - origin);
   if (pageEntry) pageEntryLatency.add(pageElapsed, { outcome: initialOk && availabilityValid && encodingMatches(res) ? 'ok' : 'error' });
   pollRequests.add(1); pollErrors.add(!initialOk); count(initialOk ? 'poll_ok' : 'poll_error', !initialOk); pollLatency.add(res.timings.duration, { outcome: initialOk ? 'ok' : 'error', phase: 'entry' });
   if (!initialOk) return;

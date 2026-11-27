@@ -69,7 +69,7 @@ class ScenarioTest(unittest.TestCase):
         cls.thread.join()
 
     def run_scenario(self, scenario, refresh=0, mismatch=False, invalid_availability=False, entry='simultaneous',
-                     reject_token=None, expect_failure=False, participants=None):
+                     reject_token=None, expect_failure=False, participants=None, extra_env=None):
         Handler.mismatch = mismatch
         Handler.invalid_availability = invalid_availability
         Handler.reject_token = reject_token
@@ -84,8 +84,8 @@ class ScenarioTest(unittest.TestCase):
                        MANAGEMENT_URL=f'http://127.0.0.1:{self.server.server_port}', PERFORMANCE_ID='1',
                        PARTICIPANTS=participants or ('1' if scenario == 'mixed' else '2'), HOLD_PARTICIPANTS='1', VUS=participants or '2',
                        USERS_CSV=str(users), SETUP='csv', RUN_ID='scenario-test', POLL_ENTRY=entry,
-                       REFRESH_COUNT=str(refresh), REFRESH_INTERVAL_SECONDS='1', HOLD_DELAY_SECONDS='1',
-                       SUMMARY_PATH=str(output))
+                       REFRESH_COUNT=str(refresh), REFRESH_INTERVAL_SECONDS='1',
+                       SUMMARY_PATH=str(output), **(extra_env or {}))
             result = subprocess.run(['k6', 'run', '--quiet', str(ROOT / 'perf/scenarios/ticketing' / (scenario + '.js'))],
                                     env=env, capture_output=True, text=True, timeout=20)
             if invalid_availability or expect_failure:
@@ -131,8 +131,10 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(metrics['ticket_availability_requests']['values']['count'], 1)
         self.assertEqual(metrics['ticket_page_entry_duration{outcome:ok}']['values']['count'], 1)
         self.assertGreaterEqual(metrics['ticket_page_entry_duration{outcome:ok}']['values']['avg'], 150)
-        self.assertEqual(metrics['ticket_start_offset{phase:hold}']['values']['count'], 1)
-        self.assertGreaterEqual(metrics['ticket_start_offset{phase:hold}']['values']['avg'], 900)  # HOLD_DELAY_SECONDS=1
+        hold_start = metrics['ticket_start_offset{phase:hold}']['values']
+        self.assertEqual(hold_start['count'], 1)
+        # 선점자는 조회자와 함께 출발해 조회 응답이 끝나기 전에 선점을 보낸다.
+        self.assertLess(hold_start['max'], metrics['ticket_entry_end_offset']['values']['max'])
 
     def test_start_offset_shows_simultaneous_and_spread_entry(self):
         simultaneous = self.run_scenario('simultaneous')['metrics']['ticket_start_offset{phase:entry}']['values']
@@ -153,6 +155,21 @@ class ScenarioTest(unittest.TestCase):
         metrics = self.run_scenario('replay', participants='1')['metrics']  # 스텁 좌석이 1석이다.
         self.assertEqual(metrics['ticket_hold_duration{outcome:created}']['values']['count'], 1)
         self.assertEqual(metrics['ticket_hold_duration{outcome:replay_ok}']['values']['count'], 1)
+
+    def test_scheduled_start_waits_and_measures_from_start_time(self):
+        metrics = self.run_scenario('simultaneous', extra_env={'START_DELAY_SECONDS': '2'})['metrics']
+        self.assertGreaterEqual(metrics['iteration_duration']['values']['avg'], 1500)
+        self.assertLess(metrics['ticket_start_offset{phase:entry}']['values']['max'], 500)
+
+    def test_scheduled_start_is_rejected_for_hold_scenarios(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, BASE_URL='http://127.0.0.1:1', MANAGEMENT_URL='http://127.0.0.1:1', PERFORMANCE_ID='1',
+                       PARTICIPANTS='2', VUS='2', USERS_CSV=str(Path(tmp) / 'none.csv'), RUN_ID='scheduled-hot',
+                       START_DELAY_SECONDS='2')
+            result = subprocess.run(['k6', 'run', '--quiet', str(ROOT / 'perf/scenarios/ticketing/hot.js')],
+                                    env=env, capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('START_DELAY_SECONDS', result.stderr)
 
     def test_unauthorized_seat_response_fails_run(self):
         metrics = self.run_scenario('simultaneous', reject_token='fake-2', expect_failure=True)['metrics']

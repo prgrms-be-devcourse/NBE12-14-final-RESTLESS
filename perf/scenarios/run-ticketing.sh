@@ -15,8 +15,8 @@ SCENARIO:
 USERS는 전체 테스트 사용자 수다. 예: run-ticketing.sh page 100
 필수 환경변수: BASE_URL, PERFORMANCE_ID, MANAGEMENT_URL, PERF_ALLOWED_APP_HOSTS
 인증: USERS_CSV 또는 SETUP=self (시드 계정 로그인)
-선택 환경변수: MAX_DURATION, REFRESH_COUNT, REFRESH_INTERVAL_SECONDS, HOT_SEATS, HOLD_DELAY_SECONDS,
-              POLL_ENTRY (page/mixed), SEAT_ENCODING, MANAGEMENT_URL, K6_BIN
+선택 환경변수: MAX_DURATION, REFRESH_COUNT, REFRESH_INTERVAL_SECONDS, HOT_SEATS,
+              POLL_ENTRY (page/mixed), START_DELAY_SECONDS (simultaneous/page/mixed), SEAT_ENCODING, MANAGEMENT_URL, K6_BIN
 HELP
 }
 if [[ "${1:-}" == '-h' || "${1:-}" == '--help' ]]; then usage; exit 0; fi
@@ -41,7 +41,7 @@ if [[ "${SETUP:-csv}" != self ]]; then
 fi
 export PARTICIPANTS="$users" VUS="$users"
 export HOT_SEATS="${HOT_SEATS:-1}" MAX_DURATION="${MAX_DURATION:-5m}"
-export HOLD_DELAY_SECONDS="${HOLD_DELAY_SECONDS:-3}" MIXED_HOLD=hot
+export MIXED_HOLD=hot
 case "$scenario" in
   simultaneous) export MODE=poll ;;
   page) export MODE=page POLL_ENTRY="${POLL_ENTRY:-spread}" ;;
