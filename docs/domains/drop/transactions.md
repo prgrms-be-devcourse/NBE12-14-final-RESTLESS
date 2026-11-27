@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/application/`
 >
-> 마지막 확인: 2026-11-26 (#481 진입 품절 표시 추가, 경계 그대로. #477 대기열 동시 처리 상한을 인터셉터에서 Security 앞 필터로 옮김, 트랜잭션 경계는 그대로). 이전: 2026-11-25 (#446 구매 흐름과 트랜잭션 대응 표 추가, 결제 준비를 TX2와 나눠 적음. `DropReservationTransactions`, `DropPaymentResultHandler`, `PaymentTransactions.begin`과 대조, 경계는 그대로. #435 TX5-c 삭제 기준 시각 추가. #430 TX2 삭제 거절과 TX5-c 새벽 환불 추가. #429 주최자 등록과 게시 추가. 관리자 등록과 같은 트랜잭션 하나이고, 게시는 드롭 행 잠금 뒤 소유자를 확인한다. 이전: 2026-11-24 (#390 D4 상태 조회와 진입에 동시 처리 상한과 `pollAfterMs` 추가, 트랜잭션 경계는 그대로. #388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 재고 버킷 분할: TX1 5번, 계측 표, 정산 대상 버킷, 입장 허가 작업의 재고 합 읽기. 2026-11-21 #325 완료 단계 타이머 추가. #322 TX1 순서 변경: 재고 UPDATE를 마지막으로. 2026-11-20 #285 TX3 롤백 뒤 상태를 `DropApprovalRollbackRecoveryIntegrationTest`, 장애 처리 문서와 대조. 용어 정리. 2026-11-19 #254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
+> 마지막 확인: 2026-11-27 (#512 입장 gate 복구와 결제 상태 전이 로그 대조). 이전: 2026-11-26 (#481 진입 품절 표시 추가, 경계 그대로. #477 대기열 동시 처리 상한을 인터셉터에서 Security 앞 필터로 옮김, 트랜잭션 경계는 그대로). 이전: 2026-11-25 (#446 구매 흐름과 트랜잭션 대응 표 추가, 결제 준비를 TX2와 나눠 적음. `DropReservationTransactions`, `DropPaymentResultHandler`, `PaymentTransactions.begin`과 대조, 경계는 그대로. #435 TX5-c 삭제 기준 시각 추가. #430 TX2 삭제 거절과 TX5-c 새벽 환불 추가. #429 주최자 등록과 게시 추가. 관리자 등록과 같은 트랜잭션 하나이고, 게시는 드롭 행 잠금 뒤 소유자를 확인한다. 이전: 2026-11-24 (#390 D4 상태 조회와 진입에 동시 처리 상한과 `pollAfterMs` 추가, 트랜잭션 경계는 그대로. #388 만료 ADMITTED를 입장 허가 작업이 EXPIRED로 닫음. INV-16 계산은 그대로. #330 재고 버킷 분할: TX1 5번, 계측 표, 정산 대상 버킷, 입장 허가 작업의 재고 합 읽기. 2026-11-21 #325 완료 단계 타이머 추가. #322 TX1 순서 변경: 재고 UPDATE를 마지막으로. 2026-11-20 #285 TX3 롤백 뒤 상태를 `DropApprovalRollbackRecoveryIntegrationTest`, 장애 처리 문서와 대조. 용어 정리. 2026-11-19 #254 SKU별 입장 제어 구현. TX1의 재고 계측 구간은 유지한다. TX2~TX5는 결제 핸들러, 정산, 생명주기, 만료 작업 코드와 대조해 보완했다)
 
 PG 호출 중에는 DB 트랜잭션을 열어 두지 않는다.
 
@@ -246,7 +246,7 @@ PG 취소 결과가 불명확하면 재고를 복원하지 않는다.
 게이트 행이 없을 때의 복구:
 
 - 게이트 락 결과는 LOCKED, BUSY, MISSING이다. SKIP LOCKED 결과가 비면 잠그지 않는 존재 조회로 BUSY와 MISSING을 구분한다.
-- MISSING이면 batch transaction을 끝낸 뒤 ERROR 로그와 태그 없는 `drop.queue.gate.missing`을 남긴다. 별도 REQUIRES_NEW transaction에서 INSERT IGNORE로 게이트를 만들고 batch를 한 번 재시도한다. 재시도도 비면 건너뛴다.
+- MISSING이면 batch transaction을 끝낸 뒤 복구 시도 WARN 로그와 태그 없는 `drop.queue.gate.missing`을 남긴다. 별도 REQUIRES_NEW transaction에서 INSERT IGNORE로 게이트를 만들고 batch를 한 번 재시도한다. 재시도 뒤에도 gate가 없으면 같은 variantId로 ERROR를 기록하고 건너뛴다.
 - 정상 LOCKED와 BUSY 경로에는 INSERT가 없다. TX1은 이 복구 경로를 쓰지 않는다.
 - 동시 복구의 INSERT는 PK 충돌 처리 때문에 짧게 기다릴 수 있다. 그래도 admission transaction을 쥔 채 기다리지 않는다.
 
