@@ -138,6 +138,8 @@ export type OrganizerConcert = {
   published: boolean;
   publishedAt: string | null;
   pricingConfigured: boolean;
+  /** 공연 단위 예매 오픈. 모든 회차가 이 값을 쓴다 */
+  bookingOpensAt: string | null;
 };
 export type OrganizerConcertPage = { content: OrganizerConcert[]; page: number; size: number; totalElements: number; totalPages: number };
 export type OrganizerLayout = { layoutId: number; name: string; status: string; sections: { sectionLabel: string; sellableSeats: number }[] };
@@ -161,6 +163,20 @@ export type DropItem = {
   saleStatus: DropSaleStatus;
 };
 export type DropPage = { items: DropItem[] };
+/** 운영 화면 목록. 주최자는 본인 드롭, 관리자는 전체 드롭(게시 전 포함) */
+export type DropAdminStatus = "DRAFT" | "SCHEDULED" | "OPEN" | "CLOSED" | "CANCELLED";
+export type DropManaged = {
+  dropId: number;
+  concertId: number;
+  /** 시드 데이터 등 주최자 없이 만든 드롭은 null */
+  organizerId: number | null;
+  title: string;
+  status: DropAdminStatus;
+  opensAt: string;
+  closesAt: string;
+  createdAt: string;
+};
+export type DropManagedPage = { items: DropManaged[] };
 export type DropVariant = {
   variantId: number;
   skuCode: string;

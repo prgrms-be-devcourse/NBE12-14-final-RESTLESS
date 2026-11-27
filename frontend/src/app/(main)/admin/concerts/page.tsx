@@ -11,12 +11,12 @@ import { dateOnly, dateTime } from "@/lib/format";
 import { useLoad } from "@/lib/hooks";
 import type { OrganizerConcert, OrganizerConcertPage } from "@/lib/types";
 import AdminGate from "../admin-gate";
-import { firstFieldError } from "../form-utils";
+import { firstFieldError, iso, toLocal } from "../form-utils";
 import { concertStage } from "./status";
 
 export default function AdminConcertsPage() {
   return (
-    <AdminGate lead={<>공연을 초안으로 만들고 가격, 회차를 정한 뒤 공개해요. 주최자는 본인 공연만, 관리자는 모든 공연을 봐요.</>}>
+    <AdminGate lead={<>공연을 초안으로 만들고 예매 오픈, 가격, 회차를 정한 뒤 공개해요. 주최자는 본인 공연만, 관리자는 모든 공연을 봐요.</>}>
       <CreateConcert />
       <MyConcerts />
     </AdminGate>
@@ -24,11 +24,17 @@ export default function AdminConcertsPage() {
 }
 
 const day = (offset: number) => new Date(Date.now() + offset * 86400_000).toLocaleDateString("sv-SE");
+/** 내일 20시 */
+const tomorrowEvening = () => {
+  const d = new Date(Date.now() + 86400_000);
+  d.setHours(20, 0, 0, 0);
+  return toLocal(d.getTime());
+};
 
 function CreateConcert() {
   const toast = useToast();
   const router = useRouter();
-  const [f, setF] = useState({ venueId: 1, layoutId: 1, title: "", description: "", periodStartDate: day(14), periodEndDate: day(15), durationMinutes: 120 });
+  const [f, setF] = useState({ venueId: 1, layoutId: 1, title: "", description: "", periodStartDate: day(14), periodEndDate: day(15), durationMinutes: 120, bookingOpensAt: tomorrowEvening() });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -50,6 +56,7 @@ function CreateConcert() {
           periodStartDate: f.periodStartDate || null,
           periodEndDate: f.periodEndDate || null,
           durationMinutes: f.durationMinutes || null,
+          bookingOpensAt: f.bookingOpensAt ? iso(f.bookingOpensAt) : null,
         },
       });
       toast(`공연 #${r.concertId} 초안을 만들었어요`, "ok");
@@ -97,6 +104,11 @@ function CreateConcert() {
           <label htmlFor="c-dur">공연 시간 (분)</label>
           <input id="c-dur" className="fq-input" type="number" min={1} value={f.durationMinutes} onChange={(e) => setF({ ...f, durationMinutes: Number(e.target.value) })} />
         </div>
+      </div>
+      <div className="fq-field">
+        <label htmlFor="c-opens">예매 오픈</label>
+        <p className="fq-hint">모든 회차의 예매가 이 시각에 열려요. 비워 두면 상세 화면에서 정해요</p>
+        <input id="c-opens" className="fq-input" type="datetime-local" value={f.bookingOpensAt} onChange={(e) => setF({ ...f, bookingOpensAt: e.target.value })} />
       </div>
       {error ? (
         <p className="fq-err" role="alert">

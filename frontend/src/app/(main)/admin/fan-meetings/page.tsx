@@ -6,6 +6,7 @@ import { FM_STATUS } from "@/components/Cards";
 import LoadError from "@/components/LoadError";
 import { useToast } from "@/components/Toast";
 import { ApiError, api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { dateTime, won } from "@/lib/format";
 import { useLoad } from "@/lib/hooks";
 import type { FanMeetingDetail, FanMeetingPage } from "@/lib/types";
@@ -15,7 +16,7 @@ import { isoToLocal } from "../form-utils";
 
 export default function AdminFanMeetingsPage() {
   return (
-    <AdminGate lead={<>응모가 열리기 전(응모 예정)인 팬미팅만 고치거나 취소할 수 있어요. 본인이 만든 행사만 바뀌고, 관리자는 모든 행사를 다룰 수 있어요.</>}>
+    <AdminGate lead={<>추첨 팬미팅을 만들고, 응모가 열리기 전(응모 예정)인 행사를 고치거나 취소해요. 본인이 만든 행사만 바뀌고, 관리자는 모든 행사를 다룰 수 있어요.</>}>
       <Manage />
     </AdminGate>
   );
@@ -35,6 +36,7 @@ const toForm = (d: FanMeetingDetail): FmForm => ({
 
 function Manage() {
   const toast = useToast();
+  const { profile } = useAuth();
   const list = useLoad(() => api<FanMeetingPage>("/api/fan-meetings?status=SCHEDULED&size=100").then((r) => r.items));
   const [editing, setEditing] = useState<FanMeetingDetail | null>(null);
   const [lookup, setLookup] = useState("");
@@ -99,14 +101,18 @@ function Manage() {
           />
           <div className="fq-row" style={{ marginTop: 12 }}>
             <button type="button" className="fq-btn is-ghost is-sm" onClick={() => setEditing(null)}>
-              닫기
+              새 팬미팅 만들기로
             </button>
             <button type="button" className="fq-btn is-danger is-sm" disabled={busy === editing.eventId} onClick={() => cancel(editing.eventId, editing.title)}>
               이 팬미팅 취소
             </button>
           </div>
         </div>
-      ) : null}
+      ) : (
+        <div style={{ marginTop: 18 }}>
+          <FanMeetingForm key="new" onCreated={() => void list.reload().catch(() => undefined)} />
+        </div>
+      )}
 
       <section className="fq-section" style={{ marginTop: 22 }}>
         <span className="fq-eyebrow">응모 예정 팬미팅</span>
@@ -149,6 +155,44 @@ function Manage() {
           </ul>
         )}
       </section>
+      {profile?.role === "ADMIN" ? <FanMeetingSummary /> : null}
     </>
   );
+}
+
+type FanMeetingSummaryData = {
+  eventId: number; status: string; winnerLimit: number; reserveLimit: number; promotionClosesAt: string | null;
+  applicationCount: number; occupied: number; selectionCounts: Record<string, number>; orderCounts: Record<string, number>;
+  maxPromotedReserveRank: number | null; reviews: { orderId: number; reviewStartedAt: string; elapsedMinutes: number }[];
+  refundPending: { orderId: number }[];
+};
+
+/** 관리자 전용 운영 현황. 응모가 열린 뒤의 행사도 ID로 조회한다 */
+function FanMeetingSummary() {
+  const [eventId, setEventId] = useState("");
+  const [summary, setSummary] = useState<FanMeetingSummaryData | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setError(""); setSummary(null);
+    try { setSummary(await api<FanMeetingSummaryData>(`/api/admin/fan-meetings/${Number(eventId)}/summary`)); }
+    catch (e) { const err = e as ApiError; setError(err.message); }
+    finally { setBusy(false); }
+  };
+  return <section className="fq-card is-pad fq-form" style={{ marginTop: 22 }}>
+    <span className="fq-eyebrow">팬미팅 운영 현황 (관리자)</span>
+    <form className="fq-row" onSubmit={load}>
+      <input className="fq-input" aria-label="팬미팅 ID" type="number" min={1} required value={eventId} onChange={(e) => setEventId(e.target.value)} placeholder="행사 ID" />
+      <button className="fq-btn is-ghost" disabled={busy}>{busy ? "조회 중…" : "현황 조회"}</button>
+    </form>
+    {error ? <p className="fq-err" role="alert">{error}</p> : null}
+    {summary ? <><p>{summary.status}, 응모 {summary.applicationCount.toLocaleString()}명, 점유 {summary.occupied}/{summary.winnerLimit}</p>
+      <p className="fq-muted">선정 현황: {Object.entries(summary.selectionCounts).map(([k,v]) => `${k} ${v}`).join(", ")}</p>
+      <p className="fq-muted">주문 현황: {Object.entries(summary.orderCounts).map(([k,v]) => `${k} ${v}`).join(", ")}</p>
+      {summary.maxPromotedReserveRank !== null ? <p>최대 승격 예비 순번: {summary.maxPromotedReserveRank}</p> : null}
+      {summary.reviews.length ? <p>결제 확인 보류: {summary.reviews.map((r) => `#${r.orderId} (${r.elapsedMinutes}분)`).join(", ")}</p> : null}
+      {summary.refundPending.length ? <p>환불 대기 주문: {summary.refundPending.map((r) => `#${r.orderId}`).join(", ")}</p> : null}
+    </> : null}
+  </section>;
 }
