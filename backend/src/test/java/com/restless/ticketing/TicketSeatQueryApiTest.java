@@ -1,5 +1,6 @@
 package com.restless.ticketing;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -18,6 +19,7 @@ import com.restless.member.domain.Member;
 import com.restless.ticketing.domain.SeatHold;
 import com.restless.ticketing.domain.TicketReservation;
 import com.restless.ticketing.domain.TicketSeat;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -32,9 +34,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 @DisplayName("회차별 좌석 조회 API")
+// 배치 좌석 위치 캐시를 켠 상태로 응답을 검증한다. 테스트마다 새 배치를 만들어 캐시 값이 섞이지 않는다.
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
-        "spring.docker.compose.enabled=false"
+        "spring.docker.compose.enabled=false",
+        "restless.concert.layout-cache.enabled=true"
 })
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
@@ -50,6 +54,9 @@ class TicketSeatQueryApiTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     private Long userId;
     private Long venueId;
@@ -178,6 +185,60 @@ class TicketSeatQueryApiTest {
     }
 
     @Test
+    @DisplayName("배치 위치를 기억한 뒤에도 좌석 상태는 조회 시점의 DB 상태를 반환한다")
+    void returnsCurrentSeatStatusAfterLayoutIsCached() throws Exception {
+        Long physicalId = persistPhysicalSeat("1");
+        includeInLayout(layoutId, physicalId, "A", "10.25");
+        TicketSeat seat = persistTicketSeat(performanceId, layoutId, physicalId, "VIP", 100000);
+        entityManager.flush();
+        entityManager.clear();
+        mockMvc.perform(get(PATH, performanceId).with(jwt()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].status").value("AVAILABLE"));
+
+        TicketReservation reservation = TicketReservation.createHeld(userId, performanceId, "cached-layout",
+                new byte[32], NOW.plusSeconds(300), NOW);
+        entityManager.persist(reservation);
+        SeatHold hold = SeatHold.createHeld(reservation.getId(), performanceId, seat.getId(),
+                seat.getPrice(), NOW.plusSeconds(300), NOW);
+        entityManager.persist(hold);
+        entityManager.flush();
+        entityManager.createNativeQuery("UPDATE performance_seats SET status = 'HELD', current_hold_id = :holdId WHERE id = :seatId")
+                .setParameter("holdId", hold.getId()).setParameter("seatId", seat.getId()).executeUpdate();
+        entityManager.clear();
+        double hitsBefore = layoutCacheHits();
+
+        mockMvc.perform(get(PATH, performanceId).with(jwt()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].seatId").value(seat.getId()))
+                .andExpect(jsonPath("$[0].sectionLabel").value("A"))
+                .andExpect(jsonPath("$[0].posX").value(10.25))
+                .andExpect(jsonPath("$[0].status").value("HELD"));
+        assertThat(layoutCacheHits()).isEqualTo(hitsBefore + 1);
+    }
+
+    @Test
+    @DisplayName("공개 회차로 배치 위치를 기억한 뒤에도 같은 배치를 쓰는 비공개 공연 회차는 404다")
+    void rejectsUnpublishedPerformanceSharingCachedLayout() throws Exception {
+        Long physicalId = persistPhysicalSeat("1");
+        includeInLayout(layoutId, physicalId, "A", "10.25");
+        persistTicketSeat(performanceId, layoutId, physicalId, "VIP", 1000);
+        Concert draft = Concert.createDraft(venueId, userId, "Draft", "SCHEDULED", NOW,
+                null, null, null, null, layoutId, null);
+        entityManager.persist(draft);
+        Performance draftPerformance = Performance.create(draft.getId(), venueId, layoutId,
+                NOW.plusSeconds(14400), NOW.plusSeconds(3600), NOW.plusSeconds(10800), 4, "SCHEDULED");
+        entityManager.persist(draftPerformance);
+        persistTicketSeat(draftPerformance.getId(), layoutId, physicalId, "VIP", 1000);
+        entityManager.flush();
+        entityManager.clear();
+        mockMvc.perform(get(PATH, performanceId).with(jwt())).andExpect(status().isOk());
+
+        mockMvc.perform(get(PATH, draftPerformance.getId()).with(jwt()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
     @DisplayName("회차가 존재하지만 판매 좌석이 없으면 빈 배열을 반환한다")
     void returnsEmptyArrayForPerformanceWithoutSaleSeats() throws Exception {
         includeInLayout(layoutId, persistPhysicalSeat("1"), "A", "10.25");
@@ -231,6 +292,11 @@ class TicketSeatQueryApiTest {
         mockMvc.perform(get(PATH, performanceId))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+    }
+
+    private double layoutCacheHits() {
+        return meterRegistry.get("cache.gets").tags("cache", "concert.layout_seat_positions", "result", "hit")
+                .functionCounter().count();
     }
 
     private Long persistPerformance(Long targetLayoutId) {

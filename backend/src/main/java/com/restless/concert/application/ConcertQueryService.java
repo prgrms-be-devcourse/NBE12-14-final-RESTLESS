@@ -9,7 +9,6 @@ import com.restless.concert.domain.LayoutSeat;
 import com.restless.concert.domain.Performance;
 import com.restless.concert.domain.Venue;
 import com.restless.concert.infrastructure.ConcertRepository;
-import com.restless.concert.infrastructure.LayoutSeatPositionRepository;
 import com.restless.concert.infrastructure.LayoutSeatRepository;
 import com.restless.concert.infrastructure.PerformanceRepository;
 import com.restless.concert.infrastructure.VenueRepository;
@@ -30,7 +29,7 @@ public class ConcertQueryService {
 
     private final PerformanceRepository performanceRepository;
     private final LayoutSeatRepository layoutSeatRepository;
-    private final LayoutSeatPositionRepository layoutSeatPositions;
+    private final LayoutSeatPositionCache layoutSeatPositions;
     private final ConcertRepository concertRepository;
     private final VenueRepository venueRepository;
     private final SeatQueryMetrics seatQueryMetrics;
@@ -103,7 +102,7 @@ public class ConcertQueryService {
         Long layoutId = seatQueryMetrics.measure("performance", () -> performanceRepository.findPublishedLayoutId(performanceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "공연 회차를 찾을 수 없습니다.")));
         List<SeatPosition> seats = seatQueryMetrics.measure("layout_seats",
-                () -> layoutSeatPositions.findByLayoutId(layoutId));
+                () -> layoutSeatPositions.get(layoutId));
         return new PerformanceLayout(layoutId, seats);
     }
 
