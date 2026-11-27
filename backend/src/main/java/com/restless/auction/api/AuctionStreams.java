@@ -262,8 +262,13 @@ public class AuctionStreams {
             for (SseEmitter emitter : List.copyOf(entry.getValue())) {
                 try {
                     emitter.send(SseEmitter.event().comment("heartbeat"));
-                } catch (IOException | IllegalStateException e) {
-                    // 클라이언트가 이미 떠났다. 응답 정리는 컨테이너가 오류 콜백으로 마친다.
+                } catch (IOException e) {
+                    // 이 쓰기로 떠난 연결을 찾았다. 응답 정리는 컨테이너가 오류 콜백으로 마친다.
+                    // 같은 실패를 받은 오류 콜백이 다른 스레드에서 먼저 뺄 수 있다. 누가 빼든 heartbeat가 찾은 연결로 센다.
+                    remove(entry.getKey(), emitter);
+                    removed++;
+                } catch (IllegalStateException e) {
+                    // 이미 끝난 연결이다. 아직 목록에 남아 있었을 때만 heartbeat가 정리한 것으로 센다.
                     if (remove(entry.getKey(), emitter)) {
                         removed++;
                     }
