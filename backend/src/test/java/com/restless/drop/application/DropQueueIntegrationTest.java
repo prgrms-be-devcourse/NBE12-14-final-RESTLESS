@@ -57,6 +57,8 @@ class DropQueueIntegrationTest {
     @Autowired javax.sql.DataSource dataSource;
     @Autowired MutableClock clock;
     @Autowired MeterRegistry meters;
+    @Autowired com.restless.drop.infrastructure.DropQueueEntryRepository entries;
+    @Autowired org.testcontainers.mysql.MySQLContainer mysql;
     private final Instant opens = Instant.parse("2026-11-20T03:00:00Z");
     private Long user;
     private Long drop;
@@ -170,6 +172,71 @@ class DropQueueIntegrationTest {
         job.runOnce();
         assertThat(entryStatus()).isEqualTo("EXPIRED");
         assertThat(queue.me(drop, later).orElseThrow().status()).isEqualTo(DropQueueStatus.UNAVAILABLE);
+    }
+
+    /** #519: the closing query reads one status in index order, so its lock stops at the batch limit. */
+    @Test
+    void soldOutClosingQueryReadsIndexOrderWithoutSort() {
+        var sql = com.restless.drop.infrastructure.DropQueueEntryRepository.LOCK_LIVE_BY_STATUS
+                .replace(":variantId", "?").replace(":status", "?").replace(":batch", "?");
+        var plan = jdbc.queryForList("EXPLAIN " + sql, variant, "WAITING", 100);
+        assertThat(plan).hasSize(1);
+        assertThat(plan.get(0).get("key")).isEqualTo("ix_drop_queue_sku_order");
+        assertThat(String.valueOf(plan.get(0).get("Extra"))).doesNotContain("filesort");
+    }
+
+    /** #519: a sold-out closing batch locks only its own rows, so a heartbeat on a row outside the batch does not wait. */
+    @Test
+    void soldOutClosingBatchDoesNotLockRowsOutsideTheBatch() throws Exception {
+        int size = DropQueueAdmissionTransactions.CLOSE_BATCH_SIZE;
+        Long outside = null;
+        for (int i = 0; i <= size; i++) {
+            Long member = newUser();
+            queue.enter(drop, member, variant);
+            outside = member;
+        }
+        Long outsideId = jdbc.queryForObject("SELECT MAX(id) FROM drop_queue_entries WHERE drop_id=? AND user_id=?",
+                Long.class, drop, outside);
+        var locked = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            // Production runs the closing batch in READ COMMITTED (DropQueueAdmissionTransactions.runBatch).
+            var readCommitted = new TransactionTemplate(transactions.getTransactionManager());
+            readCommitted.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+            var holderThread = new java.util.concurrent.atomic.AtomicLong();
+            Future<Integer> holder = executor.submit(() -> readCommitted.execute(status -> {
+                int rows = entries.lockLive(variant, size).size();
+                holderThread.set(jdbc.queryForObject("SELECT PS_CURRENT_THREAD_ID()", Long.class));
+                locked.countDown();
+                try { release.await(10, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                return rows;
+            }));
+            try {
+                assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
+                try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+                    statement.execute("SET SESSION innodb_lock_wait_timeout = 1");
+                    assertThat(statement.executeUpdate("UPDATE drop_queue_entries SET last_seen_at = last_seen_at WHERE id = "
+                            + outsideId)).isEqualTo(1);
+                }
+                // Plan-independent guard: the batch's row locks come through the per-status index and stay within
+                // the batch, whatever plan this small test database would pick for a single IN query.
+                // data_locks needs a privilege the application user lacks; the container root shares its password.
+                var locksByIndex = new java.util.HashMap<String, Long>();
+                try (var root = java.sql.DriverManager.getConnection(mysql.getJdbcUrl(), "root", mysql.getPassword());
+                     var query = root.prepareStatement("""
+                             SELECT INDEX_NAME, COUNT(*) FROM performance_schema.data_locks
+                             WHERE THREAD_ID = ? AND OBJECT_NAME = 'drop_queue_entries' AND LOCK_TYPE = 'RECORD'
+                             GROUP BY INDEX_NAME""")) {
+                    query.setLong(1, holderThread.get());
+                    try (var rs = query.executeQuery()) { while (rs.next()) locksByIndex.put(rs.getString(1), rs.getLong(2)); }
+                }
+                assertThat(locksByIndex).containsKey("ix_drop_queue_sku_order");
+                assertThat(locksByIndex.getOrDefault("PRIMARY", 0L)).isLessThanOrEqualTo(size);
+            } finally {
+                release.countDown();
+            }
+            assertThat(holder.get(10, TimeUnit.SECONDS)).isEqualTo(size);
+        }
     }
 
     @Test
