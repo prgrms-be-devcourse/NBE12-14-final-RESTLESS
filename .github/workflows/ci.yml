@@ -168,5 +168,11 @@ jobs:
           restore-keys: nextjs-${{ hashFiles('frontend/package-lock.json') }}-
       - run: npm ci
         if: steps.changes.outputs.run == 'true'
+      # 화면 로직 검사(드롭 구매 복구, 환불, 좌석 상태). 파일 하나라도 실패하면 멈춘다.
+      - name: Frontend tests
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          set -e
+          for t in tests/*.cjs; do echo "::group::$t"; node "$t"; echo "::endgroup::"; done
       - run: npm run build
         if: steps.changes.outputs.run == 'true'
