@@ -30,6 +30,19 @@ const holdParticipants = mode === 'mixed' ? positive('HOLD_PARTICIPANTS', 20) : 
 const startDelay = Number(__ENV.START_DELAY_SECONDS || 0);
 // checkout에서 선점 전에 좌석 화면 진입(좌석·구매 가능 정보)을 함께 보낼지. 1이면 보낸다.
 const checkoutPageEntry = (__ENV.CHECKOUT_PAGE_ENTRY || '0') === '1';
+// 도착률 모드: ARRIVAL_RATE(초당 사용자)로 ARRIVAL_SECONDS 동안 고르게 들어온다. 반복 하나가 사용자 한 명이다.
+// 순간 몰림이 아니라 계속 들어오는 부하에서 처리 한계를 본다. simultaneous와 page에만 쓴다.
+const arrivalRate = Number(__ENV.ARRIVAL_RATE || 0);
+const arrivalSeconds = Number(__ENV.ARRIVAL_SECONDS || 0);
+const arrival = arrivalRate > 0;
+if (!Number.isSafeInteger(arrivalRate) || arrivalRate < 0 || arrivalRate > 5000) throw new Error('ARRIVAL_RATE must be an integer from 0 to 5000');
+if (arrival && (!Number.isSafeInteger(arrivalSeconds) || arrivalSeconds < 1 || arrivalSeconds > 3600)) throw new Error('ARRIVAL_SECONDS must be an integer from 1 to 3600');
+if (arrival && !['poll', 'page'].includes(mode)) throw new Error('ARRIVAL_RATE is supported for simultaneous and page');
+if (arrival && participants !== arrivalRate * arrivalSeconds) throw new Error('arrival mode requires USERS = ARRIVAL_RATE x ARRIVAL_SECONDS');
+// 좌석 응답 검증 수준. full: 본문을 풀어 좌석 수까지 확인. light: 본문을 받지 않고(k6가 풀거나 파싱하지 않음)
+// 상태 코드, 압축 헤더, 길이만 확인한다. 부하 발생기 CPU를 줄여 처리량을 잴 때 쓴다.
+const seatCheck = __ENV.SEAT_CHECK || 'full';
+if (!['full', 'light'].includes(seatCheck)) throw new Error('SEAT_CHECK must be full or light');
 if (!Number.isSafeInteger(startDelay) || startDelay < 0 || startDelay > 600) throw new Error('START_DELAY_SECONDS must be an integer from 0 to 600');
 const mixedHold = fixedMixedHold || __ENV.MIXED_HOLD || 'hot';
 if (mode === 'mixed' && !['hot', 'distributed'].includes(mixedHold)) throw new Error('MIXED_HOLD must be hot or distributed');
@@ -44,13 +57,15 @@ if (setupMode === 'self' && totalUsers > 1000) throw new Error('self setup suppo
 const refreshCount = Number(__ENV.REFRESH_COUNT || 0);
 if (!Number.isSafeInteger(refreshCount) || refreshCount < 0 || refreshCount > 100) throw new Error('REFRESH_COUNT must be an integer from 0 to 100');
 const refreshInterval = positive('REFRESH_INTERVAL_SECONDS', 30);
+if (seatCheck === 'light' && (refreshCount || !['poll', 'page'].includes(mode))) throw new Error('SEAT_CHECK=light is supported for simultaneous and page without REFRESH_COUNT');
 // 진입 방식은 화면 진입(page, mixed 조회자)에만 적용한다. 좌석 조회(poll)와 선점 시나리오는 항상 동시 출발한다.
 const entry = mode === 'page' || mode === 'mixed' ? (fixedEntry || __ENV.POLL_ENTRY || 'spread') : 'simultaneous';
 if (!['spread', 'simultaneous'].includes(entry)) throw new Error('POLL_ENTRY must be spread or simultaneous');
 if (startDelay && !['poll', 'page', 'mixed'].includes(mode)) throw new Error('START_DELAY_SECONDS is supported for simultaneous, page and mixed');
+if (arrival && startDelay) throw new Error('ARRIVAL_RATE cannot be combined with START_DELAY_SECONDS');
 const runId = __ENV.RUN_ID;
 if (!runId || !/^[a-zA-Z0-9_-]{1,40}$/.test(runId)) throw new Error('RUN_ID is required (1-40 letters, numbers, _ or -)');
-if ((mode === 'poll' || mode === 'page') && vus !== participants) throw new Error('poll and page require VUS=PARTICIPANTS');
+if (!arrival && (mode === 'poll' || mode === 'page') && vus !== participants) throw new Error('poll and page require VUS=PARTICIPANTS');
 const users = setupMode === 'csv' ? new SharedArray('users', () => {
   const lines = open(__ENV.USERS_CSV || '../../seed/out/users.csv').trim().split('\n');
   const header = lines.shift().trim().split(',');
@@ -62,7 +77,13 @@ if (setupMode === 'csv' && (users.length < totalUsers || users.some(u => !u.id |
   throw new Error('users.csv needs enough distinct user IDs and access tokens');
 const options = {
   setupTimeout: '10m',
-  scenarios: { ticketing: ['poll', 'page', 'mixed'].includes(mode)
+  scenarios: { ticketing: arrival
+    ? { executor: 'constant-arrival-rate', rate: arrivalRate, timeUnit: '1s', duration: `${arrivalSeconds}s`,
+        // 한 사용자가 끝나기 전에 다음 사용자가 오므로 VU를 넉넉히 둔다. 모자라면 dropped_iterations가 늘어 실패한다.
+        preAllocatedVUs: positive('ARRIVAL_PRE_VUS', Math.min(arrivalRate * 5, 3000)),
+        maxVUs: positive('ARRIVAL_MAX_VUS', Math.min(arrivalRate * 20, 6000)),
+        gracefulStop: __ENV.GRACEFUL_STOP || '30s' }
+    : ['poll', 'page', 'mixed'].includes(mode)
     ? { executor: 'per-vu-iterations', vus: mode === 'mixed' ? totalUsers : vus, iterations: 1, maxDuration: __ENV.MAX_DURATION || '5m', gracefulStop: __ENV.GRACEFUL_STOP || '30s' }
     : { executor: 'shared-iterations', vus, iterations: participants, maxDuration: __ENV.MAX_DURATION || '5m', gracefulStop: __ENV.GRACEFUL_STOP || '30s' } },
   thresholds: {
@@ -103,6 +124,8 @@ const options = {
     } : {}),
     ...(mode === 'mixed' ? { ticket_poll_requests: [`count>=${participants}`], ticket_poll_errors: ['rate==0'], ticket_hold_errors: ['rate==0'] } : {}),
     ...(['poll', 'page'].includes(mode) ? { ticket_poll_requests: [`count>=${participants}`], ticket_poll_errors: ['rate==0'] } : {}),
+    // 부하 발생기가 목표 유입을 만들었는지: 못 보낸 반복이 없어야 한다.
+    ...(arrival ? { dropped_iterations: ['count==0'], 'ticket_arrival_lag': [] } : {}),
     ...(refreshCount && ['poll', 'page', 'mixed'].includes(mode) ? { ticket_refresh_requests: [`count==${participants * refreshCount}`] } : {}),
     'ticket_poll_duration{outcome:ok}': [],
     'ticket_poll_duration{phase:entry}': [],
@@ -125,6 +148,8 @@ const replayCompleted = new Counter('ticket_replay_completed');
 const pollLatency = new Trend('ticket_poll_duration', true);
 // 시나리오 시작부터 사용자의 첫 요청 직전까지. 동시 출발이 실제로 지켜졌는지 확인한다.
 const startOffset = new Trend('ticket_start_offset', true);
+// 도착률 모드에서 예정 시각보다 늦게 출발한 시간. 크면 부하 발생기가 도착률을 만들지 못한 것이다.
+const arrivalLag = new Trend('ticket_arrival_lag', true);
 // 시나리오 시작(또는 지정 출발 시각)부터 조회자의 화면 진입 응답이 끝날 때까지. mixed에서 선점 출발과 겹쳤는지 본다.
 const entryEndOffset = new Trend('ticket_entry_end_offset', true);
 const seatGzipResponses = new Counter('ticket_seat_gzip_responses');
@@ -187,7 +212,10 @@ function setup() {
   if (refreshCount && ['poll', 'page', 'mixed'].includes(mode)) refreshRequests.add(0);
   const startAt = startDelay ? Date.now() + startDelay * 1000 : null;
   if (startAt) console.log(`start scheduled=${new Date(startAt).toISOString()}`);
-  return { ids, seatCount: seats.length, seatIds: seats.map(s => s.seatId), users: activeUsers, startAt };
+  // light 검증 기준: 준비 요청과 같은 인코딩 응답 길이. 좌석 상태 문자열 차이로 조금 달라질 수 있어 절반 이상이면 정상으로 본다.
+  const seatBodyLength = Number(response.headers['Content-Length'] || 0);
+  if (seatCheck === 'light' && !seatBodyLength) throw new Error('SEAT_CHECK=light needs a Content-Length on the seat response');
+  return { ids, seatCount: seats.length, seatIds: seats.map(s => s.seatId), users: activeUsers, startAt, seatBodyLength };
 }
 function run(data) {
   const activeUsers = data.users;
@@ -195,7 +223,7 @@ function run(data) {
   const origin = data.startAt || exec.scenario.startTime;
   const pollUser = mode === 'poll' || mode === 'page' || (mode === 'mixed' && exec.vu.idInTest <= participants);
   if (pollUser) {
-    return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, entryEndOffset, origin, refreshCount, refreshInterval, refreshRequests });
+    return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, entryEndOffset, origin, refreshCount, refreshInterval, refreshRequests, arrival, arrivalRate, arrivalLag, seatCheck });
   }
   if (mode === 'checkout') {
     return runCheckout(data, { base, performanceId, users: activeUsers, runId, origin, headers, seatHeaders, encodingMatches, count, startOffset,
@@ -207,7 +235,7 @@ function run(data) {
 function handleSummary(data) {
   const { setup_data: setupData, ...safeData } = data;
   const safeSetup = setupData ? { ...setupData, ...(Array.isArray(setupData.users) ? { users: setupData.users.map(user => ({ id: user.id })) } : {}) } : setupData;
-  const report = { ...safeData, setup_data: safeSetup, conditions: { mode, entry,
+  const report = { ...safeData, setup_data: safeSetup, conditions: { mode, seatCheck, entry: arrival ? 'arrival' : entry, arrivalRate: arrival ? arrivalRate : null, arrivalSeconds: arrival ? arrivalSeconds : null,
     mixedHold: mode === 'mixed' ? mixedHold : null, performanceId, participants, holdParticipants,
     vus: mode === 'mixed' ? totalUsers : vus, refreshCount, refreshIntervalSeconds: refreshCount ? refreshInterval : null,
     maxDuration: __ENV.MAX_DURATION || '5m',

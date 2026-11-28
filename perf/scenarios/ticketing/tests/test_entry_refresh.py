@@ -20,7 +20,9 @@ class Handler(BaseHTTPRequestHandler):
     checkout_status = 200
     checkout_delay = 0
     posts = []
+    seat_auth = []
     seat_requests = 0
+    short_seats = False
 
     def log_message(self, *_):
         pass
@@ -38,7 +40,9 @@ class Handler(BaseHTTPRequestHandler):
             body = json.dumps([dict(seatId=2 if self.mismatch else 1, status='AVAILABLE')])
         elif self.path.endswith('/seats'):
             Handler.seat_requests += 1
-            body = json.dumps([dict(seatId=1, status='AVAILABLE')])
+            Handler.seat_auth.append(self.headers.get('Authorization'))
+            # short_seats: 준비 요청(첫 요청) 뒤로는 비정상적으로 짧은 본문을 준다
+            body = '[]' if Handler.short_seats and Handler.seat_requests > 1 else json.dumps([dict(seatId=1, status='AVAILABLE')])
         else:
             self.send_error(404)
             return
@@ -84,19 +88,21 @@ class ScenarioTest(unittest.TestCase):
         cls.thread.join()
 
     def run_scenario(self, scenario, refresh=0, mismatch=False, invalid_availability=False, entry='simultaneous',
-                     reject_token=None, expect_failure=False, participants=None, extra_env=None, checkout_status=200, checkout_delay=0):
+                     reject_token=None, expect_failure=False, participants=None, extra_env=None, checkout_status=200, checkout_delay=0, user_count=2, short_seats=False):
         Handler.mismatch = mismatch
         Handler.invalid_availability = invalid_availability
         Handler.reject_token = reject_token
         Handler.checkout_status = checkout_status
         Handler.checkout_delay = checkout_delay
         Handler.posts = []
+        Handler.seat_auth = []
+        Handler.short_seats = short_seats
         Handler.seat_requests = 0
         with tempfile.TemporaryDirectory() as tmp:
             users = Path(tmp) / 'users.csv'
             with users.open('w', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerows([['user_id', 'access_token'], ['1', 'fake-1'], ['2', 'fake-2']])
+                writer.writerows([['user_id', 'access_token']] + [[str(n), f'fake-{n}'] for n in range(1, user_count + 1)])
             output = Path(tmp) / 'summary.json'
             env = dict(os.environ, BASE_URL=f'http://127.0.0.1:{self.server.server_port}',
                        MANAGEMENT_URL=f'http://127.0.0.1:{self.server.server_port}', PERFORMANCE_ID='1',
@@ -231,6 +237,40 @@ class ScenarioTest(unittest.TestCase):
         entry = metrics['ticket_start_offset{phase:entry}']['values']['max']
         hold = metrics['ticket_start_offset{phase:hold}']['values']['max']
         self.assertGreaterEqual(hold - entry, 150)  # 구매 가능 정보 스텁이 200ms 걸린다.
+
+    def test_arrival_rate_sends_one_distinct_user_per_iteration(self):
+        report = self.run_scenario('page', participants='8', user_count=8,
+                                   extra_env={'ARRIVAL_RATE': '4', 'ARRIVAL_SECONDS': '2'})
+        metrics = report['metrics']
+        self.assertEqual(metrics['ticket_poll_requests']['values']['count'], 8)
+        self.assertEqual(metrics['ticket_page_entry_duration{outcome:ok}']['values']['count'], 8)
+        self.assertEqual(metrics['dropped_iterations']['values']['count'], 0)
+        self.assertLess(metrics['ticket_arrival_lag']['values']['max'], 500)
+        # setup의 좌석 확인 1번 + 사용자 8명이 서로 다른 토큰으로 1번씩
+        self.assertEqual(len(set(Handler.seat_auth[1:])), 8)
+        self.assertEqual(report['conditions']['entry'], 'arrival')
+        self.assertGreaterEqual(metrics['iteration_duration']['values']['count'], 8)
+
+    def test_arrival_rate_requires_users_to_match_rate_and_duration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, BASE_URL='http://127.0.0.1:1', MANAGEMENT_URL='http://127.0.0.1:1', PERFORMANCE_ID='1',
+                       PARTICIPANTS='7', VUS='7', USERS_CSV=str(Path(tmp) / 'none.csv'), RUN_ID='arrival-mismatch',
+                       ARRIVAL_RATE='4', ARRIVAL_SECONDS='2')
+            result = subprocess.run(['k6', 'run', '--quiet', str(ROOT / 'perf/scenarios/ticketing/page.js')],
+                                    env=env, capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('ARRIVAL_RATE x ARRIVAL_SECONDS', result.stderr)
+
+    def test_light_seat_check_accepts_full_length_and_rejects_short_body(self):
+        report = self.run_scenario('page', participants='8', user_count=8,
+                                   extra_env={'ARRIVAL_RATE': '4', 'ARRIVAL_SECONDS': '2', 'SEAT_CHECK': 'light'})
+        metrics = report['metrics']
+        self.assertEqual(report['conditions']['seatCheck'], 'light')
+        self.assertEqual(metrics['ticket_page_entry_duration{outcome:ok}']['values']['count'], 8)
+        self.assertEqual(metrics['ticket_poll_errors']['values']['passes'], 0)
+        metrics = self.run_scenario('page', participants='8', user_count=8, expect_failure=True, short_seats=True,
+                                    extra_env={'ARRIVAL_RATE': '4', 'ARRIVAL_SECONDS': '2', 'SEAT_CHECK': 'light'})['metrics']
+        self.assertEqual(metrics['ticket_poll_errors']['values']['passes'], 8)
 
     def test_unauthorized_seat_response_fails_run(self):
         metrics = self.run_scenario('simultaneous', reject_token='fake-2', expect_failure=True)['metrics']
