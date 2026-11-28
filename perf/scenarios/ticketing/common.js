@@ -57,6 +57,12 @@ if (setupMode === 'self' && totalUsers > 1000) throw new Error('self setup suppo
 const refreshCount = Number(__ENV.REFRESH_COUNT || 0);
 if (!Number.isSafeInteger(refreshCount) || refreshCount < 0 || refreshCount > 100) throw new Error('REFRESH_COUNT must be an integer from 0 to 100');
 const refreshInterval = positive('REFRESH_INTERVAL_SECONDS', 30);
+// 다시 진입(F5) 반복: page에서 첫 진입 뒤 RELOAD_INTERVAL_SECONDS마다 화면 진입을 RELOAD_COUNT번 더 보낸다.
+const reloadCount = Number(__ENV.RELOAD_COUNT || 0);
+if (!Number.isSafeInteger(reloadCount) || reloadCount < 0 || reloadCount > 100) throw new Error('RELOAD_COUNT must be an integer from 0 to 100');
+const reloadInterval = positive('RELOAD_INTERVAL_SECONDS', 5);
+if (reloadCount && mode !== 'page') throw new Error('RELOAD_COUNT is supported for page');
+if (reloadCount && refreshCount) throw new Error('RELOAD_COUNT cannot be combined with REFRESH_COUNT');
 if (seatCheck === 'light' && (refreshCount || !['poll', 'page'].includes(mode))) throw new Error('SEAT_CHECK=light is supported for simultaneous and page without REFRESH_COUNT');
 // 진입 방식은 화면 진입(page, mixed 조회자)에만 적용한다. 좌석 조회(poll)와 선점 시나리오는 항상 동시 출발한다.
 const entry = mode === 'page' || mode === 'mixed' ? (fixedEntry || __ENV.POLL_ENTRY || 'spread') : 'simultaneous';
@@ -127,6 +133,7 @@ const options = {
     // 부하 발생기가 목표 유입을 만들었는지: 못 보낸 반복이 없어야 한다.
     ...(arrival ? { dropped_iterations: ['count==0'], 'ticket_arrival_lag': [] } : {}),
     ...(refreshCount && ['poll', 'page', 'mixed'].includes(mode) ? { ticket_refresh_requests: [`count==${participants * refreshCount}`] } : {}),
+    ...(reloadCount ? { ticket_page_reloads: [`count==${participants * reloadCount}`], 'ticket_page_reload_duration{outcome:ok}': [], 'ticket_page_reload_duration{outcome:error}': [] } : {}),
     'ticket_poll_duration{outcome:ok}': [],
     'ticket_poll_duration{phase:entry}': [],
     ...(['page', 'mixed'].includes(mode) ? { 'ticket_page_entry_duration{outcome:ok}': [], 'ticket_page_entry_duration{outcome:error}': [] } : {}),
@@ -142,6 +149,9 @@ const pollErrors = new Rate('ticket_poll_errors');
 const holdErrors = new Rate('ticket_hold_errors');
 const pollRequests = new Counter('ticket_poll_requests');
 const refreshRequests = new Counter('ticket_refresh_requests');
+const pageReloads = new Counter('ticket_page_reloads');
+// 다시 진입(F5) 한 번의 화면 진입 시간(좌석 + 구매 가능 정보).
+const pageReloadLatency = new Trend('ticket_page_reload_duration', true);
 const holdAttempts = new Counter('ticket_hold_attempts');
 const holdCompleted = new Counter('ticket_hold_completed');
 const replayCompleted = new Counter('ticket_replay_completed');
@@ -210,6 +220,7 @@ function setup() {
   if (mode === 'checkout') { checkoutCompleted.add(0); prepareCompleted.add(0); }
   if (mode === 'mixed') pollRequests.add(0);
   if (refreshCount && ['poll', 'page', 'mixed'].includes(mode)) refreshRequests.add(0);
+  if (reloadCount) pageReloads.add(0);
   const startAt = startDelay ? Date.now() + startDelay * 1000 : null;
   if (startAt) console.log(`start scheduled=${new Date(startAt).toISOString()}`);
   // light 검증 기준: 준비 요청과 같은 인코딩 응답 길이. 좌석 상태 문자열 차이로 조금 달라질 수 있어 절반 이상이면 정상으로 본다.
@@ -223,7 +234,7 @@ function run(data) {
   const origin = data.startAt || exec.scenario.startTime;
   const pollUser = mode === 'poll' || mode === 'page' || (mode === 'mixed' && exec.vu.idInTest <= participants);
   if (pollUser) {
-    return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, entryEndOffset, origin, refreshCount, refreshInterval, refreshRequests, arrival, arrivalRate, arrivalLag, seatCheck });
+    return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, entryEndOffset, origin, refreshCount, refreshInterval, refreshRequests, arrival, arrivalRate, arrivalLag, seatCheck, reloadCount, reloadInterval, pageReloads, pageReloadLatency });
   }
   if (mode === 'checkout') {
     return runCheckout(data, { base, performanceId, users: activeUsers, runId, origin, headers, seatHeaders, encodingMatches, count, startOffset,
@@ -237,7 +248,7 @@ function handleSummary(data) {
   const safeSetup = setupData ? { ...setupData, ...(Array.isArray(setupData.users) ? { users: setupData.users.map(user => ({ id: user.id })) } : {}) } : setupData;
   const report = { ...safeData, setup_data: safeSetup, conditions: { mode, seatCheck, entry: arrival ? 'arrival' : entry, arrivalRate: arrival ? arrivalRate : null, arrivalSeconds: arrival ? arrivalSeconds : null,
     mixedHold: mode === 'mixed' ? mixedHold : null, performanceId, participants, holdParticipants,
-    vus: mode === 'mixed' ? totalUsers : vus, refreshCount, refreshIntervalSeconds: refreshCount ? refreshInterval : null,
+    vus: mode === 'mixed' ? totalUsers : vus, refreshCount, refreshIntervalSeconds: refreshCount ? refreshInterval : null, reloadCount, reloadIntervalSeconds: reloadCount ? reloadInterval : null,
     maxDuration: __ENV.MAX_DURATION || '5m',
     hotSeats, startDelaySeconds: startDelay || null, checkoutPageEntry: mode === 'checkout' ? checkoutPageEntry : null, seatEncoding, runId, baseUrl: base, rowOffset } };
   const out = { stdout: JSON.stringify(report, null, 2) };
