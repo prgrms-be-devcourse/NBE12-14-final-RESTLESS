@@ -15,6 +15,8 @@ import { mergeSeatStates } from "./seat-state";
 import "./seats.css";
 
 const GRADE_COLOR: Record<string, string> = { VIP: "#B04FD0", R: "#6A57F2", S: "#2F8FE0", A: "#1FB89A" };
+// 창 포커스로 구매 가능 정보를 다시 조회하는 최소 간격.
+const AVAILABILITY_FOCUS_REFRESH_MS = 30_000;
 
 export default function SeatsView({ id, max, concertId }: { id: number; max: number; concertId: string | null }) {
   const now = useNow();
@@ -26,6 +28,10 @@ export default function SeatsView({ id, max, concertId }: { id: number; max: num
   const refreshInFlight = useRef(false);
   const refreshVersion = useRef(0);
   const availability = useLoad(() => profile ? api<TicketBookingAvailability>(`/api/performances/${id}/booking-availability`) : Promise.resolve(null), [id, profile?.memberId]);
+  // 창으로 돌아올 때는 마지막 조회 뒤 일정 시간이 지났을 때만 다시 조회한다(#570). 탭을 오갈 때마다 요청하지 않는다.
+  // 선점 실패·취소 직후에는 아래에서 바로 다시 조회한다. 선점할 때 서버가 한도와 활성 예약을 다시 검사한다.
+  const availabilityLoadedAt = useRef(0);
+  useEffect(() => { if (availability.data) availabilityLoadedAt.current = Date.now(); }, [availability.data]);
   const [picked, setPicked] = useState<number[]>([]);
   const [hold, setHold] = useState<TicketReservationInfo | null>(null);
   const [checkout, setCheckout] = useState<TicketCheckoutResponse | null>(null);
@@ -93,7 +99,10 @@ export default function SeatsView({ id, max, concertId }: { id: number; max: num
     refreshVersion.current += 1;
     setPollError(false);
     setRefreshingSeats(false);
-    const refreshAvailability = () => { void availability.reload().catch(() => undefined); };
+    const refreshAvailability = () => {
+      if (Date.now() - availabilityLoadedAt.current < AVAILABILITY_FOCUS_REFRESH_MS) return;
+      void availability.reload().catch(() => undefined);
+    };
     window.addEventListener("focus", refreshAvailability);
     return () => { refreshVersion.current += 1; window.removeEventListener("focus", refreshAvailability); };
   }, [profile?.memberId, id]);
