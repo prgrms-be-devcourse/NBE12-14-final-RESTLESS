@@ -21,6 +21,7 @@ class Handler(BaseHTTPRequestHandler):
     checkout_delay = 0
     posts = []
     seat_auth = []
+    status_encodings = []
     seat_requests = 0
     short_after = None
 
@@ -37,6 +38,7 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(0.2)
             body = json.dumps({} if self.invalid_availability else dict(maximum=3, confirmed=0, reserved=0, remaining=3, activeReservation=None))
         elif self.path.endswith('/seats/status'):
+            Handler.status_encodings.append(self.headers.get('Accept-Encoding'))
             body = json.dumps([dict(seatId=2 if self.mismatch else 1, status='AVAILABLE')])
         elif self.path.endswith('/seats'):
             Handler.seat_requests += 1
@@ -96,6 +98,7 @@ class ScenarioTest(unittest.TestCase):
         Handler.checkout_delay = checkout_delay
         Handler.posts = []
         Handler.seat_auth = []
+        Handler.status_encodings = []
         Handler.short_after = 1 if short_seats else short_after
         Handler.seat_requests = 0
         with tempfile.TemporaryDirectory() as tmp:
@@ -260,6 +263,11 @@ class ScenarioTest(unittest.TestCase):
                                     env=env, capture_output=True, text=True, timeout=20)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('ARRIVAL_RATE x ARRIVAL_SECONDS', result.stderr)
+
+    def test_refresh_sends_seat_accept_encoding(self):
+        # 스텁은 압축하지 않으므로 identity로 보낸 값이 상태 요청에도 그대로 실리는지 본다.
+        self.run_scenario('page', refresh=1, extra_env={'SEAT_ENCODING': 'identity'})
+        self.assertEqual(Handler.status_encodings, ['identity', 'identity'])
 
     def test_page_reload_repeats_full_page_entry(self):
         report = self.run_scenario('page', participants='2', extra_env={'RELOAD_COUNT': '2', 'RELOAD_INTERVAL_SECONDS': '1'})

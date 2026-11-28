@@ -69,7 +69,8 @@ export function runPoll(data, context) {
   for (let i = 0; i < refreshCount; i++) {
     sleep(refreshInterval);
     refreshRequests.add(1);
-    const state = http.get(`${base}/api/performances/${performanceId}/seats/status`, { headers: headers(user), tags: { name: 'GET seat states', phase: 'refresh' } });
+    // 브라우저처럼 좌석 조회와 같은 Accept-Encoding을 보낸다. 서버가 압축하지 않아도 실패로 보지 않는다.
+    const state = http.get(`${base}/api/performances/${performanceId}/seats/status`, { headers: seatHeaders(user), tags: { name: 'GET seat states', phase: 'refresh' } });
     let values; try { values = state.json(); } catch (_) { /* malformed */ }
     const received = state.status === 200 && values !== undefined;
     const byId = new Set();
