@@ -22,7 +22,7 @@ class Handler(BaseHTTPRequestHandler):
     posts = []
     seat_auth = []
     seat_requests = 0
-    short_seats = False
+    short_after = None
 
     def log_message(self, *_):
         pass
@@ -42,7 +42,7 @@ class Handler(BaseHTTPRequestHandler):
             Handler.seat_requests += 1
             Handler.seat_auth.append(self.headers.get('Authorization'))
             # short_seats: 준비 요청(첫 요청) 뒤로는 비정상적으로 짧은 본문을 준다
-            body = '[]' if Handler.short_seats and Handler.seat_requests > 1 else json.dumps([dict(seatId=1, status='AVAILABLE')])
+            body = '[]' if Handler.short_after is not None and Handler.seat_requests > Handler.short_after else json.dumps([dict(seatId=1, status='AVAILABLE')])
         else:
             self.send_error(404)
             return
@@ -88,7 +88,7 @@ class ScenarioTest(unittest.TestCase):
         cls.thread.join()
 
     def run_scenario(self, scenario, refresh=0, mismatch=False, invalid_availability=False, entry='simultaneous',
-                     reject_token=None, expect_failure=False, participants=None, extra_env=None, checkout_status=200, checkout_delay=0, user_count=2, short_seats=False):
+                     reject_token=None, expect_failure=False, participants=None, extra_env=None, checkout_status=200, checkout_delay=0, user_count=2, short_seats=False, short_after=None):
         Handler.mismatch = mismatch
         Handler.invalid_availability = invalid_availability
         Handler.reject_token = reject_token
@@ -96,7 +96,7 @@ class ScenarioTest(unittest.TestCase):
         Handler.checkout_delay = checkout_delay
         Handler.posts = []
         Handler.seat_auth = []
-        Handler.short_seats = short_seats
+        Handler.short_after = 1 if short_seats else short_after
         Handler.seat_requests = 0
         with tempfile.TemporaryDirectory() as tmp:
             users = Path(tmp) / 'users.csv'
@@ -260,6 +260,47 @@ class ScenarioTest(unittest.TestCase):
                                     env=env, capture_output=True, text=True, timeout=20)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('ARRIVAL_RATE x ARRIVAL_SECONDS', result.stderr)
+
+    def test_page_reload_repeats_full_page_entry(self):
+        report = self.run_scenario('page', participants='2', extra_env={'RELOAD_COUNT': '2', 'RELOAD_INTERVAL_SECONDS': '1'})
+        metrics = report['metrics']
+        self.assertEqual(metrics['ticket_page_reloads']['values']['count'], 4)
+        self.assertEqual(metrics['ticket_page_reload_duration{outcome:ok}']['values']['count'], 4)
+        self.assertEqual(metrics['ticket_availability_requests']['values']['count'], 6)
+        # setup 1 + 첫 진입 2 + 다시 진입 4
+        self.assertEqual(Handler.seat_requests, 7)
+        self.assertEqual(report['conditions']['reloadCount'], 2)
+        self.assertEqual(report['conditions']['reloadIntervalSeconds'], 1)
+
+    def test_page_reload_counts_failed_reloads(self):
+        # setup과 첫 진입 2번까지는 정상, 다시 진입부터 좌석 응답이 비정상
+        metrics = self.run_scenario('page', participants='2', short_after=3, expect_failure=True,
+                                    extra_env={'RELOAD_COUNT': '2', 'RELOAD_INTERVAL_SECONDS': '1'})['metrics']
+        self.assertEqual(metrics['ticket_page_entry_duration{outcome:ok}']['values']['count'], 2)
+        self.assertEqual(metrics['ticket_page_reload_duration{outcome:error}']['values']['count'], 4)
+        self.assertEqual(metrics['ticket_poll_errors']['values']['passes'], 4)
+
+    def test_page_reload_with_arrival_and_light_check(self):
+        metrics = self.run_scenario('page', participants='4', user_count=4,
+                                    extra_env={'ARRIVAL_RATE': '2', 'ARRIVAL_SECONDS': '2', 'SEAT_CHECK': 'light',
+                                               'RELOAD_COUNT': '1', 'RELOAD_INTERVAL_SECONDS': '1'})['metrics']
+        self.assertEqual(metrics['ticket_page_reloads']['values']['count'], 4)
+        self.assertEqual(metrics['ticket_page_reload_duration{outcome:ok}']['values']['count'], 4)
+        self.assertEqual(metrics['dropped_iterations']['values']['count'], 0)
+
+    def test_page_reload_rejects_unsupported_combinations(self):
+        for script, extra, message in [
+            ('simultaneous.js', {'RELOAD_COUNT': '1'}, 'RELOAD_COUNT is supported for page'),
+            ('page.js', {'RELOAD_COUNT': '1', 'REFRESH_COUNT': '1'}, 'cannot be combined with REFRESH_COUNT'),
+            ('page.js', {'RELOAD_COUNT': '101'}, 'RELOAD_COUNT must be an integer'),
+        ]:
+            with tempfile.TemporaryDirectory() as tmp:
+                env = dict(os.environ, BASE_URL='http://127.0.0.1:1', MANAGEMENT_URL='http://127.0.0.1:1', PERFORMANCE_ID='1',
+                           PARTICIPANTS='2', VUS='2', USERS_CSV=str(Path(tmp) / 'none.csv'), RUN_ID='reload-invalid', **extra)
+                result = subprocess.run(['k6', 'run', '--quiet', str(ROOT / 'perf/scenarios/ticketing' / script)],
+                                        env=env, capture_output=True, text=True, timeout=20)
+                self.assertNotEqual(result.returncode, 0, script)
+                self.assertIn(message, result.stderr)
 
     def test_light_seat_check_accepts_full_length_and_rejects_short_body(self):
         report = self.run_scenario('page', participants='8', user_count=8,
