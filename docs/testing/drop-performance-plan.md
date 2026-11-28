@@ -55,7 +55,7 @@
 
 C는 연속 증가 중 순간 최대가 아니라 고정 도착률로 유지해 본 값이다. 연속 증가에서는 서버가 넘친 뒤에도 요청이 타임아웃 전까지 쌓였다가 늦게 성공해서 값이 높게 나온다.
 
-입장 제어 on에서 참여자는 진입 때 SKU 하나를 고르고, 진입, 조회, 점유에 같은 SKU를 쓴다. 입장 수는 SKU마다 `min(max(0, available - 미사용 유효 ADMITTED 수), admit-per-run)`이다. 입장률은 C보다 낮게 둔다. SKU의 `available = 0`이면 신규 진입은 409 `DROP_SOLD_OUT`이고, 입장 허가 작업이 그 SKU의 `WAITING`과 미사용 `ADMITTED`를 `UNAVAILABLE`로 종료한다.
+입장 제어 on에서 참여자는 진입 때 SKU 하나를 고르고, 진입, 조회, 점유에 같은 SKU를 쓴다. 입장 수는 SKU마다 `min(max(0, available - 미사용 유효 ADMITTED 수), admit-per-run)`이다. 초당 입장 상한 `admit-rate-per-second`(드롭 합계, SKU마다 `ceil(상한 / SKU 수)`)를 켜면 이번 초에 남은 몫으로 더 줄인다 (#551). perf 프로필 기본값은 120이고, 용량 측정에서 끌 때는 `RESTLESS_DROP_QUEUE_ADMIT_RATE_PER_SECOND=0`을 넣는다. 입장률은 C보다 낮게 둔다. SKU의 `available = 0`이면 신규 진입은 409 `DROP_SOLD_OUT`이고, 입장 허가 작업이 그 SKU의 `WAITING`과 미사용 `ADMITTED`를 `UNAVAILABLE`로 종료한다.
 
 ## 4. 병목 판정
 
@@ -91,7 +91,7 @@ C는 연속 증가 중 순간 최대가 아니라 고정 도착률로 유지해 
 |---|---|---|
 | C (핫 SKU 3개, 고정 도착률 3분) | [실행 절차 3절](drop-performance-procedure.md#3-용량-측정)의 정의를 따른다. 값은 [#391](https://github.com/prgrms-be-devcourse/NBE12-14-final-RESTLESS/issues/391)에 있다 | 개선 전 기준, 입장률 상한 |
 | SKU 1개 포화 처리량 | 버킷 분할 전과 후의 값이 [#391](https://github.com/prgrms-be-devcourse/NBE12-14-final-RESTLESS/issues/391)에 있다 | 잠금 모델 확인, SKU 하나의 입장률 상한 |
-| 입장률 시작값 | 0.7 x C. 핫 SKU 3개, 주기 1초면 `admit-per-run`은 이 값을 3으로 나눈 것이다 | 대표 판매 측정의 대기열 켬 |
+| 입장률 시작값 | 0.7 x C. `admit-rate-per-second`에 이 값을 드롭 합계로 넣는다 (#551). 상한이 꺼져 있으면 핫 SKU 3개, 주기 1초에서 `admit-per-run`을 이 값의 3분의 1로 둔다 | 대표 판매 측정의 대기열 켬 |
 
 앱 CPU는 요청 처리 전반에 넓게 퍼져 있어 3행의 개별 최적화로는 줄지 않았다. 6행에서 요청 수를 줄이는 쪽(#390)으로 넘어갔다. 그 밖에 사람이 정할 선택은 입장 제어의 입장률 설정, 점유 때 주문을 만들지 않는 구조 변경(팀 결정), 사양 변경(예산 승인)이다. 1~3행은 t3.small 앱 1대, 4~6행은 ALB 뒤 t3.small 2대이고 RDS small, 로컬 k6 조건이다. 환경이나 이미지가 바뀌면 다시 잰다.
 

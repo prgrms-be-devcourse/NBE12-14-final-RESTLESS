@@ -12,3 +12,11 @@ server:
 
 toss:
   secret-key: ${TOSS_SECRET_KEY}
+
+restless:
+  drop:
+    queue:
+      # 드롭 하나의 초당 입장 허가 상한, 모든 서버 합계 (#551). SKU 3개 드롭이면 SKU마다 초당 40이다.
+      # 측정 장비에 묶인 값이다: 앱 t3.small 4대 + DB 2코어, 구매 처리 용량 약 175건/초 x 0.7.
+      # 장비가 바뀌면 처리 용량을 다시 재고 이 값을 고친다. 환경변수 RESTLESS_DROP_QUEUE_ADMIT_RATE_PER_SECOND로 덮어쓸 수 있다.
+      admit-rate-per-second: 120

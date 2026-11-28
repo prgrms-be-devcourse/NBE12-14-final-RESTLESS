@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/resources/db/migration/V*__drop_*.sql`, `backend/src/main/java/com/restless/drop/domain/`
 >
-> 마지막 확인: 2026-11-25 (#430 삭제 시각 V20261125_1700과 대조. #429 주최자 컬럼 V20261125_1500과 대조. 이전: 2026-11-24 (#377 입장 순번 인덱스 V20261124_1700과 대조. 2026-11-22 #330 재고 버킷 분할 migration V20261122_1400, 1401과 대조. 2026-11-20 #285 용어를 재고 점유로 통일. 2026-11-19 #254 SKU별 입장 제어 migration과 대조. 나머지는 2026-11-14 #92 구현과 대조)
+> 마지막 확인: 2026-11-28 (#551 게이트 행의 입장 속도 창 V20261128_1800과 대조). 이전: 2026-11-25 (#430 삭제 시각 V20261125_1700과 대조. #429 주최자 컬럼 V20261125_1500과 대조. 이전: 2026-11-24 (#377 입장 순번 인덱스 V20261124_1700과 대조. 2026-11-22 #330 재고 버킷 분할 migration V20261122_1400, 1401과 대조. 2026-11-20 #285 용어를 재고 점유로 통일. 2026-11-19 #254 SKU별 입장 제어 migration과 대조. 나머지는 2026-11-14 #92 구현과 대조)
 
 ![Drop ERD](drop-erd.svg)
 
@@ -143,6 +143,9 @@ SKU 재고 버킷. SKU 수량은 버킷 합이다
 ## DROP_QUEUE_GATES
 
 - `variant_id`: PK이자 `drop_variants.id` FK. SKU마다 한 행.
+- `rate_window_second`: BIGINT NOT NULL DEFAULT 0. 이 SKU에서 마지막으로 입장 허가를 낸 초(epoch second). 초당 입장 상한이 꺼져 있으면 0으로 남는다 (`V20261128_1800__drop_queue_gate_rate.sql`, #551).
+- `rate_window_admits`: INT NOT NULL DEFAULT 0. 그 초에 모든 서버가 함께 낸 입장 허가 수.
+- 두 열은 게이트 행 락을 쥔 입장 허가 batch 안에서만 읽고 쓴다. 계산 규칙은 [transactions.md](transactions.md) D4다.
 - 입장과 종료 batch만 `FOR UPDATE SKIP LOCKED`로 락 획득한다. 게이트가 사용 중이면 즉시 건너뛰고 다음 주기에 재시도한다.
 - gate row lock은 transaction 종료 시 자동 해제된다. TX1과 PG 호출은 이 게이트를 사용하지 않는다.
 - 기존 SKU는 expand migration에서, 새 SKU는 운영자 생성 transaction에서 게이트를 만든다. 작업이 누락 gate를 발견하면 로그와 `drop.queue.gate.missing` 합계를 남기고 별도 짧은 transaction의 INSERT IGNORE로 보완한 뒤 한 번 재시도한다.

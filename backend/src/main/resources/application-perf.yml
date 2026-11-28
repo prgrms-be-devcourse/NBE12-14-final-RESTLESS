@@ -55,6 +55,12 @@ management:
 restless:
   ratelimit:
     enabled: false
+  drop:
+    queue:
+      # 드롭 하나의 초당 입장 허가 상한, 모든 서버 합계 (#551). prod와 같은 값이다. SKU 3개 드롭이면 SKU마다 초당 40이다.
+      # 측정 장비에 묶인 값이다: 앱 t3.small 4대 + DB 2코어, 구매 처리 용량 약 175건/초 x 0.7.
+      # 장비가 바뀌면 처리 용량을 다시 재고 이 값을 고친다. 용량 측정에서 끌 때는 RESTLESS_DROP_QUEUE_ADMIT_RATE_PER_SECOND=0을 넣는다.
+      admit-rate-per-second: 120
   auth:
     withdrawn-block:
       # 쓰기마다 늘어나는 회원 조회를 이전 측정과 섞지 않는다. 전후 비교 때만 켠다.

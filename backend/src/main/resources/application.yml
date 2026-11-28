@@ -49,6 +49,9 @@ restless:
       # heartbeat-interval defaults to 10s (timeout / 4 for shorter timeouts).
       admission-ttl: 5m
       admit-per-run: 100
+      # 드롭 하나의 초당 입장 허가 상한, 모든 서버 합계 (#551). SKU마다 ceil(이 값 / 드롭의 SKU 수)씩 나눠 쓴다.
+      # 0이면 끈다. 꺼지면 남은 재고와 admit-per-run만 상한이다. 실제 판매 프로필(prod, perf)이 값을 켠다.
+      admit-rate-per-second: 0
       # 2026-11-24 사용자 위임 결정 (#390): 서버가 알려 주는 다음 조회 간격.
       # 순번이 up-to-position 이하인 첫 구간의 after-ms, 없으면 fallback-ms. 어떤 값도 max-ms를 넘지 않는다.
       # max-ms를 쓰지 않으면 min(10000, heartbeat-interval, heartbeat-timeout / 3)이다.
