@@ -37,8 +37,9 @@ const arrivalSeconds = Number(__ENV.ARRIVAL_SECONDS || 0);
 const arrival = arrivalRate > 0;
 if (!Number.isSafeInteger(arrivalRate) || arrivalRate < 0 || arrivalRate > 5000) throw new Error('ARRIVAL_RATE must be an integer from 0 to 5000');
 if (arrival && (!Number.isSafeInteger(arrivalSeconds) || arrivalSeconds < 1 || arrivalSeconds > 3600)) throw new Error('ARRIVAL_SECONDS must be an integer from 1 to 3600');
-if (arrival && !['poll', 'page'].includes(mode)) throw new Error('ARRIVAL_RATE is supported for simultaneous and page');
-if (arrival && participants !== arrivalRate * arrivalSeconds) throw new Error('arrival mode requires USERS = ARRIVAL_RATE x ARRIVAL_SECONDS');
+if (arrival && !['poll', 'page', 'mixed'].includes(mode)) throw new Error('ARRIVAL_RATE is supported for simultaneous, page and mixed');
+// mixed는 조회자(USERS)와 선점자(HOLD_PARTICIPANTS)를 합친 인원이 도착한다.
+if (arrival && participants + holdParticipants !== arrivalRate * arrivalSeconds) throw new Error('arrival mode requires USERS (+ HOLD_PARTICIPANTS for mixed) = ARRIVAL_RATE x ARRIVAL_SECONDS');
 // 좌석 응답 검증 수준. full: 본문을 풀어 좌석 수까지 확인. light: 본문을 받지 않고(k6가 풀거나 파싱하지 않음)
 // 상태 코드, 압축 헤더, 길이만 확인한다. 부하 발생기 CPU를 줄여 처리량을 잴 때 쓴다.
 const seatCheck = __ENV.SEAT_CHECK || 'full';
@@ -63,7 +64,7 @@ if (!Number.isSafeInteger(reloadCount) || reloadCount < 0 || reloadCount > 100) 
 const reloadInterval = positive('RELOAD_INTERVAL_SECONDS', 5);
 if (reloadCount && mode !== 'page') throw new Error('RELOAD_COUNT is supported for page');
 if (reloadCount && refreshCount) throw new Error('RELOAD_COUNT cannot be combined with REFRESH_COUNT');
-if (seatCheck === 'light' && (refreshCount || !['poll', 'page'].includes(mode))) throw new Error('SEAT_CHECK=light is supported for simultaneous and page without REFRESH_COUNT');
+if (seatCheck === 'light' && (refreshCount || !['poll', 'page', 'mixed'].includes(mode))) throw new Error('SEAT_CHECK=light is supported for simultaneous, page and mixed without REFRESH_COUNT');
 // 진입 방식은 화면 진입(page, mixed 조회자)에만 적용한다. 좌석 조회(poll)와 선점 시나리오는 항상 동시 출발한다.
 const entry = mode === 'page' || mode === 'mixed' ? (fixedEntry || __ENV.POLL_ENTRY || 'spread') : 'simultaneous';
 if (!['spread', 'simultaneous'].includes(entry)) throw new Error('POLL_ENTRY must be spread or simultaneous');
@@ -232,7 +233,12 @@ function run(data) {
   const activeUsers = data.users;
   if (data.startAt) { const wait = data.startAt - Date.now(); if (wait > 0) sleep(wait / 1000); }
   const origin = data.startAt || exec.scenario.startTime;
-  const pollUser = mode === 'poll' || mode === 'page' || (mode === 'mixed' && exec.vu.idInTest <= participants);
+  // 도착률 mixed: 반복 i번째 도착자가 선점자인지 고르게 섞어 정한다. 선점자 비율이 실행 내내 같다.
+  const arrivalIndex = arrival ? exec.scenario.iterationInTest : -1;
+  const totalArrivals = participants + holdParticipants;
+  const holdOrdinal = arrival && mode === 'mixed' && Math.floor((arrivalIndex + 1) * holdParticipants / totalArrivals) > Math.floor(arrivalIndex * holdParticipants / totalArrivals)
+    ? Math.floor(arrivalIndex * holdParticipants / totalArrivals) : -1;
+  const pollUser = mode === 'poll' || mode === 'page' || (mode === 'mixed' && (arrival ? holdOrdinal < 0 : exec.vu.idInTest <= participants));
   if (pollUser) {
     return runPoll(data, { base, performanceId, users: activeUsers, entry, vus, participants, mode, headers, seatHeaders, encodingMatches, seatGzipResponses, seatEncodingErrors, pollRequests, pollErrors, count, pollLatency, availabilityRequests, availabilityErrors, availabilityLatency, pageEntryLatency, startOffset, entryEndOffset, origin, refreshCount, refreshInterval, refreshRequests, arrival, arrivalRate, arrivalLag, seatCheck, reloadCount, reloadInterval, pageReloads, pageReloadLatency });
   }
@@ -241,7 +247,7 @@ function run(data) {
       pageEntry: checkoutPageEntry, pageEntryLatency, holdAttempts, holdCompleted, holdLatency, checkoutLatency, prepareLatency, journeyLatency,
       checkoutCompleted, prepareCompleted });
   }
-  return runHold(data, { base, performanceId, users: activeUsers, mode, participants, holdParticipants, entry, origin, mixedHold, hotSeats, runId, headers, holdAttempts, holdCompleted, replayCompleted, holdErrors, count, holdLatency, startOffset });
+  return runHold(data, { base, performanceId, users: activeUsers, mode, participants, holdParticipants, entry, origin, mixedHold, hotSeats, runId, headers, holdAttempts, holdCompleted, replayCompleted, holdErrors, count, holdLatency, startOffset, arrival, arrivalRate, arrivalLag, arrivalIndex, holdOrdinal });
 }
 function handleSummary(data) {
   const { setup_data: setupData, ...safeData } = data;

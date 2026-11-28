@@ -310,6 +310,30 @@ class ScenarioTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0, script)
                 self.assertIn(message, result.stderr)
 
+    def test_arrival_rate_mixes_holders_evenly_among_page_users(self):
+        # 조회 3 + 선점 1 = 4명이 초당 2명 x 2초로 도착. 선점자는 네 번째 도착자(사용자 4)다.
+        report = self.run_scenario('mixed', participants='3', user_count=4,
+                                   extra_env={'ARRIVAL_RATE': '2', 'ARRIVAL_SECONDS': '2'})
+        metrics = report['metrics']
+        self.assertEqual(report['conditions']['entry'], 'arrival')
+        self.assertEqual(metrics['ticket_poll_requests']['values']['count'], 3)
+        self.assertEqual(metrics['ticket_hold_attempts']['values']['count'], 1)
+        self.assertEqual(metrics['dropped_iterations']['values']['count'], 0)
+        holds = [post for post in Handler.posts if post[0] == '/api/ticket-reservations']
+        self.assertEqual([key for _, key, _ in holds], ['perf-scenario-test-4'])
+        # setup 1번 + 조회자 3명이 서로 다른 토큰
+        self.assertEqual(sorted(Handler.seat_auth[1:]), ['Bearer fake-1', 'Bearer fake-2', 'Bearer fake-3'])
+
+    def test_arrival_rate_mixed_requires_total_users(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, BASE_URL='http://127.0.0.1:1', MANAGEMENT_URL='http://127.0.0.1:1', PERFORMANCE_ID='1',
+                       MODE='mixed', PARTICIPANTS='4', HOLD_PARTICIPANTS='1', USERS_CSV=str(Path(tmp) / 'none.csv'),
+                       RUN_ID='arrival-mixed', ARRIVAL_RATE='2', ARRIVAL_SECONDS='2')
+            result = subprocess.run(['k6', 'run', '--quiet', str(ROOT / 'perf/scenarios/ticketing/mixed.js')],
+                                    env=env, capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('HOLD_PARTICIPANTS for mixed', result.stderr)
+
     def test_light_seat_check_accepts_full_length_and_rejects_short_body(self):
         report = self.run_scenario('page', participants='8', user_count=8,
                                    extra_env={'ARRIVAL_RATE': '4', 'ARRIVAL_SECONDS': '2', 'SEAT_CHECK': 'light'})
