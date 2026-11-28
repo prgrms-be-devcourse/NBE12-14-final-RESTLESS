@@ -38,6 +38,12 @@ public class TicketReservationQueryService {
     private final TicketPurchaseLimitRepository purchaseLimits;
     private final ConcertQueryService concerts;
 
+    /**
+     * 좌석 화면 진입·F5마다 불리는 경로라 트랜잭션 설정 왕복을 줄인다(#566). 클래스의 읽기 전용·격리 수준 지정은
+     * 요청마다 READ ONLY 켜기·끄기와 격리 수준 확인 문장 3개를 더 보낸다(쿼리 3개에 문장 9개).
+     * 쓰지 않는 조회이고 격리 수준은 DB 기본값(MySQL REPEATABLE READ)이라 한 트랜잭션 안의 세 조회가 같은 스냅숏을 본다.
+     */
+    @Transactional
     public TicketBookingAvailability getAvailability(Long userId, Long performanceId) {
         validateUser(userId);
         if (performanceId == null || performanceId <= 0) throw new BusinessException(ErrorCode.INVALID_REQUEST);
