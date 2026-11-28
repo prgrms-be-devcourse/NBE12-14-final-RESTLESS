@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
-/** 회차별 좌석 목록만 선택적으로 압축한다. */
+/** 회차별 좌석 목록과 좌석 상태 갱신 응답만 선택적으로 압축한다. */
 @Component
 public class TicketSeatCompressionFilter extends OncePerRequestFilter {
     private static final int MIN_SIZE = 2048;
@@ -39,7 +39,7 @@ public class TicketSeatCompressionFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI().substring(request.getContextPath().length());
         return !enabled || !"GET".equals(request.getMethod())
-                || !path.matches("/api/performances/[^/]+/seats");
+                || !path.matches("/api/performances/[^/]+/seats(/status)?");
     }
 
     @Override

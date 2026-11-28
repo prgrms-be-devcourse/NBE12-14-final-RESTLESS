@@ -45,7 +45,14 @@ public class TicketSeatController {
     }
 
     @GetMapping("/{performanceId}/seats/status")
-    public List<TicketSeatState> getSeatStates(@PathVariable("performanceId") Long performanceId) {
-        return ticketSeatQueryService.getSeatStates(performanceId);
+    public ResponseEntity<?> getSeatStates(@PathVariable("performanceId") Long performanceId, HttpServletRequest request) {
+        if (!seatResponses.enabled()) {
+            List<TicketSeatState> states = ticketSeatQueryService.getSeatStates(performanceId);
+            return ResponseEntity.ok(states);
+        }
+        // 상태 응답도 회차별로 짧게 공유하고 미리 만든 gzip을 쓴다 (ADR-0009).
+        TicketSeatResponseCache.SeatResponse response = seatResponses.getStates(performanceId);
+        TicketSeatCompressionFilter.offerPrecompressed(request, response.json(), response.gzip());
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(response.json());
     }
 }

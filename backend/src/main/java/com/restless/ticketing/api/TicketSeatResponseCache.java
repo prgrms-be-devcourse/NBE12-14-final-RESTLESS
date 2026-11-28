@@ -19,6 +19,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * 회차별 좌석 조회 응답을 완성된 바이트(JSON, gzip)로 짧게 공유한다 (ADR-0008, #542).
+ * 좌석 상태 갱신({@code /seats/status}) 응답도 같은 방식으로 따로 공유한다 (ADR-0009, #562).
  *
  * <p>응답에는 사용자별 값이 없다. 같은 회차를 유효 시간(기본 0.5초) 안에 찾는 요청은 같은 바이트를 받는다.
  * 같은 회차를 동시에 처음 찾는 요청은 한 번만 계산한다. 계산 실패(없는 회차, 비공개 공연 포함)는 기억하지 않는다.
@@ -35,6 +36,7 @@ public class TicketSeatResponseCache {
     private final JsonMapper json;
     private final boolean enabled;
     private final Cache<Long, SeatResponse> responses;
+    private final Cache<Long, SeatResponse> states;
 
     public TicketSeatResponseCache(TicketSeatQueryService seats, JsonMapper json, Clock clock, MeterRegistry registry,
             @Value("${restless.ticketing.seat-response-cache.enabled:true}") boolean enabled,
@@ -46,13 +48,19 @@ public class TicketSeatResponseCache {
         this.json = json;
         this.enabled = enabled;
         Ticker ticker = () -> TimeUnit.MILLISECONDS.toNanos(clock.millis());
-        this.responses = Caffeine.newBuilder()
+        this.responses = newCache(ttl, ticker);
+        this.states = newCache(ttl, ticker);
+        CaffeineCacheMetrics.monitor(registry, responses, "ticketing.seat_response");
+        CaffeineCacheMetrics.monitor(registry, states, "ticketing.seat_status_response");
+    }
+
+    private static Cache<Long, SeatResponse> newCache(Duration ttl, Ticker ticker) {
+        return Caffeine.newBuilder()
                 .maximumSize(MAXIMUM_PERFORMANCES)
                 .expireAfterWrite(ttl)
                 .ticker(ticker)
                 .recordStats()
                 .build();
-        CaffeineCacheMetrics.monitor(registry, responses, "ticketing.seat_response");
     }
 
     public boolean enabled() {
@@ -64,8 +72,18 @@ public class TicketSeatResponseCache {
         return responses.get(performanceId, this::render);
     }
 
+    /** 좌석 상태 갱신 응답. 꺼져 있으면 호출하지 않는다. 없는 회차는 기존 예외가 그대로 나간다. */
+    public SeatResponse getStates(Long performanceId) {
+        return states.get(performanceId, this::renderStates);
+    }
+
     private SeatResponse render(Long performanceId) {
         byte[] body = json.writeValueAsBytes(seats.getSeats(performanceId));
+        return new SeatResponse(body, gzip(body));
+    }
+
+    private SeatResponse renderStates(Long performanceId) {
+        byte[] body = json.writeValueAsBytes(seats.getSeatStates(performanceId));
         return new SeatResponse(body, gzip(body));
     }
 

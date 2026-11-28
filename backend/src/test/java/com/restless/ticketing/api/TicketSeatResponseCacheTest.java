@@ -3,6 +3,7 @@ package com.restless.ticketing.api;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -11,6 +12,7 @@ import com.restless.common.error.BusinessException;
 import com.restless.common.error.ErrorCode;
 import com.restless.ticketing.application.TicketSeatQueryService;
 import com.restless.ticketing.application.dto.TicketSeatInfo;
+import com.restless.ticketing.application.dto.TicketSeatState;
 import com.restless.ticketing.domain.TicketSeatStatus;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.ByteArrayInputStream;
@@ -122,6 +124,38 @@ class TicketSeatResponseCacheTest {
             pool.shutdownNow();
         }
         assertThat(loads).hasValue(1);
+    }
+
+    @Test
+    @DisplayName("상태 응답은 좌석 응답과 따로 유효 시간 동안 공유하고 지나면 새로 계산한다")
+    void sharesStatesSeparatelyWithinTtl() throws Exception {
+        when(seats.getSeatStates(1L)).thenReturn(List.of(new TicketSeatState(10L, TicketSeatStatus.AVAILABLE)),
+                List.of(new TicketSeatState(10L, TicketSeatStatus.HELD)));
+        var cache = cache();
+
+        var first = cache.getStates(1L);
+        clock.advance(TTL.minusMillis(1));
+        assertThat(cache.getStates(1L)).isSameAs(first);
+        assertThat(new String(first.json())).isEqualTo(json.writeValueAsString(List.of(new TicketSeatState(10L, TicketSeatStatus.AVAILABLE))));
+        try (var in = new GZIPInputStream(new ByteArrayInputStream(first.gzip()))) {
+            assertThat(in.readAllBytes()).isEqualTo(first.json());
+        }
+        clock.advance(Duration.ofMillis(1));
+        assertThat(new String(cache.getStates(1L).json())).contains("\"HELD\"");
+        verify(seats, times(2)).getSeatStates(1L);
+        verify(seats, never()).getSeats(1L);
+    }
+
+    @Test
+    @DisplayName("상태 계산 실패는 기억하지 않는다")
+    void doesNotCacheStateFailure() {
+        when(seats.getSeatStates(1L)).thenThrow(new BusinessException(ErrorCode.NOT_FOUND))
+                .thenReturn(List.of(new TicketSeatState(10L, TicketSeatStatus.AVAILABLE)));
+        var cache = cache();
+
+        assertThatThrownBy(() -> cache.getStates(1L)).isInstanceOf(BusinessException.class);
+        assertThat(cache.getStates(1L).json()).isNotEmpty();
+        verify(seats, times(2)).getSeatStates(1L);
     }
 
     @Test

@@ -252,15 +252,15 @@
 
 `seatId`는 회차별 판매 좌석 ID이며 `venueSeatId`는 물리 좌석 ID다.
 
-상태는 `AVAILABLE`, `HELD`, `SOLD` 중 하나다. 만료 처리나 선점은 수행하지 않는다. 같은 회차 응답은 서버마다 최대 0.5초(설정값) 공유하므로 좌석 상태와 회차 공개 여부는 최대 0.5초 이전 상태일 수 있다 ([ADR-0008](../../decisions/0008-ticketing-seat-response-cache.md)). 실제 선점 가능 여부는 선점 요청에서 서버가 좌석을 잠그고 다시 판단한다. 조회 시점의 상태가 필요하면 `/seats/status`를 쓴다.
+상태는 `AVAILABLE`, `HELD`, `SOLD` 중 하나다. 만료 처리나 선점은 수행하지 않는다. 같은 회차 응답은 서버마다 최대 0.5초(설정값) 공유하므로 좌석 상태와 회차 공개 여부는 최대 0.5초 이전 상태일 수 있다 ([ADR-0008](../../decisions/0008-ticketing-seat-response-cache.md)). 실제 선점 가능 여부는 선점 요청에서 서버가 좌석을 잠그고 다시 판단한다. `/seats/status`도 같은 방식으로 최대 0.5초 이전 상태다 ([ADR-0009](../../decisions/0009-ticketing-seat-status-response-cache.md)).
 회차에 판매 좌석이 없으면 빈 배열을 반환한다. 없는 회차는 `404 NOT_FOUND`,
 Long으로 변환할 수 없는 performanceId는 `400 INVALID_REQUEST`로 응답한다.
 
-좌석 JSON이 2KB 이상이고 클라이언트가 gzip을 허용하면 서버는 gzip으로 응답할 수 있다. 압축 해제 후 JSON 필드와 의미는 동일하다. 압축은 이 좌석 조회 API에만 적용하며 `HTTP_COMPRESSION_ENABLED=false`로 비활성화할 수 있다.
+좌석 JSON이 2KB 이상이고 클라이언트가 gzip을 허용하면 서버는 gzip으로 응답할 수 있다. 압축 해제 후 JSON 필드와 의미는 동일하다. 압축은 이 좌석 조회 API와 좌석 상태 갱신(`/seats/status`)에만 적용하며 `HTTP_COMPRESSION_ENABLED=false`로 비활성화할 수 있다.
 
 ### 좌석 상태 갱신
 
-`GET /api/performances/{performanceId}/seats/status`는 인증된 사용자에게 해당 회차 판매 좌석의 `seatId`, `status`만 좌석 ID 오름차순으로 반환한다. 상태는 `AVAILABLE`, `HELD`, `SOLD`이며 조회 시점의 DB 상태다. 회차가 없으면 404, 좌석이 없으면 빈 배열, 비로그인은 401이다. 좌석 소유자나 배치·가격은 반환하지 않는다.
+`GET /api/performances/{performanceId}/seats/status`는 인증된 사용자에게 해당 회차 판매 좌석의 `seatId`, `status`만 좌석 ID 오름차순으로 반환한다. 상태는 `AVAILABLE`, `HELD`, `SOLD`이며 같은 회차 응답을 서버마다 최대 0.5초(설정값) 공유하므로 최대 0.5초 이전 상태일 수 있다 ([ADR-0009](../../decisions/0009-ticketing-seat-status-response-cache.md)). 응답 압축 조건은 좌석 조회와 같다. 회차가 없으면 404, 좌석이 없으면 빈 배열, 비로그인은 401이다. 좌석 소유자나 배치·가격은 반환하지 않는다.
 
 `frontend`는 최초 진입 시 `/seats`로 배치·가격과 상태를 받고, 사용자가 새로고침 버튼을 누르면 이 API의 `seatId`를 기준으로 상태만 갱신한다. 주기적인 자동 갱신은 하지 않는다. 목록이 최초 목록과 달라지면 전체 좌석을 다시 조회한다. 최초 목록에 없는 좌석을 임의로 생성하거나 실패한 상태 조회를 성공으로 처리하지 않는다. 좌석 상태는 조회 이후 달라질 수 있으며 선점 요청 시 서버가 최종 검증한다.
 

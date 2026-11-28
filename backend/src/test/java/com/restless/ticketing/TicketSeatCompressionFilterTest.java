@@ -44,8 +44,18 @@ class TicketSeatCompressionFilterTest {
     }
 
     @Test
+    void compressesSeatStatusRefreshToo() throws Exception {
+        var response = request("/api/performances/1/seats/status", "gzip", true, BODY, 200);
+        assertEquals("gzip", response.getHeader(HttpHeaders.CONTENT_ENCODING));
+        try (var gzip = new GZIPInputStream(new ByteArrayInputStream(response.getContentAsByteArray()))) {
+            assertArrayEquals(BODY, gzip.readAllBytes());
+        }
+    }
+
+    @Test
     void leavesOtherEndpointsAndDisabledSettingUntouched() throws Exception {
-        for (String path : new String[] {"/api/performances/1/booking-availability", "/api/drops/1"}) {
+        for (String path : new String[] {"/api/performances/1/booking-availability", "/api/drops/1",
+                "/api/performances/1/seats/status/extra", "/api/performances/1/seat-states"}) {
             var response = request(path, "gzip", true, BODY, 200);
             assertNull(response.getHeader(HttpHeaders.CONTENT_ENCODING));
             assertNull(response.getHeader(HttpHeaders.VARY));
