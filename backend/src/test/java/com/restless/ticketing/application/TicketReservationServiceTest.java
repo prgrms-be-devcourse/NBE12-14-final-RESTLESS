@@ -3,8 +3,13 @@ package com.restless.ticketing.application;
 import com.restless.ticketing.application.dto.TicketReservationInfo;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mockingDetails;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -180,6 +185,61 @@ class TicketReservationServiceTest {
                 Integer.class, fixture.performanceId())).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT SUM(reserved_count) FROM ticket_purchase_limits WHERE performance_id = ?",
                 Integer.class, fixture.performanceId())).isEqualTo(2);
+    }
+
+    @ParameterizedTest(name = "{displayName} [{0}]")
+    @ValueSource(strings = {"HELD", "PAYMENT_PENDING", "SOLD"})
+    @DisplayName("유효하게 선점됐거나 결제 중이거나 판매된 좌석이 섞이면 좌석을 잠그지 않고 전체를 거절한다")
+    void takenSeatIsRejectedBeforeSeatLock(String ownerState) {
+        TicketReservationInfo owner = reserve(fixture.firstUserId(), "owner", List.of(seat(1)));
+        if (!ownerState.equals("HELD")) {
+            // 결제 중·판매된 좌석은 최초 선점 기한이 지나도 사용 중이다.
+            markExpired(owner.reservationId());
+        }
+        if (ownerState.equals("PAYMENT_PENDING")) {
+            jdbc.update("UPDATE ticket_reservations SET status = 'PAYMENT_PENDING', checkout_started_at = UTC_TIMESTAMP(6), payment_expires_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 5 MINUTE) WHERE id = ?",
+                    owner.reservationId());
+        } else if (ownerState.equals("SOLD")) {
+            jdbc.update("UPDATE ticket_reservations SET status = 'CONFIRMED' WHERE id = ?", owner.reservationId());
+            jdbc.update("UPDATE seat_holds SET status = 'CONFIRMED' WHERE reservation_id = ?", owner.reservationId());
+            jdbc.update("UPDATE performance_seats SET status = 'SOLD' WHERE id = ?", seat(1));
+        }
+        var seatsBefore = jdbc.queryForList("SELECT id, status, current_hold_id FROM performance_seats WHERE performance_id = ? ORDER BY id",
+                fixture.performanceId());
+        clearInvocations(seatRepository);
+
+        assertError(() -> reserve(fixture.secondUserId(), "late", List.of(seat(0), seat(1))), ErrorCode.SEAT_UNAVAILABLE);
+
+        verify(seatRepository, never()).findLockedById(any());
+        assertThat(count("ticket_reservations")).isEqualTo(1);
+        assertThat(count("seat_holds")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ticket_purchase_limits WHERE user_id = ? AND performance_id = ?",
+                Integer.class, fixture.secondUserId(), fixture.performanceId())).isZero();
+        assertThat(jdbc.queryForList("SELECT id, status, current_hold_id FROM performance_seats WHERE performance_id = ? ORDER BY id",
+                fixture.performanceId())).isEqualTo(seatsBefore);
+    }
+
+    @Test
+    @DisplayName("기한이 지난 HELD 예약의 좌석은 미리 거절하지 않고 잠금 경로에서 정리한 뒤 선점한다")
+    void expiredHeldSeatStillTakesLockPath() {
+        TicketReservationInfo old = reserve(fixture.firstUserId(), "expired-owner", List.of(seat(1)));
+        markExpired(old.reservationId());
+        clearInvocations(seatRepository);
+
+        TicketReservationInfo next = reserve(fixture.secondUserId(), "after-expiry", List.of(seat(1)));
+
+        verify(seatRepository, atLeastOnce()).findLockedById(seat(1));
+        assertThat(reservationStatus(old.reservationId())).isEqualTo("RELEASED");
+        assertStoredReservation(next, 1);
+    }
+
+    @Test
+    @DisplayName("미리 거절은 활성 예약 같은 앞선 검증의 오류를 바꾸지 않는다")
+    void takenSeatCheckKeepsEarlierErrors() {
+        reserve(fixture.firstUserId(), "owner", List.of(seat(1)));
+        reserve(fixture.secondUserId(), "active", List.of(seat(2)));
+
+        assertError(() -> reserve(fixture.secondUserId(), "second-request", List.of(seat(1))), ErrorCode.ACTIVE_RESERVATION_EXISTS);
     }
 
     @Test

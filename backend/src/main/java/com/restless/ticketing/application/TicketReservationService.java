@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -126,6 +127,10 @@ public class TicketReservationService {
             throw new BusinessException(ErrorCode.TICKET_LIMIT_EXCEEDED);
         }
 
+        // 인기 좌석 경쟁에서 실패할 요청이 좌석 잠금을 차례로 기다리지 않도록, 잠그기 전에 확실히 사용 중인 좌석만 거절한다.
+        if (anySeatCertainlyTaken(orderedIds)) {
+            throw new BusinessException(ErrorCode.SEAT_UNAVAILABLE);
+        }
         List<TicketSeat> lockedSeats = lockSeats(orderedIds);
         Set<Long> sellableVenueSeatIds = concertQueryService.sellableVenueSeatIds(performance.layoutId(),
                 lockedSeats.stream().map(TicketSeat::getVenueSeatId).toList());
@@ -288,6 +293,26 @@ public class TicketReservationService {
             hold.release(now);
         }
         limit.release(originalHolds.size());
+    }
+
+    /**
+     * 잠그지 않은 일반 조회로 판매됐거나 유효하게 선점된 좌석이 있는지 본다. 조회 시점에 사용 중이었으므로 거절해도 소유권은 바뀌지 않는다.
+     * 기한이 지난 HELD 예약의 좌석, 선점 이력이 없는 포인터처럼 애매한 경우는 거절하지 않고 잠금 경로의 재검증과 만료 정리에 맡긴다.
+     * 만료 판단은 {@link TicketReservation#isHoldExpired}와 같이 DB UTC 시각 기준이다.
+     */
+    private boolean anySeatCertainlyTaken(List<Long> orderedIds) {
+        String placeholders = String.join(",", Collections.nCopies(orderedIds.size(), "?"));
+        Boolean taken = jdbc.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1 FROM performance_seats s
+                    LEFT JOIN seat_holds h ON h.id = s.current_hold_id
+                    LEFT JOIN ticket_reservations r ON r.id = h.reservation_id
+                    WHERE s.id IN (%s)
+                      AND (s.status = 'SOLD'
+                           OR (s.status = 'HELD' AND r.id IS NOT NULL
+                               AND (r.status <> 'HELD' OR r.hold_expires_at > UTC_TIMESTAMP(6)))))
+                """.formatted(placeholders), Boolean.class, orderedIds.toArray());
+        return Boolean.TRUE.equals(taken);
     }
 
     private List<TicketSeat> lockSeats(List<Long> orderedIds) {
