@@ -25,6 +25,7 @@ import jakarta.persistence.EntityManager;
 import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.zip.GZIPInputStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -52,6 +53,7 @@ class TicketSeatResponseCacheApiTest {
 
     private static final Instant NOW = Instant.parse("2026-11-12T01:00:00Z");
     private static final String PATH = "/api/performances/{performanceId}/seats";
+    private static final String STATUS_PATH = "/api/performances/{performanceId}/seats/status";
 
     @Autowired private MockMvc mockMvc;
     @Autowired private EntityManager entityManager;
@@ -129,6 +131,46 @@ class TicketSeatResponseCacheApiTest {
         Thread.sleep(400);
         mockMvc.perform(get(PATH, performanceId).with(jwt()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$[0].status").value("HELD"));
+    }
+
+    @Test
+    @DisplayName("상태 갱신 응답은 서비스 결과와 같은 JSON이고 gzip으로 줄 수 있으며 유효 시간 안에는 이전 상태를 공유한다")
+    void sharesSeatStatusResponse() throws Exception {
+        List<TicketSeat> created = new java.util.ArrayList<>();
+        for (int i = 1; i <= 80; i++) created.add(persistSaleSeat(String.valueOf(i)));
+        entityManager.flush();
+        entityManager.clear();
+        String expected = json.writeValueAsString(seatQueries.getSeatStates(performanceId));
+
+        var identity = mockMvc.perform(get(STATUS_PATH, performanceId).with(jwt()).header(HttpHeaders.ACCEPT_ENCODING, "identity"))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist(HttpHeaders.CONTENT_ENCODING))
+                .andReturn().getResponse();
+        assertThat(identity.getContentAsString()).isEqualTo(expected);
+        var gzipped = mockMvc.perform(get(STATUS_PATH, performanceId).with(jwt()).header(HttpHeaders.ACCEPT_ENCODING, "gzip"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CONTENT_ENCODING, "gzip"))
+                .andReturn().getResponse();
+        try (var in = new GZIPInputStream(new ByteArrayInputStream(gzipped.getContentAsByteArray()))) {
+            assertThat(new String(in.readAllBytes())).isEqualTo(expected);
+        }
+
+        hold(created.get(0));
+
+        mockMvc.perform(get(STATUS_PATH, performanceId).with(jwt()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].status").value("AVAILABLE"));
+        Thread.sleep(400);
+        mockMvc.perform(get(STATUS_PATH, performanceId).with(jwt()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].status").value("HELD"));
+    }
+
+    @Test
+    @DisplayName("상태 갱신도 없는 회차는 404이고 실패는 공유하지 않는다")
+    void seatStatusErrorsAreNotShared() throws Exception {
+        for (int i = 0; i < 2; i++) {
+            mockMvc.perform(get(STATUS_PATH, -1).with(jwt())).andExpect(status().isNotFound());
+        }
+        mockMvc.perform(get(STATUS_PATH, performanceId)).andExpect(status().isUnauthorized());
     }
 
     @Test

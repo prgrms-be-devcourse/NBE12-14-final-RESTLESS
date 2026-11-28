@@ -2,6 +2,7 @@
 
 - 상태: DECIDED (#540). 만료 시간(0.5초)은 측정으로 조정한다. 구현은 별도 PR
 - 날짜: 2026-11-28
+- 후속: [ADR-0009](0009-ticketing-seat-status-response-cache.md)가 같은 방식을 `/seats/status`에 적용했다(결정 8의 범위 확장).
 - 관련: [티켓팅 API 계약 좌석 조회](../contracts/api/ticketing.md#회차별-좌석-조회), [공연장·배치 정합성](../domains/ticketing/venue-consistency.md) 배치 좌석 위치 서버 캐시 절(#509), [ADR-0007 경매 실시간 전달](0007-auction-stream-cross-server.md)(조회 캐시 1초 선례), 드롭 품절 표시(`DropSoldOutCache`, 1초 선례)
 
 ## 배경
