@@ -2,7 +2,7 @@
 
 > 관련 코드: `backend/src/main/java/com/restless/drop/api/`, `backend/src/main/java/com/restless/drop/application/dto/`, `backend/src/test/java/com/restless/drop/acceptance/`
 >
-> 마지막 확인: 2026-11-26 (#481 판매 중 SKU가 모두 품절인 드롭의 진입은 필터가 바로 409 `DROP_SOLD_OUT`. 오류 코드와 본문 형식은 그대로다. #477 동시 처리 상한 503을 인증과 사용자별 요청 횟수 제한보다 먼저 판정. 오류 코드와 본문 형식은 그대로다). 이전: 2026-11-25 (#446 호출 순서에 경로와 결제 준비, 승인 요청 구분 추가. 입장 허가 기한과 예약 결제 기한 구분. D2 트랜잭션 문장을 TX1 코드 순서와 맞춤. 요청, 응답, 오류 코드는 그대로다. #438 주최자 오픈 시각 제한. #423 진입 503의 `Retry-After` 기본값 3초에서 5초. 필드와 오류 코드는 그대로다). 이전: 2026-11-24 (#390 대기열 응답의 선택 필드 `pollAfterMs`, 동시 처리 상한 초과 503 `DROP_QUEUE_BUSY`. 기존 필드와 오류 코드는 그대로다. 이전: 2026-11-22 (#330 재고 버킷 분할. D1 등록과 D2 트랜잭션 문장, D2 품절 판정의 뜻을 고쳤다. 요청, 응답, 오류 코드는 그대로다. 2026-11-20 #285 상태 표기 갱신, 대기열 경로의 429를 #278 `application.yml`, `QueueRateLimitIntegrationTest`와 대조. 2026-11-19 #253 SKU별 입장 제어 정책의 계약 반영. D4는 #254 SKU별 입장 제어 구현과 대조했다. 나머지는 2026-11-14 기준: #92 등록 검증과 판매 상태, #41 탈퇴 제한, #97 탈퇴 동의, #105 검색과 정렬, #109 주문 상세 결제 대상)
+> 마지막 확인: 2026-11-28 (#551 입장 허가 작업에 드롭 단위 초당 입장 상한 추가. 입장 허가 수만 줄고 요청, 응답, 오류 코드는 그대로다). 이전: 2026-11-26 (#481 판매 중 SKU가 모두 품절인 드롭의 진입은 필터가 바로 409 `DROP_SOLD_OUT`. 오류 코드와 본문 형식은 그대로다. #477 동시 처리 상한 503을 인증과 사용자별 요청 횟수 제한보다 먼저 판정. 오류 코드와 본문 형식은 그대로다). 이전: 2026-11-25 (#446 호출 순서에 경로와 결제 준비, 승인 요청 구분 추가. 입장 허가 기한과 예약 결제 기한 구분. D2 트랜잭션 문장을 TX1 코드 순서와 맞춤. 요청, 응답, 오류 코드는 그대로다. #438 주최자 오픈 시각 제한. #423 진입 503의 `Retry-After` 기본값 3초에서 5초. 필드와 오류 코드는 그대로다). 이전: 2026-11-24 (#390 대기열 응답의 선택 필드 `pollAfterMs`, 동시 처리 상한 초과 503 `DROP_QUEUE_BUSY`. 기존 필드와 오류 코드는 그대로다. 이전: 2026-11-22 (#330 재고 버킷 분할. D1 등록과 D2 트랜잭션 문장, D2 품절 판정의 뜻을 고쳤다. 요청, 응답, 오류 코드는 그대로다. 2026-11-20 #285 상태 표기 갱신, 대기열 경로의 429를 #278 `application.yml`, `QueueRateLimitIntegrationTest`와 대조. 2026-11-19 #253 SKU별 입장 제어 정책의 계약 반영. D4는 #254 SKU별 입장 제어 구현과 대조했다. 나머지는 2026-11-14 기준: #92 등록 검증과 판매 상태, #41 탈퇴 제한, #97 탈퇴 동의, #105 검색과 정렬, #109 주문 상세 결제 대상)
 
 - 상태: v1 IMPLEMENTED (2026-11-13 합의). 수용 테스트(`backend/src/test/java/com/restless/drop/acceptance/`)가 이 계약을 기준으로 판정한다.
 - Base URL: `/api` ([ADR-0002](../../decisions/0002-common-conventions.md)). 오류는 공통 형식 `{code, message, details, traceId, timestamp}` ([common.md](common.md)).
@@ -233,6 +233,7 @@ SKU의 `available = 0`이면 그 SKU는 **현재 구매 불가**다 (`reserved`�
 
 - 작업 빈 이름 `dropQueueAdmissionJob`, 메서드 `runOnce()`. 설정 `restless.drop.queue.scheduler.enabled=false`는 주기 실행만 멈추고 빈은 남는다. 한 번 실행에 살아 있는 대기가 있는 SKU마다 `restless.drop.queue.admit-per-run`명까지 대략적인 진입 순서로 ADMITTED로 바꾼다. 정확한 선착순은 보장하지 않는다(처리 속도 우선).
   - SKU마다 `min(max(0, available - 미사용 유효 ADMITTED 수), admit-per-run)`명을 같은 SKU의 입장 순번(`id`)대로 입장시킨다. 같은 SKU를 여러 작업이 동시에 처리해도 입장 허가가 `available`을 넘기지 않는다 (INV-16).
+  - 초당 입장 상한 `restless.drop.queue.admit-rate-per-second`(드롭 하나의 모든 서버 합계, 기본 0은 끔)를 켜면 SKU마다 1초에 `ceil(상한 / 드롭의 SKU 수)`명까지만 입장시킨다 (#551). 대기자는 그만큼 더 오래 `WAITING`으로 남는다. 응답 필드와 오류 코드는 바뀌지 않는다.
   - SKU의 `available = 0`이면 그 SKU는 입장시키지 않고 `WAITING`과 미사용 `ADMITTED`를 종료한다 (INV-17). `reserved` 수량은 보지 않는다. 다른 SKU는 영향이 없다.
   - 재고가 반환돼 `available > 0`이 되면 새로 진입한 사용자부터 같은 SKU의 입장 순번대로 입장시킨다. 종료된 입장 순번과 입장 허가는 복구하지 않는다.
 - 기본값: `heartbeat-timeout` 40초, `admit-per-run` 100명, 입장 허가 작업 주기 1초(`restless.drop.queue.scheduler.fixed-delay-ms`).

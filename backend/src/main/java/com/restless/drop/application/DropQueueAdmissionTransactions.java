@@ -3,16 +3,17 @@ package com.restless.drop.application;
 import com.restless.drop.domain.DropQueueStatus;
 import com.restless.drop.infrastructure.*;
 import java.time.Clock;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@RequiredArgsConstructor
 public class DropQueueAdmissionTransactions {
     static final int CLOSE_BATCH_SIZE = 100;
+    /** A stored rate window further ahead of this server's clock than this is stale (#551). */
+    static final long MAX_WINDOW_AHEAD_SECONDS = 2;
     public enum Result { DONE, MORE, SKIPPED, MISSING }
     private final DropQueueGateRepository gates;
     private final DropQueueEntryRepository entries;
@@ -22,11 +23,42 @@ public class DropQueueAdmissionTransactions {
     private final DropQueueSettings settings;
     private final DropQueueMetrics metrics;
     private final Clock clock;
+    private final DropQueueAdmissionRate rate;
+
+    @Autowired
+    public DropQueueAdmissionTransactions(DropQueueGateRepository gates, DropQueueEntryRepository entries,
+            DropVariantRepository variants, DropRepository drops, DropInventoryRepository inventories,
+            DropQueueSettings settings, DropQueueMetrics metrics, Clock clock, DropQueueAdmissionRate rate) {
+        this.gates = gates;
+        this.entries = entries;
+        this.variants = variants;
+        this.drops = drops;
+        this.inventories = inventories;
+        this.settings = settings;
+        this.metrics = metrics;
+        this.clock = clock;
+        this.rate = rate;
+    }
+
+    /** Admission rate cap off, as before #551. */
+    public DropQueueAdmissionTransactions(DropQueueGateRepository gates, DropQueueEntryRepository entries,
+            DropVariantRepository variants, DropRepository drops, DropInventoryRepository inventories,
+            DropQueueSettings settings, DropQueueMetrics metrics, Clock clock) {
+        this(gates, entries, variants, drops, inventories, settings, metrics, clock, DropQueueAdmissionRate.OFF);
+    }
 
     /** One short transaction per SKU batch. TX1 never touches the gate. */
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public Result runBatch(Long variantId) {
-        var gate = gates.tryLock(variantId);
+        // #551: with the rate cap on, the same gate row lock also reads the shared per-second window.
+        DropQueueGateRepository.RateGate window = null;
+        DropQueueGateRepository.LockResult gate;
+        if (rate.enabled()) {
+            window = gates.tryLockRate(variantId);
+            gate = window.result();
+        } else {
+            gate = gates.tryLock(variantId);
+        }
         if (gate == DropQueueGateRepository.LockResult.MISSING) return Result.MISSING;
         if (gate == DropQueueGateRepository.LockResult.BUSY) {
             metrics.skipped();
@@ -53,6 +85,20 @@ public class DropQueueAdmissionTransactions {
         int allowance = (int) Math.min(Math.max(0L, available - grants), settings.admitPerRun());
         var variant = variants.findById(variantId).orElseThrow();
         var drop = drops.findById(variant.getDropId()).orElseThrow();
+        // #551 rate cap: every server shares one window per SKU on the locked gate row. The SKU's share is
+        // ceil(perDrop / SKUs in the drop). It only lowers the INV-16 allowance, never raises it.
+        long windowSecond = 0;
+        int windowUsed = 0;
+        if (window != null) {
+            int perSku = rate.perSku(variants.countByDropId(variant.getDropId()));
+            long nowSecond = clock.instant().getEpochSecond();
+            // A window stored slightly ahead (another server's clock) keeps counting, so skew cannot reset a full
+            // window. One far ahead came from a clock that jumped forward; it is stale so it cannot freeze admission.
+            long stored = window.windowSecond() > nowSecond + MAX_WINDOW_AHEAD_SECONDS ? 0 : window.windowSecond();
+            windowSecond = Math.max(nowSecond, stored);
+            windowUsed = stored >= nowSecond ? window.windowAdmits() : 0;
+            allowance = Math.min(allowance, Math.max(0, perSku - windowUsed));
+        }
         // Lifecycle cleanup must run even if valid grants already cover all available stock.
         // Bound this batch too; MORE commits before processing any further stale rows.
         var cleanupNow = clock.instant();
@@ -91,6 +137,7 @@ public class DropQueueAdmissionTransactions {
             }
             entries.flush();
         }
+        if (window != null && admitted > 0) gates.recordAdmits(variantId, windowSecond, windowUsed + admitted);
         return Result.DONE;
     }
 }

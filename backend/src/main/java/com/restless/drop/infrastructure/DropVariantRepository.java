@@ -5,4 +5,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface DropVariantRepository extends JpaRepository<DropVariant, Long> {
     java.util.List<DropVariant> findAllByDropIdOrderByIdAsc(Long dropId);
+
+    long countByDropId(Long dropId);
 }
