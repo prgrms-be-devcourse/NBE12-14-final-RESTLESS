@@ -23,8 +23,11 @@ COPY --from=build /workspace/extracted/application/ ./
 USER app
 
 # 컨테이너 메모리의 60%까지만 힙으로 쓴다. t3.small(2GB)에서 OS와 도커 몫을 남기기 위해서다.
-# 실행할 때 -e JAVA_TOOL_OPTIONS=... 로 바꿀 수 있다. 시간대는 테스트와 같은 UTC다.
-ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError" \
+# CompileThresholdScaling=0.1은 JIT 컴파일 문턱을 10분의 1로 낮춰 컴파일을 예열 쪽으로 앞당긴다 (#552). 측정에서 판매 중 JIT는 15% 줄었다.
+# 2코어 서버에서 판매 중 앱 CPU의 45%가 JIT였다. 구조적 해결이 아니라 JVM 튜닝이다.
+# 실행할 때 -e JAVA_TOOL_OPTIONS=... 나 env 파일로 바꿀 수 있다. 그러면 이 값 전체를 대체하므로 필요한 옵션을 함께 넣는다.
+# 시간대는 테스트와 같은 UTC다.
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError -XX:CompileThresholdScaling=0.1" \
     TZ=UTC
 # 8080 서비스, 8081 관리 포트 (perf 프로필의 지표와 health)
 EXPOSE 8080 8081

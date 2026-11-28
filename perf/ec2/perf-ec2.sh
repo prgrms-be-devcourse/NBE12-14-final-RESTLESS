@@ -86,6 +86,11 @@ case "$cmd" in
     echo "profile=$SPRING_PROFILES_ACTIVE db=$DB_NAME host=$DB_HOST queue_required=${RESTLESS_DROP_QUEUE_REQUIRED:-unset} management_port=${MANAGEMENT_PORT:-unset}"
     echo "pg fake: delay=${PG_FAKE_APPROVE_DELAY:-default 300ms} reject=${PG_FAKE_REJECT_RATE:-0} unknown=${PG_FAKE_UNKNOWN_RATE:-0} lost=${PG_FAKE_LOST_RESPONSE_RATE:-0}"
     [[ "${RESTLESS_DROP_QUEUE_REQUIRED:-}" == "true" ]] || echo "warning: RESTLESS_DROP_QUEUE_REQUIRED is not true (default is on; only reservation capacity and spike runs turn it off, then set it back)"
+    # perf.env의 JAVA_TOOL_OPTIONS는 이미지 기본값 전체를 대체한다 (#552).
+    if read_env_file | grep -q '^[[:blank:]]*JAVA_TOOL_OPTIONS=' &&
+      ! read_env_file | grep '^[[:blank:]]*JAVA_TOOL_OPTIONS=' | tail -n 1 | grep -q -- '-XX:CompileThresholdScaling='; then
+      echo "warning: JAVA_TOOL_OPTIONS in perf.env replaces the image default and drops -XX:CompileThresholdScaling=0.1 (#552); add it or remove the line"
+    fi
     [[ ${#JWT_SECRET} -ge 32 ]] || die "JWT_SECRET is shorter than 32 bytes"
     echo "mysql client: $MYSQL"
     ;;
